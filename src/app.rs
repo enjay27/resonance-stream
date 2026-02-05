@@ -14,6 +14,13 @@ struct GreetArgs<'a> {
     name: &'a str,
 }
 
+#[derive(Serialize, Deserialize)]
+struct CheckModelArgs<'a> {
+    filename: &'a str,
+}
+
+const FILENAME_0_5B: &str = "qwen2.5-0.5b-instruct.gguf";
+
 #[component]
 pub fn App() -> impl IntoView {
     let (name, set_name) = signal(String::new());
@@ -38,6 +45,14 @@ pub fn App() -> impl IntoView {
             set_greet_msg.set(new_msg);
         });
     };
+
+    // Run check on mount
+    Effect::new(move |_| {
+        spawn_local(async {
+            let args = serde_wasm_bindgen::to_value(&CheckModelArgs { filename: FILENAME_0_5B }).unwrap();
+            invoke("check_model_status", args).await;
+        });
+    });
 
     view! {
         <main class="container">

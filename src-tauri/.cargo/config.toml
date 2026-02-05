@@ -1,0 +1,9 @@
+# bpsr-translator/src-tauri/.cargo/config.toml
+
+[env]
+# Path to the WinDivert x64 SDK files (lib and sys)
+# If the SDK is in the src-tauri folder:
+WINDIVERT_PATH = { value = ".", relative = true }
+
+# Where the DLL should be copied during build
+WINDIVERT_DLL_OUTPUT = { value = ".", relative = true }

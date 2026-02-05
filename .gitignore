@@ -1,0 +1,10 @@
+/dist/
+/target/
+/Cargo.lock
+
+WinDivert.dll
+WinDivert.lib
+WinDivert64.sys
+
+.idea
+.vscode

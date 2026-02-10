@@ -55,8 +55,8 @@ fn check_model_status(app: AppHandle, filename: String) -> () {
 }
 
 #[tauri::command]
-async fn download_model(app: AppHandle, url: String, filename: String) -> () {
-    println!("download_model called with {} and {}", url, filename);
+async fn download_model(app: AppHandle, url: String) -> () {
+    println!("download_model called with {}", url);
     // let dir = get_models_dir(&app);
     // let file_path = dir.join(&filename);
     //

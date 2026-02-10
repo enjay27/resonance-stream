@@ -1,18 +1,23 @@
+use std::collections::HashMap;
 // src-tauri/src/sniffer.rs
 use std::sync::mpsc::Sender;
 use std::thread;
 use windivert::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Window};
+use crate::packet_buffer::PacketBuffer;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct ChatPacket {
-    #[serde(rename = "UID")]
-    pub uid: u64,
-    pub nickname: String,
-    pub channel: String,
-    pub timestamp: i64,
-    pub message: String,
+    pub channel: String,      // e.g., "PARTY", "LOCAL"
+    pub entity_id: u64,       // e.g., 80
+    pub uid: u64,             // e.g., 823656
+    pub nickname: String,     // e.g., "NAME"
+    pub class_id: u64,        // e.g., 2
+    pub status_flag: u64,     // e.g., 1
+    pub level: u64,           // e.g., 60
+    pub timestamp: u64,       // e.g., 1770753503
+    pub message: String,      // e.g., "hi" or "emojiPic=..."
 }
 
 pub fn start_sniffer(window: Window) {
@@ -31,112 +36,193 @@ pub fn start_sniffer(window: Window) {
             }
         };
 
+        // Map of [IP+Port] -> PacketBuffer
+        let mut streams: HashMap<[u8; 6], PacketBuffer> = HashMap::new();
         let mut buffer = [0u8; 65535];
 
         loop {
             if let Ok(packet) = wd.recv(Some(&mut buffer)) {
-                // WinDivert handles the IP/TCP headers differently.
-                // We need to find the start of the actual Data (Payload)
-                let payload = packet.data;
+                let raw_data = packet.data;
 
-                println!("payload: {:?}", payload);
-                if let Some(chat) = parse_star_resonance(&*payload) {
-                    window.emit("new-chat-message", &chat).unwrap();
+                // 1. Get the Stream Key using the RAW data (so we know the IP/Port)
+                if let Some(stream_key) = extract_stream_key(&*raw_data) {
+
+                    // 2. EXTRACT THE PAYLOAD (Strip IP & TCP Headers)
+                    if let Some(payload) = extract_tcp_payload(&*raw_data) {
+
+                        // CRITICAL FIX: Skip empty TCP ACKs.
+                        // A payload length of 0 means it's just a network ping, no game data.
+                        if payload.is_empty() {
+                            continue;
+                        }
+
+                        // 3. Now we feed ONLY the game data into the buffer
+                        let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
+                        p_buf.add(payload);
+
+                        // 4. Try to drain full packets based on your 2-byte header logic
+                        while let Some(full_packet) = p_buf.next() {
+                            println!("full packet: {:?}", full_packet);
+
+                            // Send to parser (skipping the 2-byte length header)
+                            if let Some(chat) = parse_star_resonance(&full_packet) {
+                                println!("chat: {:?}", chat);
+                                window.emit("new-chat-message", &chat).unwrap();
+                            }
+                        }
+                    }
                 }
             }
         }
     });
 }
 
-// --- TAG-BASED PARSER (ZERO-OFFSET) ---
+// ==========================================
+// PROTOBUF PARSING (DEEP EXTRACTION)
+// ==========================================
 
-fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
-    // Search for the 0x0A marker (Tag 1, Wire Type 2)
-    let start = data.windows(1).position(|w| w[0] == 0x0A)?;
-    let stream = &data[start..];
+pub fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
+    // 1. PacketBuffer guarantees data starts with 0x0A.
+    // If it doesn't, this isn't a valid chat packet.
+    if data.is_empty() || data[0] != 0x0A {
+        return None;
+    }
+
+    // 2. No offsets needed! Just use the data directly.
+    let stream = data;
 
     let mut chat = ChatPacket::default();
-    let mut i = 1;
+    let mut i = 1; // Skip the 0x0A tag
 
-    // Read outer length (Varint)
     let (total_len, read) = read_varint(&stream[i..]);
     i += read;
 
-    while i < stream.len() && i < (total_len as usize + 5) {
+    let safe_end = (i + total_len as usize).min(stream.len());
+
+    // --- ROOT LEVEL SCAN ---
+    while i < safe_end {
+        // ... (Keep your existing match loop exactly the same)
         let tag = stream[i];
-        let field_num = tag >> 3;
         let wire_type = tag & 0x07;
+        let field_num = tag >> 3;
         i += 1;
 
         match field_num {
-            2 => { // User Sub-block
-                let (len, read) = read_varint(&stream[i..]);
+            1 => { // Channel ID
+                let (val, read) = read_varint(&stream[i..safe_end]);
+                chat.channel = match val {
+                    2 => "LOCAL".into(),
+                    3 => "PARTY".into(),
+                    4 => "GUILD".into(),
+                    _ => "WORLD".into(),
+                };
                 i += read;
-
-                // SAFE SLICE
-                let end = (i + len as usize).min(stream.len());
-                if i < end {
-                    let sub_data = &stream[i..end];
-                    extract_user_fields(sub_data, &mut chat);
-                }
-                i = end;
             }
-            4 => { // Message Sub-block
-                let (len, read) = read_varint(&stream[i..]);
+            2 => { // User Container Block
+                let (len, read) = read_varint(&stream[i..safe_end]);
                 i += read;
+                let block_end = (i + len as usize).min(safe_end);
 
-                // SAFE SLICE
-                let end = (i + len as usize).min(stream.len());
-                if i < end {
-                    let sub_data = &stream[i..end];
-                    chat.message = find_string_by_tag(sub_data, 0x1A).unwrap_or_default();
+                if let Some(sub_data) = stream.get(i..block_end) {
+                    parse_user_container(sub_data, &mut chat);
                 }
-                i = end;
+                i = block_end;
             }
-            _ => {
-                i += skip_field(wire_type, &stream[i..]);
-            }
+            _ => i += skip_field(wire_type, &stream[i..safe_end]),
         }
     }
-    println!("chat: {:?}", chat);
+    println!("chat inside: {:?}", chat);
 
     if !chat.message.is_empty() && chat.uid > 0 { Some(chat) } else { None }
 }
 
-fn extract_user_fields(data: &[u8], chat: &mut ChatPacket) {
+fn parse_user_container(data: &[u8], chat: &mut ChatPacket) {
     let mut i = 0;
     while i < data.len() {
-        let tag = data.get(i).copied().unwrap_or(0);
-        if tag == 0 { break; }
-
+        let tag = data[i];
+        let wire_type = tag & 0x07;
         let field_num = tag >> 3;
         i += 1;
 
         match field_num {
-            1 => { // UID
-                if let Some(slice) = data.get(i..) {
-                    let (val, read) = read_varint(slice);
-                    if val > chat.uid { chat.uid = val; }
-                    i += read;
-                }
+            1 => { // Entity ID (Session ID)
+                let (val, read) = read_varint(&data[i..]);
+                chat.entity_id = val;
+                i += read;
             }
-            2 => { // Nickname Sub-block
-                if let Some(slice) = data.get(i..) {
-                    let (len, read) = read_varint(slice);
-                    i += read;
+            2 => { // Profile Block
+                let (len, read) = read_varint(&data[i..]);
+                i += read;
+                let block_end = (i + len as usize).min(data.len());
 
-                    let start = i;
-                    let end = (i + len as usize).min(data.len()); // CLAMP
+                if let Some(sub_data) = data.get(i..block_end) {
+                    parse_profile_block(sub_data, chat);
+                }
+                i = block_end;
+            }
+            3 => { // Timestamp
+                let (val, read) = read_varint(&data[i..]);
+                chat.timestamp = val;
+                i += read;
+            }
+            4 => { // Message Block
+                let (len, read) = read_varint(&data[i..]);
+                i += read;
+                let block_end = (i + len as usize).min(data.len());
 
-                    if let Some(sub) = data.get(start..end) {
-                        if let Some(name) = find_string_by_tag(sub, 0x12) {
-                            chat.nickname = name;
-                        }
+                if let Some(sub_data) = data.get(i..block_end) {
+                    // Chat string is always Tag 3 (0x1A) inside the Message Block
+                    if let Some(msg) = find_string_by_tag(sub_data, 0x1A) {
+                        chat.message = msg;
                     }
-                    i = end;
                 }
+                i = block_end;
             }
-            _ => i += 1,
+            _ => i += skip_field(wire_type, &data[i..]),
+        }
+    }
+}
+
+fn parse_profile_block(data: &[u8], chat: &mut ChatPacket) {
+    let mut i = 0;
+    while i < data.len() {
+        let tag = data[i];
+        let wire_type = tag & 0x07;
+        let field_num = tag >> 3;
+        i += 1;
+
+        match field_num {
+            1 => { // Permanent UID
+                let (val, read) = read_varint(&data[i..]);
+                chat.uid = val;
+                i += read;
+            }
+            2 => { // Nickname
+                let (len, read) = read_varint(&data[i..]);
+                i += read;
+                let block_end = (i + len as usize).min(data.len());
+
+                if let Some(sub_data) = data.get(i..block_end) {
+                    chat.nickname = String::from_utf8_lossy(sub_data).into_owned();
+                }
+                i = block_end;
+            }
+            3 => { // Class ID
+                let (val, read) = read_varint(&data[i..]);
+                chat.class_id = val;
+                i += read;
+            }
+            4 => { // Status Flag
+                let (val, read) = read_varint(&data[i..]);
+                chat.status_flag = val;
+                i += read;
+            }
+            5 => { // Level
+                let (val, read) = read_varint(&data[i..]);
+                chat.level = val;
+                i += read;
+            }
+            _ => i += skip_field(wire_type, &data[i..]),
         }
     }
 }
@@ -146,23 +232,17 @@ fn extract_user_fields(data: &[u8], chat: &mut ChatPacket) {
 fn find_string_by_tag(data: &[u8], target_tag: u8) -> Option<String> {
     let mut i = 0;
     while i < data.len() {
-        if data[i] == target_tag {
-            // Check if we have enough room to even read a varint
-            if i + 1 >= data.len() { return None; }
-
+        let tag = data[i];
+        if tag == target_tag {
             let (len, read) = read_varint(&data[i+1..]);
             let start = i + 1 + read;
-            let end = start + len as usize;
-
-            // SAFETY: Clamp the end index to the data length
-            let safe_end = end.min(data.len());
-
-            if start < safe_end {
-                let string_bytes = &data[start..safe_end];
-                return Some(String::from_utf8_lossy(string_bytes).into_owned());
+            let end = (start + len as usize).min(data.len());
+            if start < end {
+                return Some(String::from_utf8_lossy(&data[start..end]).into_owned());
             }
         }
-        i += 1;
+        let wire_type = tag & 0x07;
+        i += 1 + skip_field(wire_type, &data[i+1..]);
     }
     None
 }
@@ -191,5 +271,37 @@ fn skip_field(wire_type: u8, data: &[u8]) -> usize {
         }
         5 => 4,
         _ => 1,
+    }
+}
+
+fn extract_stream_key(data: &[u8]) -> Option<[u8; 6]> {
+    if data.len() < 20 || (data[0] >> 4) != 4 || data[9] != 6 { return None; } // Must be IPv4 + TCP
+    let ihl = (data[0] & 0x0F) as usize * 4;
+    if data.len() < ihl + 20 { return None; }
+
+    let mut key = [0u8; 6];
+    key[0..4].copy_from_slice(&data[12..16]); // Source IP
+    key[4..6].copy_from_slice(&data[ihl..ihl + 2]); // Source Port
+    Some(key)
+}
+
+fn extract_tcp_payload(data: &[u8]) -> Option<&[u8]> {
+    // Basic IPv4 check
+    if data.len() < 20 || (data[0] >> 4) != 4 || data[9] != 6 { return None; }
+
+    // IP Header Length (usually 20 bytes, but can be more)
+    let ip_header_len = (data[0] & 0x0F) as usize * 4;
+    if data.len() < ip_header_len + 20 { return None; }
+
+    // TCP Header Length (Offset is at byte 12 of the TCP header)
+    let tcp_header_len = ((data[ip_header_len + 12] >> 4) as usize) * 4;
+
+    // The actual game data starts after both headers
+    let payload_offset = ip_header_len + tcp_header_len;
+
+    if payload_offset <= data.len() {
+        Some(&data[payload_offset..])
+    } else {
+        None
     }
 }

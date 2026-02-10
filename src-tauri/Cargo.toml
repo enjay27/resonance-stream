@@ -29,7 +29,14 @@ tokio = { version = "1", features = ["fs", "io-util"] }
 reqwest = { version = "0.11", features = ["stream", "blocking", "rustls-tls"] }
 futures-util = "0.3"
 tauri-plugin-fs = "2.4.5" # For handling the download stream
+# Network & Parsing
 pnet = "0.35"
+byteorder = "1.5"  # For reading u16/u32 from packets
+
+# Cryptography (Matches BPSR-ZDPS logic)
+aes = "0.8"
+ctr = "0.9"
+hex = "0.4"
 
 [dev-dependencies]
 pnet = "0.35"

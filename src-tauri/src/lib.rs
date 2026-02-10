@@ -6,6 +6,7 @@ mod model_manager;
 mod python_translator;
 mod sniffer_logic_test;
 mod sniffer;
+mod packet_buffer;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

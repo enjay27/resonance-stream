@@ -1,101 +1,91 @@
-use pnet::datalink::{self, Channel::Ethernet};
-use pnet::packet::ethernet::EthernetPacket;
+// src-tauri/src/sniffer.rs
+use std::sync::mpsc::Sender;
+use std::thread;
+use windivert::prelude::*;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
-use pnet::ipnetwork::IpNetwork; // Import this to check IPs safely
-use std::sync::mpsc::Sender;
-use std::thread;
-
-const GAME_PORT: u16 = 51000;
 
 pub fn start_sniffer(tx: Sender<String>) {
     thread::spawn(move || {
-        let interfaces = datalink::interfaces();
+        println!("--- [Eye] SNIFFER ACTIVE ON PORT 5003 ---");
 
-        println!("--- [Sniffer] Scanning Network Interfaces ---");
-        for iface in &interfaces {
-            println!("Found: {} | MAC: {:?} | IPs: {:?}",
-                     iface.name, iface.mac, iface.ips);
-        }
-        println!("---------------------------------------------");
+        // Filter strictly for the Chat Server
+        let filter = "tcp.PayloadLength > 0 and (tcp.SrcPort == 5003 or tcp.DstPort == 5003)";
+        let flags = WinDivertFlags::new().set_sniff();
 
-        // --- NEW LOGIC: FIND BY IP ---
-        // We look for ANY interface that has a valid IPv4 address (not 0.0.0.0 and not localhost).
-        // We ignore "is_up()" because Windows sometimes reports false for working adapters.
-        let interface = interfaces
-            .into_iter()
-            .find(|iface| {
-                iface.ips.iter().any(|ip| {
-                    match ip {
-                        IpNetwork::V4(v4) => {
-                            let s = v4.ip().to_string();
-                            s != "0.0.0.0" && s != "127.0.0.1"
-                        },
-                        _ => false
-                    }
-                })
-            })
-            // Fallback: If that fails, match the GUID directly from your logs
-            .or_else(|| {
-                println!("[Sniffer] IP Filter failed. Trying manual GUID match...");
-                datalink::interfaces().into_iter().find(|iface|
-                    iface.name.contains("4DC99CBD-4CAA-40F1-8F0F-9555859FFEAF")
-                )
-            });
-
-        let interface = match interface {
-            Some(iface) => iface,
-            None => {
-                eprintln!("[Sniffer] ERROR: No valid network interface found! Packet capture is disabled.");
-                return;
-            }
-        };
-
-        println!("[Sniffer] Selected Interface: {} ({:?})", interface.name, interface.description);
-
-        let (_, mut rx) = match datalink::channel(&interface, Default::default()) {
-            Ok(Ethernet(tx, rx)) => (tx, rx),
-            Ok(_) => {
-                eprintln!("[Sniffer] Error: Unhandled channel type");
-                return;
-            },
+        let wd = match WinDivert::network(filter, 0, flags) {
+            Ok(w) => w,
             Err(e) => {
-                eprintln!("[Sniffer] Error creating channel: {}", e);
+                eprintln!("[Sniffer] FATAL ERROR: {:?}", e);
                 return;
             }
         };
+
+        let mut buffer = [0u8; 65535];
 
         loop {
-            match rx.next() {
+            match wd.recv(Some(&mut buffer)) {
                 Ok(packet) => {
-                    process_packet(packet, &tx);
+                    if let Some(ipv4) = Ipv4Packet::new(&packet.data) {
+                        if let Some(tcp) = TcpPacket::new(ipv4.payload()) {
+                            let payload = tcp.payload();
+
+                            // Check if the payload is large enough to contain our header
+                            if payload.len() >= 6 {
+                                // 1. Read Length (First 4 bytes, Big Endian)
+                                let mut len_bytes = [0u8; 4];
+                                len_bytes.copy_from_slice(&payload[0..4]);
+                                let packet_length = u32::from_be_bytes(len_bytes) as usize;
+
+                                // 2. Read Opcode (Next 2 bytes, Big Endian)
+                                let mut opcode_bytes = [0u8; 2];
+                                opcode_bytes.copy_from_slice(&payload[4..6]);
+                                let opcode = u16::from_be_bytes(opcode_bytes);
+
+                                // 3. Is it a Chat Packet? (Opcode 2)
+                                // We also ensure the payload actually matches the stated length to avoid fragmented garbage
+                                if opcode == 2 && payload.len() >= packet_length {
+
+                                    // 4. Extract the Japanese Text
+                                    // We skip the 22-byte header/routing info and read the Protobuf body
+                                    println!("[Original] Payload: {:?}", &payload);
+                                    if let Some(text) = extract_japanese_text(&payload[22..packet_length]) {
+                                        println!("[Sniffer] Extracted: {}", text);
+
+                                        // Send to the Tauri frontend -> Python Sidecar -> Qwen!
+                                        if let Err(e) = tx.send(text) {
+                                            eprintln!("[Sniffer] Failed to send to UI: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-                Err(e) => {
-                    eprintln!("[Sniffer] Read Error: {}", e);
-                }
+                Err(_) => {}
             }
         }
     });
 }
 
-fn process_packet(ethernet_bytes: &[u8], tx: &Sender<String>) {
-    if let Some(ethernet) = EthernetPacket::new(ethernet_bytes) {
-        if let Some(ipv4) = Ipv4Packet::new(ethernet.payload()) {
-            if let Some(tcp) = TcpPacket::new(ipv4.payload()) {
-                if tcp.get_source() == GAME_PORT || tcp.get_destination() == GAME_PORT {
-                    let payload = tcp.payload();
-                    if payload.is_empty() { return; }
+/// A robust byte-scanner that pulls readable UTF-8 strings out of raw Protobuf data.
+fn extract_japanese_text(data: &[u8]) -> Option<String> {
+    // Convert the raw bytes into a lossy string
+    let raw_string = String::from_utf8_lossy(data);
 
-                    if let Ok(text) = std::str::from_utf8(payload) {
-                        let clean_text = text.trim();
-                        if clean_text.len() > 1 && clean_text.chars().all(|c| !c.is_control()) {
-                            let json_msg = serde_json::json!({ "text": clean_text }).to_string();
-                            let _ = tx.send(json_msg);
-                        }
-                    }
-                }
-            }
-        }
+    // Filter out control characters and the '' replacement character
+    let clean_text: String = raw_string
+        .chars()
+        .filter(|c| !c.is_control() && *c != '\u{FFFD}')
+        .collect();
+
+    let trimmed = clean_text.trim();
+
+    // Ensure we actually caught something substantial before returning it
+    if trimmed.len() > 1 {
+        Some(trimmed.to_string())
+    } else {
+        None
     }
 }

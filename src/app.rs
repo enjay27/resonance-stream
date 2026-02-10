@@ -34,6 +34,8 @@ pub fn App() -> impl IntoView {
     let (model_ready, set_model_ready) = signal(false);
     let (downloading, set_downloading) = signal(false);
     let (progress, set_progress) = signal(0u8);
+    let (test_input, set_test_input) = signal("".to_string()); // New Signal
+    let (translation_log, set_translation_log) = signal("".to_string()); // To show results
 
     // 1. Check Model
     let check_model = move || {
@@ -105,6 +107,38 @@ pub fn App() -> impl IntoView {
 
     Effect::new(move |_| check_model());
 
+    let setup_listener = move || {
+        spawn_local(async move {
+            let closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+                // Parse the "translator-event" from Rust
+                // We assume Python sends JSON: { "type": "result", "translated": "..." }
+                // For now, just dump the raw string to the UI to verify
+                if let Some(str_val) = event_obj.as_string() {
+                    // In real app, parse the JSON payload here
+                    set_translation_log.set(str_val);
+                } else {
+                    // Fallback if event is an object
+                    set_translation_log.set(format!("{:?}", event_obj));
+                }
+            }) as Box<dyn FnMut(JsValue)>);
+
+            let _ = listen("translator-event", &closure).await;
+            closure.forget();
+        });
+    };
+
+    // Call listener on startup
+    Effect::new(move |_| setup_listener());
+
+    // NEW: Manual Send
+    let send_test = move |_| {
+        println!("send test");
+        spawn_local(async move {
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "text": test_input.get() })).unwrap();
+            let _ = invoke("manual_translate", args).await;
+        });
+    };
+
     view! {
         <main class="container">
             <h1>"BPSR Translator"</h1>
@@ -133,6 +167,21 @@ pub fn App() -> impl IntoView {
                 </button>
             </Show>
 
+            // MANUAL TEST ZONE
+            <div class="test-zone">
+                <h3>"Manual Test"</h3>
+                <input
+                    type="text"
+                    placeholder="Type Japanese here..."
+                    on:input=move |ev| set_test_input.set(event_target_value(&ev))
+                />
+                <button on:click=send_test>"Send"</button>
+
+                <div class="log-box">
+                    <pre>{move || translation_log.get()}</pre>
+                </div>
+            </div>
+
             <style>
                 "
                 body { margin: 0; background: #222; }
@@ -142,6 +191,9 @@ pub fn App() -> impl IntoView {
                 .fill { height: 100%; background: #00ff88; transition: width 0.2s; }
                 .primary-btn { background: #00ff88; border: none; padding: 15px 30px; font-size: 1.1rem; font-weight: bold; cursor: pointer; border-radius: 5px; }
                 .spacer { height: 10px; }
+                .test-zone { margin-top: 20px; border-top: 1px solid #444; padding-top: 20px; }
+                input { padding: 10px; border-radius: 4px; border: none; width: 60%; margin-right: 10px; }
+                .log-box { background: #111; padding: 10px; margin-top: 10px; border-radius: 5px; text-align: left; font-family: monospace; color: #0f0; min-height: 50px; }
                 "
             </style>
         </main>

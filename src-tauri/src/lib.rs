@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri::path::BaseDirectory;
+use tokio::io::AsyncWriteExt;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -11,11 +12,19 @@ fn greet(name: &str) -> String {
 }
 
 // Constants for our recommended models
-pub const URL_QWEN_1_7B: &str = "https://huggingface.co/Qwen/Qwen3-1.7B-Instruct-GGUF/resolve/main/qwen3-1.7b-instruct-q4_k_m.gguf";
+pub const URL_QWEN_1_7B: &str = "https://huggingface.co/lm-kit/qwen-3-1.7b-instruct-gguf/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true";
 pub const FILENAME_1_7B: &str = "qwen3-1.7b-instruct.gguf";
 
 pub const URL_QWEN_0_5B: &str = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf";
 pub const FILENAME_0_5B: &str = "qwen2.5-0.5b-instruct.gguf";
+
+// --- CONFIGURATION ---
+const URL_STD: &str = "https://huggingface.co/Qwen/Qwen3-1.7B-Instruct-GGUF/resolve/main/qwen3-1.7b-instruct-q4_k_m.gguf";
+const FILE_STD: &str = "qwen3-1.7b-instruct.gguf";
+
+const URL_LITE: &str = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf";
+const FILE_LITE: &str = "qwen2.5-0.5b-instruct.gguf";
+
 
 #[derive(serde::Serialize)]
 pub struct ModelStatus {
@@ -54,42 +63,80 @@ fn check_model_status(app: AppHandle, filename: String) -> () {
     // }
 }
 
+// Helper: Resolve variant key to filename
+pub fn resolve_filename(variant: &str) -> Option<&'static str> {
+    match variant {
+        "std" => Some(FILE_STD),
+        "lite" => Some(FILE_LITE),
+        _ => None,
+    }
+}
+
+// Helper: Resolve variant key to URL
+fn resolve_url(variant: &str) -> Option<&'static str> {
+    match variant {
+        "std" => Some(URL_STD),
+        "lite" => Some(URL_LITE),
+        _ => None,
+    }
+}
+
 #[tauri::command]
-async fn download_model(app: AppHandle, url: String) -> () {
-    println!("download_model called with {}", url);
-    // let dir = get_models_dir(&app);
-    // let file_path = dir.join(&filename);
-    //
-    // // 1. Setup Request
-    // let client = reqwest::Client::new();
-    // let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    //
-    // let total_size = res.content_length().unwrap_or(0);
-    //
-    // // 2. Setup File Writer
-    // let mut file = std::fs::File::create(&file_path).map_err(|e| e.to_string())?;
-    // let mut stream = res.bytes_stream();
-    // let mut downloaded: u64 = 0;
-    //
-    // // 3. Stream Loop
-    // while let Some(item) = stream.next().await {
-    //     let chunk = item.map_err(|e| e.to_string())?;
-    //     file.write_all(&chunk).map_err(|e| e.to_string())?;
-    //
-    //     downloaded += chunk.len() as u64;
-    //
-    //     // 4. Emit Progress Event (Optimize: Don't emit every single chunk, maybe every 1%)
-    //     if total_size > 0 {
-    //         let percent = ((downloaded as f64 / total_size as f64) * 100.0) as u8;
-    //         app.emit("download-progress", ProgressPayload {
-    //             current: downloaded,
-    //             total: total_size,
-    //             percent,
-    //         }).unwrap();
-    //     }
-    // }
-    //
-    // Ok(file_path.to_string_lossy().to_string())
+async fn download_model(app: AppHandle, variant: String) -> Result<String, String> {
+    println!("Starting download for variant: {}", variant);
+
+    let url = resolve_url(&variant).ok_or("Invalid variant")?;
+    println!("Target URL: {}", url);
+    let filename = resolve_filename(&variant).ok_or("Invalid variant")?;
+
+    let dir = get_models_dir(&app);
+    let file_path = dir.join(filename);
+
+    // 1. Setup Client (Async)
+    let client = reqwest::Client::new();
+    let res = client
+        .get(url)
+        .header("User-Agent", "BPSR-Translator/1.0")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Download failed: {}", res.status()));
+    }
+
+    let total_size = res.content_length().unwrap_or(0);
+
+    // 2. Open File (Async)
+    let mut file = tokio::fs::File::create(&file_path)
+        .await
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+
+    // 3. Stream
+    let mut stream = res.bytes_stream();
+    let mut downloaded: u64 = 0;
+    let mut last_emit = 0;
+
+    while let Some(item) = stream.next().await {
+        let chunk = item.map_err(|e| e.to_string())?;
+        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+
+        downloaded += chunk.len() as u64;
+
+        if total_size > 0 {
+            let percent = ((downloaded as f64 / total_size as f64) * 100.0) as u8;
+            if percent > last_emit {
+                last_emit = percent;
+                app.emit("download-progress", ProgressPayload {
+                    current: downloaded,
+                    total: total_size,
+                    percent,
+                }).unwrap_or_else(|_| {});
+            }
+        }
+    }
+
+    Ok(file_path.to_string_lossy().to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

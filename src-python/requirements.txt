@@ -1,0 +1,2 @@
+llama_cpp_python==0.3.16
+pyinstaller==6.18.0

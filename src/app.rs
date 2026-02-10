@@ -90,6 +90,20 @@ pub fn App() -> impl IntoView {
         });
     };
 
+    // 3. Launch Sidecar
+    let launch_sidecar = move |_| {
+        set_status_text.set("Booting AI Engine...".to_string());
+        spawn_local(async move {
+            // Args: { "use_gpu": true }
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "use_gpu": true })).unwrap();
+
+            match invoke("start_translator_sidecar", args).await {
+                Ok(_) => set_status_text.set("AI Running. Check Terminal for Logs.".to_string()),
+                Err(e) => set_status_text.set(format!("Launch Failed: {:?}", e)),
+            }
+        });
+    };
+
     Effect::new(move |_| check_model());
 
     view! {
@@ -113,6 +127,12 @@ pub fn App() -> impl IntoView {
                     </button>
                 </Show>
             </div>
+
+            <Show when=move || model_ready.get()>
+                <button class="primary-btn" on:click=launch_sidecar>
+                    "Start AI Translator"
+                </button>
+            </Show>
 
             <style>
                 "

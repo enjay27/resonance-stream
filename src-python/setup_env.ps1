@@ -33,4 +33,4 @@ pip install -r requirements.txt
 Write-Host "--- Setup Complete! ---" -ForegroundColor Green
 Write-Host "To build the binary, run:"
 Write-Host "  .venv\Scripts\activate"
-Write-Host "  pyinstaller --clean --onefile --distpath src-tauri/bin --name translator-x86_64-pc-windows-msvc src-python/main.py"
+Write-Host "  pyinstaller --noconfirm --clean --onefile --distpath src-tauri/bin --name translator-x86_64-pc-windows-msvc --add-data ".venv/Lib/site-packages/llama_cpp;llama_cpp" main.py"

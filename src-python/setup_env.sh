@@ -22,4 +22,4 @@ echo "Installing dependencies..."
 pip install -r requirements.txt
 
 echo "--- Setup Complete! ---"
-echo "To build: source .venv/bin/activate && pyinstaller --clean --onefile --distpath src-tauri/bin --name translator src-python/main.py"
+echo "To build: source .venv/bin/activate && pyinstaller --clean --onefile --distpath src-tauri/bin --name translator-x86_64-pc-windows-msvc src-python/main.py"

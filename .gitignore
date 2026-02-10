@@ -2,9 +2,19 @@
 /target/
 /Cargo.lock
 
+# WinDivert
 WinDivert.dll
 WinDivert.lib
 WinDivert64.sys
 
+# IDE
 .idea
 .vscode
+
+# Python
+.venv
+
+# build
+build
+translator-x86_64-pc-windows-msvc.spec
+translator-x86_64-pc-windows-msvc.exe

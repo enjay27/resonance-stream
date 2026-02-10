@@ -1,4 +1,8 @@
-mod model_manager; // Register our module
+use crate::python_translator::*;
+use crate::model_manager::*;
+
+mod model_manager;
+mod python_translator;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -6,8 +10,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
-            model_manager::check_model_status,
-            model_manager::download_model
+            check_model_status,
+            download_model,
+            start_translator_sidecar
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

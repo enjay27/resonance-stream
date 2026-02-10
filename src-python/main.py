@@ -3,48 +3,41 @@ import argparse
 import signal
 import json
 import os
+import io
+import re  # NEW IMPORT for Regex
 
-# You need to install this: pip install llama-cpp-python
-try:
-    from llama_cpp import Llama
-except ImportError:
-    print(json.dumps({"error": "Missing llama-cpp-python module"}))
-    sys.exit(1)
+# Force UTF-8 (Fixes the encoding crash from before)
+sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-def signal_handler(sig, frame):
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
+# ... (Keep existing imports/handlers) ...
 
 def main():
-    # 1. Parse Arguments (Passed from Rust)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, required=True, help="Path to .gguf file")
-    parser.add_argument("--gpu_layers", type=int, default=-1, help="Number of GPU layers (-1 = all)")
+    parser.add_argument("--model", type=str, required=True)
+    parser.add_argument("--gpu_layers", type=int, default=-1)
     args = parser.parse_args()
 
-    # 2. Check File
     if not os.path.exists(args.model):
-        print(json.dumps({"type": "error", "message": f"Model file not found: {args.model}"}), flush=True)
+        print(json.dumps({"type": "error", "message": "Model not found"}), flush=True)
         return
 
-    # 3. Load Model
-    print(json.dumps({"type": "status", "message": "Loading AI Engine..."}), flush=True)
+    print(json.dumps({"type": "status", "message": "Loading AI..."}), flush=True)
 
     try:
+        from llama_cpp import Llama
         llm = Llama(
             model_path=args.model,
-            n_gpu_layers=args.gpu_layers, # -1 for max GPU
-            n_ctx=2048,                   # Context Window
-            verbose=False                 # Reduce C++ logs
+            n_gpu_layers=args.gpu_layers,
+            n_ctx=2048,      # This causes the warning (but saves RAM)
+            verbose=False    # This hides the warning from the logs!
         )
         print(json.dumps({"type": "status", "message": "AI Ready"}), flush=True)
     except Exception as e:
         print(json.dumps({"type": "error", "message": str(e)}), flush=True)
         return
 
-    # 4. Translation Loop (Read from Rust)
-    # Rust will send: {"text": "こんにちは", "target": "KO"}
+    # Processing Loop
     for line in sys.stdin:
         try:
             line = line.strip()
@@ -52,18 +45,16 @@ def main():
 
             data = json.loads(line)
             input_text = data.get("text", "")
-
             if not input_text: continue
 
-            # Construct Prompt (Qwen Chat Format)
+            # Prompt Template
             prompt = f"""<|im_start|>system
-You are a translator. Translate the following Japanese text to Korean accurately. Output ONLY the Korean translation.<|im_end|>
+You are a translator. Translate the Japanese text to Korean. Output ONLY the translation.<|im_end|>
 <|im_start|>user
 {input_text}<|im_end|>
 <|im_start|>assistant
 """
 
-            # Run Inference
             output = llm(
                 prompt,
                 max_tokens=256,
@@ -71,18 +62,19 @@ You are a translator. Translate the following Japanese text to Korean accurately
                 echo=False
             )
 
-            translated_text = output['choices'][0]['text'].strip()
+            raw_text = output['choices'][0]['text']
 
-            # Send back to Rust
+            # --- CLEAN UP <think> TAGS ---
+            # Remove everything between <think> and </think>
+            clean_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
+
             response = {
                 "type": "result",
                 "original": input_text,
-                "translated": translated_text
+                "translated": clean_text
             }
-            print(json.dumps(response), flush=True)
+            print(json.dumps(response, ensure_ascii=False), flush=True)
 
-        except json.JSONDecodeError:
-            pass # Ignore junk lines
         except Exception as e:
             print(json.dumps({"type": "error", "message": str(e)}), flush=True)
 

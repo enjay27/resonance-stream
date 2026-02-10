@@ -22,4 +22,4 @@ echo "Installing dependencies..."
 pip install -r requirements.txt
 
 echo "--- Setup Complete! ---"
-echo "To build: source .venv/bin/activate && pyinstaller --clean --onefile --distpath src-tauri/bin --name translator-x86_64-pc-windows-msvc src-python/main.py"
+echo "To build: source .venv/bin/activate && pyinstaller --noconfirm --clean --onefile --distpath src-tauri/bin --name translator-x86_64-pc-windows-msvc --add-data ".venv/Lib/site-packages/llama_cpp;llama_cpp" main.py"

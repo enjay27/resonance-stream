@@ -5,11 +5,8 @@ use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
 
 // --- CONFIGURATION ---
-// Qwen 3 0.6B Instruct (Nano Size, High IQ)
-// Note: I am using the Qwen 2.5 0.5B URL as a placeholder because Qwen 3 is not fully public on main yet.
-// If you have the specific Qwen 3 link, put it here. Otherwise, this 0.5B is the best <500MB choice.
-const MODEL_URL: &str = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf";
-const MODEL_FILENAME: &str = "qwen2.5-0.5b-instruct.gguf";
+const MODEL_URL: &str = "https://huggingface.co/lm-kit/qwen-3-0.6b-instruct-gguf/resolve/main/Qwen3-0.6B-Q4_K_M.gguf";
+const MODEL_FILENAME: &str = "Qwen3-0.6B-Q4_K_M.gguf";
 
 #[derive(serde::Serialize, Clone)]
 pub struct ModelStatus {

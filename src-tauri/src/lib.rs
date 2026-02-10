@@ -3,6 +3,7 @@ use crate::model_manager::*;
 
 mod model_manager;
 mod python_translator;
+mod sniffer_logic_test;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

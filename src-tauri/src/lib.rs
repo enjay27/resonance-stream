@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use tauri::Manager;
 use crate::python_translator::*;
 use crate::model_manager::*;
 
@@ -11,6 +12,11 @@ mod packet_buffer;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            let window = app.get_window("main").unwrap();
+            sniffer::start_sniffer(window); // Start the background thread
+            Ok(())
+        })
         .manage(AppState { tx: Mutex::new(None)})
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())

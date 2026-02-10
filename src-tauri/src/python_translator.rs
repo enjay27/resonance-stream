@@ -39,9 +39,6 @@ pub fn start_translator_sidecar(
     // 3. Store Sender in State (Cloning ensures channel stays open)
     *state.tx.lock().unwrap() = Some(tx.clone());
 
-    // 4. Start Sniffer
-    sniffer::start_sniffer(tx);
-
     // 5. Start Writer Thread (The "Hand")
     thread::spawn(move || {
         // CRITICAL FIX: Shadow 'child' to ensure it is mutable inside this thread

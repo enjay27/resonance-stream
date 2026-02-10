@@ -15,8 +15,18 @@ extern "C" {
 #[derive(Serialize, Deserialize, Clone)]
 struct ModelStatus { exists: bool, path: String }
 
-#[derive(Serialize, Deserialize, Clone)]
-struct ProgressPayload { percent: u8 }
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct TauriEvent {
+    payload: ProgressPayload, // We extract this inner part
+}
+
+// Keep this one as f64 to be safe with JS numbers
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ProgressPayload {
+    pub current: f64,
+    pub total: f64,
+    pub percent: u8,
+}
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -50,10 +60,16 @@ pub fn App() -> impl IntoView {
         set_status_text.set("Starting Download...".to_string());
 
         spawn_local(async move {
-            let closure = Closure::wrap(Box::new(move |payload: JsValue| {
-                if let Ok(p) = serde_wasm_bindgen::from_value::<ProgressPayload>(payload) {
-                    set_progress.set(p.percent);
-                    set_status_text.set(format!("Downloading... {}%", p.percent));
+            let closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+                match serde_wasm_bindgen::from_value::<TauriEvent>(event_obj) {
+                    Ok(wrapper) => {
+                        let p = wrapper.payload;
+                        set_progress.set(p.percent);
+                        set_status_text.set(format!("Downloading... {}%", p.percent));
+                    },
+                    Err(e) => {
+                        web_sys::console::error_1(&format!("Parse Error: {:?}", e).into());
+                    }
                 }
             }) as Box<dyn FnMut(JsValue)>);
 

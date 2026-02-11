@@ -1,9 +1,9 @@
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, Manager};
-use crate::python_translator::*;
 use crate::model_manager::*;
+use crate::python_translator::*;
 use crate::sniffer::*;
+use std::collections::VecDeque;
+use std::sync::Mutex;
+use tauri::{Emitter, Manager};
 
 mod model_manager;
 mod python_translator;
@@ -14,7 +14,7 @@ mod packet_buffer;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState { tx: Mutex::new(None)})
+        .manage(AppState { tx: Mutex::new(None), chat_history: Mutex::new(VecDeque::new()) })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
@@ -22,7 +22,8 @@ pub fn run() {
             download_model,
             start_translator_sidecar,
             manual_translate,
-            start_sniffer_command
+            start_sniffer_command,
+            get_chat_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

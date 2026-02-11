@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use windivert::prelude::*;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Window};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
 use crate::inject_system_message;
 use crate::packet_buffer::PacketBuffer;
 
@@ -20,14 +21,19 @@ pub struct ChatPacket {
     pub message: String,      // e.g., "hi" or "emojiPic=..."
 }
 
+pub struct AppState {
+    pub tx: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
+    pub chat_history: Mutex<VecDeque<ChatPacket>>,
+}
+
 static IS_SNIFFER_RUNNING: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
-pub fn start_sniffer_command(window: tauri::Window, app_handle: tauri::AppHandle) {
-    start_sniffer(window, app_handle);
+pub fn start_sniffer_command(window: tauri::Window, app: AppHandle) {
+    start_sniffer(window, app);
 }
 
-fn start_sniffer(window: Window, app_handle: AppHandle) {
+fn start_sniffer(window: Window, app: AppHandle) {
     if IS_SNIFFER_RUNNING.load(Ordering::SeqCst) {
         // If already running, just send a "Re-attached" system message
         inject_system_message(&window, "System: Sniffer already active. Re-attached to stream.");
@@ -36,7 +42,7 @@ fn start_sniffer(window: Window, app_handle: AppHandle) {
 
     IS_SNIFFER_RUNNING.store(true, Ordering::SeqCst);
 
-    let window_clone = window.clone();
+    let app_handle = app.clone();
     thread::spawn(move || {
         inject_system_message(&window, "Eye of Star Resonance: Sniffer Active (Port 5003)");
 
@@ -81,6 +87,14 @@ fn start_sniffer(window: Window, app_handle: AppHandle) {
                             // Send to parser (skipping the 2-byte length header)
                             if let Some(chat) = parse_star_resonance(&full_packet) {
                                 println!("chat: {:?}", chat);
+                                // --- FIFO Logic & Persistence ---
+                                if let Some(state) = app_handle.try_state::<AppState>() {
+                                    let mut history = state.chat_history.lock().unwrap();
+                                    if history.len() >= 1000 {
+                                        history.pop_front();
+                                    }
+                                    history.push_back(chat.clone());
+                                }
                                 window.emit("new-chat-message", &chat).unwrap();
                             }
                         }
@@ -320,3 +334,9 @@ fn extract_tcp_payload(data: &[u8]) -> Option<&[u8]> {
     }
 }
 
+#[tauri::command]
+pub fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatPacket> {
+    let history = state.chat_history.lock().unwrap();
+    println!("History: {:?}", history);
+    history.iter().cloned().collect()
+}

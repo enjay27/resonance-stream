@@ -1,13 +1,13 @@
+use std::collections::VecDeque;
 use tauri::{AppHandle, Emitter, State, Window};
 use std::sync::Mutex;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use crate::{inject_system_message, model_manager};
+use crate::sniffer::{AppState, ChatPacket};
 
 // 1. Define State to hold the Channel
-pub struct AppState {
-    pub tx: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
-}
+
 
 #[tauri::command]
 pub async fn start_translator_sidecar(

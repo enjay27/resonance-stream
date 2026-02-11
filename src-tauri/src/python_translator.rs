@@ -102,3 +102,23 @@ pub fn manual_translate(text: String, state: State<AppState>) -> Result<(), Stri
         Err("AI not started yet. Click 'Start AI Translator' first.".to_string())
     }
 }
+
+#[tauri::command]
+pub fn translate_jp_to_ko(text: String, id: u64, state: State<AppState>) -> Result<(), String> {
+    println!("[Translate] Request: {}", text);
+
+    let guard = state.tx.lock().unwrap();
+
+    if let Some(tx) = guard.as_ref() {
+        // Pass both text and ID to Python
+        let json_msg = serde_json::json!({
+            "text": text,
+            "id": id
+        }).to_string();
+
+        tx.send(json_msg).map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("AI not running".into())
+    }
+}

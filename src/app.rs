@@ -84,46 +84,55 @@ pub fn App() -> impl IntoView {
     };
 
     // --- EVENT LISTENERS ---
-
     let setup_listeners = move || {
         spawn_local(async move {
-            // 1. Listen for new packets from the Sniffer
+            // --- 1. NEW PACKET LISTENER ---
             let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
                     if let Ok(packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
                         let packet_clone = packet.clone();
 
+                        // Add to log immediately
                         set_chat_log.update(|log| log.push(packet));
 
-                        // 2. TRIGGER TRANSLATION IF JAPANESE
+                        // Auto-trigger translation for Japanese text
                         if is_japanese(&packet_clone.message) {
                             spawn_local(async move {
-                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "text": packet_clone.message })).unwrap();
-                                let _ = invoke("manual_translate", args).await;
+                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                "text": packet_clone.message,
+                                "id": packet_clone.timestamp // Pass ID
+                            })).unwrap();
+                                // ARCHITECTURE FIX: Invoke the ID-aware method
+                                let _ = invoke("translate_jp_to_ko", args).await;
                             });
                         }
                     }
                 }
             }) as Box<dyn FnMut(JsValue)>);
 
-            // 2. Listen for translation results from the AI Sidecar
+            // --- 2. TRANSLATION RESULT LISTENER ---
             let trans_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Some(json_str) = event_obj.as_string() {
                     if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                        let original = resp["original"].as_str().unwrap_or_default().to_string();
-                        let translated = resp["translated"].as_str().unwrap_or_default().to_string();
+                        // Match by the echoed ID
+                        let target_id = resp["id"].as_u64().unwrap_or(0);
+                        let translated_text = resp["translated"].as_str().unwrap_or_default().to_string();
 
                         set_chat_log.update(|log| {
-                            if let Some(msg) = log.iter_mut().rev().find(|m| m.message == original) {
-                                msg.translated = Some(translated);
+                            // Find the exact message by timestamp ID
+                            if let Some(msg) = log.iter_mut().rev().find(|m| m.timestamp == target_id) {
+                                msg.translated = Some(translated_text);
                             }
                         });
                     }
                 }
             }) as Box<dyn FnMut(JsValue)>);
 
+            // Attach to Tauri Event System
             listen("new-chat-message", &packet_closure).await;
             listen("translator-event", &trans_closure).await;
+
+            // Prevent closures from being dropped
             packet_closure.forget();
             trans_closure.forget();
         });

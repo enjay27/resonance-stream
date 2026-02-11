@@ -1,16 +1,13 @@
 import sys
 import argparse
-import signal
 import json
 import os
 import io
-import re  # NEW IMPORT for Regex
+import re
 
-# Force UTF-8 (Fixes the encoding crash from before)
+# Force UTF-8 for reliable cross-platform pipe communication
 sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8', errors='replace')
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-
-# ... (Keep existing imports/handlers) ...
 
 def main():
     parser = argparse.ArgumentParser()
@@ -29,8 +26,8 @@ def main():
         llm = Llama(
             model_path=args.model,
             n_gpu_layers=args.gpu_layers,
-            n_ctx=2048,      # This causes the warning (but saves RAM)
-            verbose=False    # This hides the warning from the logs!
+            n_ctx=2048,
+            verbose=False
         )
         print(json.dumps({"type": "status", "message": "AI Ready"}), flush=True)
     except Exception as e:
@@ -45,16 +42,16 @@ def main():
 
             data = json.loads(line)
             input_text = data.get("text", "")
+            req_id = data.get("id", None) # Capture the Unique ID
+
             if not input_text: continue
 
-            # Prompt Template
             prompt = f"""<|im_start|>system
 You are a translator. Translate the Japanese text to Korean. Output ONLY the translation.<|im_end|>
 <|im_start|>user
 {input_text}<|im_end|>
 <|im_start|>assistant
 """
-
             output = llm(
                 prompt,
                 max_tokens=256,
@@ -63,13 +60,12 @@ You are a translator. Translate the Japanese text to Korean. Output ONLY the tra
             )
 
             raw_text = output['choices'][0]['text']
-
-            # --- CLEAN UP <think> TAGS ---
-            # Remove everything between <think> and </think>
+            # Clean up thinking tags if the model uses them
             clean_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
 
             response = {
                 "type": "result",
+                "id": req_id, # Echo the ID back to the UI
                 "original": input_text,
                 "translated": clean_text
             }

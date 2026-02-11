@@ -82,7 +82,7 @@ pub fn App() -> impl IntoView {
                         let packet_clone = packet.clone();
                         set_chat_log.update(|log| log.push(packet));
 
-                        if is_japanese(&packet_clone.message) {
+                        if packet_clone.channel != "SYSTEM" && is_japanese(&packet_clone.message) {
                             spawn_local(async move {
                                 let args = serde_wasm_bindgen::to_value(&serde_json::json!({
                                     "text": packet_clone.message,

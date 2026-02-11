@@ -1,5 +1,6 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{AppHandle, Emitter, Manager};
 use crate::python_translator::*;
 use crate::model_manager::*;
 use crate::sniffer::*;
@@ -25,4 +26,15 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+pub fn inject_system_message<S: Into<String>>(window: &tauri::Window, message: S) {
+    let sys_packet = ChatPacket {
+        channel: "SYSTEM".into(),
+        nickname: "SYSTEM".into(),
+        message: message.into(),
+        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+        ..Default::default()
+    };
+    let _ = window.emit("new-chat-message", &sys_packet);
 }

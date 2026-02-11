@@ -1,10 +1,8 @@
-use tauri::{AppHandle, Manager, Emitter, State}; // Added State
-use tauri_plugin_shell::ShellExt;
+use tauri::{AppHandle, Emitter, State, Window};
+use std::sync::Mutex;
 use tauri_plugin_shell::process::CommandEvent;
-use std::sync::{Arc, Mutex}; // Added Mutex
-use std::thread;
-use crate::model_manager;
-use crate::sniffer;
+use tauri_plugin_shell::ShellExt;
+use crate::{inject_system_message, model_manager};
 
 // 1. Define State to hold the Channel
 pub struct AppState {
@@ -12,44 +10,79 @@ pub struct AppState {
 }
 
 #[tauri::command]
-pub fn start_translator_sidecar(
+pub async fn start_translator_sidecar(
+    window: Window,
     app: AppHandle,
     state: State<'_, AppState>,
     use_gpu: bool
 ) -> Result<String, String> {
-    println!("Start Translator Sidecar");
+    inject_system_message(&window, format!("[Sidecar] Request received to start translator. GPU: {}", use_gpu));
 
     let model_path = model_manager::get_model_path(&app);
     let device_arg = if use_gpu { "cuda" } else { "cpu" };
 
     // 1. Spawn the sidecar
-    // Note: "python_translator" must match exactly in tauri.conf.json
+    // Make sure your tauri.conf.json -> externalBin contains "binaries/python_translator"
     let (mut rx, child) = app
         .shell()
-        .sidecar("python_translator")
-        .map_err(|e| e.to_string())?
+        .sidecar("translator")
+        .map_err(|e| {
+            let err = format!("[Sidecar] ERROR: Binary not found or config mismatch: {}", e);
+            inject_system_message(&window, err.clone());
+            err
+        })?
         .args(["--model", &model_path, "--device", device_arg])
         .spawn()
-        .map_err(|e| format!("Spawn failed: {}", e))?;
+        .map_err(|e| {
+            let err = format!("[Sidecar] ERROR: Failed to execute binary: {}", e);
+            inject_system_message(&window, err.clone());
+            err
+        })?;
+
+    inject_system_message(&window, format!("[Sidecar] Process spawned successfully. Child PID: {}", child.pid()));
 
     // 2. STORE THE CHILD IN STATE
     {
         let mut tx_guard = state.tx.lock().unwrap();
-        *tx_guard = Some(child); // This is why you were getting 'None'
+        *tx_guard = Some(child);
+        inject_system_message(&window, "[Sidecar] SUCCESS: Child handle saved to AppState.");
     }
 
-    // 3. Handle Stdout (Async)
+    // 3. Handle Stdout (Status & Results)
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             if let CommandEvent::Stdout(line_bytes) = event {
                 let line = String::from_utf8_lossy(&line_bytes).to_string();
-                let _ = app_clone.emit("translator-event", line);
+
+                println!("[Python] {}", line);
+
+                // Try to parse the JSON from Python
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if json["type"] == "status" {
+                        // It's a status message! Inject it into the system log.
+                        let status_msg = json["message"].as_str().unwrap_or("Unknown Status");
+
+                        // We call the logger we built in the previous step
+                        inject_system_message(&window, format!("[Python] {}", status_msg));
+
+                        // Also update the badge status if it's "Ready"
+                        if status_msg.contains("Ready") {
+                            let _ = app_clone.emit("translator-status", "Connected");
+                        }
+                    } else {
+                        // It's a translation result ("type": "result")
+                        // Send it to the translator-event listener in app.rs
+                        let _ = app_clone.emit("translator-event", line);
+                    }
+                }
             }
         }
+        inject_system_message(&window, "[Sidecar] WARNING: Stdout stream closed.");
+        let _ = app_clone.emit("translator-status", "Disconnected");
     });
 
-    Ok("Sidecar started and stored in state".into())
+    Ok("Connected".into())
 }
 
 #[tauri::command]
@@ -58,18 +91,25 @@ pub async fn manual_translate(
     id: u64,
     state: State<'_, AppState>
 ) -> Result<(), String> {
+    // 1. Diagnostics
+    println!("[Diagnostic] manual_translate called for: {}", text);
+
     let mut guard = state.tx.lock().unwrap();
 
-    // Check if the sidecar is actually there
+    // 2. Check the child
     if let Some(child) = guard.as_mut() {
         let msg = serde_json::json!({ "text": text, "id": id }).to_string() + "\n";
 
-        // Write to Python's stdin
-        child.write(msg.as_bytes()).map_err(|e| e.to_string())?;
-        println!("[Rust] Sent to Python: {}", text);
+        child.write(msg.as_bytes()).map_err(|e| {
+            println!("[Error] Pipe write failed: {}", e);
+            e.to_string()
+        })?;
+
+        println!("[Rust] Message piped to Python stdin.");
         Ok(())
     } else {
-        println!("[Error] Python process is None. Did you call start_translator_sidecar?");
-        Err("Translator sidecar is not running".into())
+        // If we reach here, start_translator_sidecar was NEVER successful
+        println!("[Error] Python process is None in state.");
+        Err("Translator not initialized".into())
     }
 }

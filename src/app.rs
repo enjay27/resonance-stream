@@ -61,6 +61,7 @@ pub fn App() -> impl IntoView {
             log
         } else {
             let channel_key = match tab.as_str() {
+                "시스템" => "SYSTEM", // Ensure this matches the backend's tag
                 "로컬" => "LOCAL",
                 "파티" => "PARTY",
                 "길드" => "GUILD",
@@ -114,16 +115,29 @@ pub fn App() -> impl IntoView {
             let trans_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Some(json_str) = event_obj.as_string() {
                     if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                        // Match by the echoed ID
-                        let target_id = resp["id"].as_u64().unwrap_or(0);
-                        let translated_text = resp["translated"].as_str().unwrap_or_default().to_string();
-
-                        set_chat_log.update(|log| {
-                            // Find the exact message by timestamp ID
-                            if let Some(msg) = log.iter_mut().rev().find(|m| m.timestamp == target_id) {
-                                msg.translated = Some(translated_text);
-                            }
-                        });
+                        match resp["type"].as_str() {
+                            Some("status") => {
+                                // Inject AI status as a chat message
+                                let msg = resp["message"].as_str().unwrap_or_default();
+                                set_chat_log.update(|log| log.push(ChatPacket {
+                                    channel: "SYSTEM".into(),
+                                    nickname: "AI_CORE".into(),
+                                    message: format!("[Status] {}", msg),
+                                    ..Default::default()
+                                }));
+                            },
+                            Some("result") => {
+                                // Handle the actual translation (using the ID-sync logic)
+                                let target_id = resp["id"].as_u64().unwrap_or(0);
+                                let translated_text = resp["translated"].as_str().unwrap_or_default().to_string();
+                                set_chat_log.update(|log| {
+                                    if let Some(msg) = log.iter_mut().rev().find(|m| m.timestamp == target_id) {
+                                        msg.translated = Some(translated_text);
+                                    }
+                                });
+                            },
+                            _ => {}
+                        }
                     }
                 }
             }) as Box<dyn FnMut(JsValue)>);
@@ -170,25 +184,43 @@ pub fn App() -> impl IntoView {
             }
             // CRITICAL: Call the listeners after initialization logic
             setup_listeners();
+
+            // 2. CHECK ENVIRONMENT
+            if let Ok(res) = invoke("check_model_status", JsValue::NULL).await {
+                if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(res) {
+                    set_ready.set(status.exists);
+                    if status.exists {
+                        // 3. START AI
+                        let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "useGpu": true })).unwrap();
+                        let _ = invoke("start_translator_sidecar", args).await;
+                        set_status.set("AI Engine Ready".to_string());
+                    }
+                }
+            }
+
+            // --- 4. FINALLY: START SNIFFER ---
+            // Now that the 'new-chat-message' listener is active,
+            // the "Sniffer Active" message will be caught.
+            let _ = invoke("start_sniffer_command", JsValue::NULL).await;
         });
     });
 
     view! {
         <main class="chat-app">
             <nav class="tab-bar">
-            {vec!["전체", "로컬", "파티", "길드", "월드"].into_iter().map(|t| {
-                let tab_name = t.to_string();
-                let tab_name_for_click = tab_name.clone();
+                {vec!["전체", "시스템", "로컬", "파티", "길드", "월드"].into_iter().map(|t| {
+                    let tab_name = t.to_string();
+                    let tab_name_for_click = tab_name.clone();
 
-                view! {
-                    <button
-                        class=move || if active_tab.get() == tab_name { "tab-btn active" } else { "tab-btn" }
-                        on:click=move |_| set_active_tab.set(tab_name_for_click.clone())
-                    >
-                        {t}
-                    </button>
-                }
-            }).collect_view()}
+                    view! {
+                        <button
+                            class=move || if active_tab.get() == tab_name { "tab-btn active" } else { "tab-btn" }
+                            on:click=move |_| set_active_tab.set(tab_name_for_click.clone())
+                        >
+                            {t}
+                        </button>
+                    }
+                }).collect_view()}
             </nav>
 
             <div
@@ -268,6 +300,45 @@ pub fn App() -> impl IntoView {
                 .time { margin-left: auto; color: #555; font-size: 0.75rem; }
                 .original { color: #eee; line-height: 1.4; }
                 .translated { color: #00ff88; font-size: 0.95rem; margin-top: 2px; }
+
+                /* BPSR System Message Style */
+                .chat-row[data-channel='SYSTEM'] {
+                    border-left-color: #FFD54F;
+                    background: rgba(255, 213, 79, 0.05);
+                }
+                .chat-row[data-channel='SYSTEM'] .nickname { color: #FFD54F; font-weight: bold; }
+                .chat-row[data-channel='SYSTEM'] .original { color: #FFD54F; font-style: italic; }
+
+                /* Translation Pop-in Animation */
+                .translated {
+                    color: #00ff88;
+                    font-size: 0.95rem;
+                    margin-top: 4px;
+                    animation: fade-in 0.3s ease-out;
+                }
+
+                @keyframes fade-in {
+                    from { opacity: 0; transform: translateY(-2px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+
+                .chat-row[data-channel='SYSTEM'] {
+                    border-left-color: #FFD54F;
+                    background: rgba(255, 213, 79, 0.05);
+                }
+                .chat-row[data-channel='SYSTEM'] .nickname { color: #FFD54F; font-weight: bold; }
+                .chat-row[data-channel='SYSTEM'] .original { color: #FFD54F; font-style: italic; }
+
+                /* Animation for the translation pop-in */
+                .translated {
+                    color: #00ff88;
+                    animation: fade-in 0.3s ease-out;
+                }
+
+                @keyframes fade-in {
+                    from { opacity: 0; transform: translateY(-2px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
                 "
             </style>
         </main>

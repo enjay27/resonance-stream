@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use crate::python_translator::*;
 use crate::model_manager::*;
+use crate::sniffer::*;
 
 mod model_manager;
 mod python_translator;
@@ -12,11 +13,6 @@ mod packet_buffer;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .setup(|app| {
-            let window = app.get_window("main").unwrap();
-            sniffer::start_sniffer(window); // Start the background thread
-            Ok(())
-        })
         .manage(AppState { tx: Mutex::new(None)})
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -25,7 +21,8 @@ pub fn run() {
             download_model,
             start_translator_sidecar,
             manual_translate,
-            translate_jp_to_ko
+            translate_jp_to_ko,
+            start_sniffer_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

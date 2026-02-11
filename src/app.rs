@@ -74,7 +74,6 @@ pub fn App() -> impl IntoView {
     };
 
     // --- ACTIONS ---
-
     let setup_listeners = move || {
         spawn_local(async move {
             let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
@@ -149,7 +148,6 @@ pub fn App() -> impl IntoView {
     };
 
     // --- STARTUP / EFFECTS ---
-
     Effect::new(move |_| {
         spawn_local(async move {
             if let Ok(res) = invoke("check_model_status", JsValue::NULL).await {
@@ -160,11 +158,22 @@ pub fn App() -> impl IntoView {
 
                         // Launch sequence
                         setup_listeners();
-                        let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "useGpu": true })).unwrap();
-                        let _ = invoke("start_translator_sidecar", args).await;
-                        let _ = invoke("start_sniffer_command", JsValue::NULL).await;
 
-                        set_status_text.set("Ready".to_string());
+                        if let Ok(res) = invoke("check_model_status", JsValue::NULL).await {
+                            if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(res) {
+                                if status.exists {
+                                    // 2. The backend command now handles the "Single Instance" logic
+                                    let _ = invoke("start_sniffer_command", JsValue::NULL).await;
+
+                                    // 3. Start AI Sidecar (Similar logic should be applied to the AI process)
+                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "useGpu": true })).unwrap();
+                                    let _ = invoke("start_translator_sidecar", args).await;
+
+                                    set_model_ready.set(true);
+                                    set_status_text.set("Ready".to_string());
+                                }
+                            }
+                        }
                     } else {
                         set_status_text.set("Model Missing".to_string());
                     }

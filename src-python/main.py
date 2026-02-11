@@ -1,40 +1,41 @@
 import sys
-import argparse
 import json
-import os
 import io
-import re
+import argparse
+import ctranslate2
+import sentencepiece as spm
 
-# Force UTF-8 for reliable cross-platform pipe communication
-sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8', errors='replace')
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+# Force UTF-8 for stable pipe communication with Rust/Tauri
+sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 def main():
     parser = argparse.ArgumentParser()
+    # model_path now points to the folder containing model.bin, config.json, etc.
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--gpu_layers", type=int, default=-1)
+    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda", "auto"])
     args = parser.parse_args()
 
-    if not os.path.exists(args.model):
-        print(json.dumps({"type": "error", "message": "Model not found"}), flush=True)
-        return
-
-    print(json.dumps({"type": "status", "message": "Loading AI..."}), flush=True)
-
     try:
-        from llama_cpp import Llama
-        llm = Llama(
-            model_path=args.model,
-            n_gpu_layers=args.gpu_layers,
-            n_ctx=2048,
-            verbose=False
+        # 1. Initialize the Translator
+        # compute_type="int8" ensures it runs fast on common CPUs
+        translator = ctranslate2.Translator(
+            args.model,
+            device=args.device,
+            compute_type="int8" if args.device == "cpu" else "default"
         )
-        print(json.dumps({"type": "status", "message": "AI Ready"}), flush=True)
+
+        # 2. Initialize the SentencePiece Tokenizer
+        # The model manager downloads this to the same directory
+        sp_path = f"{args.model}/tokenizer.model"
+        sp = spm.SentencePieceProcessor(model_file=sp_path)
+
+        print(json.dumps({"type": "status", "message": "NLLB Lite Engine Ready"}), flush=True)
     except Exception as e:
-        print(json.dumps({"type": "error", "message": str(e)}), flush=True)
+        print(json.dumps({"type": "error", "message": f"Init failed: {str(e)}"}), flush=True)
         return
 
-    # Processing Loop
+    # 3. Processing Loop
     for line in sys.stdin:
         try:
             line = line.strip()
@@ -42,34 +43,36 @@ def main():
 
             data = json.loads(line)
             input_text = data.get("text", "")
-            req_id = data.get("id", None) # Capture the Unique ID
+            req_id = data.get("id")
 
             if not input_text: continue
 
-            prompt = f"""<|im_start|>system
-You are a translator. Translate the Japanese text to Korean. Output ONLY the translation.<|im_end|>
-<|im_start|>user
-{input_text}<|im_end|>
-<|im_start|>assistant
-"""
-            output = llm(
-                prompt,
-                max_tokens=256,
-                stop=["<|im_end|>"],
-                echo=False
+            # NLLB-200 requires language tags: jpn_Jpan (Japanese) -> kor_Hang (Korean)
+            # Tokenize and add the source language tag
+            source_tokens = ["jpn_Jpan"] + sp.encode(input_text, out_type=str) + ["</s>"]
+
+            # Perform Translation
+            # target_prefix forces the model to output Korean
+            results = translator.translate_batch(
+                [source_tokens],
+                target_prefix=[["kor_Hang"]],
+                beam_size=2
             )
 
-            raw_text = output['choices'][0]['text']
-            # Clean up thinking tags if the model uses them
-            clean_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
+            # Clean up the output (remove the target prefix and decode)
+            translated_tokens = results[0].hypotheses[0]
+            if "kor_Hang" in translated_tokens:
+                translated_tokens.remove("kor_Hang")
 
-            response = {
+            final_output = sp.decode(translated_tokens)
+
+            # Echo the result back to app.rs
+            print(json.dumps({
                 "type": "result",
-                "id": req_id, # Echo the ID back to the UI
+                "id": req_id,
                 "original": input_text,
-                "translated": clean_text
-            }
-            print(json.dumps(response, ensure_ascii=False), flush=True)
+                "translated": final_output
+            }, ensure_ascii=False), flush=True)
 
         except Exception as e:
             print(json.dumps({"type": "error", "message": str(e)}), flush=True)

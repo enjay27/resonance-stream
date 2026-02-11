@@ -1,92 +1,105 @@
-use tauri::{AppHandle, Manager, Emitter};
-use tauri::path::BaseDirectory;
-use std::path::PathBuf;
 use futures_util::StreamExt;
-use tokio::io::AsyncWriteExt;
+use serde::Serialize;
+use std::io::Write;
+use tauri::{AppHandle, Emitter, Manager};
 
-// --- CONFIGURATION ---
-const MODEL_URL: &str = "https://huggingface.co/lm-kit/qwen-3-0.6b-instruct-gguf/resolve/main/Qwen3-0.6B-Q4_K_M.gguf";
-const MODEL_FILENAME: &str = "Qwen3-0.6B-Q4_K_M.gguf";
-
-#[derive(serde::Serialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct ModelStatus {
     pub exists: bool,
     pub path: String,
 }
 
-#[derive(serde::Serialize, Clone)]
-pub struct ProgressPayload {
-    pub current: u64,
-    pub total: u64,
+#[derive(Serialize, Clone)]
+struct ProgressPayload {
+    pub current_file: String,
     pub percent: u8,
+    pub total_percent: u8,
 }
 
-// Helper: Get Model Path
-pub fn get_model_path(app: &AppHandle) -> PathBuf {
-    let app_data = app.path().resolve("", BaseDirectory::AppData).unwrap();
-    let models_dir = app_data.join("models");
-    if !models_dir.exists() {
-        std::fs::create_dir_all(&models_dir).expect("Failed to create models dir");
-    }
-    models_dir.join(MODEL_FILENAME)
+struct ModelFile {
+    name: &'static str,
+    url: &'static str,
+}
+
+const MODEL_FILES: [ModelFile; 4] = [
+    ModelFile {
+        name: "model.bin",
+        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-600M-ct2-int8/resolve/main/model.bin",
+    },
+    ModelFile {
+        name: "config.json",
+        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-600M-ct2-int8/resolve/main/config.json",
+    },
+    ModelFile {
+        name: "shared_vocabulary.txt",
+        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-600M-ct2-int8/resolve/main/shared_vocabulary.txt",
+    },
+    ModelFile {
+        name: "tokenizer.model",
+        url: "https://s3.amazonaws.com/opennmt-models/nllb-200/flores200_sacrebleu_tokenizer_spm.model",
+    },
+];
+
+#[tauri::command]
+pub async fn check_model_status(app: AppHandle) -> Result<ModelStatus, String> {
+    let model_dir = app.path().app_data_dir().unwrap().join("models/nllb_int8");
+
+    let all_exist = MODEL_FILES.iter().all(|f| model_dir.join(f.name).exists());
+
+    Ok(ModelStatus {
+        exists: all_exist,
+        path: model_dir.to_string_lossy().into_owned(),
+    })
 }
 
 #[tauri::command]
-pub fn check_model_status(app: AppHandle) -> ModelStatus {
-    let file_path = get_model_path(&app);
-    ModelStatus {
-        exists: file_path.exists(),
-        path: file_path.to_string_lossy().to_string(),
-    }
-}
+pub async fn download_model(app: AppHandle) -> Result<(), String> {
+    let model_dir = app.path().app_data_dir().unwrap().join("models/nllb_int8");
+    std::fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
 
-#[tauri::command]
-pub async fn download_model(app: AppHandle) -> Result<String, String> {
-    let file_path = get_model_path(&app);
-
-    // 1. Setup Client
     let client = reqwest::Client::new();
-    let res = client
-        .get(MODEL_URL)
-        .header("User-Agent", "BPSR-Translator/1.0")
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+    let total_files = MODEL_FILES.len() as f32;
 
-    if !res.status().is_success() {
-        return Err(format!("Download failed: {}", res.status()));
-    }
+    for (idx, file_info) in MODEL_FILES.iter().enumerate() {
+        let dest_path = model_dir.join(file_info.name);
 
-    let total_size = res.content_length().unwrap_or(0);
+        // Skip if individual file exists (basic resumption)
+        if dest_path.exists() { continue; }
 
-    // 2. Create File
-    let mut file = tokio::fs::File::create(&file_path)
-        .await
-        .map_err(|e| format!("Failed to create file: {}", e))?;
+        let res = client.get(file_info.url).send().await.map_err(|e| e.to_string())?;
+        let total_size = res.content_length().unwrap_or(0);
 
-    // 3. Stream
-    let mut stream = res.bytes_stream();
-    let mut downloaded: u64 = 0;
-    let mut last_emit = 0;
+        let mut file = std::fs::File::create(&dest_path).map_err(|e| e.to_string())?;
+        let mut downloaded: u64 = 0;
+        let mut stream = res.bytes_stream();
 
-    while let Some(item) = stream.next().await {
-        let chunk = item.map_err(|e| e.to_string())?;
-        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+        while let Some(item) = stream.next().await {
+            let chunk = item.map_err(|e| e.to_string())?;
+            file.write_all(&chunk).map_err(|e| e.to_string())?;
+            downloaded += chunk.len() as u64;
 
-        downloaded += chunk.len() as u64;
+            if total_size > 0 {
+                let file_percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
+                let total_percent = (((idx as f32 / total_files) * 100.0) + (file_percent as f32 / total_files)) as u8;
 
-        if total_size > 0 {
-            let percent = ((downloaded as f64 / total_size as f64) * 100.0) as u8;
-            if percent > last_emit {
-                last_emit = percent;
-                app.emit("download-progress", ProgressPayload {
-                    current: downloaded,
-                    total: total_size,
-                    percent,
-                }).unwrap_or_else(|_| {});
+                let _ = app.emit("download-progress", ProgressPayload {
+                    current_file: file_info.name.to_string(),
+                    percent: file_percent,
+                    total_percent,
+                });
             }
         }
     }
 
-    Ok(file_path.to_string_lossy().to_string())
+    Ok(())
+}
+
+pub fn get_model_path(app: &AppHandle) -> String {
+    // In Tauri v2, app.path() is the standard way to resolve base directories
+    app.path()
+        .app_data_dir()
+        .expect("Failed to resolve AppData directory")
+        .join("models/nllb_int8")
+        .to_string_lossy()
+        .into_owned()
 }

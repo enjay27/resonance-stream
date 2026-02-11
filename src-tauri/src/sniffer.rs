@@ -1,15 +1,18 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
+use indexmap::IndexMap;
 use windivert::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 use crate::inject_system_message;
 use crate::packet_buffer::PacketBuffer;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")] // CRITICAL: Aligns Rust snake_case with JS camelCase
 pub struct ChatPacket {
+    pub pid: u64,
     pub channel: String,      // e.g., "PARTY", "LOCAL"
     pub entity_id: u64,       // e.g., 80
     pub uid: u64,             // e.g., 823656
@@ -19,21 +22,25 @@ pub struct ChatPacket {
     pub level: u64,           // e.g., 60
     pub timestamp: u64,       // e.g., 1770753503
     pub message: String,      // e.g., "hi" or "emojiPic=..."
+    #[serde(default)]         // Ensures None doesn't break parsing
+    pub translated: Option<String>,
 }
 
 pub struct AppState {
     pub tx: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
-    pub chat_history: Mutex<VecDeque<ChatPacket>>,
+    pub chat_history: Mutex<IndexMap<u64, ChatPacket>>,
+    // Global counter for the current session
+    pub next_pid: AtomicU64,
 }
 
 static IS_SNIFFER_RUNNING: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
-pub fn start_sniffer_command(window: tauri::Window, app: AppHandle) {
-    start_sniffer(window, app);
+pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State<'_, AppState>) {
+    start_sniffer(window, app, state);
 }
 
-fn start_sniffer(window: Window, app: AppHandle) {
+fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     if IS_SNIFFER_RUNNING.load(Ordering::SeqCst) {
         // If already running, just send a "Re-attached" system message
         inject_system_message(&window, "System: Sniffer already active. Re-attached to stream.");
@@ -41,6 +48,8 @@ fn start_sniffer(window: Window, app: AppHandle) {
     }
 
     IS_SNIFFER_RUNNING.store(true, Ordering::SeqCst);
+
+    state.next_pid.store(1, Ordering::SeqCst);
 
     let app_handle = app.clone();
     thread::spawn(move || {
@@ -85,17 +94,25 @@ fn start_sniffer(window: Window, app: AppHandle) {
                         // 4. Try to drain full packets based on your 2-byte header logic
                         while let Some(full_packet) = p_buf.next() {
                             // Send to parser (skipping the 2-byte length header)
-                            if let Some(chat) = parse_star_resonance(&full_packet) {
+                            if let Some(mut chat) = parse_star_resonance(&full_packet) {
                                 println!("chat: {:?}", chat);
                                 // --- FIFO Logic & Persistence ---
                                 if let Some(state) = app_handle.try_state::<AppState>() {
-                                    let mut history = state.chat_history.lock().unwrap();
-                                    if history.len() >= 1000 {
-                                        history.pop_front();
+                                    let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
+                                    chat.pid = current_pid;
+
+                                    {
+                                        let mut history = state.chat_history.lock().unwrap();
+                                        if history.len() >= 1000 {
+                                            history.shift_remove_index(0);
+                                            println!("History 1000 limit removed");
+                                        }
+                                        history.insert(chat.pid, chat.clone());
+                                        println!("Chat History inserted");
                                     }
-                                    history.push_back(chat.clone());
+
+                                    let x = app.emit("new-chat-message", &chat).unwrap();
                                 }
-                                window.emit("new-chat-message", &chat).unwrap();
                             }
                         }
                     }
@@ -337,6 +354,7 @@ fn extract_tcp_payload(data: &[u8]) -> Option<&[u8]> {
 #[tauri::command]
 pub fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatPacket> {
     let history = state.chat_history.lock().unwrap();
-    println!("History: {:?}", history);
-    history.iter().cloned().collect()
+    // IndexMap keeps them in order, so we just collect values
+    println!("[History] {:?}", history);
+    history.values().cloned().collect()
 }

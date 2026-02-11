@@ -47,7 +47,7 @@ def main():
             data = json.loads(line.strip())
 
             input_text = data.get("text", "")
-            req_id = data.get("id")
+            packet_pid = data.get("pid")
 
             if not input_text: continue
 
@@ -73,7 +73,7 @@ def main():
             # Echo the result back to app.rs
             print(json.dumps({
                 "type": "result",
-                "id": req_id,
+                "pid": packet_pid,
                 "original": input_text,
                 "translated": final_output
             }, ensure_ascii=False), flush=True)

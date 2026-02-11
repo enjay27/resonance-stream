@@ -17,7 +17,9 @@ extern "C" {
 // --- DATA STRUCTURES ---
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatPacket {
+    pub pid: u64,
     pub channel: String,
     pub entity_id: u64,
     pub uid: u64,
@@ -75,27 +77,26 @@ pub fn App() -> impl IntoView {
     // --- ACTIONS ---
     let setup_listeners = move || {
         spawn_local(async move {
+            // 1. New Packet Listener
             let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+                // Tauri v2 wraps the data in a "payload" field
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    // Note: 'payload' is the default wrapper for Tauri events
+                    // Parse using the ChatPacket struct (which now handles camelCase)
                     if let Ok(packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
                         let packet_clone = packet.clone();
 
                         set_chat_log.update(|log| {
-                            // FIFO Logic: maintain 1000 limit in frontend
-                            if log.len() >= 1000 {
-                                log.remove(0);
-                            }
+                            if log.len() >= 1000 { log.remove(0); }
                             log.push(packet);
                         });
 
-                        // Only translate non-system Japanese messages
+                        // Trigger translation using PID, not timestamp
                         if packet_clone.channel != "SYSTEM" && is_japanese(&packet_clone.message) {
                             spawn_local(async move {
                                 let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                                    "text": packet_clone.message,
-                                    "id": packet_clone.timestamp
-                                })).unwrap();
+                                "text": packet_clone.message,
+                                "pid": packet_clone.pid // Use PID here!
+                            })).unwrap();
                                 let _ = invoke("manual_translate", args).await;
                             });
                         }
@@ -103,16 +104,17 @@ pub fn App() -> impl IntoView {
                 }
             }) as Box<dyn FnMut(JsValue)>);
 
+            // 2. Translation Result Listener
             let trans_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                // Parsing logic for translator-event (comes as raw string from emit)
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+                    // Python returns a JSON string in the payload
                     if let Ok(resp) = serde_json::from_str::<serde_json::Value>(ev["payload"].as_str().unwrap_or("")) {
-                        let target_id = resp["id"].as_u64().unwrap_or(0);
+                        let target_pid = resp["pid"].as_u64().unwrap_or(0); // Use PID
                         let translated_text = resp["translated"].as_str().unwrap_or_default().to_string();
 
                         set_chat_log.update(|log| {
-                            // Find the message by timestamp to attach translation
-                            if let Some(msg) = log.iter_mut().rev().find(|m| m.timestamp == target_id) {
+                            // Find by PID for O(1)-like speed in the UI
+                            if let Some(msg) = log.iter_mut().rev().find(|m| m.pid == target_pid) {
                                 msg.translated = Some(translated_text);
                             }
                         });
@@ -120,8 +122,10 @@ pub fn App() -> impl IntoView {
                 }
             }) as Box<dyn FnMut(JsValue)>);
 
-            listen("new-chat-message", &packet_closure).await;
+            // Match your backend: "packet-event" for new messages
+            listen("packet-event", &packet_closure).await;
             listen("translator-event", &trans_closure).await;
+
             packet_closure.forget();
             trans_closure.forget();
         });
@@ -252,7 +256,7 @@ pub fn App() -> impl IntoView {
                         set_user_scrolling.set(!bottom);
                     }>
                     <For each=move || filtered_messages.get()
-                        key=|msg| format!("{}-{}-{}", msg.timestamp, msg.uid, msg.translated.is_some())
+                        key=|msg| msg.pid
                         children=move |msg| {
                             let is_jp = is_japanese(&msg.message);
                             let translated_base = msg.translated.clone();

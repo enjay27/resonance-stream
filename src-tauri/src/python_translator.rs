@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use tauri::{AppHandle, Emitter, State, Window};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
 use std::sync::Mutex;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
@@ -70,8 +70,18 @@ pub async fn start_translator_sidecar(
                         if status_msg.contains("Ready") {
                             let _ = app_clone.emit("translator-status", "Connected");
                         }
-                    } else {
-                        // It's a translation result ("type": "result")
+                    } else if json["type"] == "result" {
+                        let target_pid = json["pid"].as_u64().unwrap_or(0);
+                        let translated_text = json["translated"].as_str().unwrap_or_default().to_string();
+
+                        if let Some(state) = app_clone.try_state::<crate::AppState>() {
+                            let mut history = state.chat_history.lock().unwrap();
+
+                            if let Some(packet) = history.get_mut(&target_pid) {
+                                packet.translated = Some(translated_text);
+                            }
+                        }
+
                         // Send it to the translator-event listener in app.rs
                         let _ = app_clone.emit("translator-event", line);
                     }
@@ -88,7 +98,7 @@ pub async fn start_translator_sidecar(
 #[tauri::command]
 pub async fn manual_translate(
     text: String,
-    id: u64,
+    pid: u64,
     state: State<'_, AppState>
 ) -> Result<(), String> {
     // 1. Diagnostics
@@ -98,7 +108,7 @@ pub async fn manual_translate(
 
     // 2. Check the child
     if let Some(child) = guard.as_mut() {
-        let msg = serde_json::json!({ "text": text, "id": id }).to_string() + "\n";
+        let msg = serde_json::json!({ "text": text, "pid": pid }).to_string() + "\n";
 
         child.write(msg.as_bytes()).map_err(|e| {
             println!("[Error] Pipe write failed: {}", e);

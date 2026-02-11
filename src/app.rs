@@ -1,8 +1,10 @@
+use leptos::html;
 // src-ui/src/app.rs
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+use web_sys::HtmlDivElement;
 
 #[wasm_bindgen]
 extern "C" {
@@ -15,220 +17,248 @@ extern "C" {
 
 // --- DATA STRUCTURES ---
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(PartialEq)]
+pub struct ChatPacket {
+    pub channel: String,
+    pub entity_id: u64,
+    pub uid: u64,
+    pub nickname: String,
+    pub class_id: u64,
+    pub status_flag: u64,
+    pub level: u64,
+    pub timestamp: u64,
+    pub message: String,
+    #[serde(default)]
+    pub translated: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct ModelStatus { exists: bool, path: String }
 
-// Wrapper to handle Tauri Event Object structure
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct TauriEvent {
-    payload: ProgressPayload,
-}
-
-// Use f64 to match JS numbers safely
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct ProgressPayload {
-    pub current: f64,
-    pub total: f64,
-    pub percent: u8,
-}
-
 #[component]
 pub fn App() -> impl IntoView {
-    // --- STATE SIGNALS ---
+    // --- CORE SYSTEM SIGNALS ---
     let (status_text, set_status_text) = signal("System Check...".to_string());
     let (model_ready, set_model_ready) = signal(false);
-    let (downloading, set_downloading) = signal(false);
-    let (progress, set_progress) = signal(0u8);
+    let (downloading, _set_downloading) = signal(false);
+    let (_progress, _set_progress) = signal(0u8);
 
-    // Test Zone Signals
-    let (test_input, set_test_input) = signal("".to_string());
-    let (translation_log, set_translation_log) = signal("".to_string());
+    // --- CHAT & NAVIGATION SIGNALS ---
+    let (active_tab, set_active_tab) = signal("전체".to_string());
+    let (chat_log, set_chat_log) = signal(Vec::<ChatPacket>::new());
 
-    // --- LOGIC: CHECK MODEL ---
-    let check_model = move || {
+    // --- UI INTERACTION SIGNALS ---
+    let (is_user_scrolling, set_user_scrolling) = signal(false);
+    let chat_container_ref = create_node_ref::<html::Div>();
+
+    // --- DERIVED SIGNALS ---
+
+    let filtered_messages = Memo::new(move |_| {
+        let tab = active_tab.get();
+        let log = chat_log.get();
+        if tab == "전체" {
+            log
+        } else {
+            let channel_key = match tab.as_str() {
+                "로컬" => "LOCAL",
+                "파티" => "PARTY",
+                "길드" => "GUILD",
+                "월드" => "WORLD",
+                _ => "SYSTEM",
+            };
+            log.into_iter().filter(|m| m.channel == channel_key).collect()
+        }
+    });
+
+    // --- HELPERS ---
+
+    let format_time = |ts: u64| {
+        let date = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
+        format!("{:02}:{:02}", date.get_hours(), date.get_minutes())
+    };
+
+    let is_japanese = |text: &str| {
+        let re = js_sys::RegExp::new("[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FAF]", "");
+        re.test(text)
+    };
+
+    // --- EVENT LISTENERS ---
+
+    let setup_listeners = move || {
         spawn_local(async move {
-            match invoke("check_model_status", JsValue::NULL).await {
-                Ok(result) => {
-                    if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(result) {
-                        set_model_ready.set(status.exists);
-                        if status.exists {
-                            set_status_text.set("Qwen 3 (0.6B) Ready".to_string());
-                        } else {
-                            set_status_text.set("Model Missing".to_string());
+            // 1. Listen for new packets from the Sniffer
+            let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+                    if let Ok(packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
+                        let packet_clone = packet.clone();
+
+                        set_chat_log.update(|log| log.push(packet));
+
+                        // 2. TRIGGER TRANSLATION IF JAPANESE
+                        if is_japanese(&packet_clone.message) {
+                            spawn_local(async move {
+                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "text": packet_clone.message })).unwrap();
+                                let _ = invoke("manual_translate", args).await;
+                            });
                         }
                     }
                 }
-                Err(e) => set_status_text.set(format!("Error: {:?}", e)),
-            }
-        });
-    };
+            }) as Box<dyn FnMut(JsValue)>);
 
-    // --- LOGIC: DOWNLOAD MODEL ---
-    let start_download = move |_| {
-        set_downloading.set(true);
-        set_status_text.set("Initializing...".to_string());
+            // 2. Listen for translation results from the AI Sidecar
+            let trans_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+                if let Some(json_str) = event_obj.as_string() {
+                    if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                        let original = resp["original"].as_str().unwrap_or_default().to_string();
+                        let translated = resp["translated"].as_str().unwrap_or_default().to_string();
 
-        spawn_local(async move {
-            // Listen for progress events
-            let closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                match serde_wasm_bindgen::from_value::<TauriEvent>(event_obj) {
-                    Ok(wrapper) => {
-                        let p = wrapper.payload;
-                        set_progress.set(p.percent);
-                        set_status_text.set(format!("Downloading... {}%", p.percent));
-                    },
-                    Err(e) => {
-                        web_sys::console::error_1(&format!("Parse Error: {:?}", e).into());
+                        set_chat_log.update(|log| {
+                            if let Some(msg) = log.iter_mut().rev().find(|m| m.message == original) {
+                                msg.translated = Some(translated);
+                            }
+                        });
                     }
                 }
             }) as Box<dyn FnMut(JsValue)>);
 
-            let _ = listen("download-progress", &closure).await;
-            closure.forget();
-
-            match invoke("download_model", JsValue::NULL).await {
-                Ok(_) => {
-                    set_downloading.set(false);
-                    set_model_ready.set(true);
-                    set_status_text.set("Download Complete".to_string());
-                }
-                Err(e) => {
-                    set_downloading.set(false);
-                    set_status_text.set(format!("Failed: {:?}", e));
-                }
-            }
+            listen("new-chat-message", &packet_closure).await;
+            listen("translator-event", &trans_closure).await;
+            packet_closure.forget();
+            trans_closure.forget();
         });
     };
 
-    // --- LOGIC: LAUNCH AI ---
-    let launch_sidecar = move |_| {
-        set_status_text.set("Booting AI Engine...".to_string());
-        spawn_local(async move {
-            // Note: "useGpu" must be camelCase for Tauri to map to snake_case in Rust
-            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "useGpu": true })).unwrap();
-
-            match invoke("start_translator_sidecar", args).await {
-                Ok(_) => set_status_text.set("AI Running. Ready to translate.".to_string()),
-                Err(e) => set_status_text.set(format!("Launch Failed: {:?}", e)),
-            }
-        });
-    };
-
-    // --- LOGIC: LISTEN FOR TRANSLATIONS ---
-    let setup_listener = move || {
-        spawn_local(async move {
-            let closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                // If it's a string, display it. If it's an object, dump it.
-                if let Some(str_val) = event_obj.as_string() {
-                    set_translation_log.set(str_val);
-                } else {
-                    set_translation_log.set(format!("{:?}", event_obj));
-                }
-            }) as Box<dyn FnMut(JsValue)>);
-
-            let _ = listen("translator-event", &closure).await;
-            closure.forget();
-        });
-    };
-
-    // --- LOGIC: MANUAL TEST SEND ---
-    let send_test = move |_| {
-        spawn_local(async move {
-            // CHANGE THIS LINE
-            // Old: let text_val = test_input.get();
-            // New: Use .get_untracked() to safely read the value inside async
-            let text_val = test_input.get_untracked();
-
-            if text_val.trim().is_empty() { return; }
-
-            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "text": text_val })).unwrap();
-
-            // ... keep the rest the same ...
-            match invoke("manual_translate", args).await {
-                Ok(_) => {},
-                Err(e) => set_translation_log.set(format!("Send Error: {:?}", e)),
-            }
-        });
-    };
-
-    // Run startup checks
+    // --- AUTO SCROLL LOGIC ---
     Effect::new(move |_| {
-        check_model();
-        setup_listener();
+        chat_log.track();
+        if !is_user_scrolling.get_untracked() {
+            if let Some(el) = chat_container_ref.get() {
+                el.set_scroll_top(el.scroll_height());
+            }
+        }
+    });
+
+    // --- STARTUP LOGIC ---
+    Effect::new(move |_| {
+        let set_status = set_status_text;
+        let set_ready = set_model_ready;
+
+        spawn_local(async move {
+            if let Ok(res) = invoke("check_model_status", JsValue::NULL).await {
+                if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(res) {
+                    set_ready.set(status.exists);
+
+                    if status.exists {
+                        set_status.set("AI Sidecar Booting...".to_string());
+                        let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "useGpu": true })).unwrap();
+                        let _ = invoke("start_translator_sidecar", args).await;
+                        set_status.set("AI Engine Ready".to_string());
+                    } else {
+                        set_status.set("Model Missing: Download Required".to_string());
+                    }
+                }
+            }
+            // CRITICAL: Call the listeners after initialization logic
+            setup_listeners();
+        });
     });
 
     view! {
-        <main class="container">
-            <h1>"BPSR Translator"</h1>
-            <p class="subtitle">"Powered by Qwen 3 (0.6B) Nano"</p>
+        <main class="chat-app">
+            <nav class="tab-bar">
+            {vec!["전체", "로컬", "파티", "길드", "월드"].into_iter().map(|t| {
+                let tab_name = t.to_string();
+                let tab_name_for_click = tab_name.clone();
 
-            <div class="status-card">
-                <p><strong>"Status: "</strong> {move || status_text.get()}</p>
-
-                <Show when=move || downloading.get() fallback=|| view! { <div class="spacer"></div> }>
-                    <div class="progress-bar">
-                        <div class="fill" style:width=move || format!("{}%", progress.get())></div>
-                    </div>
-                </Show>
-            </div>
-
-            <div class="controls">
-                <Show when=move || !model_ready.get() && !downloading.get()>
-                    <button class="primary-btn" on:click=start_download>
-                        "Download Model (450MB)"
+                view! {
+                    <button
+                        class=move || if active_tab.get() == tab_name { "tab-btn active" } else { "tab-btn" }
+                        on:click=move |_| set_active_tab.set(tab_name_for_click.clone())
+                    >
+                        {t}
                     </button>
-                </Show>
+                }
+            }).collect_view()}
+            </nav>
 
-                <Show when=move || model_ready.get()>
-                    <button class="primary-btn" on:click=launch_sidecar>
-                        "Start AI Translator"
-                    </button>
-                </Show>
-            </div>
+            <div
+                class="chat-container"
+                node_ref=chat_container_ref
+                on:scroll=move |ev| {
+                    let el = event_target::<HtmlDivElement>(&ev);
+                    let at_bottom = el.scroll_top() + el.client_height() >= el.scroll_height() - 20;
+                    set_user_scrolling.set(!at_bottom);
+                }
+            >
+            <For
+                each=move || filtered_messages.get()
+                // Update key to include translation state to force rerender
+                key=|msg| format!("{}-{}-{}", msg.timestamp, msg.uid, msg.translated.is_some())
+                children=move |msg| {
+                    let is_jp = is_japanese(&msg.message);
+                    let translated_base = msg.translated.clone();
 
-            <hr style="margin: 30px 0; border-color: #333;"/>
+                    view! {
+                        <div class="chat-row" data-channel=msg.channel.clone()>
+                            <div class="msg-header">
+                                <span class="nickname">{msg.nickname.clone()}</span>
+                                <span class="lvl">"Lv." {msg.level}</span>
+                                <span class="time">{format_time(msg.timestamp)}</span>
+                            </div>
+                            <div class="msg-body">
+                                <div class="original">
+                                    {if is_jp { "[원문] " } else { "" }}
+                                    {msg.message.clone()}
+                                </div>
 
-            // --- MANUAL TEST ZONE ---
-            <div class="test-zone">
-                <h3>"Manual Translator Test"</h3>
-                <div class="input-group">
-                    <input
-                        type="text"
-                        placeholder="Type Japanese (e.g. こんにちは)..."
-                        on:input=move |ev| set_test_input.set(event_target_value(&ev))
-                        prop:value=move || test_input.get()
-                    />
-                    <button class="test-btn" on:click=send_test>"Translate"</button>
-                </div>
+                                {
+                                    let translated_when = translated_base.clone();
+                                    let translated_child = translated_base.clone();
 
-                <div class="log-box">
-                    <pre>{move || translation_log.get()}</pre>
-                </div>
+                                    view! {
+                                        <Show when=move || translated_when.is_some()>
+                                            <div class="translated">
+                                                "[번역] "
+                                                {
+                                                    let translated_final = translated_child.clone();
+                                                    move || translated_final.clone().unwrap_or_default()
+                                                }
+                                            </div>
+                                        </Show>
+                                    }
+                                }
+                            </div>
+                        </div>
+                    }
+                }
+            />
             </div>
 
             <style>
                 "
-                body { margin: 0; background: #1a1a1a; color: #fff; font-family: 'Segoe UI', sans-serif; }
-                .container { text-align: center; padding: 2rem; max-width: 600px; margin: 0 auto; }
-                h1 { margin-bottom: 0.5rem; color: #00ff88; text-transform: uppercase; letter-spacing: 2px; }
-                .subtitle { color: #888; margin-bottom: 2rem; }
+                .chat-app { display: flex; flex-direction: column; height: 100vh; background: #121212; font-family: sans-serif; }
+                .tab-bar { display: flex; background: #1e1e1e; border-bottom: 1px solid #333; }
+                .tab-btn { flex: 1; padding: 12px; border: none; background: none; color: #888; cursor: pointer; font-weight: bold; }
+                .tab-btn.active { color: #00ff88; border-bottom: 2px solid #00ff88; background: #252525; }
 
-                .status-card { background: #2a2a2a; padding: 1.5rem; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-                .progress-bar { width: 100%; height: 10px; background: #444; border-radius: 5px; overflow: hidden; margin-top: 10px; }
-                .fill { height: 100%; background: #00ff88; transition: width 0.2s; }
+                .chat-container { flex: 1; overflow-y: auto; padding: 10px; user-select: text; }
+                .chat-row { margin-bottom: 12px; padding: 4px 8px; border-radius: 4px; border-left: 3px solid transparent; }
 
-                .controls { display: flex; justify-content: center; gap: 10px; }
-                .primary-btn { background: #00ff88; border: none; padding: 15px 30px; font-size: 1.1rem; font-weight: bold; cursor: pointer; border-radius: 5px; color: #000; transition: transform 0.1s; }
-                .primary-btn:active { transform: scale(0.98); }
+                .chat-row[data-channel='LOCAL'] { border-left-color: #E0E0E0; }
+                .chat-row[data-channel='LOCAL'] .nickname { color: #E0E0E0; }
+                .chat-row[data-channel='PARTY'] { border-left-color: #4FC3F7; }
+                .chat-row[data-channel='PARTY'] .nickname { color: #4FC3F7; }
+                .chat-row[data-channel='GUILD'] { border-left-color: #81C784; }
+                .chat-row[data-channel='GUILD'] .nickname { color: #81C784; }
+                .chat-row[data-channel='WORLD'] { border-left-color: #BA68C8; }
+                .chat-row[data-channel='WORLD'] .nickname { color: #BA68C8; }
 
-                .test-zone { background: #222; padding: 20px; border-radius: 8px; border: 1px solid #333; }
-                .input-group { display: flex; gap: 10px; justify-content: center; margin-bottom: 15px; }
-                input { padding: 12px; border-radius: 4px; border: 1px solid #444; width: 70%; background: #333; color: #fff; font-size: 1rem; }
-                .test-btn { background: #00aaff; border: none; padding: 10px 20px; color: white; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1rem; }
-                .test-btn:hover { background: #0088cc; }
-
-                .log-box { background: #111; padding: 15px; border-radius: 5px; text-align: left; font-family: 'Consolas', monospace; color: #0f0; min-height: 80px; white-space: pre-wrap; word-break: break-all; border: 1px solid #333; }
-                .spacer { height: 10px; }
+                .msg-header { font-size: 0.85rem; display: flex; gap: 8px; margin-bottom: 2px; align-items: center; }
+                .lvl { color: #888; font-size: 0.75rem; }
+                .time { margin-left: auto; color: #555; font-size: 0.75rem; }
+                .original { color: #eee; line-height: 1.4; }
+                .translated { color: #00ff88; font-size: 0.95rem; margin-top: 2px; }
                 "
             </style>
         </main>

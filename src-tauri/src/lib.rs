@@ -24,7 +24,8 @@ pub fn run() {
             check_model_status,
             download_model,
             start_translator_sidecar,
-            manual_translate
+            manual_translate,
+            translate_jp_to_ko
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

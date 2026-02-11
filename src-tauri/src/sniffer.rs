@@ -20,8 +20,16 @@ pub struct ChatPacket {
     pub message: String,      // e.g., "hi" or "emojiPic=..."
 }
 
-pub fn start_sniffer(window: Window) {
+#[tauri::command]
+pub fn start_sniffer_command(window: tauri::Window, app_handle: tauri::AppHandle) {
+    start_sniffer(window);
+}
+
+fn start_sniffer(window: Window) {
+    let window_clone = window.clone();
     thread::spawn(move || {
+        inject_system_message(&window_clone, "Eye of Star Resonance: Sniffer Active (Port 5003)");
+
         println!("--- [Eye] SNIFFER ACTIVE ON PORT 5003 ---");
 
         // Filter strictly for the Chat Server
@@ -304,4 +312,19 @@ fn extract_tcp_payload(data: &[u8]) -> Option<&[u8]> {
     } else {
         None
     }
+}
+
+pub fn inject_system_message(window: &tauri::Window, text: &str) {
+    let sys_packet = ChatPacket {
+        channel: "SYSTEM".into(),
+        nickname: "SYSTEM".into(),
+        message: text.into(),
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        ..Default::default()
+    };
+    println!("[System] {:?}", sys_packet);
+    let _ = window.emit("new-chat-message", &sys_packet);
 }

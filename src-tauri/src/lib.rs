@@ -3,6 +3,7 @@ use crate::python_translator::*;
 use crate::sniffer::*;
 use std::collections::VecDeque;
 use std::sync::Mutex;
+use indexmap::IndexMap;
 use tauri::{Emitter, Manager};
 
 mod model_manager;
@@ -14,7 +15,7 @@ mod packet_buffer;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState { tx: Mutex::new(None), chat_history: Mutex::new(VecDeque::new()) })
+        .manage(AppState { tx: Mutex::new(None), chat_history: Mutex::new(IndexMap::new()), next_pid: 1.into() })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
@@ -29,11 +30,13 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-pub fn inject_system_message<S: Into<String>>(window: &tauri::Window, message: S) {
+pub fn inject_system_message<S: Into<String> + Clone>(window: &tauri::Window, message: S) {
+    let msg = message.into();
+    println!("[System] {}", msg);
     let sys_packet = ChatPacket {
         channel: "SYSTEM".into(),
         nickname: "SYSTEM".into(),
-        message: message.into(),
+        message: msg,
         timestamp: chrono::Utc::now().timestamp_millis() as u64,
         ..Default::default()
     };

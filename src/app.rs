@@ -77,10 +77,19 @@ pub fn App() -> impl IntoView {
         spawn_local(async move {
             let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+                    // Note: 'payload' is the default wrapper for Tauri events
                     if let Ok(packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
                         let packet_clone = packet.clone();
-                        set_chat_log.update(|log| log.push(packet));
 
+                        set_chat_log.update(|log| {
+                            // FIFO Logic: maintain 1000 limit in frontend
+                            if log.len() >= 1000 {
+                                log.remove(0);
+                            }
+                            log.push(packet);
+                        });
+
+                        // Only translate non-system Japanese messages
                         if packet_clone.channel != "SYSTEM" && is_japanese(&packet_clone.message) {
                             spawn_local(async move {
                                 let args = serde_wasm_bindgen::to_value(&serde_json::json!({
@@ -95,12 +104,14 @@ pub fn App() -> impl IntoView {
             }) as Box<dyn FnMut(JsValue)>);
 
             let trans_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                if let Some(json_str) = event_obj.as_string() {
-                    if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                // Parsing logic for translator-event (comes as raw string from emit)
+                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+                    if let Ok(resp) = serde_json::from_str::<serde_json::Value>(ev["payload"].as_str().unwrap_or("")) {
                         let target_id = resp["id"].as_u64().unwrap_or(0);
                         let translated_text = resp["translated"].as_str().unwrap_or_default().to_string();
 
                         set_chat_log.update(|log| {
+                            // Find the message by timestamp to attach translation
                             if let Some(msg) = log.iter_mut().rev().find(|m| m.timestamp == target_id) {
                                 msg.translated = Some(translated_text);
                             }
@@ -151,28 +162,27 @@ pub fn App() -> impl IntoView {
         spawn_local(async move {
             if let Ok(res) = invoke("check_model_status", JsValue::NULL).await {
                 if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(res) {
-                    set_model_ready.set(status.exists);
                     if status.exists {
-                        set_status_text.set("Starting System...".to_string());
+                        set_status_text.set("Loading History...".to_string());
 
-                        // Launch sequence
+                        // 1. Setup listeners first so we don't miss new packets
                         setup_listeners();
 
-                        if let Ok(res) = invoke("check_model_status", JsValue::NULL).await {
-                            if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(res) {
-                                if status.exists {
-                                    // 2. The backend command now handles the "Single Instance" logic
-                                    let _ = invoke("start_sniffer_command", JsValue::NULL).await;
-
-                                    // 3. Start AI Sidecar (Similar logic should be applied to the AI process)
-                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "useGpu": true })).unwrap();
-                                    let _ = invoke("start_translator_sidecar", args).await;
-
-                                    set_model_ready.set(true);
-                                    set_status_text.set("Ready".to_string());
-                                }
+                        // 2. FETCH HISTORY FROM RUST (The Persistence Key)
+                        if let Ok(history_res) = invoke("get_chat_history", JsValue::NULL).await {
+                            if let Ok(history) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(history_res) {
+                                set_chat_log.set(history);
                             }
                         }
+
+                        // 3. Sequential Launch (Commands handle 'already running' internally)
+                        let _ = invoke("start_sniffer_command", JsValue::NULL).await;
+
+                        let trans_args = serde_wasm_bindgen::to_value(&serde_json::json!({ "useGpu": true })).unwrap();
+                        let _ = invoke("start_translator_sidecar", trans_args).await;
+
+                        set_model_ready.set(true);
+                        set_status_text.set("Ready".to_string());
                     } else {
                         set_status_text.set("Model Missing".to_string());
                     }

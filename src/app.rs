@@ -1,4 +1,5 @@
 use leptos::html;
+use leptos::leptos_dom::log;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
@@ -107,15 +108,20 @@ pub fn App() -> impl IntoView {
             // 2. Translation Result Listener
             let trans_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    // Python returns a JSON string in the payload
                     if let Ok(resp) = serde_json::from_str::<serde_json::Value>(ev["payload"].as_str().unwrap_or("")) {
-                        let target_pid = resp["pid"].as_u64().unwrap_or(0); // Use PID
+                        let target_pid = resp["pid"].as_u64().unwrap_or(0);
                         let translated_text = resp["translated"].as_str().unwrap_or_default().to_string();
 
                         set_chat_log.update(|log| {
-                            // Find by PID for O(1)-like speed in the UI
-                            if let Some(msg) = log.iter_mut().rev().find(|m| m.pid == target_pid) {
-                                msg.translated = Some(translated_text);
+                            // 1. Find the index of the packet
+                            if let Some(pos) = log.iter().position(|m| m.pid == target_pid) {
+                                // 2. Clone and Modify
+                                let mut updated_packet = log[pos].clone();
+                                updated_packet.translated = Some(translated_text);
+
+                                // 3. Replace the old packet with the new one
+                                // This triggers the UI re-render for this specific PID
+                                log[pos] = updated_packet;
                             }
                         });
                     }
@@ -259,33 +265,41 @@ pub fn App() -> impl IntoView {
                         key=|msg| msg.pid
                         children=move |msg| {
                             let is_jp = is_japanese(&msg.message);
-                            let translated_base = msg.translated.clone();
+
+                            // Clone variables here so they can be moved into the view's closures
+                            let nickname = msg.nickname.clone();
+                            let message = msg.message.clone();
+                            let translated = msg.translated.clone(); // Take a snapshot for this render
+
                             view! {
                                 <div class="chat-row" data-channel=msg.channel.clone()>
                                     <div class="msg-header">
-                                        <span class="nickname">{msg.nickname.clone()}</span>
+                                        <span class="nickname">{nickname}</span>
                                         <span class="lvl">"Lv." {msg.level}</span>
                                         <span class="time">{format_time(msg.timestamp)}</span>
                                     </div>
                                     <div class="msg-body">
                                         <div class="original">
-                                            {if is_jp { "[원문] " } else { "" }} {msg.message.clone()}
+                                            {if is_jp { "[원문] " } else { "" }} {message}
                                         </div>
-                                        {
-                                            let tw = translated_base.clone();
-                                            let tc = translated_base.clone();
-                                            view! {
-                                                <Show when=move || tw.is_some()>
+
+                                        // Use the cloned 'translated' variable to avoid the move error
+                                        {move || {
+                                            if let Some(text) = msg.translated.clone() {
+                                                view! {
                                                     <div class="translated">
-                                                        "[번역] " {let tf = tc.clone(); move || tf.clone().unwrap_or_default()}
+                                                        "[번역] " {text}
                                                     </div>
-                                                </Show>
+                                                }.into_view()
+                                            } else {
+                                                view! {}.into_view()
                                             }
-                                        }
+                                        }}
                                     </div>
                                 </div>
                             }
-                        }/>
+                        }
+                    />
                 </div>
             </Show>
 

@@ -95,7 +95,6 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
 }
 
 pub fn get_model_path(app: &AppHandle) -> String {
-    // In Tauri v2, app.path() is the standard way to resolve base directories
     app.path()
         .app_data_dir()
         .expect("Failed to resolve AppData directory")

@@ -14,58 +14,42 @@ pub struct AppState {
 #[tauri::command]
 pub fn start_translator_sidecar(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     use_gpu: bool
 ) -> Result<String, String> {
-    // 1. Resolve the path to the NLLB INT8 model folder
-    let model_path = model_manager::get_model_path(&app);
+    println!("Start Translator Sidecar");
 
-    // 2. Determine hardware device
+    let model_path = model_manager::get_model_path(&app);
     let device_arg = if use_gpu { "cuda" } else { "cpu" };
 
-    // 3. Create the Sidecar Command
-    // "python_translator" must match the name in tauri.conf.json -> bundle -> externalBin
-    let sidecar_command = app
+    // 1. Spawn the sidecar
+    // Note: "python_translator" must match exactly in tauri.conf.json
+    let (mut rx, child) = app
         .shell()
         .sidecar("python_translator")
-        .map_err(|e| format!("Sidecar configuration error: {}", e))?
-        .args(["--model", &model_path, "--device", device_arg]);
-
-    // 4. Spawn the process
-    let (mut rx, mut child) = sidecar_command
+        .map_err(|e| e.to_string())?
+        .args(["--model", &model_path, "--device", device_arg])
         .spawn()
-        .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
+        .map_err(|e| format!("Spawn failed: {}", e))?;
 
-    // 5. Shared State for IPC
-    // Store the child handle in AppState so we can write to its stdin later
-    let state_inner = state.inner().clone();
+    // 2. STORE THE CHILD IN STATE
     {
-        let mut tx_guard = state_inner.tx.lock().unwrap();
-        // Since we use the child directly to write to stdin
-        *tx_guard = Some(child);
+        let mut tx_guard = state.tx.lock().unwrap();
+        *tx_guard = Some(child); // This is why you were getting 'None'
     }
 
-    // 6. Handle Sidecar Output (Stdout/Stderr)
+    // 3. Handle Stdout (Async)
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(line_bytes) => {
-                    let line = String::from_utf8_lossy(&line_bytes).to_string();
-                    // Emit raw status or results to the Frontend listener
-                    println!("[Python] {}", line);
-                    let _ = app_clone.emit("translator-event", line);
-                }
-                CommandEvent::Stderr(line_bytes) => {
-                    let line = String::from_utf8_lossy(&line_bytes).to_string();
-                    eprintln!("[Python Sidecar Error] {}", line);
-                }
-                _ => {}
+            if let CommandEvent::Stdout(line_bytes) = event {
+                let line = String::from_utf8_lossy(&line_bytes).to_string();
+                let _ = app_clone.emit("translator-event", line);
             }
         }
     });
 
-    Ok("Translator sidecar initialized successfully".into())
+    Ok("Sidecar started and stored in state".into())
 }
 
 #[tauri::command]
@@ -75,18 +59,17 @@ pub async fn manual_translate(
     state: State<'_, AppState>
 ) -> Result<(), String> {
     let mut guard = state.tx.lock().unwrap();
-    println!("[Manual Translate] {:?}", text);
 
+    // Check if the sidecar is actually there
     if let Some(child) = guard.as_mut() {
-        // Construct JSON to send to Python's stdin
-        let msg = serde_json::json!({
-            "text": text,
-            "id": id
-        }).to_string() + "\n";
+        let msg = serde_json::json!({ "text": text, "id": id }).to_string() + "\n";
 
+        // Write to Python's stdin
         child.write(msg.as_bytes()).map_err(|e| e.to_string())?;
+        println!("[Rust] Sent to Python: {}", text);
         Ok(())
     } else {
+        println!("[Error] Python process is None. Did you call start_translator_sidecar?");
         Err("Translator sidecar is not running".into())
     }
 }

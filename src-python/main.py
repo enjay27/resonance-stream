@@ -16,6 +16,8 @@ def main():
     parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda", "auto"])
     args = parser.parse_args()
 
+    print(json.dumps({"type": "status", "message": "NLLB Ready"}), flush=True)
+
     try:
         # 1. Initialize the Translator
         # compute_type="int8" ensures it runs fast on common CPUs
@@ -36,12 +38,14 @@ def main():
         return
 
     # 3. Processing Loop
-    for line in sys.stdin:
-        try:
-            line = line.strip()
-            if not line: continue
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break  # Pipe closed
 
-            data = json.loads(line)
+        try:
+            data = json.loads(line.strip())
+
             input_text = data.get("text", "")
             req_id = data.get("id")
 

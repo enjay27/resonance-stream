@@ -82,6 +82,7 @@ pub async fn start_translator_sidecar(
                             }
                         }
 
+                        println!("[Line] {:?}", line);
                         // Send it to the translator-event listener in app.rs
                         let _ = app_clone.emit("translator-event", line);
                     }

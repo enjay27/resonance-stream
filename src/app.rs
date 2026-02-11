@@ -1,5 +1,4 @@
 use leptos::html;
-// src-ui/src/app.rs
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};

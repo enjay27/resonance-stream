@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-// src-tauri/src/sniffer.rs
-use std::sync::mpsc::Sender;
 use std::thread;
 use windivert::prelude::*;
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Window};
+use tauri::{AppHandle, Emitter, Window};
+use crate::inject_system_message;
 use crate::packet_buffer::PacketBuffer;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -25,10 +24,10 @@ static IS_SNIFFER_RUNNING: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 pub fn start_sniffer_command(window: tauri::Window, app_handle: tauri::AppHandle) {
-    start_sniffer(window);
+    start_sniffer(window, app_handle);
 }
 
-fn start_sniffer(window: Window) {
+fn start_sniffer(window: Window, app_handle: AppHandle) {
     if IS_SNIFFER_RUNNING.load(Ordering::SeqCst) {
         // If already running, just send a "Re-attached" system message
         inject_system_message(&window, "System: Sniffer already active. Re-attached to stream.");
@@ -39,9 +38,7 @@ fn start_sniffer(window: Window) {
 
     let window_clone = window.clone();
     thread::spawn(move || {
-        inject_system_message(&window_clone, "Eye of Star Resonance: Sniffer Active (Port 5003)");
-
-        println!("--- [Eye] SNIFFER ACTIVE ON PORT 5003 ---");
+        inject_system_message(&window, "Eye of Star Resonance: Sniffer Active (Port 5003)");
 
         // Filter strictly for the Chat Server
         let filter = "tcp.PayloadLength > 0 and (tcp.SrcPort == 5003 or tcp.DstPort == 5003)";
@@ -50,7 +47,7 @@ fn start_sniffer(window: Window) {
         let wd = match WinDivert::network(filter, 0, flags) {
             Ok(w) => w,
             Err(e) => {
-                eprintln!("[Sniffer] FATAL ERROR: {:?}", e);
+                inject_system_message(&window, format!("[Sniffer] FATAL ERROR: {:?}", e));
                 return;
             }
         };
@@ -81,8 +78,6 @@ fn start_sniffer(window: Window) {
 
                         // 4. Try to drain full packets based on your 2-byte header logic
                         while let Some(full_packet) = p_buf.next() {
-                            println!("full packet: {:?}", full_packet);
-
                             // Send to parser (skipping the 2-byte length header)
                             if let Some(chat) = parse_star_resonance(&full_packet) {
                                 println!("chat: {:?}", chat);
@@ -325,17 +320,3 @@ fn extract_tcp_payload(data: &[u8]) -> Option<&[u8]> {
     }
 }
 
-pub fn inject_system_message(window: &tauri::Window, text: &str) {
-    let sys_packet = ChatPacket {
-        channel: "SYSTEM".into(),
-        nickname: "SYSTEM".into(),
-        message: text.into(),
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-        ..Default::default()
-    };
-    println!("[System] {:?}", sys_packet);
-    let _ = window.emit("new-chat-message", &sys_packet);
-}

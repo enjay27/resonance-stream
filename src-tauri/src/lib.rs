@@ -21,7 +21,6 @@ pub fn run() {
             download_model,
             start_translator_sidecar,
             manual_translate,
-            translate_jp_to_ko,
             start_sniffer_command
         ])
         .run(tauri::generate_context!())

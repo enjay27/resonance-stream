@@ -26,7 +26,7 @@ serde_json = "1"
 windivert = { version = "0.6", features = ["vendored"] }
 etherparse = "0.19.0" # To parse the raw bytes into human-readable data
 tokio = { version = "1", features = ["fs", "io-util"] }
-reqwest = { version = "0.11", features = ["stream", "blocking", "rustls-tls"] }
+reqwest = { version = "0.11", features = ["stream", "json", "blocking", "rustls-tls"] }
 futures-util = "0.3"
 tauri-plugin-fs = "2.4.5" # For handling the download stream
 # Network & Parsing

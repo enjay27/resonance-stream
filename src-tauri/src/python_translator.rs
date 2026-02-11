@@ -8,7 +8,7 @@ use crate::sniffer;
 
 // 1. Define State to hold the Channel
 pub struct AppState {
-    pub(crate) tx: Mutex<Option<std::sync::mpsc::Sender<String>>>,
+    pub tx: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
 }
 
 #[tauri::command]
@@ -17,108 +17,76 @@ pub fn start_translator_sidecar(
     state: State<AppState>,
     use_gpu: bool
 ) -> Result<String, String> {
+    // 1. Resolve the path to the NLLB INT8 model folder
     let model_path = model_manager::get_model_path(&app);
-    let model_path_str = model_path.to_string_lossy().to_string();
 
-    if !model_path.exists() {
-        return Err("Model file missing".to_string());
+    // 2. Determine hardware device
+    let device_arg = if use_gpu { "cuda" } else { "cpu" };
+
+    // 3. Create the Sidecar Command
+    // "python_translator" must match the name in tauri.conf.json -> bundle -> externalBin
+    let sidecar_command = app
+        .shell()
+        .sidecar("python_translator")
+        .map_err(|e| format!("Sidecar configuration error: {}", e))?
+        .args(["--model", &model_path, "--device", device_arg]);
+
+    // 4. Spawn the process
+    let (mut rx, mut child) = sidecar_command
+        .spawn()
+        .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
+
+    // 5. Shared State for IPC
+    // Store the child handle in AppState so we can write to its stdin later
+    let state_inner = state.inner().clone();
+    {
+        let mut tx_guard = state_inner.tx.lock().unwrap();
+        // Since we use the child directly to write to stdin
+        *tx_guard = Some(child);
     }
 
-    let gpu_arg = if use_gpu { "-1" } else { "0" };
-
-    // 1. Spawn Sidecar
-    let sidecar = app.shell().sidecar("translator").map_err(|e| e.to_string())?
-        .args(&["--model", &model_path_str])
-        .args(&["--gpu_layers", gpu_arg]);
-
-    let (mut rx_sidecar, mut child) = sidecar.spawn().map_err(|e| e.to_string())?;
-
-    // 2. Create Channel
-    let (tx, rx_sniffer) = std::sync::mpsc::channel::<String>();
-
-    // 3. Store Sender in State (Cloning ensures channel stays open)
-    *state.tx.lock().unwrap() = Some(tx.clone());
-
-    // 5. Start Writer Thread (The "Hand")
-    thread::spawn(move || {
-        // CRITICAL FIX: Shadow 'child' to ensure it is mutable inside this thread
-        let mut child = child;
-
-        println!("[Writer] Thread started. Listening for text...");
-
-        while let Ok(msg) = rx_sniffer.recv() {
-            println!("[Writer] Sending to Python: {}", msg); // Debug Log
-
-            let mut msg_with_newline = msg;
-            msg_with_newline.push('\n');
-
-            // Try to write. If this fails, Python is likely dead.
-            if let Err(e) = child.write(msg_with_newline.as_bytes()) {
-                eprintln!("[Writer] ERROR: Failed to write to Python: {}", e);
-                break; // Exit thread if pipe is broken
-            }
-        }
-
-        println!("[Writer] Thread Exiting (Channel Closed or Pipe Broken)");
-    });
-
-    // 6. Monitor Output (Python -> UI)
+    // 6. Handle Sidecar Output (Stdout/Stderr)
+    let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx_sidecar.recv().await {
-            if let CommandEvent::Stdout(line_bytes) = event {
-                let line = String::from_utf8_lossy(&line_bytes);
-                app.emit("translator-event", line.to_string()).unwrap_or(());
-            } else if let CommandEvent::Stderr(line_bytes) = event {
-                let line = String::from_utf8_lossy(&line_bytes);
-                println!("[PY ERR] {}", line); // Log Python errors to terminal
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(line_bytes) => {
+                    let line = String::from_utf8_lossy(&line_bytes).to_string();
+                    // Emit raw status or results to the Frontend listener
+                    println!("[Python] {}", line);
+                    let _ = app_clone.emit("translator-event", line);
+                }
+                CommandEvent::Stderr(line_bytes) => {
+                    let line = String::from_utf8_lossy(&line_bytes).to_string();
+                    eprintln!("[Python Sidecar Error] {}", line);
+                }
+                _ => {}
             }
         }
     });
 
-    Ok("Translator Started".to_string())
+    Ok("Translator sidecar initialized successfully".into())
 }
 
 #[tauri::command]
-pub fn manual_translate(text: String, state: State<AppState>) -> Result<(), String> {
-    // Debug: Check if we even get here
-    println!("[Manual] Request: {}", text);
+pub async fn manual_translate(
+    text: String,
+    id: u64,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    let mut guard = state.tx.lock().unwrap();
+    println!("[Manual Translate] {:?}", text);
 
-    let guard = state.tx.lock().unwrap();
-
-    if let Some(tx) = guard.as_ref() {
-        let json_msg = serde_json::json!({ "text": text }).to_string();
-
-        // This is the line failing for you
-        tx.send(json_msg).map_err(|e| {
-            let err_msg = format!("Channel Closed! Writer thread likely died. Error: {}", e);
-            eprintln!("{}", err_msg);
-            err_msg
-        })?;
-
-        println!("[Manual] Sent to channel.");
-        Ok(())
-    } else {
-        println!("[Manual] Error: AI not running.");
-        Err("AI not started yet. Click 'Start AI Translator' first.".to_string())
-    }
-}
-
-#[tauri::command]
-pub fn translate_jp_to_ko(text: String, id: u64, state: State<AppState>) -> Result<(), String> {
-    println!("[Translate] Request: {}", text);
-
-    let guard = state.tx.lock().unwrap();
-
-    if let Some(tx) = guard.as_ref() {
-        // Pass both text and ID to Python
-        let json_msg = serde_json::json!({
+    if let Some(child) = guard.as_mut() {
+        // Construct JSON to send to Python's stdin
+        let msg = serde_json::json!({
             "text": text,
             "id": id
-        }).to_string();
+        }).to_string() + "\n";
 
-        tx.send(json_msg).map_err(|e| e.to_string())?;
+        child.write(msg.as_bytes()).map_err(|e| e.to_string())?;
         Ok(())
     } else {
-        Err("AI not running".into())
+        Err("Translator sidecar is not running".into())
     }
 }

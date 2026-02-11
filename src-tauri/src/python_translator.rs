@@ -16,7 +16,7 @@ pub async fn start_translator_sidecar(
     state: State<'_, AppState>,
     use_gpu: bool
 ) -> Result<String, String> {
-    inject_system_message(&window, format!("[Sidecar] Request received to start translator. GPU: {}", use_gpu));
+    inject_system_message(&app, format!("[Sidecar] Request received to start translator. GPU: {}", use_gpu));
 
     let model_path = model_manager::get_model_path(&app);
     let device_arg = if use_gpu { "cuda" } else { "cpu" };
@@ -28,24 +28,24 @@ pub async fn start_translator_sidecar(
         .sidecar("translator")
         .map_err(|e| {
             let err = format!("[Sidecar] ERROR: Binary not found or config mismatch: {}", e);
-            inject_system_message(&window, err.clone());
+            inject_system_message(&app, err.clone());
             err
         })?
         .args(["--model", &model_path, "--device", device_arg])
         .spawn()
         .map_err(|e| {
             let err = format!("[Sidecar] ERROR: Failed to execute binary: {}", e);
-            inject_system_message(&window, err.clone());
+            inject_system_message(&app, err.clone());
             err
         })?;
 
-    inject_system_message(&window, format!("[Sidecar] Process spawned successfully. Child PID: {}", child.pid()));
+    inject_system_message(&app, format!("[Sidecar] Process spawned successfully. Child PID: {}", child.pid()));
 
     // 2. STORE THE CHILD IN STATE
     {
         let mut tx_guard = state.tx.lock().unwrap();
         *tx_guard = Some(child);
-        inject_system_message(&window, "[Sidecar] SUCCESS: Child handle saved to AppState.");
+        inject_system_message(&app, "[Sidecar] SUCCESS: Child handle saved to AppState.");
     }
 
     // 3. Handle Stdout (Status & Results)
@@ -60,23 +60,23 @@ pub async fn start_translator_sidecar(
                 // Try to parse the JSON from Python
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                     if json["type"] == "status" {
-                        // It's a status message! Inject it into the system log.
+                        // A status update is a NEW message for the log
                         let status_msg = json["message"].as_str().unwrap_or("Unknown Status");
+                        inject_system_message(&app_clone, format!("[Python] {}", status_msg));
 
-                        // We call the logger we built in the previous step
-                        inject_system_message(&window, format!("[Python] {}", status_msg));
-
-                        // Also update the badge status if it's "Ready"
                         if status_msg.contains("Ready") {
                             let _ = app_clone.emit("translator-status", "Connected");
                         }
-                    } else if json["type"] == "result" {
+                    }
+                    else if json["type"] == "result" {
+                        // A translation is an UPDATE to an existing packet
                         let target_pid = json["pid"].as_u64().unwrap_or(0);
                         let translated_text = json["translated"].as_str().unwrap_or_default().to_string();
 
                         if let Some(state) = app_clone.try_state::<crate::AppState>() {
                             let mut history = state.chat_history.lock().unwrap();
 
+                            // O(1) update in backend history for persistence across refresh
                             if let Some(packet) = history.get_mut(&target_pid) {
                                 packet.translated = Some(translated_text);
                             }
@@ -88,7 +88,7 @@ pub async fn start_translator_sidecar(
                 }
             }
         }
-        inject_system_message(&window, "[Sidecar] WARNING: Stdout stream closed.");
+        inject_system_message(&app, "[Sidecar] WARNING: Stdout stream closed.");
         let _ = app_clone.emit("translator-status", "Disconnected");
     });
 

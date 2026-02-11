@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use windivert::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, Window};
-use crate::inject_system_message;
+use crate::{inject_system_message, store_and_emit};
 use crate::packet_buffer::PacketBuffer;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -43,7 +43,7 @@ pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State
 fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     if IS_SNIFFER_RUNNING.load(Ordering::SeqCst) {
         // If already running, just send a "Re-attached" system message
-        inject_system_message(&window, "System: Sniffer already active. Re-attached to stream.");
+        inject_system_message(&app, "System: Sniffer already active. Re-attached to stream.");
         return;
     }
 
@@ -53,7 +53,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
 
     let app_handle = app.clone();
     thread::spawn(move || {
-        inject_system_message(&window, "Eye of Star Resonance: Sniffer Active (Port 5003)");
+        inject_system_message(&app, "Eye of Star Resonance: Sniffer Active (Port 5003)");
 
         // Filter strictly for the Chat Server
         let filter = "tcp.PayloadLength > 0 and (tcp.SrcPort == 5003 or tcp.DstPort == 5003)";
@@ -62,7 +62,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
         let wd = match WinDivert::network(filter, 0, flags) {
             Ok(w) => w,
             Err(e) => {
-                inject_system_message(&window, format!("[Sniffer] FATAL ERROR: {:?}", e));
+                inject_system_message(&app, format!("[Sniffer] FATAL ERROR: {:?}", e));
                 return;
             }
         };
@@ -94,25 +94,9 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
                         // 4. Try to drain full packets based on your 2-byte header logic
                         while let Some(full_packet) = p_buf.next() {
                             // Send to parser (skipping the 2-byte length header)
-                            if let Some(mut chat) = parse_star_resonance(&full_packet) {
+                            if let Some(chat) = parse_star_resonance(&full_packet) {
                                 println!("chat: {:?}", chat);
-                                // --- FIFO Logic & Persistence ---
-                                if let Some(state) = app_handle.try_state::<AppState>() {
-                                    let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
-                                    chat.pid = current_pid;
-
-                                    {
-                                        let mut history = state.chat_history.lock().unwrap();
-                                        if history.len() >= 1000 {
-                                            history.shift_remove_index(0);
-                                            println!("History 1000 limit removed");
-                                        }
-                                        history.insert(chat.pid, chat.clone());
-                                        println!("Chat History inserted");
-                                    }
-
-                                    let x = app.emit("new-chat-message", &chat).unwrap();
-                                }
+                                store_and_emit(&app_handle, chat);
                             }
                         }
                     }

@@ -2,6 +2,7 @@ use crate::model_manager::*;
 use crate::python_translator::*;
 use crate::sniffer::*;
 use std::collections::VecDeque;
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use indexmap::IndexMap;
 use tauri::{Emitter, Manager};
@@ -30,9 +31,10 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-pub fn inject_system_message<S: Into<String> + Clone>(window: &tauri::Window, message: S) {
+pub fn inject_system_message<S: Into<String>>(app: &tauri::AppHandle, message: S) {
     let msg = message.into();
     println!("[System] {}", msg);
+
     let sys_packet = ChatPacket {
         channel: "SYSTEM".into(),
         nickname: "SYSTEM".into(),
@@ -40,5 +42,29 @@ pub fn inject_system_message<S: Into<String> + Clone>(window: &tauri::Window, me
         timestamp: chrono::Utc::now().timestamp_millis() as u64,
         ..Default::default()
     };
-    let _ = window.emit("new-chat-message", &sys_packet);
+
+    // Use the extracted logic
+    store_and_emit(app, sys_packet);
+}
+
+pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatPacket) {
+    if let Some(state) = app.try_state::<AppState>() {
+        // 1. Assign and Increment the Internal PID
+        let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
+        packet.pid = current_pid;
+
+        // 2. FIFO Logic: Update the IndexMap
+        {
+            let mut history = state.chat_history.lock().unwrap();
+            if history.len() >= 1000 {
+                // O(n) but negligible for 1000 small structs
+                history.shift_remove_index(0);
+            }
+            // O(1) Insertion
+            history.insert(packet.pid, packet.clone());
+        }
+
+        // 3. Emit to UI (Unified channel name)
+        let _ = app.emit("packet-event", &packet);
+    }
 }

@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use leptos::html;
 use leptos::leptos_dom::log;
 use leptos::prelude::*;
@@ -57,7 +58,7 @@ pub fn App() -> impl IntoView {
 
     // --- CHAT & NAVIGATION SIGNALS ---
     let (active_tab, set_active_tab) = signal("전체".to_string());
-    let (chat_log, set_chat_log) = signal(Vec::<ChatPacket>::new());
+    let (chat_log, set_chat_log) = signal(IndexMap::<u64, ChatPacket>::new());
 
     // --- UI INTERACTION SIGNALS ---
     let (is_user_scrolling, set_user_scrolling) = signal(false);
@@ -78,25 +79,24 @@ pub fn App() -> impl IntoView {
     // --- ACTIONS ---
     let setup_listeners = move || {
         spawn_local(async move {
-            // 1. New Packet Listener
             let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                // Tauri v2 wraps the data in a "payload" field
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    // Parse using the ChatPacket struct (which now handles camelCase)
                     if let Ok(packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
                         let packet_clone = packet.clone();
 
                         set_chat_log.update(|log| {
-                            if log.len() >= 1000 { log.remove(0); }
-                            log.push(packet);
+                            // FIFO: shift_remove_index is O(n) but maintains insertion order
+                            if log.len() >= 1000 {
+                                log.shift_remove_index(0);
+                            }
+                            log.insert(packet.pid, packet);
                         });
 
-                        // Trigger translation using PID, not timestamp
                         if packet_clone.channel != "SYSTEM" && is_japanese(&packet_clone.message) {
                             spawn_local(async move {
                                 let args = serde_wasm_bindgen::to_value(&serde_json::json!({
                                 "text": packet_clone.message,
-                                "pid": packet_clone.pid // Use PID here!
+                                "pid": packet_clone.pid
                             })).unwrap();
                                 let _ = invoke("manual_translate", args).await;
                             });
@@ -105,7 +105,6 @@ pub fn App() -> impl IntoView {
                 }
             }) as Box<dyn FnMut(JsValue)>);
 
-            // 2. Translation Result Listener
             let trans_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
                     if let Ok(resp) = serde_json::from_str::<serde_json::Value>(ev["payload"].as_str().unwrap_or("")) {
@@ -113,25 +112,20 @@ pub fn App() -> impl IntoView {
                         let translated_text = resp["translated"].as_str().unwrap_or_default().to_string();
 
                         set_chat_log.update(|log| {
-                            // 1. Find the index of the packet
-                            if let Some(pos) = log.iter().position(|m| m.pid == target_pid) {
-                                // 2. Clone and Modify
-                                let mut updated_packet = log[pos].clone();
-                                updated_packet.translated = Some(translated_text);
-
-                                // 3. Replace the old packet with the new one
-                                // This triggers the UI re-render for this specific PID
-                                log[pos] = updated_packet;
+                            // TRUE O(1) Lookup: No more .iter().position()
+                            log!("Log {:?}", &log);
+                            log!("Target {:?}", &target_pid);
+                            if let Some(packet) = log.get_mut(&target_pid) {
+                                log!("Translated Text is {:?}", &translated_text);
+                                packet.translated = Some(translated_text);
                             }
                         });
                     }
                 }
             }) as Box<dyn FnMut(JsValue)>);
 
-            // Match your backend: "packet-event" for new messages
             listen("packet-event", &packet_closure).await;
             listen("translator-event", &trans_closure).await;
-
             packet_closure.forget();
             trans_closure.forget();
         });
@@ -180,8 +174,14 @@ pub fn App() -> impl IntoView {
 
                         // 2. FETCH HISTORY FROM RUST (The Persistence Key)
                         if let Ok(history_res) = invoke("get_chat_history", JsValue::NULL).await {
-                            if let Ok(history) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(history_res) {
-                                set_chat_log.set(history);
+                            if let Ok(history_vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(history_res) {
+                                // Convert Vec to IndexMap: (pid, packet)
+                                let history_map: IndexMap<u64, ChatPacket> = history_vec
+                                    .into_iter()
+                                    .map(|p| (p.pid, p))
+                                    .collect();
+
+                                set_chat_log.set(history_map);
                             }
                         }
 
@@ -211,15 +211,20 @@ pub fn App() -> impl IntoView {
     });
 
     // --- UI VIEW ---
-
     let filtered_messages = Memo::new(move |_| {
         let tab = active_tab.get();
         let log = chat_log.get();
-        if tab == "전체" { log } else {
+
+        // Convert IndexMap values to a Vec for filtering
+        let messages: Vec<ChatPacket> = log.values().cloned().collect();
+
+        if tab == "전체" {
+            messages
+        } else {
             let key = match tab.as_str() {
                 "시스템" => "SYSTEM", "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD"
             };
-            log.into_iter().filter(|m| m.channel == key).collect()
+            messages.into_iter().filter(|m| m.channel == key).collect()
         }
     });
 
@@ -265,41 +270,33 @@ pub fn App() -> impl IntoView {
                         key=|msg| msg.pid
                         children=move |msg| {
                             let is_jp = is_japanese(&msg.message);
-
-                            // Clone variables here so they can be moved into the view's closures
-                            let nickname = msg.nickname.clone();
-                            let message = msg.message.clone();
-                            let translated = msg.translated.clone(); // Take a snapshot for this render
-
+                            let translated_base = msg.translated.clone();
                             view! {
                                 <div class="chat-row" data-channel=msg.channel.clone()>
                                     <div class="msg-header">
-                                        <span class="nickname">{nickname}</span>
+                                        <span class="nickname">{msg.nickname.clone()}</span>
                                         <span class="lvl">"Lv." {msg.level}</span>
                                         <span class="time">{format_time(msg.timestamp)}</span>
                                     </div>
                                     <div class="msg-body">
                                         <div class="original">
-                                            {if is_jp { "[원문] " } else { "" }} {message}
+                                            {if is_jp { "[원문] " } else { "" }} {msg.message.clone()}
                                         </div>
-
-                                        // Use the cloned 'translated' variable to avoid the move error
-                                        {move || {
-                                            if let Some(text) = msg.translated.clone() {
-                                                view! {
+                                        {
+                                            let tw = translated_base.clone();
+                                            let tc = translated_base.clone();
+                                            view! {
+                                                <Show when=move || tw.is_some()>
                                                     <div class="translated">
-                                                        "[번역] " {text}
+                                                        "[번역] " {let tf = tc.clone(); move || tf.clone().unwrap_or_default()}
                                                     </div>
-                                                }.into_view()
-                                            } else {
-                                                view! {}.into_view()
+                                                </Show>
                                             }
-                                        }}
+                                        }
                                     </div>
                                 </div>
                             }
-                        }
-                    />
+                        }/>
                 </div>
             </Show>
 

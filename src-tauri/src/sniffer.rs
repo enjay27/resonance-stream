@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 // src-tauri/src/sniffer.rs
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -20,12 +21,22 @@ pub struct ChatPacket {
     pub message: String,      // e.g., "hi" or "emojiPic=..."
 }
 
+static IS_SNIFFER_RUNNING: AtomicBool = AtomicBool::new(false);
+
 #[tauri::command]
 pub fn start_sniffer_command(window: tauri::Window, app_handle: tauri::AppHandle) {
     start_sniffer(window);
 }
 
 fn start_sniffer(window: Window) {
+    if IS_SNIFFER_RUNNING.load(Ordering::SeqCst) {
+        // If already running, just send a "Re-attached" system message
+        inject_system_message(&window, "System: Sniffer already active. Re-attached to stream.");
+        return;
+    }
+
+    IS_SNIFFER_RUNNING.store(true, Ordering::SeqCst);
+
     let window_clone = window.clone();
     thread::spawn(move || {
         inject_system_message(&window_clone, "Eye of Star Resonance: Sniffer Active (Port 5003)");

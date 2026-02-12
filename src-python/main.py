@@ -44,6 +44,22 @@ class TranslationManager:
         current_text = text
         add_diag("Original", current_text)
 
+        # PHASE 0: NUMERIC PATTERN SHIELDING
+        # Step 1: Convert Kanji counters to Korean (3種 -> 3종)
+        current_text = re.sub(r'(\d+)種', r'\1종', current_text)
+        current_text = re.sub(r'(\d+)人', r'\1인', current_text)
+        current_text = re.sub(r'(\d+)周', r'\1회', current_text)
+
+        # Step 2: IMMEDIATELY SHIELD the converted Korean counters
+        # We look for "Digits + 종/인/바퀴" and hide them behind Z tags.
+        # This prevents "3종" from becoming "세 가지 종류"
+        counter_regex = r'\d+(?:종|인|바퀴)'
+        for match in re.findall(counter_regex, current_text):
+            tag = f"Z{tag_count}"
+            placeholders[tag] = match  # We store "3종" as the hidden value
+            current_text = current_text.replace(match, f" {tag} ")
+            tag_count += 1
+
         # PHASE 1: DICTIONARY
         if self.custom_dict:
             sorted_dict = sorted(self.custom_dict.items(), key=lambda x: len(x[0]), reverse=True)

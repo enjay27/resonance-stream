@@ -3,6 +3,7 @@ import sys
 import json
 import io
 import argparse
+import re  # Added: Essential for regex shielding
 import ctranslate2
 import sentencepiece as spm
 
@@ -40,40 +41,81 @@ class TranslationManager:
 
     def preprocess(self, text):
         placeholders = {}
-        # 1. Shield Symbols
-        for i, sym in enumerate(self.preserve_symbols):
-            if sym in text:
-                tag = f"__S{i}__"
+        tag_count = 0
+        diagnostics = []
+
+        # Helper to log the state after each step
+        def add_diagnostic(step_name, current_text):
+            diagnostics.append({"step": step_name, "content": current_text})
+
+        current_text = text
+        add_diagnostic("Original", current_text)
+
+        # PHASE 1: Complex Recruitment (e.g., @T1D1H1)
+        # Using [＠@] to handle both half-width and full-width symbols
+        complex_regex = r'[＠@](?:[TtDdHh][0-9])+'
+        matches = re.findall(complex_regex, current_text)
+        for match in matches:
+            tag = f"PROT_RECRUIT_{tag_count}"
+            placeholders[tag] = match
+            current_text = current_text.replace(match, f" {tag} ")
+            tag_count += 1
+        add_diagnostic("Recruitment Shield", current_text)
+
+        # PHASE 2: Kaomoji/Emoticons (e.g., (*'ω'*))
+        # Protects patterns with internal punctuation often mangled by AI
+        kaomoji_regex = r'\([^)]*[\*\'\"\^._\-;:/\\ω][^)]*\)'
+        matches = re.findall(kaomoji_regex, current_text)
+        for match in matches:
+            tag = f"PROT_KAO_{tag_count}"
+            placeholders[tag] = match
+            current_text = current_text.replace(match, f" {tag} ")
+            tag_count += 1
+        add_diagnostic("Kaomoji Shield", current_text)
+
+        # PHASE 3: Custom Dictionary (From Gist)
+        # Sorted by length to ensure "イ마진" is caught before "イ"
+        sorted_dict = sorted(self.custom_dict.items(), key=lambda x: len(x[0]), reverse=True)
+        for ja, ko in sorted_dict:
+            if ja in current_text:
+                tag = f"PROT_DICT_{tag_count}"
+                placeholders[tag] = ko # Shielding with the KOREAN target value
+                current_text = current_text.replace(ja, f" {tag} ")
+                tag_count += 1
+        add_diagnostic("Dictionary Shield", current_text)
+
+        # PHASE 4: Individual Symbols (～, 【, etc.)
+        for sym in self.preserve_symbols:
+            if sym in current_text:
+                tag = f"PROT_SYM_{tag_count}"
                 placeholders[tag] = sym
-                text = text.replace(sym, tag)
-        # 2. Apply Dictionary Terms
-        for i, (ja, ko) in enumerate(self.custom_dict.items()):
-            if ja in text:
-                tag = f"__D{i}__"
-                placeholders[tag] = ko
-                text = text.replace(ja, tag)
-        return text, placeholders
+                current_text = current_text.replace(sym, f" {tag} ")
+                tag_count += 1
+        add_diagnostic("Symbol Shield", current_text)
+
+        return current_text, placeholders, diagnostics
 
     def postprocess(self, text, placeholders):
+        final_text = text
         for tag, val in placeholders.items():
-            text = text.replace(tag, val)
-        return text
+            # Handle cases where AI adds spaces around the tag
+            final_text = final_text.replace(f" {tag} ", val)
+            final_text = final_text.replace(tag, val)
+        return final_text
 
 def get_optimized_hardware():
-    """Detects hardware and returns (device, compute_type)"""
     cuda_count = ctranslate2.get_cuda_device_count()
     if cuda_count > 0:
         device = "cuda"
         supported = ctranslate2.get_supported_compute_types("cuda")
-        if "int8_float16" in supported:
-            compute_type = "int8_float16"
-        elif "float16" in supported:
+        # float16 is best for RTX 4080 Super
+        if "float16" in supported:
             compute_type = "float16"
         else:
             compute_type = "int8"
     else:
         device = "cpu"
-        compute_type = "int8" # Essential for CPU speed
+        compute_type = "int8"
     return device, compute_type
 
 def main():
@@ -86,46 +128,45 @@ def main():
     manager.log_status("Initializing AI Engine...")
 
     try:
-        # 1. Hardware Auto-Detection
         device, compute_type = get_optimized_hardware()
-        manager.log_info(f"Hardware Detected: {device.upper()} ({compute_type})")
+        manager.log_info(f"Hardware: {device.upper()} ({compute_type})")
 
-        # 2. Load Translator & Tokenizer
         translator = ctranslate2.Translator(
             args.model,
             device=device,
             compute_type=compute_type,
             inter_threads=1,
-            intra_threads=4
+            intra_threads=1 # Safer for concurrent game usage
         )
 
         sp = spm.SentencePieceProcessor(model_file=os.path.join(args.model, "tokenizer.model"))
         manager.log_status("NLLB Ready")
 
-        # 3. Processing Loop
         while True:
             line = sys.stdin.readline()
             if not line: break
 
             try:
                 data = json.loads(line.strip())
-
-                # Check for Dictionary Reload
                 if data.get("cmd") == "reload":
                     manager.load_dictionary()
-                    manager.log_info("Dictionary hot-reloaded.")
+                    manager.log_info("Dictionary reloaded.")
                     continue
 
                 input_text = data.get("text", "")
                 packet_pid = data.get("pid")
-
-                # Robust PID check (allows PID 0)
                 if packet_pid is None: continue
 
-                # Pre-process
-                clean_text, placeholders = manager.preprocess(input_text)
+                # 1. PREPROCESS
+                clean_text, placeholders, debug_steps = manager.preprocess(input_text)
 
-                # Translation
+                print(json.dumps({
+                    "type": "diagnostic",
+                    "pid": packet_pid,
+                    "steps": debug_steps
+                }, ensure_ascii=False), flush=True)
+
+                # 2. INFERENCE
                 source_tokens = ["jpn_Jpan"] + sp.encode(clean_text, out_type=str) + ["</s>"]
                 results = translator.translate_batch(
                     [source_tokens],
@@ -133,13 +174,13 @@ def main():
                     beam_size=1
                 )
 
-                # Decode & Post-process
+                # 3. POSTPROCESS
                 translated_tokens = results[0].hypotheses[0]
                 if "kor_Hang" in translated_tokens: translated_tokens.remove("kor_Hang")
+
                 raw_translated = sp.decode(translated_tokens)
                 final_output = manager.postprocess(raw_translated, placeholders)
 
-                # Return to Rust
                 print(json.dumps({
                     "type": "result",
                     "pid": packet_pid,

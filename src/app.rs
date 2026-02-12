@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use leptos::either::Either;
 use leptos::html;
 use leptos::leptos_dom::log;
 use leptos::prelude::*;
@@ -174,18 +175,15 @@ pub fn App() -> impl IntoView {
 
                         // 2. FETCH HISTORY FROM RUST (The Persistence Key)
                         if let Ok(history_res) = invoke("get_chat_history", JsValue::NULL).await {
-                            if let Ok(history_vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(history_res) {
-                                // Convert Vec to IndexMap: (pid, packet)
-                                let history_map: IndexMap<u64, ChatPacket> = history_vec
-                                    .into_iter()
-                                    .map(|p| (p.pid, p))
-                                    .collect();
-
-                                set_chat_log.set(history_map);
+                            // Hydrate the signal directly with the IndexMap
+                            log!("History: {:?}", &history_res);
+                            if let Ok(history) = serde_wasm_bindgen::from_value::<IndexMap<u64, ChatPacket>>(history_res) {
+                                log!("History inside: {:?}", &history);
+                                set_chat_log.set(history);
                             }
                         }
 
-                        // 3. Sequential Launch (Commands handle 'already running' internally)
+                        // 3. Start systems
                         let _ = invoke("start_sniffer_command", JsValue::NULL).await;
 
                         let trans_args = serde_wasm_bindgen::to_value(&serde_json::json!({ "useGpu": true })).unwrap();

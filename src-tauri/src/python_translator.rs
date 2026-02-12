@@ -61,6 +61,8 @@ pub async fn start_translator_sidecar(
                         let target_pid = json["pid"].as_u64().unwrap_or(0);
                         let translated_text = json["translated"].as_str().unwrap_or_default().to_string();
 
+                        println!("[Python] Diagnostic: {:?}", json);
+
                         if let Some(state) = app_clone.try_state::<crate::AppState>() {
                             let mut history = state.chat_history.lock().unwrap();
                             // Persistence: Update the master history map

@@ -64,11 +64,10 @@ class TranslationManager:
         if self.custom_dict:
             sorted_dict = sorted(self.custom_dict.items(), key=lambda x: len(x[0]), reverse=True)
             for ja, ko in sorted_dict:
-                if ja in "～！？。 ": continue
+                # UPDATE 1: Add ♪, ☆, ★ to the "Do Not Shield" list
+                # This ensures they remain as text so we can split on them later.
+                if ja in "～！？。♪☆★": continue
 
-                # FIX: Use word boundaries or check if the match is partial
-                # For now, we ensure we don't match common short verbs like 'あり'
-                # unless they are stand-alone or specific enough in your Gist.
                 if ja in current_text:
                     tag = f"Z{tag_count}"
                     placeholders[tag] = ko
@@ -96,12 +95,14 @@ class TranslationManager:
 
         # PHASE 4: SYMBOLS
         for sym in self.preserve_symbols:
+            # UPDATE 2: Safety check to ensure we never shield splitters
+            if sym in "～！？。♪☆★": continue
+
             if sym in current_text:
                 tag = f"Z{tag_count}"
                 placeholders[tag] = sym
                 current_text = current_text.replace(sym, f" {tag} ")
                 tag_count += 1
-        add_diag("Symbol Shield", current_text)
 
         return current_text, placeholders, diagnostics
 
@@ -156,14 +157,15 @@ def main():
                 # 1. SHIELDING
                 shielded_text, placeholders, diag = manager.preprocess(input_text)
 
-                # 2. ADAPTIVE SEGMENTATION
-                # Split by punctuation OR multiple spaces if the string is long
-                # This ensures long recruitment posts are broken down properly.
-                if any(p in shielded_text for p in "。！？\n"):
-                    segments = re.split(r'([。！？\n])', shielded_text)
+                # 2. ADAPTIVE SEGMENTATION (The Fix)
+                # UPDATE 3: Added ♪, ☆, ★, and ◆ to the split pattern.
+                # Now "Active♪" and "Details..." become separate translation tasks.
+                split_pattern = r'([。！？\n♪☆★◆])'
+
+                if any(p in shielded_text for p in "。！？\n♪☆★◆"):
+                    segments = re.split(split_pattern, shielded_text)
                 else:
-                    # Fallback: Split by spaces if no punctuation exists
-                    segments = re.split(r'(\s{1,})', shielded_text)
+                    segments = re.split(r'(\s{2,})', shielded_text) # Split on double spaces if no punctuation
 
                 # Re-stitching segments with their delimiters
                 combined_segments = []

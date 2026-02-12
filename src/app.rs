@@ -384,18 +384,54 @@ pub fn App() -> impl IntoView {
                 .tab-btn.active[data-tab='시스템'] { border-bottom-color: #FFD54F; }
 
                 .chat-container { flex: 1; overflow-y: auto; padding: 10px; user-select: text; }
-                .chat-row { margin-bottom: 12px; padding: 4px 8px; border-radius: 4px; border-left: 3px solid transparent; }
+                .chat-row {
+                    margin-bottom: 12px;
+                    padding: 0 8px; /* Removed vertical padding, added horizontal */
+                    display: flex;
+                    flex-direction: column;
+                    align-items: flex-start; /* Aligns bubbles to the left */
+                }
 
-                .chat-row[data-channel='LOCAL'] { border-left-color: #E0E0E0; }
+                .chat-row[data-channel='LOCAL'] .msg-body { border-left-color: #E0E0E0; }
+                .chat-row[data-channel='PARTY'] .msg-body { border-left-color: #4FC3F7; background: #1a2733; } /* Slight blue tint */
+                .chat-row[data-channel='GUILD'] .msg-body { border-left-color: #81C784; background: #1a3320; } /* Slight green tint */
+                .chat-row[data-channel='WORLD'] .msg-body { border-left-color: #BA68C8; }
+                .chat-row[data-channel='SYSTEM'] .msg-body { border-left-color: #FFD54F; background: #332b00; } /* Slight yellow tint */
+
                 .chat-row[data-channel='LOCAL'] .nickname { color: #E0E0E0; }
-                .chat-row[data-channel='PARTY'] { border-left-color: #4FC3F7; }
                 .chat-row[data-channel='PARTY'] .nickname { color: #4FC3F7; }
-                .chat-row[data-channel='GUILD'] { border-left-color: #81C784; }
                 .chat-row[data-channel='GUILD'] .nickname { color: #81C784; }
-                .chat-row[data-channel='WORLD'] { border-left-color: #BA68C8; }
                 .chat-row[data-channel='WORLD'] .nickname { color: #BA68C8; }
-                .chat-row[data-channel='SYSTEM'] { border-left-color: #FFD54F; background: rgba(255, 213, 79, 0.05); }
-                .msg-header { font-size: 0.85rem; display: flex; gap: 8px; color: #888; }
+
+                /* --- THE MESSAGE BUBBLE BOX --- */
+                .msg-body {
+                    background: #252525; /* Lighter than the #121212 app background */
+                    padding: 10px 14px;
+                    border-radius: 0 12px 12px 12px; /* Top-left corner is square for the speech bubble look */
+                    margin-top: 4px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2); /* Subtle depth */
+                    max-width: 90%; /* Prevents bubbles from stretching too wide */
+                    position: relative;
+                    border-left: 3px solid transparent; /* Reserve space for the channel color */
+                }
+
+                /* --- TEXT STYLES --- */
+                .msg-header {
+                    font-size: 0.75rem;
+                    margin-left: 4px; /* Align with the start of the bubble */
+                    margin-bottom: 2px;
+                    color: #888;
+                    display: flex;
+                    gap: 8px;
+                }
+                .original { color: #ddd; font-size: 0.95rem; }
+                .translated {
+                    color: #00ff88;
+                    margin-top: 6px;
+                    padding-top: 6px;
+                    border-top: 1px solid rgba(255, 255, 255, 0.1); /* Separator line */
+                    font-size: 0.95rem;
+                }
                 .nickname { color: #ffcc00; font-weight: bold; }
                 .translated { color: #00ff88; margin-top: 2px; font-size: 0.95rem; }
 

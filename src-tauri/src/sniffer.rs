@@ -336,9 +336,8 @@ fn extract_tcp_payload(data: &[u8]) -> Option<&[u8]> {
 }
 
 #[tauri::command]
-pub fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatPacket> {
+pub fn get_chat_history(state: tauri::State<AppState>) -> IndexMap<u64, ChatPacket> {
     let history = state.chat_history.lock().unwrap();
-    // IndexMap keeps them in order, so we just collect values
-    println!("[History] {:?}", history);
-    history.values().cloned().collect()
+    println!("History: {:?}", history);
+    history.clone()
 }

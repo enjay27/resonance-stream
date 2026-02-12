@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 import io
@@ -29,7 +30,11 @@ def main():
 
         # 2. Initialize the SentencePiece Tokenizer
         # The model manager downloads this to the same directory
-        sp_path = f"{args.model}/tokenizer.model"
+        sp_path = os.path.join(args.model, "tokenizer.model")
+        if not os.path.exists(sp_path):
+            # Diagnostic for you in the console
+            print(json.dumps({"type": "error", "message": f"File not found: {sp_path}"}))
+
         sp = spm.SentencePieceProcessor(model_file=sp_path)
 
         print(json.dumps({"type": "status", "message": "NLLB Lite Engine Ready"}), flush=True)
@@ -40,31 +45,31 @@ def main():
     # 3. Processing Loop
     while True:
         line = sys.stdin.readline()
-        if not line:
-            break  # Pipe closed
+        if not line: break
 
         try:
             data = json.loads(line.strip())
-
             input_text = data.get("text", "")
             packet_pid = data.get("pid")
 
-            if not input_text: continue
-
-            # NLLB-200 requires language tags: jpn_Jpan (Japanese) -> kor_Hang (Korean)
-            # Tokenize and add the source language tag
+            # FIX: Use out_type=str to send actual tokens, not IDs
+            # NLLB requires the source language tag (e.g., jpn_Jpan)
             source_tokens = ["jpn_Jpan"] + sp.encode(input_text, out_type=str) + ["</s>"]
 
             # Perform Translation
-            # target_prefix forces the model to output Korean
+            # target_prefix MUST also be a list of string tokens
             results = translator.translate_batch(
                 [source_tokens],
                 target_prefix=[["kor_Hang"]],
-                beam_size=2
+                beam_size=2,
+                batch_type="tokens",
+                max_batch_size=1024
             )
 
-            # Clean up the output (remove the target prefix and decode)
+            # Extract results
             translated_tokens = results[0].hypotheses[0]
+
+            # Remove the target language tag if present
             if "kor_Hang" in translated_tokens:
                 translated_tokens.remove("kor_Hang")
 

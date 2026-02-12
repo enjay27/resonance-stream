@@ -24,26 +24,26 @@ struct ModelFile {
 const MODEL_FILES: [ModelFile; 4] = [
     ModelFile {
         name: "model.bin",
-        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-600M-ct2-int8/resolve/main/model.bin",
+        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-1.3B-ct2-int8/resolve/main/model.bin",
     },
     ModelFile {
         name: "config.json",
-        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-600M-ct2-int8/resolve/main/config.json",
+        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-1.3B-ct2-int8/resolve/main/config.json",
     },
     ModelFile {
         name: "shared_vocabulary.txt",
-        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-600M-ct2-int8/resolve/main/shared_vocabulary.txt",
+        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-1.3B-ct2-int8/resolve/main/shared_vocabulary.txt",
     },
     ModelFile {
-        name: "tokenizer.model",
-        url: "https://s3.amazonaws.com/opennmt-models/nllb-200/flores200_sacrebleu_tokenizer_spm.model",
+        name: "tokenizer.model", // We save it as tokenizer.model locally for the Python script
+        url: "https://huggingface.co/facebook/nllb-200-distilled-1.3B/resolve/main/sentencepiece.bpe.model",
     },
 ];
 
 #[tauri::command]
 pub async fn check_model_status(app: AppHandle) -> Result<ModelStatus, String> {
-    let model_dir = app.path().app_data_dir().unwrap().join("models/nllb_int8");
-
+    // Update path to separate the 1.3B model from your old 600M files
+    let model_dir = app.path().app_data_dir().unwrap().join("models/nllb_1.3B_int8");
     let all_exist = MODEL_FILES.iter().all(|f| model_dir.join(f.name).exists());
 
     Ok(ModelStatus {
@@ -54,7 +54,7 @@ pub async fn check_model_status(app: AppHandle) -> Result<ModelStatus, String> {
 
 #[tauri::command]
 pub async fn download_model(app: AppHandle) -> Result<(), String> {
-    let model_dir = app.path().app_data_dir().unwrap().join("models/nllb_int8");
+    let model_dir = app.path().app_data_dir().unwrap().join("models/nllb_1.3B_int8");
     std::fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
 
     let client = reqwest::Client::new();
@@ -98,7 +98,7 @@ pub fn get_model_path(app: &AppHandle) -> String {
     app.path()
         .app_data_dir()
         .expect("Failed to resolve AppData directory")
-        .join("models/nllb_int8")
+        .join("models/nllb_1.3B_int8")
         .to_string_lossy()
         .into_owned()
 }

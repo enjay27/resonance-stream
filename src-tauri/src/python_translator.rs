@@ -16,80 +16,64 @@ pub async fn start_translator_sidecar(
     state: State<'_, AppState>,
     use_gpu: bool
 ) -> Result<String, String> {
-    inject_system_message(&app, format!("[Sidecar] Request received to start translator. GPU: {}", use_gpu));
+    inject_system_message(&app, format!("[Sidecar] Request received. GPU: {}", use_gpu));
 
     let model_path = model_manager::get_model_path(&app);
-    let device_arg = if use_gpu { "cuda" } else { "cpu" };
 
-    // 1. Spawn the sidecar
-    // Make sure your tauri.conf.json -> externalBin contains "binaries/python_translator"
+    // Resolve the local dictionary path in AppData
+    let dict_path = app.path().app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("custom_dict.json");
+
+    // 1. Spawn the sidecar (Note: mut child is needed for some operations)
     let (mut rx, child) = app
         .shell()
         .sidecar("translator")
-        .map_err(|e| {
-            let err = format!("[Sidecar] ERROR: Binary not found or config mismatch: {}", e);
-            inject_system_message(&app, err.clone());
-            err
-        })?
-        .args(["--model", &model_path, "--device", device_arg])
+        .map_err(|e| format!("[Sidecar] Binary not found: {}", e))?
+        .args(["--model", &model_path, "--dict", dict_path.to_str().unwrap()])
         .spawn()
-        .map_err(|e| {
-            let err = format!("[Sidecar] ERROR: Failed to execute binary: {}", e);
-            inject_system_message(&app, err.clone());
-            err
-        })?;
+        .map_err(|e| format!("[Sidecar] Failed to execute: {}", e))?;
 
-    inject_system_message(&app, format!("[Sidecar] Process spawned successfully. Child PID: {}", child.pid()));
-
-    // 2. STORE THE CHILD IN STATE
+    // 2. STORE THE CHILD IN STATE (Transfer Ownership)
     {
         let mut tx_guard = state.tx.lock().unwrap();
+        // Move 'child' into the Mutex. DO NOT CLONE.
         *tx_guard = Some(child);
         inject_system_message(&app, "[Sidecar] SUCCESS: Child handle saved to AppState.");
     }
 
-    // 3. Handle Stdout (Status & Results)
+    // 3. Handle Stdout (Unchanged logic, but uses updated State for O(1) history)
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             if let CommandEvent::Stdout(line_bytes) = event {
                 let line = String::from_utf8_lossy(&line_bytes).to_string();
 
-                println!("[Python] {}", line);
-
-                // Try to parse the JSON from Python
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if json["type"] == "status" {
-                        // A status update is a NEW message for the log
-                        let status_msg = json["message"].as_str().unwrap_or("Unknown Status");
-                        inject_system_message(&app_clone, format!("[Python] {}", status_msg));
-
-                        if status_msg.contains("Ready") {
-                            let _ = app_clone.emit("translator-status", "Connected");
-                        }
+                    // 1. Status Log handling
+                    if json["type"] == "status" || json["type"] == "info" {
+                        let msg = json["message"].as_str().unwrap_or("");
+                        inject_system_message(&app_clone, format!("[Python] {}", msg));
+                        if msg.contains("Ready") { let _ = app_clone.emit("translator-status", "Connected"); }
                     }
-                    else if json["type"] == "result" {
-                        // A translation is an UPDATE to an existing packet
+                    // 2. Translation Result handling (PID-based)
+                    else if json.get("pid").is_some() {
                         let target_pid = json["pid"].as_u64().unwrap_or(0);
                         let translated_text = json["translated"].as_str().unwrap_or_default().to_string();
 
                         if let Some(state) = app_clone.try_state::<crate::AppState>() {
                             let mut history = state.chat_history.lock().unwrap();
-
-                            // O(1) update in backend history for persistence across refresh
+                            // Persistence: Update the master history map
                             if let Some(packet) = history.get_mut(&target_pid) {
                                 packet.translated = Some(translated_text);
                             }
                         }
-
-                        println!("[Line] {:?}", line);
-                        // Send it to the translator-event listener in app.rs
+                        // UI Update: Emit to the IndexMap<u64, RwSignal> in app.rs
                         let _ = app_clone.emit("translator-event", line);
                     }
                 }
             }
         }
-        inject_system_message(&app, "[Sidecar] WARNING: Stdout stream closed.");
         let _ = app_clone.emit("translator-status", "Disconnected");
     });
 

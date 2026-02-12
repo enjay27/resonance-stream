@@ -25,7 +25,9 @@ pub fn run() {
             start_translator_sidecar,
             manual_translate,
             start_sniffer_command,
-            get_chat_history
+            get_chat_history,
+            check_dict_update,
+            sync_dictionary
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

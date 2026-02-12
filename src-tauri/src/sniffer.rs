@@ -28,8 +28,13 @@ pub struct ChatPacket {
 
 pub struct AppState {
     pub tx: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
+
+    // HOT STORAGE: Game Chat (IndexMap for O(1) PID access)
     pub chat_history: Mutex<IndexMap<u64, ChatPacket>>,
-    // Global counter for the current session
+
+    // COLD STORAGE: System/App Logs (Ring Buffer)
+    pub system_history: Mutex<VecDeque<ChatPacket>>,
+
     pub next_pid: AtomicU64,
 }
 
@@ -326,6 +331,14 @@ fn extract_tcp_payload(data: &[u8]) -> Option<&[u8]> {
 
 #[tauri::command]
 pub fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatPacket> {
+    // Returns ONLY Game Chat
     let history = state.chat_history.lock().unwrap();
     history.values().cloned().collect()
+}
+
+#[tauri::command]
+pub fn get_system_history(state: tauri::State<AppState>) -> Vec<ChatPacket> {
+    // Returns ONLY System Logs
+    let history = state.system_history.lock().unwrap();
+    history.iter().cloned().collect()
 }

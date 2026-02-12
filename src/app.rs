@@ -56,6 +56,12 @@ pub fn App() -> impl IntoView {
 
     let (active_tab, set_active_tab) = signal("전체".to_string());
 
+    // --- SEPARATE DATA STREAMS ---
+    // 1. Game Chat (IndexMap for updates)
+    let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatPacket>>::new());
+    // 2. System Logs (VecDeque logic in frontend)
+    let (system_log, set_system_log) = signal(Vec::<RwSignal<ChatPacket>>::new());
+
     let (dict_update_available, set_dict_update_available) = signal(false);
 
     // --- DICTIONARY SYNC ACTION ---
@@ -78,7 +84,7 @@ pub fn App() -> impl IntoView {
 
     // --- FINE-GRAINED REACTIVE STATE ---
     // The IndexMap now holds individual RwSignals for each message.
-    let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatPacket>>::new());
+    // let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatPacket>>::new());
 
     let (is_user_scrolling, set_user_scrolling) = signal(false);
     let chat_container_ref = create_node_ref::<html::Div>();
@@ -97,6 +103,7 @@ pub fn App() -> impl IntoView {
     // --- ACTIONS ---
     let setup_listeners = move || {
         spawn_local(async move {
+            // LISTENER 1: Game Packets
             let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
                     if let Ok(packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
@@ -104,18 +111,30 @@ pub fn App() -> impl IntoView {
 
                         set_chat_log.update(|log| {
                             if log.len() >= 1000 { log.shift_remove_index(0); }
-                            // Wrap each new packet in its own independent signal
                             log.insert(packet.pid, RwSignal::new(packet));
                         });
 
-                        if packet_clone.channel != "SYSTEM" && is_japanese(&packet_clone.message) {
+                        // Trigger Translation ONLY for Game Chat
+                        if is_japanese(&packet_clone.message) {
                             spawn_local(async move {
                                 let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                                    "text": packet_clone.message, "pid": packet_clone.pid
-                                })).unwrap();
+                                   "text": packet_clone.message, "pid": packet_clone.pid
+                               })).unwrap();
                                 let _ = invoke("manual_translate", args).await;
                             });
                         }
+                    }
+                }
+            }) as Box<dyn FnMut(JsValue)>);
+
+            // LISTENER 2: System Logs (New!)
+            let system_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+                    if let Ok(packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
+                        set_system_log.update(|log| {
+                            if log.len() >= 200 { log.remove(0); }
+                            log.push(RwSignal::new(packet));
+                        });
                     }
                 }
             }) as Box<dyn FnMut(JsValue)>);
@@ -138,8 +157,11 @@ pub fn App() -> impl IntoView {
             }) as Box<dyn FnMut(JsValue)>);
 
             listen("packet-event", &packet_closure).await;
+            listen("system-event", &system_closure).await;
             listen("translator-event", &trans_closure).await;
+
             packet_closure.forget();
+            system_closure.forget();
             trans_closure.forget();
         });
     };
@@ -179,12 +201,17 @@ pub fn App() -> impl IntoView {
                     if status.exists {
                         setup_listeners();
 
-                        // Hydrate History: Convert the Vec to Signal-wrapped Map
-                        if let Ok(history_res) = invoke("get_chat_history", JsValue::NULL).await {
-                            if let Ok(history_vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(history_res) {
-                                let history_map: IndexMap<u64, RwSignal<ChatPacket>> =
-                                    history_vec.into_iter().map(|p| (p.pid, RwSignal::new(p))).collect();
-                                set_chat_log.set(history_map);
+                        // Hydrate GAME History
+                        if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
+                            if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(res) {
+                                set_chat_log.set(vec.into_iter().map(|p| (p.pid, RwSignal::new(p))).collect());
+                            }
+                        }
+
+                        // Hydrate SYSTEM History
+                        if let Ok(res) = invoke("get_system_history", JsValue::NULL).await {
+                            if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(res) {
+                                set_system_log.set(vec.into_iter().map(|p| RwSignal::new(p)).collect());
                             }
                         }
 
@@ -205,14 +232,27 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // --- OPTIMIZED VIEW LOGIC ---
     let filtered_messages = Memo::new(move |_| {
         let tab = active_tab.get();
-        let log = chat_log.get();
-        let messages: Vec<RwSignal<ChatPacket>> = log.values().cloned().collect();
 
-        if tab == "전체" { messages } else {
-            let key = match tab.as_str() { "시스템" => "SYSTEM", "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD" };
-            messages.into_iter().filter(|m| m.get().channel == key).collect()
+        match tab.as_str() {
+            // O(1): Return System Vector directly
+            "시스템" => system_log.get(),
+
+            // O(1): Return Game Vector directly (No filtering!)
+            "전체" => chat_log.get().values().cloned().collect(),
+
+            // O(N): Filter Game Vector for specific channels
+            _ => {
+                let key = match tab.as_str() {
+                    "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD"
+                };
+                chat_log.get().values()
+                    .filter(|m| m.get().channel == key)
+                    .cloned()
+                    .collect()
+            }
         }
     });
 
@@ -224,9 +264,15 @@ pub fn App() -> impl IntoView {
                         {vec!["전체", "월드", "길드", "파티", "로컬", "시스템"].into_iter().map(|t| {
                             let t_name = t.to_string();
                             let t_click = t_name.clone();
+                            let t_data = t_name.clone(); // Clone for data attribute
                             view! {
-                                <button class=move || if active_tab.get() == t_name { "tab-btn active" } else { "tab-btn" }
-                                    on:click=move |_| set_active_tab.set(t_click.clone())>{t}</button>
+                                <button
+                                    class=move || if active_tab.get() == t_name { "tab-btn active" } else { "tab-btn" }
+                                    data-tab=t_data // <--- ADD THIS
+                                    on:click=move |_| set_active_tab.set(t_click.clone())
+                                >
+                                    {t}
+                                </button>
                             }
                         }).collect_view()}
                     </div>
@@ -294,8 +340,48 @@ pub fn App() -> impl IntoView {
                 .primary-btn { background: #00ff88; color: #000; border: none; padding: 15px 30px; font-weight: bold; border-radius: 5px; cursor: pointer; }
 
                 .tab-bar { display: flex; background: #1e1e1e; border-bottom: 1px solid #333; }
-                .tab-btn { flex: 1; padding: 12px; border: none; background: none; color: #888; cursor: pointer; font-weight: bold; }
-                .tab-btn.active { color: #00ff88; border-bottom: 2px solid #00ff88; background: #252525; }
+                .tab-btn {
+                    flex: 1;
+                    padding: 12px;
+                    border: none;
+                    background: none;
+                    cursor: pointer;
+                    font-weight: bold;
+                    transition: all 0.2s;
+                    opacity: 0.6; /* Dimmed when inactive */
+                    border-bottom: 2px solid transparent; /* Reserve space for border */
+                }
+
+                .tab-btn:hover, .tab-btn.active {
+                    opacity: 1; /* Fully visible when active/hover */
+                    background: #252525;
+                }
+
+                /* --- SPECIFIC TAB COLORS --- */
+
+                /* 전체 (All): Recommended White */
+                .tab-btn[data-tab='전체'] { color: #FFFFFF; }
+                .tab-btn.active[data-tab='전체'] { border-bottom-color: #FFFFFF; }
+
+                /* 월드 (World): Purple */
+                .tab-btn[data-tab='월드'] { color: #BA68C8; }
+                .tab-btn.active[data-tab='월드'] { border-bottom-color: #BA68C8; }
+
+                /* 길드 (Guild): Green */
+                .tab-btn[data-tab='길드'] { color: #81C784; }
+                .tab-btn.active[data-tab='길드'] { border-bottom-color: #81C784; }
+
+                /* 파티 (Party): Blue */
+                .tab-btn[data-tab='파티'] { color: #4FC3F7; }
+                .tab-btn.active[data-tab='파티'] { border-bottom-color: #4FC3F7; }
+
+                /* 로컬 (Local): White-Gray */
+                .tab-btn[data-tab='로컬'] { color: #BDBDBD; }
+                .tab-btn.active[data-tab='로컬'] { border-bottom-color: #BDBDBD; }
+
+                /* 시스템 (System): Yellow */
+                .tab-btn[data-tab='시스템'] { color: #FFD54F; }
+                .tab-btn.active[data-tab='시스템'] { border-bottom-color: #FFD54F; }
 
                 .chat-container { flex: 1; overflow-y: auto; padding: 10px; user-select: text; }
                 .chat-row { margin-bottom: 12px; padding: 4px 8px; border-radius: 4px; border-left: 3px solid transparent; }

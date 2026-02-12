@@ -332,6 +332,7 @@ pub fn App() -> impl IntoView {
 
             <style>
                 "
+                /* --- APP LAYOUT --- */
                 .chat-app { display: flex; flex-direction: column; height: 100vh; background: #121212; font-family: sans-serif; color: #fff; }
                 .setup-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
                 .status-card { background: #1e1e1e; padding: 20px; border-radius: 8px; width: 350px; margin-bottom: 20px; text-align: center; }
@@ -339,105 +340,123 @@ pub fn App() -> impl IntoView {
                 .fill { height: 100%; background: #00ff88; transition: width 0.3s; }
                 .primary-btn { background: #00ff88; color: #000; border: none; padding: 15px 30px; font-weight: bold; border-radius: 5px; cursor: pointer; }
 
-                .tab-bar { display: flex; background: #1e1e1e; border-bottom: 1px solid #333; }
-                .tab-btn {
-                    flex: 1;
-                    padding: 12px;
-                    border: none;
-                    background: none;
-                    cursor: pointer;
-                    font-weight: bold;
-                    transition: all 0.2s;
-                    opacity: 0.6; /* Dimmed when inactive */
-                    border-bottom: 2px solid transparent; /* Reserve space for border */
-                }
-
-                .tab-btn:hover, .tab-btn.active {
-                    opacity: 1; /* Fully visible when active/hover */
-                    background: #252525;
-                }
-
-                /* --- SPECIFIC TAB COLORS --- */
-
-                /* 전체 (All): Recommended White */
-                .tab-btn[data-tab='전체'] { color: #FFFFFF; }
-                .tab-btn.active[data-tab='전체'] { border-bottom-color: #FFFFFF; }
-
-                /* 월드 (World): Purple */
-                .tab-btn[data-tab='월드'] { color: #BA68C8; }
-                .tab-btn.active[data-tab='월드'] { border-bottom-color: #BA68C8; }
-
-                /* 길드 (Guild): Green */
-                .tab-btn[data-tab='길드'] { color: #81C784; }
-                .tab-btn.active[data-tab='길드'] { border-bottom-color: #81C784; }
-
-                /* 파티 (Party): Blue */
-                .tab-btn[data-tab='파티'] { color: #4FC3F7; }
-                .tab-btn.active[data-tab='파티'] { border-bottom-color: #4FC3F7; }
-
-                /* 로컬 (Local): White-Gray */
-                .tab-btn[data-tab='로컬'] { color: #BDBDBD; }
-                .tab-btn.active[data-tab='로컬'] { border-bottom-color: #BDBDBD; }
-
-                /* 시스템 (System): Yellow */
-                .tab-btn[data-tab='시스템'] { color: #FFD54F; }
-                .tab-btn.active[data-tab='시스템'] { border-bottom-color: #FFD54F; }
-
-                .chat-container { flex: 1; overflow-y: auto; padding: 10px; user-select: text; }
-                .chat-row {
-                    margin-bottom: 12px;
-                    padding: 0 8px; /* Removed vertical padding, added horizontal */
-                    display: flex;
-                    flex-direction: column;
-                    align-items: flex-start; /* Aligns bubbles to the left */
-                }
-
-                .chat-row[data-channel='LOCAL'] .msg-body { border-left-color: #E0E0E0; }
-                .chat-row[data-channel='PARTY'] .msg-body { border-left-color: #4FC3F7; background: #1a2733; } /* Slight blue tint */
-                .chat-row[data-channel='GUILD'] .msg-body { border-left-color: #81C784; background: #1a3320; } /* Slight green tint */
-                .chat-row[data-channel='WORLD'] .msg-body { border-left-color: #BA68C8; }
-                .chat-row[data-channel='SYSTEM'] .msg-body { border-left-color: #FFD54F; background: #332b00; } /* Slight yellow tint */
-
-                .chat-row[data-channel='LOCAL'] .nickname { color: #E0E0E0; }
-                .chat-row[data-channel='PARTY'] .nickname { color: #4FC3F7; }
-                .chat-row[data-channel='GUILD'] .nickname { color: #81C784; }
-                .chat-row[data-channel='WORLD'] .nickname { color: #BA68C8; }
-
-                /* --- THE MESSAGE BUBBLE BOX --- */
-                .msg-body {
-                    background: #252525; /* Lighter than the #121212 app background */
-                    padding: 10px 14px;
-                    border-radius: 0 12px 12px 12px; /* Top-left corner is square for the speech bubble look */
-                    margin-top: 4px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.2); /* Subtle depth */
-                    max-width: 90%; /* Prevents bubbles from stretching too wide */
-                    position: relative;
-                    border-left: 3px solid transparent; /* Reserve space for the channel color */
-                }
-
-                /* --- TEXT STYLES --- */
-                .msg-header {
-                    font-size: 0.75rem;
-                    margin-left: 4px; /* Align with the start of the bubble */
-                    margin-bottom: 2px;
-                    color: #888;
-                    display: flex;
-                    gap: 8px;
-                }
-                .original { color: #ddd; font-size: 0.95rem; }
-                .translated {
-                    color: #00ff88;
-                    margin-top: 6px;
-                    padding-top: 6px;
-                    border-top: 1px solid rgba(255, 255, 255, 0.1); /* Separator line */
-                    font-size: 0.95rem;
-                }
-                .nickname { color: #ffcc00; font-weight: bold; }
-                .translated { color: #00ff88; margin-top: 2px; font-size: 0.95rem; }
-
+                /* --- TAB BAR (Adaptive Colors) --- */
                 .tab-bar { display: flex; justify-content: space-between; align-items: center; background: #1e1e1e; border-bottom: 1px solid #333; }
                 .tabs { display: flex; flex: 1; }
 
+                .tab-btn {
+                    flex: 1; padding: 12px; border: none; background: none;
+                    cursor: pointer; font-weight: bold; transition: all 0.2s;
+                    opacity: 0.6; border-bottom: 2px solid transparent;
+                }
+                .tab-btn:hover, .tab-btn.active { opacity: 1; background: #252525; }
+
+                /* Tab Specific Colors */
+                .tab-btn[data-tab='전체'] { color: #FFFFFF; }
+                .tab-btn.active[data-tab='전체'] { border-bottom-color: #FFFFFF; }
+
+                .tab-btn[data-tab='월드'] { color: #BA68C8; }
+                .tab-btn.active[data-tab='월드'] { border-bottom-color: #BA68C8; }
+
+                .tab-btn[data-tab='길드'] { color: #81C784; }
+                .tab-btn.active[data-tab='길드'] { border-bottom-color: #81C784; }
+
+                .tab-btn[data-tab='파티'] { color: #4FC3F7; }
+                .tab-btn.active[data-tab='파티'] { border-bottom-color: #4FC3F7; }
+
+                .tab-btn[data-tab='로컬'] { color: #BDBDBD; }
+                .tab-btn.active[data-tab='로컬'] { border-bottom-color: #BDBDBD; }
+
+                .tab-btn[data-tab='시스템'] { color: #FFD54F; }
+                .tab-btn.active[data-tab='시스템'] { border-bottom-color: #FFD54F; }
+
+
+                /* --- CHAT ROWS (Distinct Background Tints) --- */
+                .chat-container { flex: 1; overflow-y: auto; padding: 10px; user-select: text; }
+
+                .chat-row {
+                    margin-bottom: 8px;
+                    padding: 6px 10px;
+                    border-radius: 4px;
+                    border-left: 3px solid transparent;
+                    /* Default Text Color */
+                    color: #ddd;
+                }
+
+                /* 1. LOCAL (Gray/White) */
+                .chat-row[data-channel='LOCAL'] {
+                    border-left-color: #BDBDBD;
+                    background: rgba(189, 189, 189, 0.05); /* Subtle Gray Tint */
+                }
+                .chat-row[data-channel='LOCAL'] .nickname { color: #BDBDBD; }
+
+                /* 2. PARTY (Blue) */
+                .chat-row[data-channel='PARTY'] {
+                    border-left-color: #4FC3F7;
+                    background: rgba(79, 195, 247, 0.08); /* Subtle Blue Tint */
+                }
+                .chat-row[data-channel='PARTY'] .nickname { color: #4FC3F7; }
+
+                /* 3. GUILD (Green) */
+                .chat-row[data-channel='GUILD'] {
+                    border-left-color: #81C784;
+                    background: rgba(129, 199, 132, 0.08); /* Subtle Green Tint */
+                }
+                .chat-row[data-channel='GUILD'] .nickname { color: #81C784; }
+
+                /* 4. WORLD (Purple) */
+                .chat-row[data-channel='WORLD'] {
+                    border-left-color: #BA68C8;
+                    background: rgba(186, 104, 200, 0.08); /* Subtle Purple Tint */
+                }
+                .chat-row[data-channel='WORLD'] .nickname { color: #BA68C8; }
+
+                /* 5. SYSTEM (Yellow) */
+                .chat-row[data-channel='SYSTEM'] {
+                    border-left-color: #FFD54F;
+                    background: rgba(255, 213, 79, 0.08); /* Subtle Yellow Tint */
+                }
+                /* System messages usually don't have a nickname, or it's "SYSTEM" */
+                .chat-row[data-channel='SYSTEM'] .nickname { color: #FFD54F; }
+
+
+                /* --- TEXT STYLING --- */
+                .msg-header {
+                    display: flex;
+                    align-items: baseline; /* Aligns text by their bottom line (better for different sizes) */
+                    gap: 8px;
+                    margin-bottom: 4px;
+                    opacity: 0.9;
+                }
+
+                .nickname {
+                    font-size: 1.05rem; /* Bigger than the standard text */
+                    font-weight: 600;   /* Extra Bold */
+                    letter-spacing: 0.5px;
+                    /* Color is set by the data-channel rules above, so we don't force it here */
+                }
+
+                .lvl {
+                    font-size: 0.75rem; /* Keep metadata small */
+                    color: #888;
+                }
+
+                .time {
+                    font-size: 0.75rem;
+                    color: #666;
+                    margin-left: auto;
+                }
+
+                .msg-body { display: flex; flex-direction: column; }
+                .original { font-size: 0.95rem; line-height: 1.4; }
+                .translated {
+                    color: #00ff88;
+                    margin-top: 4px;
+                    font-size: 0.95rem;
+                    font-weight: 500;
+                }
+
+                /* --- UTILS --- */
                 .dict-sync-area { padding-right: 15px; position: relative; }
                 .sync-btn {
                     background: #333; color: #aaa; border: 1px solid #444;
@@ -453,7 +472,6 @@ pub fn App() -> impl IntoView {
                     border-radius: 50%; border: 2px solid #1e1e1e;
                     animation: pulse 2s infinite;
                 }
-
                 @keyframes pulse {
                     0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7); }
                     70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(255, 68, 68, 0); }

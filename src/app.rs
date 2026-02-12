@@ -113,12 +113,15 @@ pub fn App() -> impl IntoView {
                         let translated_text = resp["translated"].as_str().unwrap_or_default().to_string();
 
                         set_chat_log.update(|log| {
-                            // TRUE O(1) Lookup: No more .iter().position()
-                            log!("Log {:?}", &log);
-                            log!("Target {:?}", &target_pid);
-                            if let Some(packet) = log.get_mut(&target_pid) {
-                                log!("Translated Text is {:?}", &translated_text);
-                                packet.translated = Some(translated_text);
+                            // 1. Find and Clone the existing packet
+                            if let Some(packet) = log.get(&target_pid) {
+                                let mut updated_packet = packet.clone();
+
+                                // 2. Apply the update
+                                updated_packet.translated = Some(translated_text);
+
+                                // 3. RE-INSERT: This replaces the old value and signals a change
+                                log.insert(target_pid, updated_packet);
                             }
                         });
                     }
@@ -177,9 +180,9 @@ pub fn App() -> impl IntoView {
                         if let Ok(history_res) = invoke("get_chat_history", JsValue::NULL).await {
                             // Hydrate the signal directly with the IndexMap
                             log!("History: {:?}", &history_res);
-                            if let Ok(history) = serde_wasm_bindgen::from_value::<IndexMap<u64, ChatPacket>>(history_res) {
-                                log!("History inside: {:?}", &history);
-                                set_chat_log.set(history);
+                            if let Ok(history_vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(history_res) {
+                                let history_map: IndexMap<u64, ChatPacket> = history_vec.into_iter().map(|p| (p.pid, p)).collect();
+                                set_chat_log.set(history_map);
                             }
                         }
 
@@ -268,33 +271,37 @@ pub fn App() -> impl IntoView {
                         key=|msg| msg.pid
                         children=move |msg| {
                             let is_jp = is_japanese(&msg.message);
-                            let translated_base = msg.translated.clone();
+                            let nickname = msg.nickname.clone();
+                            let message = msg.message.clone();
+
                             view! {
                                 <div class="chat-row" data-channel=msg.channel.clone()>
                                     <div class="msg-header">
-                                        <span class="nickname">{msg.nickname.clone()}</span>
+                                        <span class="nickname">{nickname}</span>
                                         <span class="lvl">"Lv." {msg.level}</span>
                                         <span class="time">{format_time(msg.timestamp)}</span>
                                     </div>
                                     <div class="msg-body">
                                         <div class="original">
-                                            {if is_jp { "[원문] " } else { "" }} {msg.message.clone()}
+                                            {if is_jp { "[원문] " } else { "" }} {message}
                                         </div>
-                                        {
-                                            let tw = translated_base.clone();
-                                            let tc = translated_base.clone();
-                                            view! {
-                                                <Show when=move || tw.is_some()>
+
+                                        // REACTIVE BLOCK: This closure re-executes when the 'msg'
+                                        // associated with this PID is replaced in the IndexMap.
+                                        {move || {
+                                            msg.translated.clone().map(|text| {
+                                                view! {
                                                     <div class="translated">
-                                                        "[번역] " {let tf = tc.clone(); move || tf.clone().unwrap_or_default()}
+                                                        "[번역] " {text}
                                                     </div>
-                                                </Show>
-                                            }
-                                        }
+                                                }
+                                            })
+                                        }}
                                     </div>
                                 </div>
                             }
-                        }/>
+                        }
+                    />
                 </div>
             </Show>
 

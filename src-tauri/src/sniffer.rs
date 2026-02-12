@@ -111,57 +111,43 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
 // ==========================================
 
 pub fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
-    // 1. PacketBuffer guarantees data starts with 0x0A.
-    // If it doesn't, this isn't a valid chat packet.
-    if data.is_empty() || data[0] != 0x0A {
-        return None;
-    }
-
-    // 2. No offsets needed! Just use the data directly.
-    let stream = data;
+    if data.len() < 3 || data[0] != 0x0A { return None; }
 
     let mut chat = ChatPacket::default();
-    let mut i = 1; // Skip the 0x0A tag
+    let (total_len, header_read) = read_varint(&data[1..]);
+    let mut i = 1 + header_read;
 
-    let (total_len, read) = read_varint(&stream[i..]);
-    i += read;
+    // Ensure we don't read past the actual Protobuf payload
+    let safe_end = (i + total_len as usize).min(data.len());
 
-    let safe_end = (i + total_len as usize).min(stream.len());
-
-    // --- ROOT LEVEL SCAN ---
     while i < safe_end {
-        // ... (Keep your existing match loop exactly the same)
-        let tag = stream[i];
+        let tag = data[i];
         let wire_type = tag & 0x07;
         let field_num = tag >> 3;
         i += 1;
 
         match field_num {
             1 => { // Channel ID
-                let (val, read) = read_varint(&stream[i..safe_end]);
+                let (val, read) = read_varint(&data[i..safe_end]);
                 chat.channel = match val {
-                    2 => "LOCAL".into(),
-                    3 => "PARTY".into(),
-                    4 => "GUILD".into(),
-                    _ => "WORLD".into(),
+                    2 => "LOCAL".into(), 3 => "PARTY".into(), 4 => "GUILD".into(), _ => "WORLD".into(),
                 };
                 i += read;
             }
             2 => { // User Container Block
-                let (len, read) = read_varint(&stream[i..safe_end]);
+                let (len, read) = read_varint(&data[i..safe_end]);
                 i += read;
                 let block_end = (i + len as usize).min(safe_end);
-
-                if let Some(sub_data) = stream.get(i..block_end) {
+                if let Some(sub_data) = data.get(i..block_end) {
                     parse_user_container(sub_data, &mut chat);
                 }
                 i = block_end;
             }
-            _ => i += skip_field(wire_type, &stream[i..safe_end]),
+            _ => i += skip_field(wire_type, &data[i..safe_end]),
         }
     }
-    println!("chat inside: {:?}", chat);
 
+    // Only return if we actually captured a message and a user
     if !chat.message.is_empty() && chat.uid > 0 { Some(chat) } else { None }
 }
 
@@ -282,6 +268,9 @@ fn read_varint(data: &[u8]) -> (u64, usize) {
     let mut pos = 0;
     while pos < data.len() {
         let byte = data[pos];
+        if shift >= 64 {
+            return (value, pos); // Stop if we hit 64 bits to prevent panic
+        }
         value |= ((byte & 0x7F) as u64) << shift;
         pos += 1;
         if (byte & 0x80) == 0 { break; }
@@ -336,8 +325,7 @@ fn extract_tcp_payload(data: &[u8]) -> Option<&[u8]> {
 }
 
 #[tauri::command]
-pub fn get_chat_history(state: tauri::State<AppState>) -> IndexMap<u64, ChatPacket> {
+pub fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatPacket> {
     let history = state.chat_history.lock().unwrap();
-    println!("History: {:?}", history);
-    history.clone()
+    history.values().cloned().collect()
 }

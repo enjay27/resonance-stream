@@ -12,6 +12,9 @@ extern "C" {
     #[wasm_bindgen(catch, js_namespace = ["window", "__TAURI__", "core"], js_name = invoke)]
     async fn invoke(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
 
+    #[wasm_bindgen(catch, js_namespace = ["window", "__TAURI__", "core"], js_name = invoke)]
+    async fn invoke_string(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
+
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"], js_name = listen)]
     async fn listen(event: &str, handler: &Closure<dyn FnMut(JsValue)>) -> JsValue;
 }
@@ -52,6 +55,26 @@ pub fn App() -> impl IntoView {
     let (progress, set_progress) = signal(0u8);
 
     let (active_tab, set_active_tab) = signal("전체".to_string());
+
+    let (dict_update_available, set_dict_update_available) = signal(false);
+
+    // --- DICTIONARY SYNC ACTION ---
+    let sync_dict_action = Action::new_local(|_: &()| async move {
+        // We move the !Send Tauri future into this local action
+        match invoke("sync_dictionary", JsValue::NULL).await {
+            Ok(_) => {
+                log!("Dictionary Synced Successfully");
+                "최신 상태".to_string()
+            }
+            Err(e) => {
+                log!("Sync Error: {:?}", e);
+                "동기화 실패".to_string()
+            }
+        }
+    });
+
+    let sync_status = move || sync_dict_action.value().get().unwrap_or_else(|| "".to_string());
+    let is_syncing = sync_dict_action.pending();
 
     // --- FINE-GRAINED REACTIVE STATE ---
     // The IndexMap now holds individual RwSignals for each message.
@@ -145,6 +168,12 @@ pub fn App() -> impl IntoView {
     // --- STARTUP HYDRATION ---
     Effect::new(move |_| {
         spawn_local(async move {
+            if let Ok(res) = invoke("check_dict_update", JsValue::NULL).await {
+                if let Some(needed) = res.as_bool() {
+                    set_dict_update_available.set(needed);
+                }
+            }
+
             if let Ok(res) = invoke("check_model_status", JsValue::NULL).await {
                 if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(res) {
                     if status.exists {
@@ -191,14 +220,32 @@ pub fn App() -> impl IntoView {
         <main class="chat-app">
             <Show when=move || model_ready.get() fallback=|| view! { <div class="setup-view">"..."</div> }>
                 <nav class="tab-bar">
-                    {vec!["전체", "시스템", "로컬", "파티", "길드", "월드"].into_iter().map(|t| {
-                        let t_name = t.to_string();
-                        let t_click = t_name.clone();
-                        view! {
-                            <button class=move || if active_tab.get() == t_name { "tab-btn active" } else { "tab-btn" }
-                                on:click=move |_| set_active_tab.set(t_click.clone())>{t}</button>
-                        }
-                    }).collect_view()}
+                    <div class="tabs">
+                        {vec!["전체", "월드", "길드", "파티", "로컬", "시스템"].into_iter().map(|t| {
+                            let t_name = t.to_string();
+                            let t_click = t_name.clone();
+                            view! {
+                                <button class=move || if active_tab.get() == t_name { "tab-btn active" } else { "tab-btn" }
+                                    on:click=move |_| set_active_tab.set(t_click.clone())>{t}</button>
+                            }
+                        }).collect_view()}
+                    </div>
+
+                    // --- DICTIONARY SYNC BUTTON ---
+                    <div class="dict-sync-area">
+                        <button class="sync-btn"
+                            on:click=move |_| {
+                                sync_dict_action.dispatch(());
+                                set_dict_update_available.set(false);
+                            }
+                            disabled=is_syncing
+                        >
+                            {move || if is_syncing.get() { "동기화 중..." } else { "사전 업데이트" }}
+                            <Show when=move || dict_update_available.get()>
+                                <span class="update-dot"></span>
+                            </Show>
+                        </button>
+                    </div>
                 </nav>
 
                 <div class="chat-container" node_ref=chat_container_ref
@@ -265,6 +312,31 @@ pub fn App() -> impl IntoView {
                 .msg-header { font-size: 0.85rem; display: flex; gap: 8px; color: #888; }
                 .nickname { color: #ffcc00; font-weight: bold; }
                 .translated { color: #00ff88; margin-top: 2px; font-size: 0.95rem; }
+
+                .tab-bar { display: flex; justify-content: space-between; align-items: center; background: #1e1e1e; border-bottom: 1px solid #333; }
+                .tabs { display: flex; flex: 1; }
+
+                .dict-sync-area { padding-right: 15px; position: relative; }
+                .sync-btn {
+                    background: #333; color: #aaa; border: 1px solid #444;
+                    padding: 5px 12px; border-radius: 4px; font-size: 0.75rem;
+                    cursor: pointer; position: relative; transition: all 0.2s;
+                }
+                .sync-btn:hover { background: #444; color: #fff; }
+                .sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+                .update-dot {
+                    position: absolute; top: -4px; right: -4px;
+                    width: 8px; height: 8px; background: #ff4444;
+                    border-radius: 50%; border: 2px solid #1e1e1e;
+                    animation: pulse 2s infinite;
+                }
+
+                @keyframes pulse {
+                    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7); }
+                    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(255, 68, 68, 0); }
+                    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
+                }
                 "
             </style>
         </main>

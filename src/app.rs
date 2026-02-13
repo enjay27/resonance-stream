@@ -150,7 +150,6 @@ pub fn App() -> impl IntoView {
     let (unread_count, set_unread_count) = signal(0); // [NEW] Tracks missed messages
 
     let (active_menu_id, set_active_menu_id) = signal(None::<u64>); // [NEW] Track open menu
-    let (sniffer_warning, set_sniffer_warning) = signal(false);     // [NEW] Track watchdog warning
 
     let chat_container_ref = create_node_ref::<html::Div>();
 
@@ -258,20 +257,9 @@ pub fn App() -> impl IntoView {
             listen("system-event", &system_closure).await;
             listen("translator-event", &trans_closure).await;
 
-            // [NEW] Listener for Watchdog Warnings
-            let sniffer_status_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    if let Some("warning") = ev["payload"].as_str() {
-                        set_sniffer_warning.set(true);
-                    }
-                }
-            }) as Box<dyn FnMut(JsValue)>);
-            listen("sniffer-status", &sniffer_status_closure).await;
-
             packet_closure.forget();
             system_closure.forget();
             trans_closure.forget();
-            sniffer_status_closure.forget();
         });
     };
 
@@ -395,21 +383,6 @@ pub fn App() -> impl IntoView {
 
                     // --- DICTIONARY SYNC BUTTON ---
                     <div class="control-area">
-
-                        <button class="icon-btn"
-                            title="Restart Sniffer"
-                            on:click=move |_| {
-                                set_sniffer_warning.set(false);
-                                spawn_local(async move {
-                                    let _ = invoke("force_restart_sniffer", JsValue::NULL).await;
-                                });
-                            }
-                        >
-                            "🔄"
-                            <Show when=move || sniffer_warning.get()>
-                                <span class="update-dot"></span>
-                            </Show>
-                        </button>
 
                         // 1. Clear Chat Button
                         <button class="icon-btn danger"
@@ -880,16 +853,15 @@ pub fn App() -> impl IntoView {
                 /* --- UTILS --- */
                 .control-area {
                     padding-right: 15px;
-                    position: relative;
-                    display: flex;       /* Aligns buttons horizontally */
+                    display: flex;
                     align-items: center;
-                    gap: 8px;            /* Spacing between Trash and Update button */
+                    gap: 12px; /* Slightly increased gap for better target area */
                 }
                 .dict-sync-area { padding-right: 15px; position: relative; }
                 .sync-btn {
-                    background: #333; color: #aaa; border: 1px solid #444;
-                    padding: 5px 12px; border-radius: 4px; font-size: 0.75rem;
-                    cursor: pointer; position: relative; transition: all 0.2s;
+                    border-color: #00ff88;
+                    color: #00ff88;
+                    background: rgba(0, 255, 136, 0.05);
                 }
                 .sync-btn:hover { background: #444; color: #fff; }
                 .sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }

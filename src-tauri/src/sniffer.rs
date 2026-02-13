@@ -56,20 +56,6 @@ pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State
     start_sniffer(window, app, state);
 }
 
-#[tauri::command]
-pub fn force_restart_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
-    inject_system_message(&app, "[System] Manual Sniffer Restart Requested...");
-
-    // We don't need to manually kill the thread.
-    // Calling start_sniffer again will increment the Generation ID.
-    // The old thread will see the ID change and exit automatically.
-
-    // Reset the "Running" flag so start_sniffer accepts the request
-    IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
-
-    start_sniffer(window, app, state);
-}
-
 fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     // 1. Check if we are "officially" running
     if IS_SNIFFER_RUNNING.load(Ordering::SeqCst) {

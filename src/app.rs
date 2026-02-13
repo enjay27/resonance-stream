@@ -55,6 +55,7 @@ pub fn App() -> impl IntoView {
     let (progress, set_progress) = signal(0u8);
 
     let (active_tab, set_active_tab) = signal("전체".to_string());
+    let (search_term, set_search_term) = signal("".to_string());
 
     // --- SEPARATE DATA STREAMS ---
     // 1. Game Chat (IndexMap for updates)
@@ -246,15 +247,12 @@ pub fn App() -> impl IntoView {
     // --- OPTIMIZED VIEW LOGIC ---
     let filtered_messages = Memo::new(move |_| {
         let tab = active_tab.get();
+        let search = search_term.get().to_lowercase(); // Case-insensitive
 
-        match tab.as_str() {
-            // O(1): Return System Vector directly
+        // Step A: Get the list based on Tab
+        let list_by_tab = match tab.as_str() {
             "시스템" => system_log.get(),
-
-            // O(1): Return Game Vector directly (No filtering!)
             "전체" => chat_log.get().values().cloned().collect(),
-
-            // O(N): Filter Game Vector for specific channels
             _ => {
                 let key = match tab.as_str() {
                     "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD"
@@ -262,8 +260,20 @@ pub fn App() -> impl IntoView {
                 chat_log.get().values()
                     .filter(|m| m.get().channel == key)
                     .cloned()
-                    .collect()
+                    .collect::<Vec<_>>()
             }
+        };
+
+        // Step B: Filter by Search Term (if exists)
+        if search.is_empty() {
+            list_by_tab
+        } else {
+            list_by_tab.into_iter().filter(|sig| {
+                let msg = sig.get();
+                // Check Nickname OR Message content
+                msg.nickname.to_lowercase().contains(&search) ||
+                    msg.message.to_lowercase().contains(&search)
+            }).collect()
         }
     });
 
@@ -343,7 +353,28 @@ pub fn App() -> impl IntoView {
                             view! {
                                 <div class="chat-row" data-channel=move || sig.get().channel.clone()>
                                     <div class="msg-header">
-                                        <span class="nickname">{move || sig.get().nickname.clone()}</span>
+                                        // [CHANGED] Added Click Handler
+                                        <span class=move || if search_term.get() == sig.get().nickname { "nickname active" } else { "nickname" }
+                                            title="Click to Filter / Unfilter"
+                                            on:click=move |ev| {
+                                                // Stop the click from bubbling up (good practice)
+                                                ev.stop_propagation();
+
+                                                let clicked_name = sig.get().nickname;
+                                                let current_search = search_term.get_untracked(); // Use untracked to avoid loop
+
+                                                if current_search == clicked_name {
+                                                    // If already filtering by this name -> CLEAR
+                                                    set_search_term.set("".to_string());
+                                                } else {
+                                                    // If empty or filtering by someone else -> SET
+                                                    set_search_term.set(clicked_name);
+                                                }
+                                            }
+                                        >
+                                            {move || sig.get().nickname.clone()}
+                                        </span>
+
                                         <span class="lvl">"Lv." {move || sig.get().level}</span>
                                         <span class="time">{format_time(msg.timestamp)}</span>
                                     </div>
@@ -501,12 +532,25 @@ pub fn App() -> impl IntoView {
                 }
 
                 .nickname {
-                    font-size: 1.05rem; /* Bigger than the standard text */
-                    font-weight: 600;   /* Extra Bold */
+                    font-size: 1.05rem;
+                    font-weight: 800;
                     letter-spacing: 0.5px;
-                    /* Color is set by the data-channel rules above, so we don't force it here */
-                }
 
+                    /* [NEW] Interactive Styles */
+                    cursor: pointer;          /* Hand cursor */
+                    transition: all 0.2s;     /* Smooth hover effect */
+                    border-bottom: 1px dashed transparent; /* Subtle hint */
+                }
+                .nickname:hover {
+                    filter: brightness(1.2);      /* Make it slightly brighter */
+                    text-decoration: underline;   /* Standard "Link" behavior */
+                    border-bottom-color: currentColor; /* Underline matches channel color */
+                }
+                .nickname.active {
+                    color: #00ff88 !important; /* Force green highlight */
+                    text-decoration: underline;
+                    border-bottom: 1px solid #00ff88;
+                }
                 .lvl {
                     font-size: 0.75rem; /* Keep metadata small */
                     color: #888;

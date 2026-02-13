@@ -2,6 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 use indexmap::IndexMap;
 use windivert::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -9,98 +10,162 @@ use tauri::{AppHandle, Emitter, Manager, State, Window};
 use crate::{inject_system_message, store_and_emit};
 use crate::packet_buffer::PacketBuffer;
 
+// --- DATA STRUCTURES ---
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(rename_all = "camelCase")] // CRITICAL: Aligns Rust snake_case with JS camelCase
+#[serde(rename_all = "camelCase")]
 pub struct ChatPacket {
     pub pid: u64,
-    pub channel: String,      // e.g., "PARTY", "LOCAL"
-    pub entity_id: u64,       // e.g., 80
-    pub uid: u64,             // e.g., 823656
-    pub nickname: String,     // e.g., "NAME"
-    pub class_id: u64,        // e.g., 2
-    pub status_flag: u64,     // e.g., 1
-    pub level: u64,           // e.g., 60
-    pub timestamp: u64,       // e.g., 1770753503
-    pub message: String,      // e.g., "hi" or "emojiPic=..."
-    #[serde(default)]         // Ensures None doesn't break parsing
+    pub channel: String,
+    pub entity_id: u64,
+    pub uid: u64,
+    pub nickname: String,
+    pub class_id: u64,
+    pub status_flag: u64,
+    pub level: u64,
+    pub timestamp: u64,
+    pub message: String,
+    #[serde(default)]
     pub translated: Option<String>,
 }
 
 pub struct AppState {
     pub tx: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
-
-    // HOT STORAGE: Game Chat (IndexMap for O(1) PID access)
     pub chat_history: Mutex<IndexMap<u64, ChatPacket>>,
-
-    // COLD STORAGE: System/App Logs (Ring Buffer)
     pub system_history: Mutex<VecDeque<ChatPacket>>,
-
     pub next_pid: AtomicU64,
 }
 
+// --- GLOBAL STATE ---
 static IS_SNIFFER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+// Watchdog Timer (Last time we saw a packet)
+static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
+
+// Generation Counter: Allows us to "soft kill" old threads safely
+static SNIFFER_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+// Helper to "Kick" or "Feed" the Watchdog
+fn feed_watchdog() {
+    let start = SystemTime::now();
+    let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
+    LAST_TRAFFIC_TIME.store(since_the_epoch.as_secs(), Ordering::Relaxed);
+}
 
 #[tauri::command]
 pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State<'_, AppState>) {
     start_sniffer(window, app, state);
 }
 
+#[tauri::command]
+pub fn force_restart_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
+    inject_system_message(&app, "[System] Manual Sniffer Restart Requested...");
+
+    // We don't need to manually kill the thread.
+    // Calling start_sniffer again will increment the Generation ID.
+    // The old thread will see the ID change and exit automatically.
+
+    // Reset the "Running" flag so start_sniffer accepts the request
+    IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
+
+    start_sniffer(window, app, state);
+}
+
 fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
+    // 1. Check if we are "officially" running
     if IS_SNIFFER_RUNNING.load(Ordering::SeqCst) {
-        // If already running, just send a "Re-attached" system message
-        inject_system_message(&app, "System: Sniffer already active. Re-attached to stream.");
+        inject_system_message(&app, "System: Sniffer already active.");
         return;
     }
 
     IS_SNIFFER_RUNNING.store(true, Ordering::SeqCst);
-
     state.next_pid.store(1, Ordering::SeqCst);
 
+    // 2. Increment Generation (This kills the old thread logically)
+    let my_generation = SNIFFER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+
+    // Reset watchdog on start
+    feed_watchdog();
+
+    // --- WATCHDOG THREAD (Red Dot Logic) ---
+    let app_handle_watchdog = app.clone();
+    thread::spawn(move || {
+        loop {
+            thread::sleep(std::time::Duration::from_secs(5));
+
+            // [CHECK] If I am an old watchdog for a dead sniffer, I must retire.
+            if SNIFFER_GENERATION.load(Ordering::Relaxed) != my_generation {
+                break;
+            }
+
+            let last = LAST_TRAFFIC_TIME.load(Ordering::Relaxed);
+            if last == 0 { continue; }
+
+            let start = SystemTime::now();
+            let now = start.duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+            // TRIGGER: No packets for 15 seconds
+            if now.saturating_sub(last) > 15 {
+                inject_system_message(&app_handle_watchdog, "[Warning] No game traffic detected for 15s.");
+
+                // Emit event to Frontend (Red Dot)
+                let _ = app_handle_watchdog.emit("sniffer-status", "warning");
+
+                // Feed it to prevent spamming the warning every 5 seconds
+                feed_watchdog();
+            }
+        }
+    });
+
+    // --- MAIN SNIFFER THREAD ---
     let app_handle = app.clone();
     thread::spawn(move || {
-        inject_system_message(&app, "Eye of Star Resonance: Sniffer Active (Port 5003)");
+        inject_system_message(&app_handle, format!("Eye of Star Resonance: Active (Gen {})", my_generation));
 
-        // Filter strictly for the Chat Server
         let filter = "tcp.PayloadLength > 0 and (tcp.SrcPort == 5003 or tcp.DstPort == 5003)";
         let flags = WinDivertFlags::new().set_sniff();
 
         let wd = match WinDivert::network(filter, 0, flags) {
             Ok(w) => w,
             Err(e) => {
-                inject_system_message(&app, format!("[Sniffer] FATAL ERROR: {:?}", e));
+                inject_system_message(&app_handle, format!("[Sniffer] FATAL ERROR: {:?}", e));
+                IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
                 return;
             }
         };
 
-        // Map of [IP+Port] -> PacketBuffer
         let mut streams: HashMap<[u8; 6], PacketBuffer> = HashMap::new();
         let mut buffer = [0u8; 65535];
 
         loop {
+            // [CRITICAL] COOPERATIVE SHUTDOWN
+            // If the global generation has changed, I am obsolete.
+            if SNIFFER_GENERATION.load(Ordering::Relaxed) != my_generation {
+                println!("[Sniffer Gen {}] Shutdown signal received. Exiting.", my_generation);
+                break; // This drops 'wd', closing the handle cleanly.
+            }
+
             if let Ok(packet) = wd.recv(Some(&mut buffer)) {
+                // Feed the Watchdog because we saw traffic
+                feed_watchdog();
+
                 let raw_data = packet.data;
 
-                // 1. Get the Stream Key using the RAW data (so we know the IP/Port)
+                // 1. Get the Stream Key
                 if let Some(stream_key) = extract_stream_key(&*raw_data) {
 
-                    // 2. EXTRACT THE PAYLOAD (Strip IP & TCP Headers)
+                    // 2. Extract Payload
                     if let Some(payload) = extract_tcp_payload(&*raw_data) {
 
-                        // CRITICAL FIX: Skip empty TCP ACKs.
-                        // A payload length of 0 means it's just a network ping, no game data.
-                        if payload.is_empty() {
-                            continue;
-                        }
+                        // Skip empty ACKs
+                        if payload.is_empty() { continue; }
 
-                        // 3. Now we feed ONLY the game data into the buffer
                         let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
                         p_buf.add(payload);
 
-                        // 4. Try to drain full packets based on your 2-byte header logic
+                        println!("[Sniffer] packet received {:?}", p_buf);
+
                         while let Some(full_packet) = p_buf.next() {
-                            // Send to parser (skipping the 2-byte length header)
                             if let Some(chat) = parse_star_resonance(&full_packet) {
-                                println!("chat: {:?}", chat);
                                 store_and_emit(&app_handle, chat);
                             }
                         }
@@ -108,11 +173,13 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
                 }
             }
         }
+
+        inject_system_message(&app_handle, "Old Sniffer Thread Terminated.");
     });
 }
 
 // ==========================================
-// PROTOBUF PARSING (DEEP EXTRACTION)
+// PARSING & UTILITIES (Keep your existing functions below)
 // ==========================================
 
 pub fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
@@ -152,7 +219,6 @@ pub fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
         }
     }
 
-    // Only return if we actually captured a message and a user
     if !chat.message.is_empty() && chat.uid > 0 { Some(chat) } else { None }
 }
 
@@ -174,7 +240,6 @@ fn parse_user_container(data: &[u8], chat: &mut ChatPacket) {
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
-
                 if let Some(sub_data) = data.get(i..block_end) {
                     parse_profile_block(sub_data, chat);
                 }
@@ -189,9 +254,7 @@ fn parse_user_container(data: &[u8], chat: &mut ChatPacket) {
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
-
                 if let Some(sub_data) = data.get(i..block_end) {
-                    // Chat string is always Tag 3 (0x1A) inside the Message Block
                     if let Some(msg) = find_string_by_tag(sub_data, 0x1A) {
                         chat.message = msg;
                     }
@@ -221,7 +284,6 @@ fn parse_profile_block(data: &[u8], chat: &mut ChatPacket) {
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
-
                 if let Some(sub_data) = data.get(i..block_end) {
                     chat.nickname = String::from_utf8_lossy(sub_data).into_owned();
                 }
@@ -246,8 +308,6 @@ fn parse_profile_block(data: &[u8], chat: &mut ChatPacket) {
         }
     }
 }
-
-// --- UTILITIES ---
 
 fn find_string_by_tag(data: &[u8], target_tag: u8) -> Option<String> {
     let mut i = 0;

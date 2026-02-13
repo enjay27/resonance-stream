@@ -1,6 +1,7 @@
 use crate::model_manager::*;
 use crate::python_translator::*;
 use crate::sniffer::*;
+use crate::config::*;
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
@@ -12,6 +13,8 @@ mod python_translator;
 mod sniffer_logic_test;
 mod sniffer;
 mod packet_buffer;
+mod config;
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -35,7 +38,9 @@ pub fn run() {
             check_dict_update,
             sync_dictionary,
             clear_chat_history,
-            set_always_on_top
+            set_always_on_top,
+            load_config,
+            save_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

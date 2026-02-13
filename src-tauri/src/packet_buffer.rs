@@ -26,8 +26,13 @@ impl PacketBuffer {
         } else {
             // No 0x0A found. Wait for more data.
             // Clear if it gets too big to prevent memory leaks from encrypted noise.
-            if self.buffer.len() > 8192 { self.buffer.clear(); }
-            return None;
+            // SAFETY VALVE: If buffer is huge but we found no valid packet, clear it.
+            // This recovers from "Out of Order" corruption by resetting the stream.
+            if self.buffer.len() > 8192 {
+                println!("[Buffer] Resetting corrupted buffer (len > 8192)");
+                self.buffer.clear();
+                return None;
+            }
         }
 
         // 2. We need at least 2 bytes to read the Tag + Varint Length

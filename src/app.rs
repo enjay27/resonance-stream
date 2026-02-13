@@ -419,8 +419,44 @@ pub fn App() -> impl IntoView {
 
             <style>
                 "
-                /* --- APP LAYOUT --- */
-                .chat-app { display: flex; flex-direction: column; height: 100vh; background: #121212; font-family: sans-serif; color: #fff; }
+                /* --- 1. GLOBAL RESET (Fixes Double Scrollbar) --- */
+                html, body {
+                    margin: 0;
+                    padding: 0;
+                    width: 100%;
+                    height: 100%;
+                    overflow: hidden; /* <--- CRITICAL: Disables the outer window scrollbar */
+                    background: #121212; /* Matches app bg to prevent white flashes */
+                }
+
+                /* --- 2. APP LAYOUT --- */
+                .chat-app {
+                    display: flex;
+                    flex-direction: column;
+                    height: 100vh; /* Takes full window height */
+                    background: #121212;
+                    font-family: sans-serif;
+                    color: #fff;
+                }
+
+                /* --- 3. CUSTOM SCROLLBAR DESIGN (Slim & Dark) --- */
+                /* Target the specific scrollable area */
+                .chat-container::-webkit-scrollbar {
+                    width: 6px; /* Very slim width */
+                }
+                .chat-container::-webkit-scrollbar-track {
+                    background: transparent; /* Invisible track */
+                }
+                .chat-container::-webkit-scrollbar-thumb {
+                    background: #444; /* Dark Grey Handle */
+                    border-radius: 3px; /* Rounded edges */
+                    transition: background 0.2s;
+                }
+                /* Hover Effect: Highlights the scrollbar when you interact with it */
+                .chat-container::-webkit-scrollbar-thumb:hover {
+                    background: #00ff88; /* Green glow on hover */
+                }
+
                 .setup-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
                 .status-card { background: #1e1e1e; padding: 20px; border-radius: 8px; width: 350px; margin-bottom: 20px; text-align: center; }
                 .progress-bar { width: 100%; height: 12px; background: #333; border-radius: 6px; overflow: hidden; margin-top: 10px; }
@@ -459,7 +495,12 @@ pub fn App() -> impl IntoView {
 
 
                 /* --- CHAT ROWS (Distinct Background Tints) --- */
-                .chat-container { flex: 1; overflow-y: auto; padding: 10px; user-select: text; }
+                .chat-container {
+                    flex: 1;
+                    overflow-y: auto; /* This enables the ONLY scrollbar we want */
+                    padding: 10px;
+                    user-select: text;
+                }
 
                 .chat-row {
                     margin-bottom: 8px;

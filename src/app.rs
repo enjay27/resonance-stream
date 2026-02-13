@@ -454,6 +454,19 @@ pub fn App() -> impl IntoView {
                         }
                     }
                 >
+                    // [NEW] Active Filter Chip
+                    <Show when=move || !search_term.get().is_empty()>
+                        <div class="filter-overlay-container">
+                            <div class="filter-chip">
+                                <span class="filter-label">"Filtering: " {move || search_term.get()}</span>
+                                <button class="filter-close-btn"
+                                    on:click=move |_| set_search_term.set("".to_string())
+                                >
+                                    "✕"
+                                </button>
+                            </div>
+                        </div>
+                    </Show>
 
                     // [NEW] Top-Right Notification Badge
                     <Show when=move || { unread_count.get() > 0 }>
@@ -1016,6 +1029,67 @@ pub fn App() -> impl IntoView {
                 @keyframes slideInRight {
                     from { opacity: 0; transform: translateX(20px); }
                     to { opacity: 1; transform: translateX(0); }
+                }
+
+                /* --- FILTER CHIP OVERLAY --- */
+                .filter-overlay-container {
+                    position: sticky;
+                    top: 10px;
+                    left: 0;
+                    right: 0;
+                    display: flex;
+                    justify-content: center;
+                    pointer-events: none; /* Allows scrolling through the container */
+                    z-index: 60;
+                }
+
+                .filter-chip {
+                    pointer-events: auto; /* Re-enable clicks for the chip itself */
+                    background: rgba(0, 255, 136, 0.9); /* Theme green with transparency */
+                    color: #000;
+                    padding: 6px 12px;
+                    border-radius: 20px;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                    font-weight: 700;
+                    font-size: 0.85rem;
+                    backdrop-filter: blur(4px);
+                    animation: slideDown 0.2s ease-out;
+                }
+
+                .filter-label {
+                    max-width: 150px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+                .filter-close-btn {
+                    background: rgba(0, 0, 0, 0.1);
+                    border: none;
+                    color: #000;
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    font-size: 0.75rem;
+                    font-weight: bold;
+                    transition: all 0.2s;
+                }
+
+                .filter-close-btn:hover {
+                    background: rgba(0, 0, 0, 0.3);
+                    transform: scale(1.1);
+                }
+
+                @keyframes slideDown {
+                    from { opacity: 0; transform: translateY(-10px); }
+                    to { opacity: 1; transform: translateY(0); }
                 }
                 "
             </style>

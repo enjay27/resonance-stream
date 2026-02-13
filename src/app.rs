@@ -118,7 +118,17 @@ pub fn App() -> impl IntoView {
             // LISTENER 1: Game Packets
             let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    if let Ok(packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
+                    // [CHANGED] parsing to 'mut' so we can modify it
+                    if let Ok(mut packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
+
+                        // [NEW] Sticker Transformation Logic
+                        // Detects "emojiPic=" pattern and replaces it with "스티커 전송"
+                        if packet.message.starts_with("emojiPic=") {
+                            packet.message = "스티커 전송".to_string();
+                            // Optional: We can force translation to None since it's already "translated"
+                            packet.translated = None;
+                        }
+
                         let packet_clone = packet.clone();
 
                         set_chat_log.update(|log| {
@@ -126,12 +136,13 @@ pub fn App() -> impl IntoView {
                             log.insert(packet.pid, RwSignal::new(packet));
                         });
 
-                        // Trigger Translation ONLY for Game Chat
+                        // Trigger Translation (Only if it's NOT a sticker anymore)
+                        // Since "스티커 전송" is Korean, is_japanese() will return false, saving API calls.
                         if is_japanese(&packet_clone.message) {
                             spawn_local(async move {
                                 let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                                   "text": packet_clone.message, "pid": packet_clone.pid
-                               })).unwrap();
+                       "text": packet_clone.message, "pid": packet_clone.pid
+                   })).unwrap();
                                 let _ = invoke("manual_translate", args).await;
                             });
                         }

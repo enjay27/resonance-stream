@@ -14,21 +14,29 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 # --- JOSA (PARTICLE) FIXER ---
 def fix_korean_josa(text):
     """
-    Corrects Korean particle mismatches (을/를, 이/가, 은/는, 와/과).
+    Corrects Korean particles (을/를, 이/가, 은/는, 와/과)
+    only when they are standalone or at the end of a word block.
     """
     def has_batchim(char):
         if not ('가' <= char <= '힣'): return False
         code = ord(char) - 44032
         return (code % 28) != 0
 
-    pattern = re.compile(r'([가-힣a-zA-Z0-9\)]+)\s*([을를이가은는와과])')
+    # Refined Regex:
+    # Group 1: The preceding word
+    # Group 2: The particle
+    # (?! [가-힣]): Negative lookahead - ensures the next char is NOT a Korean syllable
+    pattern = re.compile(r'([가-힣a-zA-Z0-9\)]+)(을|를|이|가|은|는|와|과)(?![가-힣])')
 
     def replace_callback(match):
         word = match.group(1)
         particle = match.group(2)
         last_char = word[-1]
+
+        # Determine batchim status of the last character
         has_final = has_batchim(last_char) if '가' <= last_char <= '힣' else False
 
+        # Particle Mapping
         if particle in ['을', '를']: new_p = '을' if has_final else '를'
         elif particle in ['이', '가']: new_p = '이' if has_final else '가'
         elif particle in ['은', '는']: new_p = '은' if has_final else '는'
@@ -66,6 +74,62 @@ class TranslationManager:
                 self.log_info(f"Dict Loaded: {len(self.custom_dict)} terms.")
             except Exception as e:
                 self.log_error(f"Dict Error: {e}")
+    def preprocess_chunking(self, text):
+        diagnostics = []
+        diagnostics.append({"step": "1. Original Input", "content": text})
+
+        split_marker = "||SPLIT||"
+        current_text = text
+
+        # Collect all strings that must be protected
+        protected_map = {} # temp_id -> original_val
+        protected_count = 0
+
+        # A. Dictionary & Recruitment shielding
+        all_targets = []
+        if self.custom_dict:
+            for ja, ko in self.custom_dict.items():
+                if ja in current_text: all_targets.append((ja, ko))
+
+        recruit_pattern = r'@[A-Za-z0-9]+(?:[\s]+[A-Za-z0-9]+)*'
+        matches = re.findall(recruit_pattern, current_text)
+        for m in set(matches): all_targets.append((m, m))
+
+        all_targets.sort(key=lambda x: len(x[0]), reverse=True)
+
+        # B. Replace targets with Split markers + unique ID
+        for ja, target_val in all_targets:
+            # We must use a unique ID to ensure we don't accidentally split
+            # the same word multiple times if it appears twice
+            placeholder = f"__PROTECTED_{protected_count}__"
+            protected_map[placeholder] = target_val
+            current_text = current_text.replace(ja, f"{split_marker}{placeholder}{split_marker}")
+            protected_count += 1
+
+        # C. Handle Numeric regexes
+        num_patterns = [r'(\d+)種', r'(\d+)人', r'(\d+)周', r'(\d+)回']
+        for p in num_patterns:
+            def num_sub(m):
+                nonlocal protected_count
+                unit = "종" if "種" in m.group(0) else "인" if "人" in m.group(0) else "회"
+                val = f"{m.group(1)}{unit}"
+                placeholder = f"__PROTECTED_{protected_count}__"
+                protected_map[placeholder] = val
+                protected_count += 1
+                return f"{split_marker}{placeholder}{split_marker}"
+            current_text = re.sub(p, num_sub, current_text)
+
+        # D. Split and Map back
+        raw_chunks = [c.strip() for c in current_text.split(split_marker) if c.strip()]
+        final_chunks = []
+        for c in raw_chunks:
+            if c in protected_map:
+                final_chunks.append((protected_map[c], True)) # (text, is_protected)
+            else:
+                final_chunks.append((c, False))
+
+        diagnostics.append({"step": "2. Chunked Segments", "content": [c[0] for c in final_chunks]})
+        return final_chunks, diagnostics
 
     def preprocess(self, text):
         placeholders = {}
@@ -78,12 +142,8 @@ class TranslationManager:
         current_text = text
         add_diag("1. Original Input", current_text)
 
-        def apply_shield(text, search_str, replacement_val, count):
-            tag = f"(TERM_{count})"
-            # Check if this tag will be at the very start of the text
-            is_start = text.startswith(search_str)
-            placeholders[tag] = {"val": replacement_val, "is_start": is_start}
-            return text.replace(search_str, f" {tag} ", 1), tag
+        # We don't shield with tags anymore; we insert delimiters
+        # to split the sentence into a list of parts.
 
         # PHASE 1: DICTIONARY
         if self.custom_dict:
@@ -91,20 +151,22 @@ class TranslationManager:
             for ja, ko in sorted_dict:
                 if ja in "～！？。♪☆★": continue
                 if ja in current_text:
-                    current_text, _ = apply_shield(current_text, ja, ko, tag_count)
-                    tag_count += 1
+                    # Mark the dictionary term with a unique split marker
+                    current_text = current_text.replace(ja, f"|||{ko}|||")
 
-        # ... (Keep Phase 2 & 3 the same, just ensure they use the new apply_shield)
+        # PHASE 2: NUMERIC PATTERNS
+        current_text = re.sub(r'(\d+)種', r'||\1종||', current_text)
+        current_text = re.sub(r'(\d+)人', r'||\1인||', current_text)
+        current_text = re.sub(r'(\d+)周', r'||\1회||', current_text)
+        current_text = re.sub(r'(\d+)回', r'||\1회||', current_text)
 
         # PHASE 3: RECRUITMENT
         recruit_pattern = r'@[A-Za-z0-9]+(?:[\s]+[A-Za-z0-9]+)*'
         matches = re.findall(recruit_pattern, current_text)
         for match in sorted(set(matches), key=len, reverse=True):
-            current_text, _ = apply_shield(current_text, match, match, tag_count)
-            tag_count += 1
+            current_text = current_text.replace(match, f"|||{match}|||")
 
-        current_text = re.sub(r'\s+', ' ', current_text).strip()
-        add_diag("2. Dictionary Shielded", current_text)
+        add_diag("2. Delimited Text", current_text)
         return current_text, placeholders, diagnostics
 
     def postprocess(self, text, placeholders):
@@ -113,24 +175,23 @@ class TranslationManager:
         for tag in sorted(placeholders.keys(), key=len, reverse=True):
             digit_match = re.search(r'\d+', tag)
             num = digit_match.group()
-
-            # placeholders[tag] is now a dict: {"val": "불안정", "is_start": True}
             data = placeholders[tag]
             target_value = data["val"]
-            is_start = data["is_start"]
 
-            pattern_str = r'[\(\[\\\{]?\s?TERM[\s_]*' + num + r'\s?[\)\]\\\}]?'
-            pattern = re.compile(pattern_str, re.IGNORECASE)
+            pattern = re.compile(r'[\(\[\\\{]?\s?TERM[\s_]*' + num + r'\s?[\)\]\\\}]?', re.IGNORECASE)
 
             if pattern.search(final_text):
                 final_text = pattern.sub(f" {target_value} ", final_text)
             else:
-                # RECOVERY LOGIC
-                if is_start:
-                    # If it was at the start, put it back at the start
-                    final_text = f"{target_value} {final_text.strip()}"
+                # RECOVERY MODE
+                if data["is_start"]:
+                    final_text = f"{target_value} {final_text}"
+                elif data["anchor"] and data["anchor"] in final_text:
+                    # Insert immediately after the anchor word
+                    anchor_pattern = re.escape(data["anchor"])
+                    final_text = re.sub(f"({anchor_pattern})", r"\1 " + target_value, final_text, count=1)
                 else:
-                    # Otherwise, append to the end
+                    # Fallback to end if anchor is also gone
                     final_text = f"{final_text.strip()} {target_value}"
 
         return " ".join(final_text.split()).strip()
@@ -177,90 +238,47 @@ def main():
                 # RECURSIVE BATCH TRANSLATION
                 # ==========================================================
 
-                # 1. PREPROCESS (Shielding)
-                shielded_text, placeholders, diagnostics = manager.preprocess(input_text)
+                # 1. PREPROCESS
+                chunks_data, diagnostics = manager.preprocess_chunking(input_text)
 
-                # Helper to add to the main diagnostics list
-                def add_diag(step, content):
-                    diagnostics.append({"step": step, "content": content})
+                translated_parts = []
+                chunk_details = []
 
-                # 2. EXTRACT BRACKETS
-                bracket_pattern = r'([【「『（〈《＜≪«“‘])(.*?)([】」』）〉》＞≫»”’])'
-                matches = re.findall(bracket_pattern, shielded_text)
-
-                temp_main_text = shielded_text
-                parts_to_translate = []
-
-                for idx, (open_b, content, close_b) in enumerate(matches):
-                    parts_to_translate.append(content)
-
-                    # Wrap placeholder in original brackets to guide NLLB context
-                    placeholder = f"{open_b}__ITEM_{idx}__{close_b}"
-                    full_match_str = f"{open_b}{content}{close_b}"
-                    temp_main_text = temp_main_text.replace(full_match_str, placeholder, 1)
-
-                add_diag("3. Extracted Frame", temp_main_text)
-                add_diag("3. Extracted Parts", parts_to_translate)
-
-                # 3. PREPARE BATCH
-                batch_inputs = [temp_main_text] + parts_to_translate
-
-                # 4. TOKENIZE
-                batch_tokens = []
-                for txt in batch_inputs:
-                    tokens = ["jpn_Jpan"] + sp.encode(txt, out_type=str) + ["</s>"]
-                    batch_tokens.append(tokens)
-
-                # 5. TRANSLATE
-                results = translator.translate_batch(
-                    batch_tokens,
-                    target_prefix=[["kor_Hang"]] * len(batch_tokens),
-                    beam_size=3,
-                    repetition_penalty=1.1,
-                    max_decoding_length=128
-                )
-
-                # 6. DECODE
-                decoded_results = []
-                for res in results:
-                    seg_out = sp.decode(res.hypotheses[0])
-                    seg_out = re.sub(r'^[a-z]{3}_[A-Z][a-z]{3}\s*', '', seg_out).strip()
-                    decoded_results.append(seg_out)
-
-                final_main = decoded_results[0]
-                translated_inners = decoded_results[1:]
-
-                add_diag("4. AI Output (Frame)", final_main)
-                add_diag("4. AI Output (Parts)", translated_inners)
-
-                # 7. REASSEMBLE
-                for idx, inner_trans in enumerate(translated_inners):
-                    open_b, _, close_b = matches[idx]
-                    reassembled = f"{open_b}{inner_trans}{close_b}"
-
-                    # ROBUST REGEX: Finds "ITEM_0", "__ITEM_0__", "ITEM 0", etc.
-                    # Also handles if NLLB changed the surrounding brackets/quotes
-                    punc_open = r'([\"\'「『【（〈《＜≪«“‘\s]*)'
-                    punc_close = r'([\"\'」』】）〉》＞≫»”’\s]*)'
-                    tag_core = r'(?:__|)?\s*ITEM\s*[_\s]*' + str(idx) + r'\s*(?:__|)?'
-
-                    placeholder_regex = re.compile(punc_open + tag_core + punc_close)
-
-                    # Verify if we actually found the tag before replacing
-                    if placeholder_regex.search(final_main):
-                        final_main = placeholder_regex.sub(reassembled, final_main)
+                for idx, (chunk_text, is_protected) in enumerate(chunks_data):
+                    if is_protected:
+                        # DO NOT SEND TO AI
+                        translated_parts.append(chunk_text)
+                        chunk_details.append(f"Chunk {idx} [LOCKED]: {chunk_text}")
                     else:
-                        add_diag(f"Warning: Tag {idx} Lost", "AI hallucinations removed the tag")
+                        # SEND TO AI
+                        tokens = ["jpn_Jpan"] + sp.encode(chunk_text, out_type=str) + ["</s>"]
+                        res = translator.translate_batch(
+                            [tokens],
+                            target_prefix=[["kor_Hang"]],
+                            beam_size=3
+                        )
+                        seg_out = sp.decode(res[0].hypotheses[0])
+                        seg_out = re.sub(r'^[a-z]{3}_[A-Z][a-z]{3}\s*', '', seg_out).strip()
+                        translated_parts.append(seg_out)
+                        chunk_details.append(f"Chunk {idx} [AI]: {chunk_text} -> {seg_out}")
 
-                add_diag("5. Reassembled", final_main)
+                diagnostics.append({"step": "3. Translation Details", "content": chunk_details})
 
-                # 9. FIX PARTICLES
-                final_output = fix_korean_josa(final_main)
+                # 2. REASSEMBLE
+                # 1. Join chunks with a single space
+                final_output = " ".join(filter(None, translated_parts))
 
-                # 8. UNSHIELD
-                final_output = manager.postprocess(final_output, placeholders)
+                # 2. Clean up punctuation spacing (e.g., "word ." -> "word.")
+                # This ensures particles followed by punctuation are still caught by the fixer
+                final_output = re.sub(r'\s+([.!?,~])', r'\1', final_output)
 
-                add_diag("6. Final Polish", final_output)
+                # 3. Apply the PROTECTED Josa fix
+                final_output = fix_korean_josa(final_output)
+
+                # 4. Final normalization of spaces
+                final_output = " ".join(final_output.split()).strip()
+
+                diagnostics.append({"step": "4. Final Polish", "content": final_output})
 
                 print(json.dumps({
                     "type": "result",

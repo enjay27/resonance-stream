@@ -38,6 +38,13 @@ pub struct ChatPacket {
     pub translated: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+struct AppConfig {
+    compact_mode: bool,
+    always_on_top: bool,
+    active_tab: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct ModelStatus { exists: bool, path: String }
 
@@ -287,9 +294,46 @@ pub fn App() -> impl IntoView {
         });
     };
 
+    // This gathers the current state of all signals and sends them to Rust.
+    let save_config_action = Action::new_local(move |_: &()| {
+        // Use get_untracked() to read values without creating subscriptions
+        let config = AppConfig {
+            compact_mode: compact_mode.get_untracked(),
+            always_on_top: is_pinned.get_untracked(),
+            active_tab: active_tab.get_untracked(),
+        };
+
+        async move {
+            // Send to Backend
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                "config": config
+            })).unwrap();
+            let _ = invoke("save_config", args).await;
+        }
+    });
+
     // --- STARTUP HYDRATION ---
     Effect::new(move |_| {
         spawn_local(async move {
+
+            // Load User Config
+            if let Ok(res) = invoke("load_config", JsValue::NULL).await {
+                if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(res) {
+                    // Apply Visual State
+                    set_compact_mode.set(config.compact_mode);
+                    set_active_tab.set(config.active_tab);
+                    set_is_pinned.set(config.always_on_top);
+
+                    // Apply Window State (Backend)
+                    if config.always_on_top {
+                        let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                            "onTop": true
+                        })).unwrap();
+                        let _ = invoke("set_always_on_top", args).await;
+                    }
+                }
+            }
+
             if let Ok(res) = invoke("check_dict_update", JsValue::NULL).await {
                 if let Some(needed) = res.as_bool() {
                     set_dict_update_available.set(needed);
@@ -394,7 +438,10 @@ pub fn App() -> impl IntoView {
                                     <button
                                         class=move || if active_tab.get() == t_tab { "tab-btn active" } else { "tab-btn" }
                                         data-tab=t_data
-                                        on:click=move |_| set_active_tab.set(t_click.clone())
+                                        on:click=move |_| {
+                                            set_active_tab.set(t_click.clone());
+                                            save_config_action.dispatch(()); // <--- TRIGGER SAVE
+                                        }
                                         title=t_full
                                     >
                                         <span class="tab-full">{full}</span>
@@ -409,7 +456,10 @@ pub fn App() -> impl IntoView {
                     <div class="control-area">
                         <button class="icon-btn"
                             title=move || if compact_mode.get() { "Expand Mode" } else { "Compact Mode" }
-                            on:click=move |_| set_compact_mode.update(|b| *b = !*b)
+                            on:click=move |_| {
+                                set_compact_mode.update(|b| *b = !*b);
+                                save_config_action.dispatch(()); // <--- TRIGGER SAVE
+                            }
                         >
                             {move || if compact_mode.get() { "🔽" } else { "🔼" }}
                         </button>
@@ -436,6 +486,9 @@ pub fn App() -> impl IntoView {
                                     })).unwrap();
                                     let _ = invoke("set_always_on_top", args).await;
                                 });
+
+                                // 2. Save to Config
+                                save_config_action.dispatch(()); // <--- TRIGGER SAVE
                             }
                         >
                             // Rotate the pin slightly when active for visual flair

@@ -457,7 +457,9 @@ pub fn App() -> impl IntoView {
                     // [NEW] Active Filter Chip
                     <Show when=move || !search_term.get().is_empty()>
                         <div class="filter-overlay-container">
-                            <div class="filter-chip">
+                            <div class="filter-chip"
+                                 data-filter-type=move || active_tab.get() // Pass tab name to CSS
+                            >
                                 <span class="filter-label">"Filtering: " {move || search_term.get()}</span>
                                 <button class="filter-close-btn"
                                     on:click=move |_| set_search_term.set("".to_string())
@@ -470,13 +472,16 @@ pub fn App() -> impl IntoView {
 
                     // [NEW] Top-Right Notification Badge
                     <Show when=move || { unread_count.get() > 0 }>
-                        <div class="new-msg-toast" on:click=move |_| {
-                            if let Some(el) = chat_container_ref.get() {
-                                el.set_scroll_top(el.scroll_height());
-                                set_is_at_bottom.set(true);
-                                set_unread_count.set(0);
+                        <div class="new-msg-toast"
+                             data-filter-type=move || active_tab.get() // Apply same logic here
+                             on:click=move |_| {
+                                if let Some(el) = chat_container_ref.get() {
+                                    el.set_scroll_top(el.scroll_height());
+                                    set_is_at_bottom.set(true);
+                                    set_unread_count.set(0);
+                                }
                             }
-                        }>
+                        >
                             {move || unread_count.get()} "개의 새로운 메세지"
                         </div>
                     </Show>
@@ -1090,6 +1095,60 @@ pub fn App() -> impl IntoView {
                 @keyframes slideDown {
                     from { opacity: 0; transform: translateY(-10px); }
                     to { opacity: 1; transform: translateY(0); }
+                }
+
+                /* --- DYNAMIC COLOR LOGIC --- */
+
+                /* Base Styles for Chip and Toast */
+                .filter-chip, .new-msg-toast {
+                    transition: background-color 0.3s ease, color 0.3s ease;
+                    color: #000; /* Dark text for light/vivid backgrounds */
+                    font-weight: 800;
+                }
+
+                /* Default / "전체" - White */
+                .filter-chip[data-filter-type='전체'],
+                .new-msg-toast[data-filter-type='전체'] {
+                    background: rgba(255, 255, 255, 0.95);
+                    color: #000;
+                }
+
+                /* "월드" - Purple (#BA68C8) */
+                .filter-chip[data-filter-type='월드'],
+                .new-msg-toast[data-filter-type='월드'] {
+                    background: rgba(186, 104, 200, 0.95);
+                }
+
+                /* "길드" - Green (#81C784) */
+                .filter-chip[data-filter-type='길드'],
+                .new-msg-toast[data-filter-type='길드'] {
+                    background: rgba(129, 199, 132, 0.95);
+                }
+
+                /* "파티" - Blue (#4FC3F7) */
+                .filter-chip[data-filter-type='파티'],
+                .new-msg-toast[data-filter-type='파티'] {
+                    background: rgba(79, 195, 247, 0.95);
+                }
+
+                /* "로컬" - Gray (#BDBDBD) */
+                .filter-chip[data-filter-type='로컬'],
+                .new-msg-toast[data-filter-type='로컬'] {
+                    background: rgba(189, 189, 189, 0.95);
+                }
+
+                /* "시스템" - Yellow (#FFD54F) */
+                .filter-chip[data-filter-type='시스템'],
+                .new-msg-toast[data-filter-type='시스템'] {
+                    background: rgba(255, 213, 79, 0.95);
+                }
+
+                /* Special Case: Close Button Contrast */
+                .filter-chip .filter-close-btn {
+                    background: rgba(0, 0, 0, 0.15);
+                }
+                .filter-chip .filter-close-btn:hover {
+                    background: rgba(0, 0, 0, 0.3);
                 }
                 "
             </style>

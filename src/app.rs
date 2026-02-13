@@ -66,6 +66,7 @@ pub fn App() -> impl IntoView {
     let (dict_update_available, set_dict_update_available) = signal(false);
 
     let (compact_mode, set_compact_mode) = signal(false);
+    let (is_pinned, set_is_pinned) = signal(false);
 
     // --- DICTIONARY SYNC ACTION ---
     let sync_dict_action = Action::new_local(|_: &()| async move {
@@ -419,6 +420,28 @@ pub fn App() -> impl IntoView {
                             on:click=clear_chat
                         >
                             "🗑️"
+                        </button>
+
+                        <button
+                            class=move || if is_pinned.get() { "icon-btn active-pin" } else { "icon-btn" }
+                            title=move || if is_pinned.get() { "Unpin Window" } else { "Pin on Top" }
+                            on:click=move |_| {
+                                let new_state = !is_pinned.get();
+                                set_is_pinned.set(new_state);
+
+                                // Call Backend
+                                spawn_local(async move {
+                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                        "onTop": new_state
+                                    })).unwrap();
+                                    let _ = invoke("set_always_on_top", args).await;
+                                });
+                            }
+                        >
+                            // Rotate the pin slightly when active for visual flair
+                            <span style=move || if is_pinned.get() { "transform: rotate(45deg); display:block;" } else { "" }>
+                                "📌"
+                            </span>
                         </button>
 
                         // 2. Sync Dictionary Button
@@ -920,6 +943,18 @@ pub fn App() -> impl IntoView {
                 .tab-btn.active {
                     border-bottom-width: 3px; /* Make the color bar thicker for visibility */
                     background: rgba(255, 255, 255, 0.05); /* Slight highlight */
+                }
+
+                /* --- PIN BUTTON STATE --- */
+                .icon-btn.active-pin {
+                    color: #00ff88; /* Green Icon */
+                    background: rgba(0, 255, 136, 0.1); /* Subtle Green Background */
+                    box-shadow: 0 0 8px rgba(0, 255, 136, 0.2); /* Glow Effect */
+                    border: 1px solid rgba(0, 255, 136, 0.3);
+                }
+
+                .icon-btn span {
+                    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); /* Bouncy rotation */
                 }
                 "
             </style>

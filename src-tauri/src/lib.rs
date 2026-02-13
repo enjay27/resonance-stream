@@ -34,7 +34,8 @@ pub fn run() {
             get_system_history,
             check_dict_update,
             sync_dictionary,
-            clear_chat_history
+            clear_chat_history,
+            set_always_on_top
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -101,4 +102,10 @@ fn clear_chat_history(state: tauri::State<AppState>) {
     // 2. Clear System Logs (Optional, but good for a full reset)
     let mut sys_history = state.system_history.lock().unwrap();
     sys_history.clear();
+}
+
+#[tauri::command]
+fn set_always_on_top(window: tauri::Window, on_top: bool) {
+    // This simple method toggles the window state
+    let _ = window.set_always_on_top(on_top);
 }

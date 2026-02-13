@@ -75,6 +75,8 @@ pub fn App() -> impl IntoView {
     let (compact_mode, set_compact_mode) = signal(false);
     let (is_pinned, set_is_pinned) = signal(false);
 
+    let (show_settings, set_show_settings) = signal(false);
+
     // --- DICTIONARY SYNC ACTION ---
     let sync_dict_action = Action::new_local(|_: &()| async move {
         // We move the !Send Tauri future into this local action
@@ -499,16 +501,30 @@ pub fn App() -> impl IntoView {
 
                         // 2. Sync Dictionary Button
                         <button class="sync-btn"
+                            title="Update Dictionary"
                             on:click=move |_| {
                                 sync_dict_action.dispatch(());
                                 set_dict_update_available.set(false);
                             }
                             disabled=is_syncing
                         >
-                            {move || if is_syncing.get() { "동기화 중..." } else { "사전 업데이트" }}
+                            // Use a span to control Emoji size independently if needed
+                            {move || if is_syncing.get() {
+                                view! { <span style="font-size: 0.8rem">"동기화 중..."</span> }
+                            } else {
+                                // Emojis look better slightly larger
+                                view! { <span style="font-size: 1.1rem; vertical-align: middle;">"📘🔁"</span> }
+                            }}
+
                             <Show when=move || dict_update_available.get()>
                                 <span class="update-dot"></span>
                             </Show>
+                        </button>
+                        <button class="icon-btn"
+                            title="Settings & Info"
+                            on:click=move |_| set_show_settings.set(true)
+                        >
+                            "⚙️"
                         </button>
                     </div>
                 </nav>
@@ -686,6 +702,35 @@ pub fn App() -> impl IntoView {
                 </div>
             </Show>
 
+            // Settings Modal
+            <Show when=move || show_settings.get()>
+                <div class="settings-overlay" on:click=move |_| set_show_settings.set(false)>
+                    // Event propagation stopped manually to fix the previous error
+                    <div class="settings-modal" on:click=move |ev| ev.stop_propagation()>
+
+                        // Header
+                        <div class="settings-header">
+                            <h2>"Settings"</h2>
+                            <button class="close-btn" on:click=move |_| set_show_settings.set(false)>"✕"</button>
+                        </div>
+
+                        // Content (Cleaned up)
+                        <div class="settings-content">
+                            <div class="setting-group">
+                                <h3>"About"</h3>
+                                <p>"Blue Protocol Chat Translator v1.0"</p>
+                                <a href="https://github.com/YOUR_USERNAME/YOUR_REPO" target="_blank" class="github-link">
+                                    <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor">
+                                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
+                                    </svg>
+                                    " GitHub Repository"
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </Show>
+
             <style>
                 "
                 /* --- 1. GLOBAL RESET & SCROLLBAR --- */
@@ -788,9 +833,13 @@ pub fn App() -> impl IntoView {
                 .icon-btn.danger:hover { color: #ff4444; background: rgba(255,68,68,0.1); }
 
                 .sync-btn {
-                    background: #333; color: #aaa; border: 1px solid #444;
-                    padding: 4px 10px; border-radius: 4px; font-size: 0.75rem;
-                    cursor: pointer; transition: all 0.2s;
+                    /* ... existing styles ... */
+                    display: flex;             /* Helps center emojis */
+                    align-items: center;       /* Vertical center */
+                    justify-content: center;
+                    padding: 4px 8px;          /* Slightly tighter padding for icons */
+                    gap: 4px;
+                    min-width: 40px;           /* Ensure clickable area isn't too small */
                 }
                 .sync-btn:hover { border-color: #00ff88; color: #00ff88; }
 
@@ -1008,6 +1057,85 @@ pub fn App() -> impl IntoView {
 
                 .icon-btn span {
                     transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); /* Bouncy rotation */
+                }
+
+                /* --- SETTINGS MODAL --- */
+                .settings-overlay {
+                    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                    background: rgba(0, 0, 0, 0.7);
+                    display: flex; justify-content: center; align-items: center;
+                    z-index: 20000; /* Highest priority */
+                    backdrop-filter: blur(2px);
+                    animation: fadeIn 0.2s;
+                }
+
+                .settings-modal {
+                    width: 90%; max-width: 400px;
+                    background: #1e1e1e;
+                    border: 1px solid #444;
+                    border-radius: 8px;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+                    overflow: hidden;
+                    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+                }
+
+                .settings-header {
+                    display: flex; justify-content: space-between; align-items: center;
+                    padding: 12px 16px;
+                    background: #252525;
+                    border-bottom: 1px solid #333;
+                }
+                .settings-header h2 { margin: 0; font-size: 1.1rem; color: #fff; }
+
+                .close-btn {
+                    background: none; border: none; color: #aaa;
+                    font-size: 1.2rem; cursor: pointer; padding: 4px;
+                }
+                .close-btn:hover { color: #fff; }
+
+                .settings-content { padding: 16px; display: flex; flex-direction: column; gap: 20px; }
+
+                .setting-group h3 {
+                    margin: 0 0 10px 0;
+                    font-size: 0.9rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px;
+                    border-bottom: 1px solid #333; padding-bottom: 4px;
+                }
+
+                /* --- GITHUB LINK BUTTON --- */
+                .github-link {
+                    display: flex; align-items: center; gap: 10px;
+                    background: #333; color: #fff;
+                    text-decoration: none;
+                    padding: 10px; border-radius: 6px;
+                    font-weight: bold; font-size: 0.95rem;
+                    transition: all 0.2s;
+                    border: 1px solid transparent;
+                }
+                .github-link:hover {
+                    background: #444;
+                    border-color: #aaa;
+                    transform: translateY(-2px);
+                }
+
+                /* --- TOGGLES & BUTTONS --- */
+                .toggle-row {
+                    display: flex; justify-content: space-between; align-items: center;
+                    padding: 8px 0; cursor: pointer;
+                    font-size: 0.95rem; color: #ddd;
+                }
+                .toggle-row:hover { color: #fff; }
+
+                .action-btn {
+                    width: 100%; padding: 10px;
+                    background: #2a2a2a; border: 1px solid #444; color: #ddd;
+                    border-radius: 4px; cursor: pointer;
+                    transition: all 0.2s; text-align: left;
+                }
+                .action-btn:hover { background: #333; border-color: #00ff88; color: #00ff88; }
+
+                @keyframes slideUp {
+                    from { opacity: 0; transform: translateY(20px); }
+                    to { opacity: 1; transform: translateY(0); }
                 }
                 "
             </style>

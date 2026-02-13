@@ -100,6 +100,17 @@ pub fn App() -> impl IntoView {
         re.test(text)
     };
 
+    // Copy Action
+    let copy_text = move |text: String| {
+        spawn_local(async move {
+            if let Some(window) = web_sys::window() {
+                let navigator = window.navigator();
+                // This requires "Clipboard" feature in web-sys (usually enabled by default in Tauri templates)
+                let _ = navigator.clipboard().write_text(&text);
+            }
+        });
+    };
+
     // --- ACTIONS ---
     let setup_listeners = move || {
         spawn_local(async move {
@@ -314,15 +325,27 @@ pub fn App() -> impl IntoView {
                                         <span class="lvl">"Lv." {move || sig.get().level}</span>
                                         <span class="time">{format_time(msg.timestamp)}</span>
                                     </div>
-                                    <div class="msg-body">
-                                        <div class="original">
-                                            {if is_jp { "[원문] " } else { "" }} {move || sig.get().message.clone()}
+                                    <div class="msg-wrapper">
+
+                                        // The Message Bubble
+                                        <div class="msg-body">
+                                            <div class="original">
+                                                {if is_jp { "[원문] " } else { "" }} {move || sig.get().message.clone()}
+                                            </div>
+                                            {move || sig.get().translated.clone().map(|text| view! {
+                                                <div class="translated">"[번역] " {text}</div>
+                                            })}
                                         </div>
-                                        // THE FINE-GRAINED UPDATE:
-                                        // This closure ONLY re-runs when the specific sig.update() is called.
-                                        {move || sig.get().translated.clone().map(|text| view! {
-                                            <div class="translated">"[번역] " {text}</div>
-                                        })}
+
+                                        // The Copy Button (Now OUTSIDE the bubble)
+                                        <button class="copy-btn" title="Copy Original"
+                                            on:click=move |ev| {
+                                                ev.stop_propagation();
+                                                copy_text(sig.get().message.clone());
+                                            }
+                                        >
+                                            "📋"
+                                        </button>
                                     </div>
                                 </div>
                             }
@@ -381,6 +404,32 @@ pub fn App() -> impl IntoView {
                     border-left: 3px solid transparent;
                     /* Default Text Color */
                     color: #ddd;
+                }
+                .copy-btn {
+                    /* No absolute positioning needed anymore */
+                    background: transparent;
+                    border: none;
+                    color: #555;
+                    cursor: pointer;
+                    font-size: 1.1rem; /* Slightly larger icon since it's outside */
+                    padding: 4px;
+                    border-radius: 4px;
+
+                    /* Hidden until you hover the row */
+                    opacity: 0;
+                    transition: all 0.2s;
+                }
+                /* Show button when hovering the WRAPPER (Bubble area) */
+                .msg-wrapper:hover .copy-btn {
+                    opacity: 1;
+                }
+                .copy-btn:hover {
+                    color: #00ff88;
+                    background: rgba(255, 255, 255, 0.05);
+                    transform: scale(1.1);
+                }
+                .copy-btn:active {
+                    transform: scale(0.95);
                 }
 
                 /* 1. LOCAL (Gray/White) */
@@ -447,7 +496,30 @@ pub fn App() -> impl IntoView {
                     margin-left: auto;
                 }
 
-                .msg-body { display: flex; flex-direction: column; }
+                .msg-wrapper {
+                    display: flex;
+                    align-items: flex-end; /* Vertically aligns button with the middle of the message */
+                    gap: 8px;            /* Space between bubble and button */
+                    width: 100%;
+                }
+                .msg-body {
+                    position: relative;
+                    display: flex;
+                    flex-direction: column;
+
+                    width: fit-content;
+                    max-width: 85%; /* Slightly reduced to make room for button */
+
+                    background: #252525;
+                    padding: 8px 12px; /* Standard padding (no extra space needed now) */
+                    border-radius: 0 12px 12px 12px;
+                    margin-top: 4px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    border-left: 3px solid transparent;
+                }
+                .msg-body:hover .copy-btn {
+                    opacity: 1;
+                }
                 .original { font-size: 0.95rem; line-height: 1.4; }
                 .translated {
                     color: #00ff88;

@@ -65,6 +65,8 @@ pub fn App() -> impl IntoView {
 
     let (dict_update_available, set_dict_update_available) = signal(false);
 
+    let (compact_mode, set_compact_mode) = signal(false);
+
     // --- DICTIONARY SYNC ACTION ---
     let sync_dict_action = Action::new_local(|_: &()| async move {
         // We move the !Send Tauri future into this local action
@@ -340,7 +342,7 @@ pub fn App() -> impl IntoView {
     };
 
     view! {
-        <main class="chat-app">
+        <main class=move || if compact_mode.get() { "chat-app compact" } else { "chat-app" }>
             <Show when=move || active_menu_id.get().is_some()>
                 <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
             </Show>
@@ -365,24 +367,40 @@ pub fn App() -> impl IntoView {
             }>
                 <nav class="tab-bar">
                     <div class="tabs">
-                        {vec!["전체", "월드", "길드", "파티", "로컬", "시스템"].into_iter().map(|t| {
-                            let t_name = t.to_string();
-                            let t_click = t_name.clone();
-                            let t_data = t_name.clone(); // Clone for data attribute
-                            view! {
-                                <button
-                                    class=move || if active_tab.get() == t_name { "tab-btn active" } else { "tab-btn" }
-                                    data-tab=t_data // <--- ADD THIS
-                                    on:click=move |_| set_active_tab.set(t_click.clone())
-                                >
-                                    {t}
-                                </button>
+                        <Show when=move || !compact_mode.get()
+                            fallback=move || view! {
+                                // Compact Header: Just show current tab name
+                                <div class="compact-tab-indicator">
+                                    <span class="indicator-dot" data-tab=move || active_tab.get()></span>
+                                    <span class="indicator-text">{move || active_tab.get()}</span>
+                                </div>
                             }
-                        }).collect_view()}
+                        >
+                            {vec!["전체", "월드", "길드", "파티", "로컬", "시스템"].into_iter().map(|t| {
+                                let t_name = t.to_string();
+                                let t_click = t_name.clone();
+                                let t_data = t_name.clone();
+                                view! {
+                                    <button
+                                        class=move || if active_tab.get() == t_name { "tab-btn active" } else { "tab-btn" }
+                                        data-tab=t_data
+                                        on:click=move |_| set_active_tab.set(t_click.clone())
+                                    >
+                                        {t}
+                                    </button>
+                                }
+                            }).collect_view()}
+                        </Show>
                     </div>
 
                     // --- DICTIONARY SYNC BUTTON ---
                     <div class="control-area">
+                        <button class="icon-btn"
+                            title=move || if compact_mode.get() { "Expand Mode" } else { "Compact Mode" }
+                            on:click=move |_| set_compact_mode.update(|b| *b = !*b)
+                        >
+                            {move || if compact_mode.get() { "🔽" } else { "🔼" }}
+                        </button>
 
                         // 1. Clear Chat Button
                         <button class="icon-btn danger"
@@ -477,6 +495,7 @@ pub fn App() -> impl IntoView {
                             "⬇ " {move || unread_count.get()} " New Messages"
                         </button>
                     </Show>
+
                     <For each=move || filtered_messages.get()
                         key=|sig| sig.get_untracked().pid
                         children=move |sig| {
@@ -553,7 +572,9 @@ pub fn App() -> impl IntoView {
                                     <div class="msg-wrapper">
 
                                         // The Message Bubble
-                                        <div class="msg-body">
+                                        <div class="msg-body"
+                                             class:has-translation=move || sig.get().translated.is_some()
+                                        >
                                             <div class="original">
                                                 {if is_jp { "[원문] " } else { "" }} {move || sig.get().message.clone()}
                                             </div>
@@ -580,62 +601,65 @@ pub fn App() -> impl IntoView {
 
             <style>
                 "
-                /* --- 1. GLOBAL RESET (Fixes Double Scrollbar) --- */
+                /* --- 1. GLOBAL RESET & SCROLLBAR --- */
                 html, body {
                     margin: 0;
                     padding: 0;
                     width: 100%;
                     height: 100%;
-                    overflow: hidden; /* <--- CRITICAL: Disables the outer window scrollbar */
-                    background: #121212; /* Matches app bg to prevent white flashes */
-                }
-
-                /* --- 2. APP LAYOUT --- */
-                .chat-app {
-                    display: flex;
-                    flex-direction: column;
-                    height: 100vh; /* Takes full window height */
+                    overflow: hidden; /* Prevent outer window scroll */
                     background: #121212;
-                    font-family: sans-serif;
+                    font-family: 'Segoe UI', sans-serif;
                     color: #fff;
                 }
 
-                /* --- 3. CUSTOM SCROLLBAR DESIGN (Slim & Dark) --- */
-                /* Target the specific scrollable area */
-                .chat-container::-webkit-scrollbar {
-                    width: 6px; /* Very slim width */
-                }
-                .chat-container::-webkit-scrollbar-track {
-                    background: transparent; /* Invisible track */
-                }
+                /* Custom Slim Scrollbar */
+                .chat-container::-webkit-scrollbar { width: 6px; }
+                .chat-container::-webkit-scrollbar-track { background: transparent; }
                 .chat-container::-webkit-scrollbar-thumb {
-                    background: #444; /* Dark Grey Handle */
-                    border-radius: 3px; /* Rounded edges */
+                    background: #444;
+                    border-radius: 3px;
                     transition: background 0.2s;
                 }
-                /* Hover Effect: Highlights the scrollbar when you interact with it */
-                .chat-container::-webkit-scrollbar-thumb:hover {
-                    background: #00ff88; /* Green glow on hover */
+                .chat-container::-webkit-scrollbar-thumb:hover { background: #00ff88; }
+
+                /* --- 2. MAIN LAYOUT --- */
+                .chat-app {
+                    display: flex;
+                    flex-direction: column;
+                    height: 100vh;
+                    background: #121212;
+                    transition: all 0.3s ease; /* Smooth transition for Compact Mode */
                 }
 
-                .setup-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-                .status-card { background: #1e1e1e; padding: 20px; border-radius: 8px; width: 350px; margin-bottom: 20px; text-align: center; }
-                .progress-bar { width: 100%; height: 12px; background: #333; border-radius: 6px; overflow: hidden; margin-top: 10px; }
-                .fill { height: 100%; background: #00ff88; transition: width 0.3s; }
-                .primary-btn { background: #00ff88; color: #000; border: none; padding: 15px 30px; font-weight: bold; border-radius: 5px; cursor: pointer; }
+                /* --- 3. TAB BAR & NAVIGATION --- */
+                .tab-bar {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    background: #1e1e1e;
+                    border-bottom: 1px solid #333;
+                    height: 42px; /* Fixed height for consistency */
+                    transition: height 0.3s ease;
+                }
 
-                /* --- TAB BAR (Adaptive Colors) --- */
-                .tab-bar { display: flex; justify-content: space-between; align-items: center; background: #1e1e1e; border-bottom: 1px solid #333; }
-                .tabs { display: flex; flex: 1; }
+                .tabs { display: flex; flex: 1; height: 100%; }
 
                 .tab-btn {
-                    flex: 1; padding: 12px; border: none; background: none;
-                    cursor: pointer; font-weight: bold; transition: all 0.2s;
-                    opacity: 0.6; border-bottom: 2px solid transparent;
+                    flex: 1;
+                    border: none;
+                    background: none;
+                    cursor: pointer;
+                    font-weight: bold;
+                    font-size: 0.9rem;
+                    opacity: 0.6;
+                    border-bottom: 2px solid transparent;
+                    transition: all 0.2s;
+                    color: #888;
                 }
                 .tab-btn:hover, .tab-btn.active { opacity: 1; background: #252525; }
 
-                /* Tab Specific Colors */
+                /* Tab Colors */
                 .tab-btn[data-tab='전체'] { color: #FFFFFF; }
                 .tab-btn.active[data-tab='전체'] { border-bottom-color: #FFFFFF; }
 
@@ -654,474 +678,205 @@ pub fn App() -> impl IntoView {
                 .tab-btn[data-tab='시스템'] { color: #FFD54F; }
                 .tab-btn.active[data-tab='시스템'] { border-bottom-color: #FFD54F; }
 
-
-                /* --- CHAT ROWS (Distinct Background Tints) --- */
-                .chat-container {
-                    flex: 1;
-                    overflow-y: auto; /* This enables the ONLY scrollbar we want */
-                    padding: 10px;
-                    user-select: text;
+                /* Control Area (Buttons) */
+                .control-area {
+                    padding: 0 10px;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
                 }
 
+                .icon-btn {
+                    background: transparent;
+                    border: none;
+                    cursor: pointer;
+                    font-size: 1.1rem;
+                    padding: 6px;
+                    border-radius: 4px;
+                    color: #888;
+                    transition: all 0.2s;
+                    display: flex; align-items: center; justify-content: center;
+                }
+                .icon-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+                .icon-btn.danger:hover { color: #ff4444; background: rgba(255,68,68,0.1); }
+
+                .sync-btn {
+                    background: #333; color: #aaa; border: 1px solid #444;
+                    padding: 4px 10px; border-radius: 4px; font-size: 0.75rem;
+                    cursor: pointer; transition: all 0.2s;
+                }
+                .sync-btn:hover { border-color: #00ff88; color: #00ff88; }
+
+                /* --- 4. CHAT CONTAINER --- */
+                .chat-container {
+                    flex: 1;
+                    overflow-y: auto;
+                    padding: 10px;
+                    position: relative; /* For sticky elements */
+                }
+
+                /* Chat Rows */
                 .chat-row {
                     position: relative;
                     margin-bottom: 8px;
                     padding: 6px 10px;
                     border-radius: 4px;
                     border-left: 3px solid transparent;
-                    /* Default Text Color */
                     color: #ddd;
-                    overflow: visible !important;
-                }
-                .copy-btn {
-                    /* No absolute positioning needed anymore */
-                    background: transparent;
-                    border: none;
-                    color: #555;
-                    cursor: pointer;
-                    font-size: 1.1rem; /* Slightly larger icon since it's outside */
-                    padding: 4px;
-                    border-radius: 4px;
-
-                    /* Hidden until you hover the row */
-                    opacity: 0;
-                    transition: all 0.2s;
-                }
-                /* Show button when hovering the WRAPPER (Bubble area) */
-                .msg-wrapper:hover .copy-btn {
-                    opacity: 1;
-                }
-                .copy-btn:hover {
-                    color: #00ff88;
-                    background: rgba(255, 255, 255, 0.05);
-                    transform: scale(1.1);
-                }
-                .copy-btn:active {
-                    transform: scale(0.95);
+                    overflow: visible !important; /* Allow context menu to pop out */
                 }
 
-                /* --- FLOATING SCROLL BUTTON --- */
-                .scroll-bottom-btn {
-                    position: sticky; /* Stays visible inside the scroll container */
-                    bottom: 20px;     /* Floats 20px from the bottom of the view */
-                    left: 50%;
-                    transform: translateX(-50%); /* Centers it horizontally */
-
-                    background: #00ff88;
-                    color: #000;
-                    border: none;
-                    padding: 8px 16px;
-                    border-radius: 20px;
-
-                    font-weight: 800;
-                    font-size: 0.85rem;
-                    cursor: pointer;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-                    z-index: 100;
-
-                    /* Animation */
-                    animation: popUp 0.3s ease-out;
-                    opacity: 0.9;
-                }
-
-                .scroll-bottom-btn:hover {
-                    opacity: 1;
-                    transform: translateX(-50%) scale(1.05);
-                }
-
-                @keyframes popUp {
-                    from { transform: translateX(-50%) translateY(20px); opacity: 0; }
-                    to { transform: translateX(-50%) translateY(0); opacity: 0.9; }
-                }
-
-                @keyframes bounce {
-                    0%, 20%, 50%, 80%, 100% { transform: translateX(-50%) translateY(0); }
-                    40% { transform: translateX(-50%) translateY(-5px); }
-                    60% { transform: translateX(-50%) translateY(-3px); }
-                }
-
-                /* 1. LOCAL (Gray/White) */
-                .chat-row[data-channel='LOCAL'] {
-                    border-left-color: #BDBDBD;
-                    background: rgba(189, 189, 189, 0.05); /* Subtle Gray Tint */
-                }
+                /* Channel Specific Styles */
+                .chat-row[data-channel='LOCAL'] { border-left-color: #BDBDBD; background: rgba(189,189,189,0.05); }
                 .chat-row[data-channel='LOCAL'] .nickname { color: #BDBDBD; }
 
-                /* 2. PARTY (Blue) */
-                .chat-row[data-channel='PARTY'] {
-                    border-left-color: #4FC3F7;
-                    background: rgba(79, 195, 247, 0.08); /* Subtle Blue Tint */
-                }
+                .chat-row[data-channel='PARTY'] { border-left-color: #4FC3F7; background: rgba(79,195,247,0.08); }
                 .chat-row[data-channel='PARTY'] .nickname { color: #4FC3F7; }
 
-                /* 3. GUILD (Green) */
-                .chat-row[data-channel='GUILD'] {
-                    border-left-color: #81C784;
-                    background: rgba(129, 199, 132, 0.08); /* Subtle Green Tint */
-                }
+                .chat-row[data-channel='GUILD'] { border-left-color: #81C784; background: rgba(129,199,132,0.08); }
                 .chat-row[data-channel='GUILD'] .nickname { color: #81C784; }
 
-                /* 4. WORLD (Purple) */
-                .chat-row[data-channel='WORLD'] {
-                    border-left-color: #BA68C8;
-                    background: rgba(186, 104, 200, 0.08); /* Subtle Purple Tint */
-                }
+                .chat-row[data-channel='WORLD'] { border-left-color: #BA68C8; background: rgba(186,104,200,0.08); }
                 .chat-row[data-channel='WORLD'] .nickname { color: #BA68C8; }
 
-                /* 5. SYSTEM (Yellow) */
-                .chat-row[data-channel='SYSTEM'] {
-                    border-left-color: #FFD54F;
-                    background: rgba(255, 213, 79, 0.08); /* Subtle Yellow Tint */
-                }
-                /* System messages usually don't have a nickname, or it's "SYSTEM" */
+                .chat-row[data-channel='SYSTEM'] { border-left-color: #FFD54F; background: rgba(255,213,79,0.08); }
                 .chat-row[data-channel='SYSTEM'] .nickname { color: #FFD54F; }
 
-
-                /* --- TEXT STYLING --- */
+                /* --- 5. MESSAGE CONTENT --- */
                 .msg-header {
-                    display: flex;
-                    align-items: baseline; /* Aligns text by their bottom line (better for different sizes) */
-                    gap: 8px;
-                    margin-bottom: 4px;
-                    opacity: 0.9;
-                    position: relative;
+                    display: flex; align-items: baseline; gap: 8px;
+                    margin-bottom: 4px; opacity: 0.9; position: relative;
                 }
 
                 .nickname {
-                    font-size: 1.05rem;
-                    font-weight: 800;
-                    letter-spacing: 0.5px;
+                    font-size: 0.95rem; font-weight: 800; cursor: pointer;
+                    transition: all 0.2s; border-bottom: 1px dashed transparent;
+                }
+                .nickname:hover { filter: brightness(1.2); text-decoration: underline; }
+                .nickname.active { color: #00ff88 !important; border-bottom: 1px solid #00ff88; }
 
-                    /* [NEW] Interactive Styles */
-                    cursor: pointer;          /* Hand cursor */
-                    transition: all 0.2s;     /* Smooth hover effect */
-                    border-bottom: 1px dashed transparent; /* Subtle hint */
-                }
-                .nickname:hover {
-                    filter: brightness(1.2);      /* Make it slightly brighter */
-                    text-decoration: underline;   /* Standard "Link" behavior */
-                    border-bottom-color: currentColor; /* Underline matches channel color */
-                }
-                .nickname.active {
-                    color: #00ff88 !important; /* Force green highlight */
-                    text-decoration: underline;
-                    border-bottom: 1px solid #00ff88;
-                }
-                .lvl {
-                    font-size: 0.75rem; /* Keep metadata small */
-                    color: #888;
-                }
+                .lvl { font-size: 0.75rem; color: #666; }
+                .time { font-size: 0.75rem; color: #555; margin-left: auto; }
 
-                .time {
-                    font-size: 0.75rem;
-                    color: #666;
-                    margin-left: auto;
-                }
+                .msg-wrapper { display: flex; align-items: flex-end; gap: 8px; }
 
-                .msg-wrapper {
-                    display: flex;
-                    align-items: flex-end; /* Vertically aligns button with the middle of the message */
-                    gap: 8px;            /* Space between bubble and button */
-                    width: 100%;
-                }
                 .msg-body {
-                    position: relative;
-                    display: flex;
-                    flex-direction: column;
-
-                    width: fit-content;
-                    max-width: 85%; /* Slightly reduced to make room for button */
-
-                    background: #252525;
-                    padding: 8px 12px; /* Standard padding (no extra space needed now) */
-                    border-radius: 0 12px 12px 12px;
-                    margin-top: 4px;
+                    position: relative; width: fit-content; max-width: 85%;
+                    background: #252525; padding: 8px 12px;
+                    border-radius: 0 12px 12px 12px; margin-top: 2px;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                    border-left: 3px solid transparent;
                 }
-                .msg-body:hover .copy-btn {
-                    opacity: 1;
-                }
-                .original { font-size: 0.95rem; line-height: 1.4; }
+
+                .original { font-size: 0.9rem; line-height: 1.4; color: #ccc; }
                 .translated {
-                    color: #00ff88;
-                    margin-top: 4px;
-                    font-size: 0.95rem;
-                    font-weight: 500;
+                    color: #00ff88; margin-top: 4px;
+                    font-size: 0.95rem; font-weight: 500;
                 }
 
-                /* --- UTILS --- */
-                .control-area {
-                    padding-right: 15px;
-                    display: flex;
-                    align-items: center;
-                    gap: 12px; /* Slightly increased gap for better target area */
+                .copy-btn {
+                    background: transparent; border: none; color: #555;
+                    cursor: pointer; opacity: 0; transition: all 0.2s; padding: 4px;
                 }
-                .dict-sync-area { padding-right: 15px; position: relative; }
-                .sync-btn {
-                    border-color: #00ff88;
-                    color: #00ff88;
-                    background: rgba(0, 255, 136, 0.05);
-                }
-                .sync-btn:hover { background: #444; color: #fff; }
-                .sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+                .msg-wrapper:hover .copy-btn { opacity: 1; }
+                .copy-btn:hover { color: #00ff88; transform: scale(1.1); }
 
-                .icon-btn {
-                    background: transparent;
-                    border: none;
-                    cursor: pointer;
-                    font-size: 1.2rem;
-                    padding: 6px;
-                    border-radius: 4px;
-                    transition: all 0.2s;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: #888;
-                }
-                .icon-btn:hover {
-                    background: rgba(255, 255, 255, 0.1);
-                    transform: scale(1.1);
-                }
-
-                /* Red Hover for Delete */
-                .icon-btn.danger:hover {
-                    color: #ff4444;
-                    background: rgba(255, 68, 68, 0.1);
-                }
-                .update-dot {
-                    position: absolute; top: -4px; right: -4px;
-                    width: 8px; height: 8px; background: #ff4444;
-                    border-radius: 50%; border: 2px solid #1e1e1e;
-                    animation: pulse 2s infinite;
-                }
-                @keyframes pulse {
-                    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7); }
-                    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(255, 68, 68, 0); }
-                    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
-                }
-
-                /* --- CONTEXT MENU --- */
+                /* --- 6. CONTEXT MENU & OVERLAY --- */
                 .context-menu {
-                    position: absolute;
-                    top: calc(100% + 5px);
-                    left: 0;
-                    background: #1e1e1e !important; /* Force solid background */
-                    border: 1px solid #00ff88;
-                    border-radius: 8px;
-                    padding: 6px;
-                    display: flex;
-                    flex-direction: column;
-                    gap: 4px;
-
-                    /* [FIX] Higher than overlay (9998) and container */
-                    z-index: 10002;
-
-                    box-shadow: 0 10px 25px rgba(0,0,0,0.8);
-                    min-width: 150px;
-                    animation: fadeIn 0.1s cubic-bezier(0.4, 0, 0.2, 1);
-
-                    /* [NEW] Ensure mouse events are captured */
-                    pointer-events: auto;
+                    position: absolute; top: calc(100% + 4px); left: 0;
+                    background: #1e1e1e !important;
+                    border: 1px solid #00ff88; border-radius: 6px;
+                    padding: 4px; display: flex; flex-direction: column; gap: 2px;
+                    z-index: 10002; /* Topmost */
+                    box-shadow: 0 8px 20px rgba(0,0,0,0.8);
+                    min-width: 140px; pointer-events: auto;
+                    animation: fadeIn 0.1s ease-out;
                 }
 
                 .menu-item {
-                    background: transparent;
-                    border: none;
-                    color: #eee;
-                    padding: 10px 14px;
-                    text-align: left;
-                    cursor: pointer;
-                    font-size: 0.9rem;
-                    border-radius: 6px;
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
-                    transition: all 0.15s ease;
+                    background: transparent; border: none; color: #eee;
+                    padding: 8px 12px; text-align: left; cursor: pointer;
+                    font-size: 0.85rem; border-radius: 4px;
+                    display: flex; align-items: center; gap: 8px;
+                    pointer-events: auto;
                 }
-
-                .menu-item:hover {
-                    background: #00ff88;
-                    color: #000;
-                    transform: translateX(4px); /* Subtle slide-in effect */
-                }
-
-                .menu-item:active {
-                    transform: scale(0.96) translateX(4px);
-                }
-
-                .menu-icon {
-                    font-size: 1.1rem;
-                }
-
-                .menu-text {
-                    font-weight: 600;
-                }
+                .menu-item:hover { background: #00ff88; color: #000; }
 
                 .menu-overlay {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100vw;
-                    height: 100vh;
-
-                    /* [FIX] Higher than normal UI, but lower than .context-menu */
-                    z-index: 10000;
-
-                    background: rgba(0,0,0,0.2); /* Slight dim to confirm it's active */
+                    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+                    z-index: 10000; /* Below menu, above chat */
+                    background: rgba(0,0,0,0.2);
                 }
 
-                @keyframes fadeIn {
-                    from { opacity: 0; transform: translateY(-8px) scale(0.95); }
-                    to { opacity: 1; transform: translateY(0) scale(1); }
+                /* --- 7. TOASTS (FILTER & NEW MESSAGE) --- */
+                .filter-overlay-container {
+                    position: sticky; top: 10px; left: 0; right: 0;
+                    display: flex; justify-content: center;
+                    pointer-events: none; z-index: 60;
                 }
 
-                /* --- TOP-RIGHT NOTIFICATION TOAST --- */
+                .filter-chip, .new-msg-toast {
+                    pointer-events: auto;
+                    padding: 6px 12px; border-radius: 20px;
+                    font-weight: 700; font-size: 0.85rem;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+                    display: flex; align-items: center; gap: 8px;
+                    color: #000; /* Default text color for bright backgrounds */
+                    transition: background 0.3s;
+                }
+
                 .new-msg-toast {
-                    position: sticky;
-                    top: 10px;      /* Gap from the nav bar */
-                    left: 100%;     /* Push to the far right */
-                    margin-right: 15px;
-                    width: max-content;
-
-                    background: #00ff88;
-                    color: #000;
-                    padding: 6px 12px;
-                    border-radius: 4px;
-                    font-size: 0.8rem;
-                    font-weight: 800;
-                    cursor: pointer;
-                    z-index: 50; /* Above messages, below context menus */
-                    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-
-                    /* Animation for attention */
+                    position: sticky; top: 10px; left: 100%; margin-right: 15px;
+                    width: max-content; z-index: 50; cursor: pointer;
                     animation: slideInRight 0.3s ease-out;
                 }
-
-                .new-msg-toast:hover {
-                    background: #00cc6e;
-                    transform: scale(1.05);
-                }
-
-                @keyframes slideInRight {
-                    from { opacity: 0; transform: translateX(20px); }
-                    to { opacity: 1; transform: translateX(0); }
-                }
-
-                /* --- FILTER CHIP OVERLAY --- */
-                .filter-overlay-container {
-                    position: sticky;
-                    top: 10px;
-                    left: 0;
-                    right: 0;
-                    display: flex;
-                    justify-content: center;
-                    pointer-events: none; /* Allows scrolling through the container */
-                    z-index: 60;
-                }
-
-                .filter-chip {
-                    pointer-events: auto; /* Re-enable clicks for the chip itself */
-                    background: rgba(0, 255, 136, 0.9); /* Theme green with transparency */
-                    color: #000;
-                    padding: 6px 12px;
-                    border-radius: 20px;
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-                    font-weight: 700;
-                    font-size: 0.85rem;
-                    backdrop-filter: blur(4px);
-                    animation: slideDown 0.2s ease-out;
-                }
-
-                .filter-label {
-                    max-width: 150px;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                }
+                .new-msg-toast:hover { transform: scale(1.05); }
 
                 .filter-close-btn {
-                    background: rgba(0, 0, 0, 0.1);
-                    border: none;
-                    color: #000;
-                    width: 20px;
-                    height: 20px;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    cursor: pointer;
-                    font-size: 0.75rem;
-                    font-weight: bold;
-                    transition: all 0.2s;
+                    background: rgba(0,0,0,0.1); border: none; width: 20px; height: 20px;
+                    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+                    cursor: pointer; font-size: 0.7rem; color: #000;
+                }
+                .filter-close-btn:hover { background: rgba(0,0,0,0.3); }
+
+                /* Dynamic Color Logic for Toasts */
+                .filter-chip[data-filter-type='전체'], .new-msg-toast[data-filter-type='전체'] { background: rgba(255,255,255,0.95); }
+                .filter-chip[data-filter-type='월드'], .new-msg-toast[data-filter-type='월드'] { background: rgba(186,104,200,0.95); }
+                .filter-chip[data-filter-type='길드'], .new-msg-toast[data-filter-type='길드'] { background: rgba(129,199,132,0.95); }
+                .filter-chip[data-filter-type='파티'], .new-msg-toast[data-filter-type='파티'] { background: rgba(79,195,247,0.95); }
+                .filter-chip[data-filter-type='로컬'], .new-msg-toast[data-filter-type='로컬'] { background: rgba(189,189,189,0.95); }
+                .filter-chip[data-filter-type='시스템'], .new-msg-toast[data-filter-type='시스템'] { background: rgba(255,213,79,0.95); }
+
+                /* --- 8. COMPACT MODE OVERRIDES --- */
+                .chat-app.compact .tab-bar {
+                    height: 32px; padding: 0 8px; background: #151515;
                 }
 
-                .filter-close-btn:hover {
-                    background: rgba(0, 0, 0, 0.3);
-                    transform: scale(1.1);
+                .compact-tab-indicator {
+                    display: flex; align-items: center; gap: 8px;
+                    font-size: 0.9rem; font-weight: bold; color: #fff;
                 }
+                .indicator-dot {
+                    width: 8px; height: 8px; border-radius: 50%; background: #fff;
+                }
+                .indicator-dot[data-tab='월드'] { background: #BA68C8; }
+                .indicator-dot[data-tab='길드'] { background: #81C784; }
+                .indicator-dot[data-tab='파티'] { background: #4FC3F7; }
+                /* ... (Add other colors if needed) ... */
 
-                @keyframes slideDown {
-                    from { opacity: 0; transform: translateY(-10px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
+                .chat-app.compact .chat-container { padding: 4px; }
+                .chat-app.compact .chat-row { margin-bottom: 2px; padding: 2px 4px; }
+                .chat-app.compact .msg-header { margin-bottom: 0; font-size: 0.8rem; }
+                .chat-app.compact .msg-body { padding: 4px 8px; margin-top: 1px; border-radius: 4px; }
 
-                /* --- DYNAMIC COLOR LOGIC --- */
+                /* HIDE ORIGINAL TEXT ONLY IF TRANSLATION EXISTS */
+                .chat-app.compact .msg-body.has-translation .original { display: none; }
 
-                /* Base Styles for Chip and Toast */
-                .filter-chip, .new-msg-toast {
-                    transition: background-color 0.3s ease, color 0.3s ease;
-                    color: #000; /* Dark text for light/vivid backgrounds */
-                    font-weight: 800;
-                }
+                .chat-app.compact .translated { margin-top: 0; font-size: 0.9rem; }
+                .chat-app.compact .trans-tag { display: none; }
 
-                /* Default / "전체" - White */
-                .filter-chip[data-filter-type='전체'],
-                .new-msg-toast[data-filter-type='전체'] {
-                    background: rgba(255, 255, 255, 0.95);
-                    color: #000;
-                }
-
-                /* "월드" - Purple (#BA68C8) */
-                .filter-chip[data-filter-type='월드'],
-                .new-msg-toast[data-filter-type='월드'] {
-                    background: rgba(186, 104, 200, 0.95);
-                }
-
-                /* "길드" - Green (#81C784) */
-                .filter-chip[data-filter-type='길드'],
-                .new-msg-toast[data-filter-type='길드'] {
-                    background: rgba(129, 199, 132, 0.95);
-                }
-
-                /* "파티" - Blue (#4FC3F7) */
-                .filter-chip[data-filter-type='파티'],
-                .new-msg-toast[data-filter-type='파티'] {
-                    background: rgba(79, 195, 247, 0.95);
-                }
-
-                /* "로컬" - Gray (#BDBDBD) */
-                .filter-chip[data-filter-type='로컬'],
-                .new-msg-toast[data-filter-type='로컬'] {
-                    background: rgba(189, 189, 189, 0.95);
-                }
-
-                /* "시스템" - Yellow (#FFD54F) */
-                .filter-chip[data-filter-type='시스템'],
-                .new-msg-toast[data-filter-type='시스템'] {
-                    background: rgba(255, 213, 79, 0.95);
-                }
-
-                /* Special Case: Close Button Contrast */
-                .filter-chip .filter-close-btn {
-                    background: rgba(0, 0, 0, 0.15);
-                }
-                .filter-chip .filter-close-btn:hover {
-                    background: rgba(0, 0, 0, 0.3);
-                }
+                /* --- ANIMATIONS --- */
+                @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+                @keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
                 "
             </style>
         </main>

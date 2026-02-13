@@ -112,6 +112,66 @@ pub fn App() -> impl IntoView {
         });
     };
 
+    // --- OPTIMIZED VIEW LOGIC ---
+    let filtered_messages = Memo::new(move |_| {
+        let tab = active_tab.get();
+        let search = search_term.get().to_lowercase(); // Case-insensitive
+
+        // Step A: Get the list based on Tab
+        let list_by_tab = match tab.as_str() {
+            "시스템" => system_log.get(),
+            "전체" => chat_log.get().values().cloned().collect(),
+            _ => {
+                let key = match tab.as_str() {
+                    "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD"
+                };
+                chat_log.get().values()
+                    .filter(|m| m.get().channel == key)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            }
+        };
+
+        // Step B: Filter by Search Term (if exists)
+        if search.is_empty() {
+            list_by_tab
+        } else {
+            list_by_tab.into_iter().filter(|sig| {
+                let msg = sig.get();
+                // Check Nickname OR Message content
+                msg.nickname.to_lowercase().contains(&search) ||
+                    msg.message.to_lowercase().contains(&search)
+            }).collect()
+        }
+    });
+
+    // 1. STATE: Track if the user is currently at the bottom
+    let (is_at_bottom, set_is_at_bottom) = signal(true);
+    let (unread_count, set_unread_count) = signal(0); // [NEW] Tracks missed messages
+    let chat_container_ref = create_node_ref::<html::Div>();
+
+    // 2. EFFECT: Auto-scroll when messages update
+    Effect::new(move |_| {
+        // We track 'filtered_messages' so this runs ONLY when the visible list changes
+        filtered_messages.track();
+
+        // 1. Initial Check: Were we at the bottom before the new message?
+        if is_at_bottom.get_untracked() {
+
+            // Wait for the DOM to render the new message...
+            request_animation_frame(move || {
+                // 2. [CRITICAL FIX] ASYNC GUARD
+                // Check if the user scrolled up *during* the render wait.
+                // If is_at_bottom is now false (because you moved), DO NOT SCROLL.
+                if is_at_bottom.get_untracked() {
+                    if let Some(el) = chat_container_ref.get() {
+                        el.set_scroll_top(el.scroll_height());
+                    }
+                }
+            });
+        }
+    });
+
     // --- ACTIONS ---
     let setup_listeners = move || {
         spawn_local(async move {
@@ -135,6 +195,12 @@ pub fn App() -> impl IntoView {
                             if log.len() >= 1000 { log.shift_remove_index(0); }
                             log.insert(packet.pid, RwSignal::new(packet));
                         });
+
+                        // [NEW] Check if we need to show the "New Message" badge
+                        // We use .get_untracked() to avoid infinite loops inside the listener
+                        if !is_at_bottom.get_untracked() {
+                            set_unread_count.update(|n| *n += 1);
+                        }
 
                         // Trigger Translation (Only if it's NOT a sticker anymore)
                         // Since "스티커 전송" is Korean, is_japanese() will return false, saving API calls.
@@ -255,58 +321,22 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // --- OPTIMIZED VIEW LOGIC ---
-    let filtered_messages = Memo::new(move |_| {
-        let tab = active_tab.get();
-        let search = search_term.get().to_lowercase(); // Case-insensitive
-
-        // Step A: Get the list based on Tab
-        let list_by_tab = match tab.as_str() {
-            "시스템" => system_log.get(),
-            "전체" => chat_log.get().values().cloned().collect(),
-            _ => {
-                let key = match tab.as_str() {
-                    "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD"
-                };
-                chat_log.get().values()
-                    .filter(|m| m.get().channel == key)
-                    .cloned()
-                    .collect::<Vec<_>>()
-            }
-        };
-
-        // Step B: Filter by Search Term (if exists)
-        if search.is_empty() {
-            list_by_tab
-        } else {
-            list_by_tab.into_iter().filter(|sig| {
-                let msg = sig.get();
-                // Check Nickname OR Message content
-                msg.nickname.to_lowercase().contains(&search) ||
-                    msg.message.to_lowercase().contains(&search)
-            }).collect()
+    // Action: Clear Chat
+    let clear_chat = move |_| {
+        // 1. Confirm with user (Optional but recommended)
+        if !window().confirm_with_message("Clear all chat history?").unwrap_or(false) {
+            return;
         }
-    });
 
-    // 1. STATE: Track if the user is currently at the bottom
-    let (is_at_bottom, set_is_at_bottom) = signal(true);
-    let chat_container_ref = create_node_ref::<html::Div>();
+        spawn_local(async move {
+            // 2. Call Backend
+            let _ = invoke("clear_chat_history", JsValue::NULL).await;
 
-    // 2. EFFECT: Auto-scroll when messages update
-    Effect::new(move |_| {
-        // We track 'filtered_messages' so this runs ONLY when the visible list changes
-        filtered_messages.track();
-
-        // Only auto-scroll if the user was ALREADY at the bottom
-        if is_at_bottom.get_untracked() {
-            // Use request_animation_frame to wait for the DOM to update with the new message
-            request_animation_frame(move || {
-                if let Some(el) = chat_container_ref.get() {
-                    el.set_scroll_top(el.scroll_height());
-                }
-            });
-        }
-    });
+            // 3. Clear Frontend Signals immediately
+            set_chat_log.set(IndexMap::new());
+            set_system_log.set(Vec::new());
+        });
+    };
 
     view! {
         <main class="chat-app">
@@ -330,7 +360,17 @@ pub fn App() -> impl IntoView {
                     </div>
 
                     // --- DICTIONARY SYNC BUTTON ---
-                    <div class="dict-sync-area">
+                    <div class="control-area">
+
+                        // 1. Clear Chat Button
+                        <button class="icon-btn danger"
+                            title="Clear Chat History"
+                            on:click=clear_chat
+                        >
+                            "🗑️"
+                        </button>
+
+                        // 2. Sync Dictionary Button
                         <button class="sync-btn"
                             on:click=move |_| {
                                 sync_dict_action.dispatch(());
@@ -346,14 +386,44 @@ pub fn App() -> impl IntoView {
                     </div>
                 </nav>
 
-                <div class="chat-container" node_ref=chat_container_ref
-                    // 3. EVENT: Detect manual scrolling
+                <div class="chat-container"
+                    node_ref=chat_container_ref
+                    style="position: relative;"
+                    // 4. SCROLL EVENT (Reset Logic)
                     on:scroll=move |ev| {
                         let el = event_target::<HtmlDivElement>(&ev);
-                        // "Tolerance" of 30px allows for minor pixel differences
-                        let at_bottom = el.scroll_height() - el.scroll_top() - el.client_height() < 30;
+
+                        // [CHANGED] Stricter tolerance (10px instead of 30px)
+                        // This prevents "fighting" the scroll bar.
+                        let at_bottom = el.scroll_height() - el.scroll_top() - el.client_height() < 10;
+
                         set_is_at_bottom.set(at_bottom);
-                    }>
+
+                        // If user manually scrolls to bottom, clear the unread count
+                        if at_bottom {
+                            set_unread_count.set(0);
+                        }
+                    }
+                >
+
+                    // 5. FLOATING BUTTON
+                    // Show ONLY if there are unread messages (implies we are scrolled up)
+                    <Show when=move || { unread_count.get() > 0 }>
+                        <button class="scroll-bottom-btn"
+                            on:click=move |_| {
+                                if let Some(el) = chat_container_ref.get() {
+                                    // 1. Scroll to bottom
+                                    el.set_scroll_top(el.scroll_height());
+                                    // 2. Reset states immediately
+                                    set_is_at_bottom.set(true);
+                                    set_unread_count.set(0);
+                                }
+                            }
+                        >
+                            // Dynamic Label: "⬇ 3 New Messages"
+                            "⬇ " {move || unread_count.get()} " New Messages"
+                        </button>
+                    </Show>
                     <For each=move || filtered_messages.get()
                         key=|sig| sig.get_untracked().pid
                         children=move |sig| {
@@ -537,6 +607,46 @@ pub fn App() -> impl IntoView {
                     transform: scale(0.95);
                 }
 
+                /* --- FLOATING SCROLL BUTTON --- */
+                .scroll-bottom-btn {
+                    position: sticky; /* Stays visible inside the scroll container */
+                    bottom: 20px;     /* Floats 20px from the bottom of the view */
+                    left: 50%;
+                    transform: translateX(-50%); /* Centers it horizontally */
+
+                    background: #00ff88;
+                    color: #000;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 20px;
+
+                    font-weight: 800;
+                    font-size: 0.85rem;
+                    cursor: pointer;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+                    z-index: 100;
+
+                    /* Animation */
+                    animation: popUp 0.3s ease-out;
+                    opacity: 0.9;
+                }
+
+                .scroll-bottom-btn:hover {
+                    opacity: 1;
+                    transform: translateX(-50%) scale(1.05);
+                }
+
+                @keyframes popUp {
+                    from { transform: translateX(-50%) translateY(20px); opacity: 0; }
+                    to { transform: translateX(-50%) translateY(0); opacity: 0.9; }
+                }
+
+                @keyframes bounce {
+                    0%, 20%, 50%, 80%, 100% { transform: translateX(-50%) translateY(0); }
+                    40% { transform: translateX(-50%) translateY(-5px); }
+                    60% { transform: translateX(-50%) translateY(-3px); }
+                }
+
                 /* 1. LOCAL (Gray/White) */
                 .chat-row[data-channel='LOCAL'] {
                     border-left-color: #BDBDBD;
@@ -647,6 +757,13 @@ pub fn App() -> impl IntoView {
                 }
 
                 /* --- UTILS --- */
+                .control-area {
+                    padding-right: 15px;
+                    position: relative;
+                    display: flex;       /* Aligns buttons horizontally */
+                    align-items: center;
+                    gap: 8px;            /* Spacing between Trash and Update button */
+                }
                 .dict-sync-area { padding-right: 15px; position: relative; }
                 .sync-btn {
                     background: #333; color: #aaa; border: 1px solid #444;
@@ -656,6 +773,29 @@ pub fn App() -> impl IntoView {
                 .sync-btn:hover { background: #444; color: #fff; }
                 .sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+                .icon-btn {
+                    background: transparent;
+                    border: none;
+                    cursor: pointer;
+                    font-size: 1.2rem;
+                    padding: 6px;
+                    border-radius: 4px;
+                    transition: all 0.2s;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: #888;
+                }
+                .icon-btn:hover {
+                    background: rgba(255, 255, 255, 0.1);
+                    transform: scale(1.1);
+                }
+
+                /* Red Hover for Delete */
+                .icon-btn.danger:hover {
+                    color: #ff4444;
+                    background: rgba(255, 68, 68, 0.1);
+                }
                 .update-dot {
                     position: absolute; top: -4px; right: -4px;
                     width: 8px; height: 8px; background: #ff4444;

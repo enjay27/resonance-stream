@@ -33,7 +33,8 @@ pub fn run() {
             get_chat_history,
             get_system_history,
             check_dict_update,
-            sync_dictionary
+            sync_dictionary,
+            clear_chat_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -89,4 +90,15 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatPacket) {
         // Emit "packet-event" for Game Chat
         let _ = app.emit("packet-event", &packet);
     }
+}
+
+#[tauri::command]
+fn clear_chat_history(state: tauri::State<AppState>) {
+    // 1. Clear Game Chat
+    let mut history = state.chat_history.lock().unwrap();
+    history.clear();
+
+    // 2. Clear System Logs (Optional, but good for a full reset)
+    let mut sys_history = state.system_history.lock().unwrap();
+    sys_history.clear();
 }

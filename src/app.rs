@@ -163,7 +163,7 @@ pub fn App() -> impl IntoView {
         // If they have scrolled up (is_at_bottom is false), this entire block is ignored.
         if is_at_bottom.get_untracked() {
             request_animation_frame(move || {
-                // Re-check after render to ensure the user didn't move during the frame
+                // Double-check after render to ensure the state is still 'at_bottom'
                 if is_at_bottom.get_untracked() {
                     if let Some(el) = chat_container_ref.get() {
                         el.set_scroll_top(el.scroll_height());
@@ -324,13 +324,6 @@ pub fn App() -> impl IntoView {
                 }
             }
         });
-    });
-
-    Effect::new(move |_| {
-        chat_log.track();
-        if !is_user_scrolling.get_untracked() {
-            if let Some(el) = chat_container_ref.get() { el.set_scroll_top(el.scroll_height()); }
-        }
     });
 
     // Action: Clear Chat

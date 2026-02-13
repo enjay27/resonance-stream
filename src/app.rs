@@ -148,6 +148,10 @@ pub fn App() -> impl IntoView {
     // 1. STATE: Track if the user is currently at the bottom
     let (is_at_bottom, set_is_at_bottom) = signal(true);
     let (unread_count, set_unread_count) = signal(0); // [NEW] Tracks missed messages
+
+    let (active_menu_id, set_active_menu_id) = signal(None::<u64>); // [NEW] Track open menu
+    let (sniffer_warning, set_sniffer_warning) = signal(false);     // [NEW] Track watchdog warning
+
     let chat_container_ref = create_node_ref::<html::Div>();
 
     // 2. EFFECT: Auto-scroll when messages update
@@ -155,14 +159,11 @@ pub fn App() -> impl IntoView {
         // We track 'filtered_messages' so this runs ONLY when the visible list changes
         filtered_messages.track();
 
-        // 1. Initial Check: Were we at the bottom before the new message?
+        // [CRITICAL FIX] Only execute scroll logic if the user is ALREADY at the bottom.
+        // If they have scrolled up (is_at_bottom is false), this entire block is ignored.
         if is_at_bottom.get_untracked() {
-
-            // Wait for the DOM to render the new message...
             request_animation_frame(move || {
-                // 2. [CRITICAL FIX] ASYNC GUARD
-                // Check if the user scrolled up *during* the render wait.
-                // If is_at_bottom is now false (because you moved), DO NOT SCROLL.
+                // Re-check after render to ensure the user didn't move during the frame
                 if is_at_bottom.get_untracked() {
                     if let Some(el) = chat_container_ref.get() {
                         el.set_scroll_top(el.scroll_height());
@@ -249,9 +250,20 @@ pub fn App() -> impl IntoView {
             listen("system-event", &system_closure).await;
             listen("translator-event", &trans_closure).await;
 
+            // [NEW] Listener for Watchdog Warnings
+            let sniffer_status_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+                    if let Some("warning") = ev["payload"].as_str() {
+                        set_sniffer_warning.set(true);
+                    }
+                }
+            }) as Box<dyn FnMut(JsValue)>);
+            listen("sniffer-status", &sniffer_status_closure).await;
+
             packet_closure.forget();
             system_closure.forget();
             trans_closure.forget();
+            sniffer_status_closure.forget();
         });
     };
 
@@ -340,7 +352,28 @@ pub fn App() -> impl IntoView {
 
     view! {
         <main class="chat-app">
-            <Show when=move || model_ready.get() fallback=|| view! { <div class="setup-view">"..."</div> }>
+            <Show when=move || active_menu_id.get().is_some()>
+                <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
+            </Show>
+
+            <Show when=move || model_ready.get() fallback=move || view! {
+                <div class="setup-view">
+                    <h1>"BPSR Translator"</h1>
+                    <div class="status-card">
+                        <p><strong>"Status: "</strong> {move || status_text.get()}</p>
+                        <Show when=move || downloading.get()>
+                            <div class="progress-bar">
+                                <div class="fill" style:width=move || format!("{}%", progress.get())></div>
+                            </div>
+                        </Show>
+                    </div>
+                    <Show when=move || !model_ready.get() && !downloading.get()>
+                        <button class="primary-btn" on:click=start_download>
+                            "Install Translation Model (400MB)"
+                        </button>
+                    </Show>
+                </div>
+            }>
                 <nav class="tab-bar">
                     <div class="tabs">
                         {vec!["전체", "월드", "길드", "파티", "로컬", "시스템"].into_iter().map(|t| {
@@ -361,6 +394,21 @@ pub fn App() -> impl IntoView {
 
                     // --- DICTIONARY SYNC BUTTON ---
                     <div class="control-area">
+
+                        <button class="icon-btn"
+                            title="Restart Sniffer"
+                            on:click=move |_| {
+                                set_sniffer_warning.set(false);
+                                spawn_local(async move {
+                                    let _ = invoke("force_restart_sniffer", JsValue::NULL).await;
+                                });
+                            }
+                        >
+                            "🔄"
+                            <Show when=move || sniffer_warning.get()>
+                                <span class="update-dot"></span>
+                            </Show>
+                        </button>
 
                         // 1. Clear Chat Button
                         <button class="icon-btn danger"
@@ -430,31 +478,69 @@ pub fn App() -> impl IntoView {
                             // This child closure now receives an individual RwSignal
                             let msg = sig.get();
                             let is_jp = is_japanese(&msg.message);
+                            let pid = msg.pid;
+                            let nick_for_copy = msg.nickname.clone();
+                            let nick_for_filter = msg.nickname.clone();
+                            let is_active = move || active_menu_id.get() == Some(pid);
 
                             view! {
-                                <div class="chat-row" data-channel=move || sig.get().channel.clone()>
-                                    <div class="msg-header">
+                                <div class="chat-row"
+                                     data-channel=move || sig.get().channel.clone()
+                                     // [NEW] Lift the entire row when the menu is active
+                                     style:z-index=move || if is_active() { "10001" } else { "1" }
+                                >
+                                    <div class="msg-header"
+                                         style:position="relative"
+                                         style:z-index=move || if is_active() { "1001" } else { "1" }
+                                    >
                                         // [CHANGED] Added Click Handler
                                         <span class=move || if search_term.get() == sig.get().nickname { "nickname active" } else { "nickname" }
-                                            title="Click to Filter / Unfilter"
                                             on:click=move |ev| {
                                                 // Stop the click from bubbling up (good practice)
                                                 ev.stop_propagation();
 
-                                                let clicked_name = sig.get().nickname;
-                                                let current_search = search_term.get_untracked(); // Use untracked to avoid loop
-
-                                                if current_search == clicked_name {
-                                                    // If already filtering by this name -> CLEAR
-                                                    set_search_term.set("".to_string());
+                                                if active_menu_id.get() == Some(pid) {
+                                                    set_active_menu_id.set(None);
                                                 } else {
-                                                    // If empty or filtering by someone else -> SET
-                                                    set_search_term.set(clicked_name);
+                                                    set_active_menu_id.set(Some(pid));
                                                 }
                                             }
                                         >
                                             {move || sig.get().nickname.clone()}
                                         </span>
+
+                                        <Show when=is_active>
+                                            <div class="context-menu" on:click=move |ev| ev.stop_propagation()>
+                                                // OPTION 1: COPY
+                                                <button class="menu-item" on:click={
+                                                    // Create another clone for this specific closure
+                                                    let n = nick_for_copy.clone();
+                                                    move |_| {
+                                                        copy_text(n.clone());
+                                                        set_active_menu_id.set(None);
+                                                    }
+                                                }>
+                                                    <span class="menu-icon">"📋"</span>
+                                                    <span class="menu-text">"Copy Name"</span>
+                                                </button>
+
+                                                // OPTION 2: FILTER
+                                                <button class="menu-item" on:click={
+                                                    let n = nick_for_filter.clone();
+                                                    move |_| {
+                                                        if search_term.get_untracked() == n {
+                                                            set_search_term.set("".into());
+                                                        } else {
+                                                            set_search_term.set(n.clone());
+                                                        }
+                                                        set_active_menu_id.set(None);
+                                                    }
+                                                }>
+                                                    <span class="menu-icon">"🔍"</span>
+                                                    <span class="menu-text">"Filter Chat"</span>
+                                                </button>
+                                            </div>
+                                        </Show>
 
                                         <span class="lvl">"Lv." {move || sig.get().level}</span>
                                         <span class="time">{format_time(msg.timestamp)}</span>
@@ -573,12 +659,14 @@ pub fn App() -> impl IntoView {
                 }
 
                 .chat-row {
+                    position: relative;
                     margin-bottom: 8px;
                     padding: 6px 10px;
                     border-radius: 4px;
                     border-left: 3px solid transparent;
                     /* Default Text Color */
                     color: #ddd;
+                    overflow: visible !important;
                 }
                 .copy-btn {
                     /* No absolute positioning needed anymore */
@@ -691,6 +779,7 @@ pub fn App() -> impl IntoView {
                     gap: 8px;
                     margin-bottom: 4px;
                     opacity: 0.9;
+                    position: relative;
                 }
 
                 .nickname {
@@ -806,6 +895,81 @@ pub fn App() -> impl IntoView {
                     0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7); }
                     70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(255, 68, 68, 0); }
                     100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
+                }
+
+                /* --- CONTEXT MENU --- */
+                .context-menu {
+                    position: absolute;
+                    top: calc(100% + 5px);
+                    left: 0;
+                    background: #1e1e1e !important; /* Force solid background */
+                    border: 1px solid #00ff88;
+                    border-radius: 8px;
+                    padding: 6px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+
+                    /* [FIX] Higher than overlay (9998) and container */
+                    z-index: 10002;
+
+                    box-shadow: 0 10px 25px rgba(0,0,0,0.8);
+                    min-width: 150px;
+                    animation: fadeIn 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+
+                    /* [NEW] Ensure mouse events are captured */
+                    pointer-events: auto;
+                }
+
+                .menu-item {
+                    background: transparent;
+                    border: none;
+                    color: #eee;
+                    padding: 10px 14px;
+                    text-align: left;
+                    cursor: pointer;
+                    font-size: 0.9rem;
+                    border-radius: 6px;
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    transition: all 0.15s ease;
+                }
+
+                .menu-item:hover {
+                    background: #00ff88;
+                    color: #000;
+                    transform: translateX(4px); /* Subtle slide-in effect */
+                }
+
+                .menu-item:active {
+                    transform: scale(0.96) translateX(4px);
+                }
+
+                .menu-icon {
+                    font-size: 1.1rem;
+                }
+
+                .menu-text {
+                    font-weight: 600;
+                }
+
+                .menu-overlay {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100vw;
+                    height: 100vh;
+
+                    /* [FIX] Higher than normal UI, but lower than .context-menu */
+                    z-index: 10000;
+
+                    background: rgba(0,0,0,0.2); /* Slight dim to confirm it's active */
+                }
+
+                @keyframes fadeIn {
+                    from { opacity: 0; transform: translateY(-8px) scale(0.95); }
+                    to { opacity: 1; transform: translateY(0) scale(1); }
                 }
                 "
             </style>

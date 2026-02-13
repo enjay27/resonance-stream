@@ -72,12 +72,18 @@ class TranslationManager:
         tag_count = 0
         diagnostics = []
 
-        # Helper to log steps inside preprocess
         def add_diag(step, content):
             diagnostics.append({"step": step, "content": content})
 
         current_text = text
         add_diag("1. Original Input", current_text)
+
+        def apply_shield(text, search_str, replacement_val, count):
+            tag = f"(TERM_{count})"
+            # Check if this tag will be at the very start of the text
+            is_start = text.startswith(search_str)
+            placeholders[tag] = {"val": replacement_val, "is_start": is_start}
+            return text.replace(search_str, f" {tag} ", 1), tag
 
         # PHASE 1: DICTIONARY
         if self.custom_dict:
@@ -85,29 +91,48 @@ class TranslationManager:
             for ja, ko in sorted_dict:
                 if ja in "～！？。♪☆★": continue
                 if ja in current_text:
-                    tag = f"[#{tag_count}]"
-                    placeholders[tag] = ko
-                    current_text = current_text.replace(ja, tag)
+                    current_text, _ = apply_shield(current_text, ja, ko, tag_count)
                     tag_count += 1
 
-        # PHASE 2: NUMERIC PATTERNS
-        current_text = re.sub(r'(\d+)種', r'\1종', current_text)
-        current_text = re.sub(r'(\d+)人', r'\1인', current_text)
-        current_text = re.sub(r'(\d+)周', r'\1회', current_text)
-        current_text = re.sub(r'(\d+)回', r'\1회', current_text)
+        # ... (Keep Phase 2 & 3 the same, just ensure they use the new apply_shield)
 
-        # PHASE 3: RECRUITMENT & KAOMOJI
-        # (Simplified for brevity - ensure your regexes are here)
+        # PHASE 3: RECRUITMENT
+        recruit_pattern = r'@[A-Za-z0-9]+(?:[\s]+[A-Za-z0-9]+)*'
+        matches = re.findall(recruit_pattern, current_text)
+        for match in sorted(set(matches), key=len, reverse=True):
+            current_text, _ = apply_shield(current_text, match, match, tag_count)
+            tag_count += 1
 
+        current_text = re.sub(r'\s+', ' ', current_text).strip()
         add_diag("2. Dictionary Shielded", current_text)
         return current_text, placeholders, diagnostics
 
     def postprocess(self, text, placeholders):
         final_text = text
+
         for tag in sorted(placeholders.keys(), key=len, reverse=True):
-            num = tag.strip("[]#")
-            pattern = re.compile(rf'\[\s*#\s*{num}\s*\]')
-            final_text = pattern.sub(f" {placeholders[tag]} ", final_text)
+            digit_match = re.search(r'\d+', tag)
+            num = digit_match.group()
+
+            # placeholders[tag] is now a dict: {"val": "불안정", "is_start": True}
+            data = placeholders[tag]
+            target_value = data["val"]
+            is_start = data["is_start"]
+
+            pattern_str = r'[\(\[\\\{]?\s?TERM[\s_]*' + num + r'\s?[\)\]\\\}]?'
+            pattern = re.compile(pattern_str, re.IGNORECASE)
+
+            if pattern.search(final_text):
+                final_text = pattern.sub(f" {target_value} ", final_text)
+            else:
+                # RECOVERY LOGIC
+                if is_start:
+                    # If it was at the start, put it back at the start
+                    final_text = f"{target_value} {final_text.strip()}"
+                else:
+                    # Otherwise, append to the end
+                    final_text = f"{final_text.strip()} {target_value}"
+
         return " ".join(final_text.split()).strip()
 
 def get_optimized_hardware():
@@ -229,11 +254,12 @@ def main():
 
                 add_diag("5. Reassembled", final_main)
 
-                # 8. UNSHIELD
-                final_output = manager.postprocess(final_main, placeholders)
-
                 # 9. FIX PARTICLES
-                final_output = fix_korean_josa(final_output)
+                final_output = fix_korean_josa(final_main)
+
+                # 8. UNSHIELD
+                final_output = manager.postprocess(final_output, placeholders)
+
                 add_diag("6. Final Polish", final_output)
 
                 print(json.dumps({

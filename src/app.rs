@@ -376,17 +376,28 @@ pub fn App() -> impl IntoView {
                                 </div>
                             }
                         >
-                            {vec!["전체", "월드", "길드", "파티", "로컬", "시스템"].into_iter().map(|t| {
-                                let t_name = t.to_string();
-                                let t_click = t_name.clone();
-                                let t_data = t_name.clone();
+                            {vec![
+                                ("전체", "♾️"), // All (Infinity)
+                                ("월드", "🌐"), // World (Globe)
+                                ("길드", "🛡️"), // Guild (Shield)
+                                ("파티", "⚔️"), // Party (Swords)
+                                ("로컬", "📍"), // Local (Pin)
+                                ("시스템", "⚙️") // System (Gear)
+                            ].into_iter().map(|(full, short)| {
+                                let t_full = full.to_string();
+                                let t_click = t_full.clone();
+                                let t_data = t_full.clone();
+                                let t_tab = t_full.clone();
+
                                 view! {
                                     <button
-                                        class=move || if active_tab.get() == t_name { "tab-btn active" } else { "tab-btn" }
+                                        class=move || if active_tab.get() == t_tab { "tab-btn active" } else { "tab-btn" }
                                         data-tab=t_data
                                         on:click=move |_| set_active_tab.set(t_click.clone())
+                                        title=t_full
                                     >
-                                        {t}
+                                        <span class="tab-full">{full}</span>
+                                        <span class="tab-short">{short}</span>
                                     </button>
                                 }
                             }).collect_view()}
@@ -877,6 +888,39 @@ pub fn App() -> impl IntoView {
                 /* --- ANIMATIONS --- */
                 @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
                 @keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+                /* --- RESPONSIVE TAB LABELS --- */
+                .tab-full { display: inline; }
+                .tab-short { display: none; }
+
+                /* Switch to Emojis on narrow screens */
+                @media (max-width: 600px) {
+                    .tab-full { display: none; }
+
+                    .tab-short {
+                        display: inline-block;
+                        font-size: 1.2rem; /* Emojis need to be slightly larger */
+                        line-height: 1;
+                        filter: drop-shadow(0 0 1px rgba(0,0,0,0.5)); /* enhance visibility */
+                    }
+
+                    /* Adjust button spacing for icons */
+                    .tab-btn {
+                        padding: 8px 6px;
+                        min-width: 35px;
+                    }
+
+                    .control-area { gap: 4px; padding-right: 5px; }
+                }
+
+                /* --- COLOR VERIFICATION --- */
+                /* These rules ensure that even if the Emoji is colored by default,
+                   the Active Underline clearly indicates the channel color.
+                */
+                .tab-btn.active {
+                    border-bottom-width: 3px; /* Make the color bar thicker for visibility */
+                    background: rgba(255, 255, 255, 0.05); /* Slight highlight */
+                }
                 "
             </style>
         </main>

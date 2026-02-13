@@ -197,9 +197,17 @@ pub fn App() -> impl IntoView {
                             log.insert(packet.pid, RwSignal::new(packet));
                         });
 
-                        // [NEW] Check if we need to show the "New Message" badge
-                        // We use .get_untracked() to avoid infinite loops inside the listener
-                        if !is_at_bottom.get_untracked() {
+                        let current_tab = active_tab.get_untracked();
+                        let is_relevant = match current_tab.as_str() {
+                            "전체" => true,
+                            "월드" => packet_clone.channel == "WORLD",
+                            "길드" => packet_clone.channel == "GUILD",
+                            "파티" => packet_clone.channel == "PARTY",
+                            "로컬" => packet_clone.channel == "LOCAL",
+                            _ => false,
+                        };
+
+                        if is_relevant && !is_at_bottom.get_untracked() {
                             set_unread_count.update(|n| *n += 1);
                         }
 
@@ -446,6 +454,19 @@ pub fn App() -> impl IntoView {
                         }
                     }
                 >
+
+                    // [NEW] Top-Right Notification Badge
+                    <Show when=move || { unread_count.get() > 0 }>
+                        <div class="new-msg-toast" on:click=move |_| {
+                            if let Some(el) = chat_container_ref.get() {
+                                el.set_scroll_top(el.scroll_height());
+                                set_is_at_bottom.set(true);
+                                set_unread_count.set(0);
+                            }
+                        }>
+                            {move || unread_count.get()} "개의 새로운 메세지"
+                        </div>
+                    </Show>
 
                     // 5. FLOATING BUTTON
                     // Show ONLY if there are unread messages (implies we are scrolled up)
@@ -963,6 +984,38 @@ pub fn App() -> impl IntoView {
                 @keyframes fadeIn {
                     from { opacity: 0; transform: translateY(-8px) scale(0.95); }
                     to { opacity: 1; transform: translateY(0) scale(1); }
+                }
+
+                /* --- TOP-RIGHT NOTIFICATION TOAST --- */
+                .new-msg-toast {
+                    position: sticky;
+                    top: 10px;      /* Gap from the nav bar */
+                    left: 100%;     /* Push to the far right */
+                    margin-right: 15px;
+                    width: max-content;
+
+                    background: #00ff88;
+                    color: #000;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    font-size: 0.8rem;
+                    font-weight: 800;
+                    cursor: pointer;
+                    z-index: 50; /* Above messages, below context menus */
+                    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+
+                    /* Animation for attention */
+                    animation: slideInRight 0.3s ease-out;
+                }
+
+                .new-msg-toast:hover {
+                    background: #00cc6e;
+                    transform: scale(1.05);
+                }
+
+                @keyframes slideInRight {
+                    from { opacity: 0; transform: translateX(20px); }
+                    to { opacity: 1; transform: translateX(0); }
                 }
                 "
             </style>

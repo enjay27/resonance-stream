@@ -94,6 +94,7 @@ class TranslationManager:
         current_text = re.sub(r'(\d+)種', r'\1종', current_text)
         current_text = re.sub(r'(\d+)人', r'\1인', current_text)
         current_text = re.sub(r'(\d+)周', r'\1회', current_text)
+        current_text = re.sub(r'(\d+)回', r'\1회', current_text)
 
         # PHASE 3: RECRUITMENT & KAOMOJI
         # (Simplified for brevity - ensure your regexes are here)

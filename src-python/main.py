@@ -44,7 +44,22 @@ class TranslationManager:
         current_text = text
         add_diag("Original", current_text)
 
-        # PHASE 0: NUMERIC PATTERN SHIELDING
+        # PHASE 0: DICTIONARY
+        if self.custom_dict:
+            sorted_dict = sorted(self.custom_dict.items(), key=lambda x: len(x[0]), reverse=True)
+            for ja, ko in sorted_dict:
+                # UPDATE 1: Add ♪, ☆, ★ to the "Do Not Shield" list
+                # This ensures they remain as text so we can split on them later.
+                if ja in "～！？。♪☆★": continue
+
+                if ja in current_text:
+                    tag = f"Z{tag_count}"
+                    placeholders[tag] = ko
+                    current_text = current_text.replace(ja, f" {tag} ")
+                    tag_count += 1
+        add_diag("Dictionary Shield", current_text)
+
+        # PHASE 1: NUMERIC PATTERN SHIELDING
         # Step 1: Convert Kanji counters to Korean (3種 -> 3종)
         current_text = re.sub(r'(\d+)種', r'\1종', current_text)
         current_text = re.sub(r'(\d+)人', r'\1인', current_text)
@@ -59,21 +74,6 @@ class TranslationManager:
             placeholders[tag] = match  # We store "3종" as the hidden value
             current_text = current_text.replace(match, f" {tag} ")
             tag_count += 1
-
-        # PHASE 1: DICTIONARY
-        if self.custom_dict:
-            sorted_dict = sorted(self.custom_dict.items(), key=lambda x: len(x[0]), reverse=True)
-            for ja, ko in sorted_dict:
-                # UPDATE 1: Add ♪, ☆, ★ to the "Do Not Shield" list
-                # This ensures they remain as text so we can split on them later.
-                if ja in "～！？。♪☆★": continue
-
-                if ja in current_text:
-                    tag = f"Z{tag_count}"
-                    placeholders[tag] = ko
-                    current_text = current_text.replace(ja, f" {tag} ")
-                    tag_count += 1
-        add_diag("Dictionary Shield", current_text)
 
         # PHASE 2: RECRUITMENT (@h, @T1D1)
         rec_regex = r'[＠@](?:[TtDdHh][0-9]|[a-zA-Z0-9]+)'

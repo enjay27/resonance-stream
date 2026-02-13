@@ -267,6 +267,26 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // 1. STATE: Track if the user is currently at the bottom
+    let (is_at_bottom, set_is_at_bottom) = signal(true);
+    let chat_container_ref = create_node_ref::<html::Div>();
+
+    // 2. EFFECT: Auto-scroll when messages update
+    Effect::new(move |_| {
+        // We track 'filtered_messages' so this runs ONLY when the visible list changes
+        filtered_messages.track();
+
+        // Only auto-scroll if the user was ALREADY at the bottom
+        if is_at_bottom.get_untracked() {
+            // Use request_animation_frame to wait for the DOM to update with the new message
+            request_animation_frame(move || {
+                if let Some(el) = chat_container_ref.get() {
+                    el.set_scroll_top(el.scroll_height());
+                }
+            });
+        }
+    });
+
     view! {
         <main class="chat-app">
             <Show when=move || model_ready.get() fallback=|| view! { <div class="setup-view">"..."</div> }>
@@ -306,10 +326,12 @@ pub fn App() -> impl IntoView {
                 </nav>
 
                 <div class="chat-container" node_ref=chat_container_ref
+                    // 3. EVENT: Detect manual scrolling
                     on:scroll=move |ev| {
                         let el = event_target::<HtmlDivElement>(&ev);
-                        let bottom = el.scroll_top() + el.client_height() >= el.scroll_height() - 20;
-                        set_user_scrolling.set(!bottom);
+                        // "Tolerance" of 30px allows for minor pixel differences
+                        let at_bottom = el.scroll_height() - el.scroll_top() - el.client_height() < 30;
+                        set_is_at_bottom.set(at_bottom);
                     }>
                     <For each=move || filtered_messages.get()
                         key=|sig| sig.get_untracked().pid

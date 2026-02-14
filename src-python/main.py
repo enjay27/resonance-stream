@@ -164,6 +164,16 @@ def main():
                 input_text, pid = data.get("text", ""), data.get("pid")
                 raw_nickname = data.get("nickname")
 
+                if data.get("cmd") == "nickname_only":
+                    romaji = manager.get_romaji(raw_nickname)
+                    print(json.dumps({
+                        "type": "result",
+                        "pid": pid,
+                        "nickname": raw_nickname,
+                        "nickname_romaji": romaji
+                    }, ensure_ascii=False), flush=True)
+                    continue
+
                 if pid is None or not input_text: continue
 
                 nickname_info = None

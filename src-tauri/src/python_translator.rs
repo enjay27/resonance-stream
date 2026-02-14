@@ -11,27 +11,32 @@ use crate::sniffer::{AppState, ChatPacket};
 
 // --- REQUEST: Rust -> Python ---
 #[derive(Serialize)]
-pub struct TranslationRequest {
-    pub text: String,
+pub struct NicknameRequest {
+    pub cmd: String,          // Always "nickname_only"
     pub pid: u64,
-    pub nickname: Option<String>,
+    pub nickname: String,     // Required for this request type
+}
+
+#[derive(Serialize)]
+pub struct MessageRequest {
+    pub cmd: String,          // Always "translate"
+    pub pid: u64,
+    pub text: String,         // The Japanese message
 }
 
 // --- RESPONSE: Python -> Rust ---
-#[derive(Deserialize, Debug, Clone)]
-pub struct TranslationResponse {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NicknameResponse {
     pub pid: u64,
-    pub translated: String,
-    #[serde(rename = "nickname_info")]
-    pub nickname_info: Option<NicknameInfo>,
-    pub diagnostics: Option<serde_json::Value>, // For --debug mode
+    pub nickname: String,
+    pub nickname_romaji: String, // Flat string, no object
 }
 
-#[derive(Deserialize, Debug, Clone)]
-pub struct NicknameInfo {
-    pub original: String,
-    pub romanized: String,
-    pub display: String,
+// --- For Full translation requests ---
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MessageResponse {
+    pub pid: u64,
+    pub translated: String,
 }
 
 
@@ -56,7 +61,7 @@ pub async fn start_translator_sidecar(
         .shell()
         .sidecar("translator")
         .map_err(|e| format!("[Sidecar] Binary not found: {}", e))?
-        .args(["--model", &model_path, "--dict", dict_path.to_str().unwrap()])
+        .args(["--model", &model_path, "--dict", dict_path.to_str().unwrap(), "--debug"])
         .spawn()
         .map_err(|e| format!("[Sidecar] Failed to execute: {}", e))?;
 
@@ -88,26 +93,33 @@ pub async fn start_translator_sidecar(
                                 inject_system_message(&app_clone, format!("[Python ERROR] {}", msg));
                             }
                             Some("result") => {
-                                // Only now attempt to parse as the strict TranslationResponse
-                                if let Ok(resp) = serde_json::from_value::<TranslationResponse>(json) {
-                                    if resp.diagnostics.is_some() {
-                                        println!("[Python] Translated: {:?}", resp.translated);
-                                        println!("[Python] Diagnostic: {:?}", resp.diagnostics);
-                                        println!("[Python] Nickname: {:?}", resp.nickname_info);
-                                    }
-
-                                    let target_pid = resp.pid;
+                                println!("[Python] result {:?}", json);
+                                // 1. Try to parse as Nickname Response
+                                if let Ok(nick_resp) = serde_json::from_value::<NicknameResponse>(json.clone()) {
+                                    // Update History for persistence
                                     if let Some(state) = app_clone.try_state::<crate::AppState>() {
                                         let mut history = state.chat_history.lock().unwrap();
-                                        if let Some(packet) = history.get_mut(&target_pid) {
-                                            packet.translated = Some(resp.translated);
-                                            if let Some(info) = resp.nickname_info {
-                                                packet.nickname_romaji = Some(info.romanized);
-                                            }
+                                        if let Some(packet) = history.get_mut(&nick_resp.pid) {
+                                            packet.nickname_romaji = Some(nick_resp.nickname_romaji.clone());
                                         }
                                     }
-                                    let _ = app_clone.emit("translator-event", &line);
+                                    // Emit dedicated nickname event
+                                    let _ = app_clone.emit("nickname-feature-event", nick_resp);
+                                    continue; // Move to next line
                                 }
+
+                                // 2. Try to parse as Message Response
+                                if let Ok(msg_resp) = serde_json::from_value::<MessageResponse>(json) {
+                                    if let Some(state) = app_clone.try_state::<crate::AppState>() {
+                                        let mut history = state.chat_history.lock().unwrap();
+                                        if let Some(packet) = history.get_mut(&msg_resp.pid) {
+                                            packet.translated = Some(msg_resp.translated.clone());
+                                        }
+                                    }
+                                    // Emit dedicated translation event
+                                    let _ = app_clone.emit("translation-feature-event", msg_resp);
+                                }
+
                             }
                             _ => println!("[Rust] Unknown JSON type: {}", line),
                         }
@@ -126,32 +138,44 @@ pub async fn start_translator_sidecar(
     Ok("Connected".into())
 }
 
-
-
 #[tauri::command]
-pub async fn manual_translate(
-    text: String,
+pub async fn translate_nickname(
     pid: u64,
-    nickname: Option<String>, // Added nickname parameter
+    nickname: String,
     state: State<'_, AppState>
 ) -> Result<(), String> {
-    // 1. Diagnostics
+    let mut guard = state.tx.lock().unwrap();
+    if let Some(child) = guard.as_mut() {
+        // Send a clean NicknameRequest
+        let req = NicknameRequest {
+            cmd: "nickname_only".into(),
+            pid,
+            nickname,
+        };
+        let msg = serde_json::to_string(&req).map_err(|e| e.to_string())? + "\n";
+        child.write(msg.as_bytes()).map_err(|e| e.to_string())?;
+        Ok(())
+    } else { Err("Translator not initialized".into()) }
+}
+
+#[tauri::command]
+pub async fn translate_message(
+    text: String,
+    pid: u64,
+    state: State<'_, AppState>
+) -> Result<(), String> {
     println!("[Diagnostic] manual_translate called for: {}", text);
 
     let mut guard = state.tx.lock().unwrap();
-
     if let Some(child) = guard.as_mut() {
-        // Use the struct for type safety
-        let request = TranslationRequest { text, pid, nickname };
-        let msg = serde_json::to_string(&request).map_err(|e| e.to_string())? + "\n";
-
+        // Send a clean MessageRequest
+        let req = MessageRequest {
+            cmd: "translate".into(),
+            pid,
+            text,
+        };
+        let msg = serde_json::to_string(&req).map_err(|e| e.to_string())? + "\n";
         child.write(msg.as_bytes()).map_err(|e| e.to_string())?;
-
-        println!("[Rust] Message piped to Python stdin.");
         Ok(())
-    } else {
-        // If we reach here, start_translator_sidecar was NEVER successful
-        println!("[Error] Python process is None in state.");
-        Err("Translator not initialized".into())
-    }
+    } else { Err("Translator not initialized".into()) }
 }

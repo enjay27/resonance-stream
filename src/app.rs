@@ -66,6 +66,8 @@ pub fn App() -> impl IntoView {
     let (active_tab, set_active_tab) = signal("전체".to_string());
     let (search_term, set_search_term) = signal("".to_string());
 
+    let (name_cache, set_name_cache) = signal(std::collections::HashMap::<String, String>::new());
+
     // --- SEPARATE DATA STREAMS ---
     // 1. Game Chat (IndexMap for updates)
     let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatPacket>>::new());
@@ -189,10 +191,45 @@ pub fn App() -> impl IntoView {
     // --- ACTIONS ---
     let setup_listeners = move || {
         spawn_local(async move {
+            // --- LISTENER: NICKNAME UPDATES ---
+            let nick_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+                    let payload = &ev["payload"];
+                    let original = payload["original"].as_str().unwrap_or_default().to_string();
+                    let romaji = payload["romanized"].as_str().unwrap_or_default().to_string();
+                    let target_pid = payload["pid"].as_u64().unwrap_or(0);
+
+                    // Update Cache for future lookups
+                    set_name_cache.update(|cache| { cache.insert(original, romaji.clone()); });
+
+                    // Update the specific message that triggered this
+                    chat_log.with_untracked(|log| {
+                        if let Some(sig) = log.get(&target_pid) {
+                            sig.update(|p| p.nickname_romaji = Some(romaji.clone()));
+                        }
+                    });
+                }
+            }) as Box<dyn FnMut(JsValue)>);
+
+            // --- LISTENER: MESSAGE TRANSLATIONS ---
+            let msg_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+                    if let Ok(resp) = serde_json::from_str::<serde_json::Value>(ev["payload"].as_str().unwrap_or("")) {
+                        let target_pid = resp["pid"].as_u64().unwrap_or(0);
+                        let text = resp["translated"].as_str().unwrap_or_default().to_string();
+
+                        chat_log.with_untracked(|log| {
+                            if let Some(sig) = log.get(&target_pid) {
+                                sig.update(|p| p.translated = Some(text.clone()));
+                            }
+                        });
+                    }
+                }
+            }) as Box<dyn FnMut(JsValue)>);
+
             // LISTENER 1: Game Packets
             let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    // [CHANGED] parsing to 'mut' so we can modify it
                     if let Ok(mut packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
 
                         // [NEW] Sticker Transformation Logic
@@ -204,10 +241,11 @@ pub fn App() -> impl IntoView {
                         }
 
                         let packet_clone = packet.clone();
+                        let packet_nickname = packet_clone.clone();
 
                         set_chat_log.update(|log| {
                             if log.len() >= 1000 { log.shift_remove_index(0); }
-                            log.insert(packet.pid, RwSignal::new(packet));
+                            log.insert(packet.pid, RwSignal::new(packet.clone()));
                         });
 
                         let current_tab = active_tab.get_untracked();
@@ -233,9 +271,38 @@ pub fn App() -> impl IntoView {
                                     "pid": packet_clone.pid,
                                     "nickname": packet_clone.nickname // Pass for romanization
                                 })).unwrap();
-                                let _ = invoke("manual_translate", args).await;
+                                let _ = invoke("translate_message", args).await;
                             });
                         }
+
+                        let pid = packet.pid;
+                        let nickname = packet.nickname.clone();
+
+                        // NICKNAME STRATEGY: Check Cache -> Request if Missing
+                        let cached_nickname = name_cache.with(|cache| cache.get(&nickname).cloned());
+
+                        if let Some(romaji) = cached_nickname {
+                            packet.nickname_romaji = Some(romaji);
+                        } else if is_japanese(&nickname) {
+                            // Request nickname-only romanization
+                            spawn_local(async move {
+                                let _ = invoke("translate_nickname", serde_wasm_bindgen::to_value(&serde_json::json!({
+                                    "pid": pid, "nickname": nickname
+                                })).unwrap()).await;
+                            });
+                        }
+
+                        // MESSAGE STRATEGY: Request translation if Japanese
+                        if is_japanese(&packet.message) {
+                            spawn_local(async move {
+                                let _ = invoke("translate_message", serde_wasm_bindgen::to_value(&serde_json::json!({
+                                    "text": packet_nickname.message, "pid": pid, "nickname": None::<String>
+                                })).unwrap()).await;
+                            });
+                        }
+
+                        // Store in UI log
+                        set_chat_log.update(|log| { log.insert(pid, RwSignal::new(packet.clone())); });
                     }
                 }
             }) as Box<dyn FnMut(JsValue)>);
@@ -252,31 +319,15 @@ pub fn App() -> impl IntoView {
                 }
             }) as Box<dyn FnMut(JsValue)>);
 
-            let trans_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    if let Ok(resp) = serde_json::from_str::<serde_json::Value>(ev["payload"].as_str().unwrap_or("")) {
-                        let target_pid = resp["pid"].as_u64().unwrap_or(0);
-                        let romaji = resp["nickname_info"]["romanized"].as_str().map(|s| s.to_string());
-
-                        chat_log.with_untracked(|log| {
-                            if let Some(packet_sig) = log.get(&target_pid) {
-                                packet_sig.update(|p| {
-                                    p.translated = Some(resp["translated"].as_str().unwrap_or_default().to_string());
-                                    p.nickname_romaji = romaji; // Update the signal
-                                });
-                            }
-                        });
-                    }
-                }
-            }) as Box<dyn FnMut(JsValue)>);
-
             listen("packet-event", &packet_closure).await;
             listen("system-event", &system_closure).await;
-            listen("translator-event", &trans_closure).await;
+            listen("nickname-feature-event", &nick_closure).await;
+            listen("translation-feature-event", &msg_closure).await;
 
             packet_closure.forget();
             system_closure.forget();
-            trans_closure.forget();
+            nick_closure.forget();
+            msg_closure.forget();
         });
     };
 

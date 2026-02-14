@@ -48,6 +48,7 @@ struct AppConfig {
     chat_limit: usize,
     custom_tab_filters: Vec<String>,
     theme: String,
+    overlay_opacity: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -87,6 +88,7 @@ pub fn App() -> impl IntoView {
     let (custom_filters, set_custom_filters) = signal(vec!["WORLD".to_string(), "GUILD".to_string(), "PARTY".to_string(), "LOCAL".to_string()]);
 
     let (theme, set_theme) = signal("dark".to_string());
+    let (opacity, set_opacity) = signal(0.85f32);
 
     // Apply theme to the root element whenever it changes
     Effect::new(move |_| {
@@ -94,6 +96,16 @@ pub fn App() -> impl IntoView {
             if let Some(doc) = window.document() {
                 if let Some(body) = doc.body() {
                     let _ = body.set_attribute("data-theme", &theme.get());
+                }
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        if let Some(window) = web_sys::window() {
+            if let Some(doc) = window.document() {
+                if let Some(el) = doc.get_element_by_id("main-app-container") {
+                    let _ = el.set_attribute("style", &format!("--overlay-opacity: {};", opacity.get()));
                 }
             }
         }
@@ -264,6 +276,11 @@ pub fn App() -> impl IntoView {
                             // Optional: We can force translation to None since it's already "translated"
                             packet.translated = None;
                         }
+                        if packet.message.starts_with("<sprite=") {
+                            packet.message = "이모지 전송".to_string();
+                            // Optional: We can force translation to None since it's already "translated"
+                            packet.translated = None;
+                        }
 
                         let packet_clone = packet.clone();
                         let packet_nickname = packet_clone.clone();
@@ -375,8 +392,9 @@ pub fn App() -> impl IntoView {
             always_on_top: is_pinned.get_untracked(),
             active_tab: active_tab.get_untracked(),
             chat_limit: chat_limit.get_untracked(),
-            custom_tab_filters: vec!["WORLD".into(), "GUILD".into(), "PARTY".into(), "LOCAL".into()],
-            theme: "dark".to_string(),
+            custom_tab_filters: custom_filters.get_untracked(),
+            theme: theme.get_untracked(),
+            overlay_opacity: opacity.get_untracked(),
         };
 
         async move {
@@ -395,10 +413,13 @@ pub fn App() -> impl IntoView {
             // Load User Config
             if let Ok(res) = invoke("load_config", JsValue::NULL).await {
                 if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(res) {
-                    // Apply Visual State
                     set_compact_mode.set(config.compact_mode);
                     set_active_tab.set(config.active_tab);
                     set_is_pinned.set(config.always_on_top);
+                    set_chat_limit.set(config.chat_limit);
+                    set_custom_filters.set(config.custom_tab_filters);
+                    set_theme.set(config.theme);
+                    set_opacity.set(config.overlay_opacity);
 
                     // Apply Window State (Backend)
                     if config.always_on_top {
@@ -424,9 +445,16 @@ pub fn App() -> impl IntoView {
                         // Hydrate GAME History
                         if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
                             if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(res) {
-                                log!("History: {:?}", vec);
+                                let sanitized_vec: Vec<(u64, RwSignal<ChatPacket>)> = vec.into_iter().map(|mut p| {
+                                    if p.message.starts_with("emojiPic=") {
+                                        p.message = "스티커 전송".to_string();
+                                    } else if p.message.contains("<sprite=") {
+                                        p.message = "이모지 전송".to_string();
+                                    }
+                                    (p.pid, RwSignal::new(p))
+                                }).collect();
 
-                                set_chat_log.set(vec.into_iter().map(|p| (p.pid, RwSignal::new(p))).collect());
+                                set_chat_log.set(sanitized_vec.into_iter().collect());
                             }
                         }
 
@@ -465,7 +493,7 @@ pub fn App() -> impl IntoView {
     };
 
     view! {
-        <main class=move || if compact_mode.get() { "chat-app compact" } else { "chat-app" }>
+        <main id="main-app-container" class=move || if compact_mode.get() { "chat-app compact" } else { "chat-app" }>
             <Show when=move || active_menu_id.get().is_some()>
                 <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
             </Show>
@@ -781,6 +809,21 @@ pub fn App() -> impl IntoView {
                         // Content (Cleaned up)
                         <div class="settings-content">
                             <div class="setting-group">
+                                <h3>"Overlay Settings"</h3>
+                                <div class="setting-row">
+                                    <span>"Background Opacity"</span>
+                                    <div class="slider-container">
+                                        <input type="range" min="0.1" max="1.0" step="0.05"
+                                            prop:value=move || opacity.get().to_string()
+                                            on:input=move |ev| {
+                                                let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
+                                                set_opacity.set(val);
+                                                save_config_action.dispatch(()); // Persist value
+                                            }
+                                        />
+                                        <span class="opacity-value">{move || format!("{:.0}%", opacity.get() * 100.0)}</span>
+                                    </div>
+                                </div>
                                 <h3>"Display Settings"</h3>
                                 <div class="toggle-row" on:click=move |_| {
                                     let new_theme = if theme.get() == "dark" { "light" } else { "dark" };
@@ -871,7 +914,7 @@ pub fn App() -> impl IntoView {
                     display: flex;
                     flex-direction: column;
                     height: 100vh;
-                    background: var(--bg-main);
+                    background: rgba(var(--bg-rgb), var(--overlay-opacity)) !important;
                     color: var(--text-main);
                     transition: all 0.3s ease; /* Smooth transition for Compact Mode */
                 }
@@ -881,7 +924,7 @@ pub fn App() -> impl IntoView {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    background: var(--bg-panel);
+                    background: rgba(var(--bg-rgb), var(--overlay-opacity));
                     border-bottom: 1px solid var(--border);
                     height: 42px; /* Fixed height for consistency */
                     transition: height 0.3s ease;
@@ -1323,6 +1366,26 @@ pub fn App() -> impl IntoView {
                     to { opacity: 1; transform: translateY(0); }
                 }
 
+                /* Slider Styles */
+                .slider-container {
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                }
+
+                input[type='range'] {
+                    accent-color: var(--accent);
+                    cursor: pointer;
+                    width: 120px;
+                }
+
+                .opacity-value {
+                    font-family: 'Consolas', monospace;
+                    font-size: 0.85rem;
+                    min-width: 40px;
+                    color: var(--accent);
+                }
+
                 /* --- Light / Dark Theme --- */
                 :root {
                     /* --- DARK MODE (Default) --- */
@@ -1333,6 +1396,7 @@ pub fn App() -> impl IntoView {
                     --text-muted: #888888;
                     --border: #333333;
                     --accent: #00ff88;
+                    --bg-rgb: 18, 18, 18;
 
                     /* Channel Colors (Pastel for Dark) */
                     --world-color: #BA68C8;
@@ -1340,6 +1404,8 @@ pub fn App() -> impl IntoView {
                     --party-color: #4FC3F7;
                     --local-color: #BDBDBD;
                     --system-color: #FFD54F;
+
+                    --overlay-opacity: 0.85; /* Default */
                 }
 
                 [data-theme='light'] {
@@ -1347,6 +1413,7 @@ pub fn App() -> impl IntoView {
                     --bg-main: #fcfcfc;    /* Clean page background */
                     --bg-panel: #ffffff;   /* Solid white for navigation */
                     --bg-bubble: #e9ecef;  /* Light gray bubble for visibility */
+                    --bg-rgb: 252, 252, 252;
 
                     --text-main: #111111;  /* "Ink" black for original Japanese */
                     --text-muted: #495057; /* Dark gray for secondary info */

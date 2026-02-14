@@ -29,7 +29,7 @@ pub struct MessageRequest {
 pub struct NicknameResponse {
     pub pid: u64,
     pub nickname: String,
-    pub nickname_romaji: String, // Flat string, no object
+    pub romaji: String, // Flat string, no object
 }
 
 // --- For Full translation requests ---
@@ -100,7 +100,7 @@ pub async fn start_translator_sidecar(
                                     if let Some(state) = app_clone.try_state::<crate::AppState>() {
                                         let mut history = state.chat_history.lock().unwrap();
                                         if let Some(packet) = history.get_mut(&nick_resp.pid) {
-                                            packet.nickname_romaji = Some(nick_resp.nickname_romaji.clone());
+                                            packet.nickname_romaji = Some(nick_resp.romaji.clone());
                                         }
                                     }
                                     // Emit dedicated nickname event

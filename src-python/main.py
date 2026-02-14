@@ -170,7 +170,7 @@ def main():
                         "type": "result",
                         "pid": pid,
                         "nickname": raw_nickname,
-                        "nickname_romaji": romaji
+                        "romaji": romaji
                     }, ensure_ascii=False), flush=True)
                     continue
 

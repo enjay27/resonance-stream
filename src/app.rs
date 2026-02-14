@@ -195,12 +195,12 @@ pub fn App() -> impl IntoView {
             let nick_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
                     let payload = &ev["payload"];
-                    let original = payload["original"].as_str().unwrap_or_default().to_string();
-                    let romaji = payload["romanized"].as_str().unwrap_or_default().to_string();
+                    let nickname = payload["nickname"].as_str().unwrap_or_default().to_string();
+                    let romaji = payload["romaji"].as_str().unwrap_or_default().to_string();
                     let target_pid = payload["pid"].as_u64().unwrap_or(0);
 
                     // Update Cache for future lookups
-                    set_name_cache.update(|cache| { cache.insert(original, romaji.clone()); });
+                    set_name_cache.update(|cache| { cache.insert(nickname, romaji.clone()); });
 
                     // Update the specific message that triggered this
                     chat_log.with_untracked(|log| {

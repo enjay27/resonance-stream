@@ -43,6 +43,8 @@ pub fn run() {
             set_always_on_top,
             load_config,
             save_config,
+            minimize_window,
+            close_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -125,4 +127,14 @@ fn clear_chat_history(state: tauri::State<AppState>) {
 fn set_always_on_top(window: tauri::Window, on_top: bool) {
     // This simple method toggles the window state
     let _ = window.set_always_on_top(on_top);
+}
+
+#[tauri::command]
+fn minimize_window(window: tauri::Window) {
+    let _ = window.minimize();
+}
+
+#[tauri::command]
+fn close_window(window: tauri::Window) {
+    let _ = window.close();
 }

@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub chat_limit: usize,
     pub custom_tab_filters: Vec<String>,
     pub theme: String,
+    pub overlay_opacity: f32,
 }
 
 impl Default for AppConfig {
@@ -22,6 +23,7 @@ impl Default for AppConfig {
             chat_limit: 1000,
             custom_tab_filters: vec!["WORLD".into(), "GUILD".into(), "PARTY".into(), "LOCAL".into()],
             theme: "dark".to_string(),
+            overlay_opacity: 0.85,
         }
     }
 }

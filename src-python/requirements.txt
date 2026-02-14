@@ -1,3 +1,4 @@
 ctranslate2>=4.0.0
 sentencepiece>=0.2.0
+pykakasi>=2.3.0
 pyinstaller==6.18.0

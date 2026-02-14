@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub custom_tab_filters: Vec<String>,
     pub theme: String,
     pub overlay_opacity: f32,
+    pub show_system_tab: bool,
 }
 
 impl Default for AppConfig {
@@ -24,6 +25,7 @@ impl Default for AppConfig {
             custom_tab_filters: vec!["WORLD".into(), "GUILD".into(), "PARTY".into(), "LOCAL".into()],
             theme: "dark".to_string(),
             overlay_opacity: 0.85,
+            show_system_tab: false,
         }
     }
 }

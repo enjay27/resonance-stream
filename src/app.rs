@@ -1037,15 +1037,42 @@ pub fn App() -> impl IntoView {
                 .icon-btn.danger:hover { color: #ff4444; background: rgba(255,68,68,0.1); }
 
                 .sync-btn {
-                    /* ... existing styles ... */
-                    display: flex;             /* Helps center emojis */
-                    align-items: center;       /* Vertical center */
+                    position: relative;        /* [CRITICAL] Anchor for the absolute dot */
+                    display: flex;
+                    align-items: center;
                     justify-content: center;
-                    padding: 4px 8px;          /* Slightly tighter padding for icons */
+                    padding: 4px 8px;
                     gap: 4px;
-                    min-width: 40px;           /* Ensure clickable area isn't too small */
+                    min-width: 40px;
+                    background: #2a2a2a;
+                    border: 1px solid #444;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }
+                [data-theme='light'] .sync-btn {
+                    background: #fcfcfc;
+                    border-color: #ffffff;
                 }
                 .sync-btn:hover { border-color: #00ff88; color: #00ff88; }
+                .update-dot {
+                    position: absolute;
+                    /* Positions dot on the top-right edge */
+                    top: -5px;
+                    right: -5px;
+
+                    width: 10px;
+                    height: 10px;
+                    background: #ff4444;       /* High-visibility red */
+                    border: 2px solid #1e1e1e; /* Creates a clean gap from the button edge */
+                    border-radius: 50%;
+                    box-shadow: 0 0 5px rgba(255, 68, 68, 0.6);
+                    z-index: 10;
+                    pointer-events: none;      /* Prevents the dot from blocking button clicks */
+                }
+                [data-theme='light'] .update-dot {
+                    border-color: #ffffff;
+                }
 
                 /* --- 4. CHAT CONTAINER --- */
                 .chat-container {

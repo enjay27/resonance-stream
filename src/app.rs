@@ -45,6 +45,7 @@ struct AppConfig {
     compact_mode: bool,
     always_on_top: bool,
     active_tab: String,
+    chat_limit: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -80,6 +81,7 @@ pub fn App() -> impl IntoView {
     let (is_pinned, set_is_pinned) = signal(false);
 
     let (show_settings, set_show_settings) = signal(false);
+    let (chat_limit, set_chat_limit) = signal(1000);
 
     // --- DICTIONARY SYNC ACTION ---
     let sync_dict_action = Action::new_local(|_: &()| async move {
@@ -245,7 +247,10 @@ pub fn App() -> impl IntoView {
                         let packet_nickname = packet_clone.clone();
 
                         set_chat_log.update(|log| {
-                            if log.len() >= 1000 { log.shift_remove_index(0); }
+                            let limit = chat_limit.get_untracked();
+                            while log.len() >= limit && !log.is_empty() {
+                                log.shift_remove_index(0);
+                            }
                             log.insert(packet.pid, RwSignal::new(packet.clone()));
                         });
 
@@ -347,6 +352,7 @@ pub fn App() -> impl IntoView {
             compact_mode: compact_mode.get_untracked(),
             always_on_top: is_pinned.get_untracked(),
             active_tab: active_tab.get_untracked(),
+            chat_limit: chat_limit.get_untracked(),
         };
 
         async move {
@@ -750,6 +756,19 @@ pub fn App() -> impl IntoView {
                         // Content (Cleaned up)
                         <div class="settings-content">
                             <div class="setting-group">
+                                <h3>"Chat Settings"</h3>
+                                <div class="setting-row">
+                                    <span>"Message Limit"</span>
+                                    <input type="number"
+                                        prop:value=move || chat_limit.get()
+                                        on:input=move |ev| {
+                                            let val = event_target_value(&ev).parse::<usize>().unwrap_or(1000);
+                                            set_chat_limit.set(val);
+                                            save_config_action.dispatch(()); // Auto-save
+                                        }
+                                        class="limit-input"
+                                    />
+                                </div>
                                 <h3>"About"</h3>
                                 <p>"Blue Protocol Chat Translator v1.0"</p>
                                 <a href="https://github.com/YOUR_USERNAME/YOUR_REPO" target="_blank" class="github-link">
@@ -1132,6 +1151,30 @@ pub fn App() -> impl IntoView {
                     margin: 0 0 10px 0;
                     font-size: 0.9rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px;
                     border-bottom: 1px solid #333; padding-bottom: 4px;
+                }
+
+                /* app.rs style block */
+                .setting-row {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 8px 0;
+                }
+
+                .limit-input {
+                    width: 80px; /* Constrain the width */
+                    background: #2a2a2a;
+                    border: 1px solid #444;
+                    color: #00ff88;
+                    padding: 4px 8px;
+                    border_radius: 4px;
+                    text-align: right;
+                    font-family: 'Consolas', monospace;
+                }
+
+                .limit-input:focus {
+                    border-color: #00ff88;
+                    outline: none;
                 }
 
                 /* --- GITHUB LINK BUTTON --- */

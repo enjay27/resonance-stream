@@ -46,7 +46,8 @@ struct AppConfig {
     always_on_top: bool,
     active_tab: String,
     chat_limit: usize,
-    pub custom_tab_filters: Vec<String>,
+    custom_tab_filters: Vec<String>,
+    theme: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -84,6 +85,19 @@ pub fn App() -> impl IntoView {
     let (show_settings, set_show_settings) = signal(false);
     let (chat_limit, set_chat_limit) = signal(1000);
     let (custom_filters, set_custom_filters) = signal(vec!["WORLD".to_string(), "GUILD".to_string(), "PARTY".to_string(), "LOCAL".to_string()]);
+
+    let (theme, set_theme) = signal("dark".to_string());
+
+    // Apply theme to the root element whenever it changes
+    Effect::new(move |_| {
+        if let Some(window) = web_sys::window() {
+            if let Some(doc) = window.document() {
+                if let Some(body) = doc.body() {
+                    let _ = body.set_attribute("data-theme", &theme.get());
+                }
+            }
+        }
+    });
 
     // --- DICTIONARY SYNC ACTION ---
     let sync_dict_action = Action::new_local(|_: &()| async move {
@@ -362,6 +376,7 @@ pub fn App() -> impl IntoView {
             active_tab: active_tab.get_untracked(),
             chat_limit: chat_limit.get_untracked(),
             custom_tab_filters: vec!["WORLD".into(), "GUILD".into(), "PARTY".into(), "LOCAL".into()],
+            theme: "dark".to_string(),
         };
 
         async move {
@@ -766,6 +781,17 @@ pub fn App() -> impl IntoView {
                         // Content (Cleaned up)
                         <div class="settings-content">
                             <div class="setting-group">
+                                <h3>"Display Settings"</h3>
+                                <div class="toggle-row" on:click=move |_| {
+                                    let new_theme = if theme.get() == "dark" { "light" } else { "dark" };
+                                    set_theme.set(new_theme.to_string());
+                                    save_config_action.dispatch(()); // Persist choice
+                                }>
+                                    <span>"Theme Mode"</span>
+                                    <button class="theme-toggle-btn">
+                                        {move || if theme.get() == "dark" { "🌙 Dark" } else { "☀️ Light" }}
+                                    </button>
+                                </div>
                                 <h3>"Chat Settings"</h3>
                                 <h3>"Custom Tab Config"</h3>
                                 <div class="filter-grid">
@@ -845,7 +871,8 @@ pub fn App() -> impl IntoView {
                     display: flex;
                     flex-direction: column;
                     height: 100vh;
-                    background: #121212;
+                    background: var(--bg-main);
+                    color: var(--text-main);
                     transition: all 0.3s ease; /* Smooth transition for Compact Mode */
                 }
 
@@ -854,8 +881,8 @@ pub fn App() -> impl IntoView {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    background: #1e1e1e;
-                    border-bottom: 1px solid #333;
+                    background: var(--bg-panel);
+                    border-bottom: 1px solid var(--border);
                     height: 42px; /* Fixed height for consistency */
                     transition: height 0.3s ease;
                 }
@@ -880,11 +907,11 @@ pub fn App() -> impl IntoView {
                 .tab-btn[data-tab='전체'] { color: #FFFFFF; }
                 .tab-btn.active[data-tab='전체'] { border-bottom-color: #FFFFFF; }
 
-                .tab-btn[data-tab='월드'] { color: #BA68C8; }
-                .tab-btn.active[data-tab='월드'] { border-bottom-color: #BA68C8; }
+                .tab-btn[data-tab='월드'] { color: var(--world-color); }
+                .tab-btn.active[data-tab='월드'] { border-bottom-color: var(--world-color); }
 
-                .tab-btn[data-tab='길드'] { color: #81C784; }
-                .tab-btn.active[data-tab='길드'] { border-bottom-color: #81C784; }
+                .tab-btn[data-tab='길드'] { color: var(--guild-color); }
+                .tab-btn.active[data-tab='길드'] { border-bottom-color: var(--guild-color); }
 
                 .tab-btn[data-tab='파티'] { color: #4FC3F7; }
                 .tab-btn.active[data-tab='파티'] { border-bottom-color: #4FC3F7; }
@@ -954,11 +981,11 @@ pub fn App() -> impl IntoView {
                 .chat-row[data-channel='PARTY'] { border-left-color: #4FC3F7; background: rgba(79,195,247,0.08); }
                 .chat-row[data-channel='PARTY'] .nickname { color: #4FC3F7; }
 
-                .chat-row[data-channel='GUILD'] { border-left-color: #81C784; background: rgba(129,199,132,0.08); }
-                .chat-row[data-channel='GUILD'] .nickname { color: #81C784; }
+                .chat-row[data-channel='GUILD'] { border-left-color: var(--guild-color); background: var(--bg-panel); }
+                .chat-row[data-channel='GUILD'] .nickname { color: var(--guild-color); }
 
-                .chat-row[data-channel='WORLD'] { border-left-color: #BA68C8; background: rgba(186,104,200,0.08); }
-                .chat-row[data-channel='WORLD'] .nickname { color: #BA68C8; }
+                .chat-row[data-channel='WORLD'] { border-left-color: var(--world-color); background: var(--bg-panel); }
+                .chat-row[data-channel='WORLD'] .nickname { color: var(--world-color); }
 
                 .chat-row[data-channel='SYSTEM'] { border-left-color: #FFD54F; background: rgba(255,213,79,0.08); }
                 .chat-row[data-channel='SYSTEM'] .nickname { color: #FFD54F; }
@@ -979,19 +1006,34 @@ pub fn App() -> impl IntoView {
                 .lvl { font-size: 0.75rem; color: #666; }
                 .time { font-size: 0.75rem; color: #555; margin-left: auto; }
 
+                .lvl, .time {
+                    color: var(--text-muted); /* Ensures meta-info isn't too faint */
+                }
+
                 .msg-wrapper { display: flex; align-items: flex-end; gap: 8px; }
 
                 .msg-body {
                     position: relative; width: fit-content; max-width: 85%;
-                    background: #252525; padding: 8px 12px;
-                    border-radius: 0 12px 12px 12px; margin-top: 2px;
+                    background: var(--bg-bubble);
+                    padding: 8px 12px;
+                    border-radius: 0 12px 12px 12px;
+                    margin-top: 2px;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    color: var(--text-main);
+                    border: 1px solid var(--border);
                 }
 
-                .original { font-size: 0.9rem; line-height: 1.4; color: #ccc; }
+                .original {
+                    font-size: 0.9rem;
+                    line-height: 1.4;
+                    font-weight: 500;
+                    color: var(--text-main);
+                }
                 .translated {
-                    color: #00ff88; margin-top: 4px;
-                    font-size: 0.95rem; font-weight: 500;
+                    color: var(--accent); /* Now uses the deep accent defined in :root/light */
+                    font-weight: 700;
+                    margin-top: 4px;
+                    font-size: 0.95rem;
                 }
 
                 .copy-btn {
@@ -1087,7 +1129,12 @@ pub fn App() -> impl IntoView {
                 .chat-app.compact .chat-container { padding: 4px; }
                 .chat-app.compact .chat-row { margin-bottom: 2px; padding: 2px 4px; }
                 .chat-app.compact .msg-header { margin-bottom: 0; font-size: 0.8rem; }
-                .chat-app.compact .msg-body { padding: 4px 8px; margin-top: 1px; border-radius: 4px; }
+                .chat-app.compact .msg-body {
+                    border: 1px solid var(--border);
+                    padding: 4px 8px;
+                    margin-top: 1px;
+                    border-radius: 4px;
+                }
 
                 /* HIDE ORIGINAL TEXT ONLY IF TRANSLATION EXISTS */
                 .chat-app.compact .msg-body.has-translation .original { display: none; }
@@ -1274,6 +1321,48 @@ pub fn App() -> impl IntoView {
                 @keyframes slideUp {
                     from { opacity: 0; transform: translateY(20px); }
                     to { opacity: 1; transform: translateY(0); }
+                }
+
+                /* --- Light / Dark Theme --- */
+                :root {
+                    /* --- DARK MODE (Default) --- */
+                    --bg-main: #121212;
+                    --bg-panel: #1e1e1e;
+                    --bg-bubble: #252525;
+                    --text-main: #eeeeee;
+                    --text-muted: #888888;
+                    --border: #333333;
+                    --accent: #00ff88;
+
+                    /* Channel Colors (Pastel for Dark) */
+                    --world-color: #BA68C8;
+                    --guild-color: #81C784;
+                    --party-color: #4FC3F7;
+                    --local-color: #BDBDBD;
+                    --system-color: #FFD54F;
+                }
+
+                [data-theme='light'] {
+                    /* --- LIGHT MODE (High Contrast) --- */
+                    --bg-main: #fcfcfc;    /* Clean page background */
+                    --bg-panel: #ffffff;   /* Solid white for navigation */
+                    --bg-bubble: #e9ecef;  /* Light gray bubble for visibility */
+
+                    --text-main: #111111;  /* "Ink" black for original Japanese */
+                    --text-muted: #495057; /* Dark gray for secondary info */
+
+                    --border: #dee2e6;     /* Subtle divider lines */
+                    --accent: #006b3d;     /* Deep Forest Green for translations */
+
+                    /* Channel Colors (Deepened for readability on white) */
+                    --world-color: #7b1fa2;
+                    --guild-color: #2e7d32;
+                    --party-color: #0277bd;
+                    --local-color: #616161;
+                    --system-color: #f57f17;
+                }
+                [data-theme='light'] .chat-container::-webkit-scrollbar-thumb {
+                    background: #bbb; /* Darker thumb for white background */
                 }
                 "
             </style>

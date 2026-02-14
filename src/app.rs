@@ -382,8 +382,20 @@ pub fn App() -> impl IntoView {
             let _ = listen("download-progress", &closure).await;
             closure.forget();
             match invoke("download_model", JsValue::NULL).await {
-                Ok(_) => { set_downloading.set(false); set_model_ready.set(true); }
-                Err(_) => { set_downloading.set(false); }
+                Ok(_) => {
+                    set_downloading.set(false);
+                    set_model_ready.set(true);
+                    set_status_text.set("Ready".to_string());
+
+                    // [NEW] Automatic Startup Chain
+                    setup_listeners(); // Initialize packet/system listeners
+                    let _ = invoke("start_sniffer_command", JsValue::NULL).await;
+                    let _ = invoke("start_translator_sidecar", serde_wasm_bindgen::to_value(&serde_json::json!({"useGpu":true})).unwrap()).await;
+                }
+                Err(e) => {
+                    set_downloading.set(false);
+                    set_status_text.set(format!("Error: {:?}", e));
+                }
             }
         });
     };
@@ -505,32 +517,35 @@ pub fn App() -> impl IntoView {
             <Show when=move || active_menu_id.get().is_some()>
                 <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
             </Show>
-
-            <Show when=move || model_ready.get() fallback=move || view! {
-                <div class="setup-view">
-                    <h1>"BPSR Translator"</h1>
-                    <div class="status-card">
-                        <p><strong>"Status: "</strong> {move || status_text.get()}</p>
-                        <Show when=move || downloading.get()>
-                            <div class="progress-bar">
-                                <div class="fill" style:width=move || format!("{}%", progress.get())></div>
-                            </div>
-                        </Show>
-                    </div>
-                    <Show when=move || !model_ready.get() && !downloading.get()>
-                        <button class="primary-btn" on:click=start_download>
-                            "Install Translation Model (400MB)"
-                        </button>
-                    </Show>
-                </div>
-            }>
-                <div class="custom-title-bar" data-tauri-drag-region>
+            <div class="custom-title-bar" data-tauri-drag-region>
                     <div class="window-title">"BPSR Translator"</div>
                     <div class="window-controls">
                         <button class="win-btn" on:click=move |_| { let _ = invoke("minimize_window", JsValue::NULL); }>"—"</button>
                         <button class="win-btn close" on:click=move |_| { let _ = invoke("close_window", JsValue::NULL); }>"✕"</button>
                     </div>
                 </div>
+            <Show when=move || model_ready.get() fallback=move || view! {
+                <div class="setup-view">
+                    <h1>"BPSR Translator"</h1>
+                    <div class="status-card">
+                        <h2>"Model Installation"</h2>
+                        <p>{move || status_text.get()}</p>
+
+                        <Show when=move || downloading.get()>
+                            <div class="progress-bar">
+                                <div class="fill" style:width=move || format!("{}%", progress.get())></div>
+                            </div>
+                            <div class="progress-label">{move || format!("{}%", progress.get())}</div>
+                        </Show>
+                    </div>
+
+                    <Show when=move || !model_ready.get() && !downloading.get()>
+                        <button class="primary-btn" on:click=start_download>
+                            "🚀 Install Translation Model"
+                        </button>
+                    </Show>
+                </div>
+            }>
                 <nav class="tab-bar">
                     <div class="tabs">
                         <Show when=move || !compact_mode.get()
@@ -1588,6 +1603,72 @@ pub fn App() -> impl IntoView {
                 /* Light Mode specific polish */
                 [data-theme='light'] .custom-title-bar {
                     background: #f1f3f5; /* Slightly different gray for the bar in light mode */
+                }
+
+                /* Setup View */
+                .setup-view {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;    /* Centers children horizontally */
+                    justify-content: center; /* Centers children vertically */
+                    height: 100vh;           /* Full viewport height */
+                    width: 100%;
+                    gap: 24px;               /* Consistent spacing between elements */
+                    padding: 20px;
+                    text-align: center;
+                }
+
+                .primary-btn {
+                    padding: 14px 28px;
+                    background: var(--accent);
+                    color: #000;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 1rem;
+                    font-weight: 800;
+                    cursor: pointer;
+                    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                    box-shadow: 0 4px 12px rgba(0, 255, 136, 0.3);
+                }
+
+                .primary-btn:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 6px 20px rgba(0, 255, 136, 0.4);
+                    filter: brightness(1.1);
+                }
+
+                .status-card {
+                    background: var(--bg-bubble);
+                    padding: 20px;
+                    border-radius: 12px;
+                    border: 1px solid var(--border);
+                    text-align: center;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+                }
+
+                .progress-bar {
+                    width: 100%;
+                    height: 12px;
+                    background: rgba(0,0,0,0.3);
+                    border-radius: 6px;
+                    overflow: hidden;
+                    margin-top: 15px;
+                    position: relative; /* For label positioning */
+                }
+
+                .progress-bar .fill {
+                    height: 100%;
+                    background: linear-gradient(90deg, #00ff88, #00bfff); /* Visual gradient */
+                    transition: width 0.4s cubic-bezier(0.1, 0.7, 0.1, 1); /* Smooth movement */
+                    box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+                }
+
+                /* UI Addition: Percentage Text */
+                .progress-label {
+                    margin-top: 8px;
+                    font-size: 0.8rem;
+                    color: var(--accent);
+                    font-weight: bold;
                 }
                 "
             </style>

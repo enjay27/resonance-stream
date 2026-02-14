@@ -8,6 +8,7 @@ pub struct AppConfig {
     pub compact_mode: bool,
     pub always_on_top: bool,
     pub active_tab: String,
+    pub chat_limit: usize,
 }
 
 impl Default for AppConfig {
@@ -16,6 +17,7 @@ impl Default for AppConfig {
             compact_mode: false,
             always_on_top: false,
             active_tab: "전체".to_string(),
+            chat_limit: 1000,
         }
     }
 }

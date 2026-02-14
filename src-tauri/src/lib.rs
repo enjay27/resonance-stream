@@ -96,8 +96,10 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatPacket) {
 
         // Store in HOT Storage (IndexMap)
         {
+            let config = load_config(app.clone());
+
             let mut history = state.chat_history.lock().unwrap();
-            if history.len() >= 1000 {
+            while history.len() >= config.chat_limit && !history.is_empty() {
                 history.shift_remove_index(0);
             }
             history.insert(packet.pid, packet.clone());

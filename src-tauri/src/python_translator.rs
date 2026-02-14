@@ -45,10 +45,10 @@ pub async fn start_translator_sidecar(
     window: Window,
     app: AppHandle,
     state: State<'_, AppState>,
-    use_gpu: bool
+    use_gpu: bool,
 ) -> Result<String, String> {
     inject_system_message(&app, format!("[Sidecar] Request received. GPU: {}", use_gpu));
-
+    let config = crate::config::load_config(app.clone()); // Load persistent tier
     let model_path = model_manager::get_model_path(&app);
 
     // Resolve the local dictionary path in AppData
@@ -57,13 +57,21 @@ pub async fn start_translator_sidecar(
         .join("custom_dict.json");
 
     // 1. Spawn the sidecar (Note: mut child is needed for some operations)
+    let mut args = vec![
+        "--model", &model_path,
+        "--dict", dict_path.to_str().unwrap(),
+        "--tier", &config.tier, // Use the tier from config
+    ];
+    if config.is_debug {
+        args.push("--debug");
+    }
     let (mut rx, child) = app
         .shell()
         .sidecar("translator")
-        .map_err(|e| format!("[Sidecar] Binary not found: {}", e))?
-        .args(["--model", &model_path, "--dict", dict_path.to_str().unwrap(), "--debug"])
+        .map_err(|e| format!("[Sidecar] Error: {}", e))?
+        .args(args)
         .spawn()
-        .map_err(|e| format!("[Sidecar] Failed to execute: {}", e))?;
+        .map_err(|e| format!("[Sidecar] Failed: {}", e))?;
 
     // 2. STORE THE CHILD IN STATE (Transfer Ownership)
     {
@@ -93,7 +101,7 @@ pub async fn start_translator_sidecar(
                                 inject_system_message(&app_clone, format!("[Python ERROR] {}", msg));
                             }
                             Some("result") => {
-                                println!("[Python] result {:?}", json);
+                                inject_system_message(&app_clone, format!("[Python] result {:?}", json));
                                 // 1. Try to parse as Nickname Response
                                 if let Ok(nick_resp) = serde_json::from_value::<NicknameResponse>(json.clone()) {
                                     // Update History for persistence
@@ -125,7 +133,7 @@ pub async fn start_translator_sidecar(
                                 }
 
                             }
-                            _ => println!("[Rust] Unknown JSON type: {}", line),
+                            _ => inject_system_message(&app_clone, format!("[Rust] Unknown JSON type: {}", line)),
                         }
                     }
                 }
@@ -149,6 +157,7 @@ pub async fn translate_nickname(
     app: AppHandle,
     state: State<'_, AppState>
 ) -> Result<(), String> {
+    inject_system_message(&app, format!("[Diagnostic] translate nickname called for: {}", nickname));
     // 1. Check Backend Cache first
     {
         let cache = state.nickname_cache.lock().unwrap();
@@ -181,9 +190,10 @@ pub async fn translate_nickname(
 pub async fn translate_message(
     text: String,
     pid: u64,
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<(), String> {
-    println!("[Diagnostic] manual_translate called for: {}", text);
+    inject_system_message(&app, format!("[Diagnostic] translate message called for: {}", text));
 
     let mut guard = state.tx.lock().unwrap();
     if let Some(child) = guard.as_mut() {

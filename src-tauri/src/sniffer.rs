@@ -129,7 +129,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
             // [CRITICAL] COOPERATIVE SHUTDOWN
             // If the global generation has changed, I am obsolete.
             if SNIFFER_GENERATION.load(Ordering::Relaxed) != my_generation {
-                println!("[Sniffer Gen {}] Shutdown signal received. Exiting.", my_generation);
+                inject_system_message(&app_handle, format!("[Sniffer Gen {}] Shutdown signal received. Exiting.", my_generation));
                 break; // This drops 'wd', closing the handle cleanly.
             }
 

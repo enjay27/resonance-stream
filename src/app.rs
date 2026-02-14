@@ -49,7 +49,8 @@ struct AppConfig {
     custom_tab_filters: Vec<String>,
     theme: String,
     overlay_opacity: f32,
-    show_system_tab: bool,
+    is_debug: bool,
+    tier: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -90,7 +91,8 @@ pub fn App() -> impl IntoView {
 
     let (theme, set_theme) = signal("dark".to_string());
     let (opacity, set_opacity) = signal(0.85f32);
-    let (show_system_tab, set_show_system_tab) = signal(false);
+    let (is_debug, set_is_debug) = signal(false);
+    let (tier, set_tier) = signal("middle".to_string());
 
     // Apply theme to the root element whenever it changes
     Effect::new(move |_| {
@@ -397,7 +399,8 @@ pub fn App() -> impl IntoView {
             custom_tab_filters: custom_filters.get_untracked(),
             theme: theme.get_untracked(),
             overlay_opacity: opacity.get_untracked(),
-            show_system_tab: show_system_tab.get_untracked(),
+            is_debug: is_debug.get_untracked(),
+            tier: tier.get_untracked(),
         };
 
         async move {
@@ -423,7 +426,8 @@ pub fn App() -> impl IntoView {
                     set_custom_filters.set(config.custom_tab_filters);
                     set_theme.set(config.theme);
                     set_opacity.set(config.overlay_opacity);
-                    set_show_system_tab.set(config.show_system_tab);
+                    set_is_debug.set(config.is_debug);
+                    set_tier.set(config.tier);
 
                     // Apply Window State (Backend)
                     if config.always_on_top {
@@ -542,7 +546,7 @@ pub fn App() -> impl IntoView {
                                 ];
 
                                 // Conditionally add the System tab based on the signal
-                                if show_system_tab.get() {
+                                if is_debug.get() {
                                     base_tabs.push(("시스템", "⚙️"));
                                 }
 
@@ -703,6 +707,7 @@ pub fn App() -> impl IntoView {
                             // This child closure now receives an individual RwSignal
                             let msg = sig.get();
                             let is_jp = is_japanese(&msg.message);
+                            let is_system = msg.channel == "SYSTEM";
                             let pid = msg.pid;
                             let nick_for_copy = msg.nickname.clone();
                             let nick_for_filter = msg.nickname.clone();
@@ -783,7 +788,7 @@ pub fn App() -> impl IntoView {
                                              class:has-translation=move || sig.get().translated.is_some()
                                         >
                                             <div class="original">
-                                                {if is_jp { "[원문] " } else { "" }} {move || sig.get().message.clone()}
+                                                {if is_jp && !is_system { "[원문] " } else { "" }} {move || sig.get().message.clone()}
                                             </div>
                                             {move || sig.get().translated.clone().map(|text| view! {
                                                 <div class="translated">"[번역] " {text}</div>
@@ -821,6 +826,26 @@ pub fn App() -> impl IntoView {
                         // Content (Cleaned up)
                         <div class="settings-content">
                             <div class="setting-group">
+                                <h3>"Performance Tier"</h3>
+                                <div class="tier-select">
+                                    {vec!["low", "middle", "high"].into_iter().map(|t| {
+                                        let t_val = t.to_string();
+                                        let t_val_tier = t.to_string();
+                                        view! {
+                                            <label class="radio-row">
+                                                <input type="radio" name="tier"
+                                                    checked=move || tier.get() == t_val
+                                                    on:change=move |_| {
+                                                        set_tier.set(t_val_tier.clone());
+                                                        save_config_action.dispatch(()); // Persist choice
+                                                    }
+                                                />
+                                                <span>{t.to_uppercase()}</span>
+                                            </label>
+                                        }
+                                    }).collect_view()}
+                                </div>
+                                <p class="hint">"High uses more VRAM but has better accuracy."</p>
                                 <h3>"Overlay Settings"</h3>
                                 <div class="setting-row">
                                     <span>"Background Opacity"</span>
@@ -885,19 +910,19 @@ pub fn App() -> impl IntoView {
                                 </div>
                                 <h3>"Tab Settings"</h3>
                                 <div class="setting-row">
-                                    <span>"Show System Log Tab"</span>
+                                    <span>"Debug Mode"</span>
                                     <input type="checkbox"
-                                        prop:checked=move || show_system_tab.get()
+                                        prop:checked=move || is_debug.get()
                                         on:change=move |ev| {
                                             let checked = event_target_checked(&ev);
-                                            set_show_system_tab.set(checked);
+                                            set_is_debug.set(checked);
                                             save_config_action.dispatch(()); // Persist change
                                         }
                                     />
                                 </div>
                                 <h3>"About"</h3>
                                 <p>"Blue Protocol Chat Translator v1.0"</p>
-                                <a href="https://github.com/YOUR_USERNAME/YOUR_REPO" target="_blank" class="github-link">
+                                <a href="https://github.com/enjay27/bpsr-translator" target="_blank" class="github-link">
                                     <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor">
                                         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
                                     </svg>

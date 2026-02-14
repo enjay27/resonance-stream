@@ -263,19 +263,6 @@ pub fn App() -> impl IntoView {
                             set_unread_count.update(|n| *n += 1);
                         }
 
-                        // Trigger Translation (Only if it's NOT a sticker anymore)
-                        // Since "스티커 전송" is Korean, is_japanese() will return false, saving API calls.
-                        if is_japanese(&packet_clone.message) {
-                            spawn_local(async move {
-                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                                    "text": packet_clone.message,
-                                    "pid": packet_clone.pid,
-                                    "nickname": packet_clone.nickname // Pass for romanization
-                                })).unwrap();
-                                let _ = invoke("translate_message", args).await;
-                            });
-                        }
-
                         let pid = packet.pid;
                         let nickname = packet.nickname.clone();
 

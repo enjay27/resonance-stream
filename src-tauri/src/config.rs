@@ -9,6 +9,7 @@ pub struct AppConfig {
     pub always_on_top: bool,
     pub active_tab: String,
     pub chat_limit: usize,
+    pub custom_tab_filters: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -18,6 +19,7 @@ impl Default for AppConfig {
             always_on_top: false,
             active_tab: "전체".to_string(),
             chat_limit: 1000,
+            custom_tab_filters: vec!["WORLD".into(), "GUILD".into(), "PARTY".into(), "LOCAL".into()],
         }
     }
 }

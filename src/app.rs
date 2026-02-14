@@ -46,6 +46,7 @@ struct AppConfig {
     always_on_top: bool,
     active_tab: String,
     chat_limit: usize,
+    pub custom_tab_filters: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -82,6 +83,7 @@ pub fn App() -> impl IntoView {
 
     let (show_settings, set_show_settings) = signal(false);
     let (chat_limit, set_chat_limit) = signal(1000);
+    let (custom_filters, set_custom_filters) = signal(vec!["WORLD".to_string(), "GUILD".to_string(), "PARTY".to_string(), "LOCAL".to_string()]);
 
     // --- DICTIONARY SYNC ACTION ---
     let sync_dict_action = Action::new_local(|_: &()| async move {
@@ -133,12 +135,18 @@ pub fn App() -> impl IntoView {
     // --- OPTIMIZED VIEW LOGIC ---
     let filtered_messages = Memo::new(move |_| {
         let tab = active_tab.get();
-        let search = search_term.get().to_lowercase(); // Case-insensitive
+        let search = search_term.get().to_lowercase();
+        let filters = custom_filters.get();
 
-        // Step A: Get the list based on Tab
         let list_by_tab = match tab.as_str() {
             "시스템" => system_log.get(),
             "전체" => chat_log.get().values().cloned().collect(),
+            "커스텀" => { // NEW: Custom filtering logic
+                chat_log.get().values()
+                    .filter(|m| filters.contains(&m.get().channel))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            },
             _ => {
                 let key = match tab.as_str() {
                     "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD"
@@ -353,6 +361,7 @@ pub fn App() -> impl IntoView {
             always_on_top: is_pinned.get_untracked(),
             active_tab: active_tab.get_untracked(),
             chat_limit: chat_limit.get_untracked(),
+            custom_tab_filters: vec!["WORLD".into(), "GUILD".into(), "PARTY".into(), "LOCAL".into()],
         };
 
         async move {
@@ -477,6 +486,7 @@ pub fn App() -> impl IntoView {
                         >
                             {vec![
                                 ("전체", "♾️"), // All (Infinity)
+                                ("커스텀", "⭐"), // Custom (Star)
                                 ("월드", "🌐"), // World (Globe)
                                 ("길드", "🛡️"), // Guild (Shield)
                                 ("파티", "⚔️"), // Party (Swords)
@@ -757,6 +767,29 @@ pub fn App() -> impl IntoView {
                         <div class="settings-content">
                             <div class="setting-group">
                                 <h3>"Chat Settings"</h3>
+                                <h3>"Custom Tab Config"</h3>
+                                <div class="filter-grid">
+                                    {vec!["WORLD", "GUILD", "PARTY", "LOCAL"].into_iter().map(|channel| {
+                                        let ch = channel.to_string();
+                                        let ch_clone = ch.clone();
+                                        view! {
+                                            <label class="checkbox-row">
+                                                <input type="checkbox"
+                                                    checked=move || custom_filters.get().contains(&ch_clone)
+                                                    on:change=move |ev| {
+                                                        let checked = event_target_checked(&ev);
+                                                        set_custom_filters.update(|f| {
+                                                            if checked { f.push(ch.clone()); }
+                                                            else { f.retain(|x| x != &ch); }
+                                                        });
+                                                        save_config_action.dispatch(()); // Auto-save
+                                                    }
+                                                />
+                                                <span>{channel}</span>
+                                            </label>
+                                        }
+                                    }).collect_view()}
+                                </div>
                                 <div class="setting-row">
                                     <span>"Message Limit"</span>
                                     <input type="number"
@@ -1153,7 +1186,36 @@ pub fn App() -> impl IntoView {
                     border-bottom: 1px solid #333; padding-bottom: 4px;
                 }
 
-                /* app.rs style block */
+                .filter-grid {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 10px;
+                    padding: 10px 0;
+                }
+
+                .checkbox-row {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    cursor: pointer;
+                    font-size: 0.9rem;
+                    color: #ccc;
+                    padding: 5px;
+                    border-radius: 4px;
+                }
+
+                .checkbox-row:hover { background: rgba(255, 255, 255, 0.05); }
+
+                .checkbox-row input[type="checkbox"] {
+                    accent-color: #00ff88;
+                    width: 16px;
+                    height: 16px;
+                }
+
+                /* Custom Tab highlight */
+                .tab-btn[data-tab='커스텀'] { color: #00ff88; }
+                .tab-btn.active[data-tab='커스텀'] { border-bottom-color: #00ff88; }
+
                 .setting-row {
                     display: flex;
                     justify-content: space-between;

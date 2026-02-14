@@ -49,6 +49,7 @@ struct AppConfig {
     custom_tab_filters: Vec<String>,
     theme: String,
     overlay_opacity: f32,
+    show_system_tab: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -89,6 +90,7 @@ pub fn App() -> impl IntoView {
 
     let (theme, set_theme) = signal("dark".to_string());
     let (opacity, set_opacity) = signal(0.85f32);
+    let (show_system_tab, set_show_system_tab) = signal(false);
 
     // Apply theme to the root element whenever it changes
     Effect::new(move |_| {
@@ -395,6 +397,7 @@ pub fn App() -> impl IntoView {
             custom_tab_filters: custom_filters.get_untracked(),
             theme: theme.get_untracked(),
             overlay_opacity: opacity.get_untracked(),
+            show_system_tab: show_system_tab.get_untracked(),
         };
 
         async move {
@@ -420,6 +423,7 @@ pub fn App() -> impl IntoView {
                     set_custom_filters.set(config.custom_tab_filters);
                     set_theme.set(config.theme);
                     set_opacity.set(config.overlay_opacity);
+                    set_show_system_tab.set(config.show_system_tab);
 
                     // Apply Window State (Backend)
                     if config.always_on_top {
@@ -527,35 +531,43 @@ pub fn App() -> impl IntoView {
                                 </div>
                             }
                         >
-                            {vec![
-                                ("전체", "♾️"), // All (Infinity)
-                                ("커스텀", "⭐"), // Custom (Star)
-                                ("월드", "🌐"), // World (Globe)
-                                ("길드", "🛡️"), // Guild (Shield)
-                                ("파티", "⚔️"), // Party (Swords)
-                                ("로컬", "📍"), // Local (Pin)
-                                ("시스템", "⚙️") // System (Gear)
-                            ].into_iter().map(|(full, short)| {
-                                let t_full = full.to_string();
-                                let t_click = t_full.clone();
-                                let t_data = t_full.clone();
-                                let t_tab = t_full.clone();
+                            {move || {
+                                let mut base_tabs = vec![
+                                    ("전체", "♾️"),
+                                    ("커스텀", "⭐"),
+                                    ("월드", "🌐"),
+                                    ("길드", "🛡️"),
+                                    ("파티", "⚔️"),
+                                    ("로컬", "📍"),
+                                ];
 
-                                view! {
-                                    <button
-                                        class=move || if active_tab.get() == t_tab { "tab-btn active" } else { "tab-btn" }
-                                        data-tab=t_data
-                                        on:click=move |_| {
-                                            set_active_tab.set(t_click.clone());
-                                            save_config_action.dispatch(()); // <--- TRIGGER SAVE
-                                        }
-                                        title=t_full
-                                    >
-                                        <span class="tab-full">{full}</span>
-                                        <span class="tab-short">{short}</span>
-                                    </button>
+                                // Conditionally add the System tab based on the signal
+                                if show_system_tab.get() {
+                                    base_tabs.push(("시스템", "⚙️"));
                                 }
-                            }).collect_view()}
+
+                                base_tabs.into_iter().map(|(full, short)| {
+                                    let t_full = full.to_string();
+                                    let t_click = t_full.clone();
+                                    let t_data = t_full.clone();
+                                    let t_tab = t_full.clone();
+
+                                    view! {
+                                        <button
+                                            class=move || if active_tab.get() == t_tab { "tab-btn active" } else { "tab-btn" }
+                                            data-tab=t_data
+                                            on:click=move |_| {
+                                                set_active_tab.set(t_click.clone());
+                                                save_config_action.dispatch(());
+                                            }
+                                            title=t_full
+                                        >
+                                            <span class="tab-full">{full}</span>
+                                            <span class="tab-short">{short}</span>
+                                        </button>
+                                    }
+                                }).collect_view()
+                            }}
                         </Show>
                     </div>
 
@@ -869,6 +881,18 @@ pub fn App() -> impl IntoView {
                                             save_config_action.dispatch(()); // Auto-save
                                         }
                                         class="limit-input"
+                                    />
+                                </div>
+                                <h3>"Tab Settings"</h3>
+                                <div class="setting-row">
+                                    <span>"Show System Log Tab"</span>
+                                    <input type="checkbox"
+                                        prop:checked=move || show_system_tab.get()
+                                        on:change=move |ev| {
+                                            let checked = event_target_checked(&ev);
+                                            set_show_system_tab.set(checked);
+                                            save_config_action.dispatch(()); // Persist change
+                                        }
                                     />
                                 </div>
                                 <h3>"About"</h3>

@@ -518,12 +518,15 @@ pub fn App() -> impl IntoView {
                 <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
             </Show>
             <div class="custom-title-bar" data-tauri-drag-region>
-                    <div class="window-title">"BPSR Translator"</div>
-                    <div class="window-controls">
-                        <button class="win-btn" on:click=move |_| { let _ = invoke("minimize_window", JsValue::NULL); }>"—"</button>
-                        <button class="win-btn close" on:click=move |_| { let _ = invoke("close_window", JsValue::NULL); }>"✕"</button>
-                    </div>
+                <div class="drag-handle" data-tauri-drag-region></div>
+                <div class="window-title" style="pointer-events: none;">
+                    "BPSR Translator"
                 </div>
+                <div class="window-controls">
+                    <button class="win-btn" on:click=move |_| { let _ = invoke("minimize_window", JsValue::NULL); }>"—"</button>
+                    <button class="win-btn close" on:click=move |_| { let _ = invoke("close_window", JsValue::NULL); }>"✕"</button>
+                </div>
+            </div>
             <Show when=move || model_ready.get() fallback=move || view! {
                 <div class="setup-view">
                     <h1>"BPSR Translator"</h1>
@@ -1573,18 +1576,35 @@ pub fn App() -> impl IntoView {
                     align-items: center;
                     padding-left: 10px;
                     user-select: none;
+                    cursor: default;
+                    position: relative;
                     border-bottom: 1px solid var(--border); /* Adapts to theme */
                 }
 
+                .drag-handle {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 1; /* Sits below the buttons */
+                    cursor: default;
+                }
+
                 .window-title {
+                    position: relative;
+                    z-index: 2; /* Ensures text is visible but doesn't block handle */
+                    pointer-events: none; /* Mouse clicks pass through to the drag-handle */
                     font-size: 0.75rem;
-                    color: var(--text-muted); /* Dark gray in light, light gray in dark */
+                    color: var(--text-muted);
                     font-weight: 600;
                 }
 
                 .window-controls {
+                    position: relative;
                     display: flex;
                     height: 100%;
+                    z-index: 10;
                 }
 
                 .win-btn {
@@ -1595,6 +1615,9 @@ pub fn App() -> impl IntoView {
                     color: var(--text-main); /* Near-black in light mode */
                     cursor: pointer;
                     transition: background 0.2s;
+                    position: relative;
+                    z-index: 11;
+                    pointer-events: auto;
                 }
 
                 .win-btn:hover { background: rgba(128, 128, 128, 0.2); }

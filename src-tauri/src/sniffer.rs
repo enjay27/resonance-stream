@@ -26,6 +26,8 @@ pub struct ChatPacket {
     pub message: String,
     #[serde(default)]
     pub translated: Option<String>,
+    #[serde(default)]
+    pub nickname_romaji: Option<String>,
 }
 
 pub struct AppState {

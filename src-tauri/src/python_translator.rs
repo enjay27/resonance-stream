@@ -1,12 +1,38 @@
 use std::collections::VecDeque;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 use std::sync::Mutex;
+use serde::{Deserialize, Serialize};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use crate::{inject_system_message, model_manager};
 use crate::sniffer::{AppState, ChatPacket};
 
 // 1. Define State to hold the Channel
+
+// --- REQUEST: Rust -> Python ---
+#[derive(Serialize)]
+pub struct TranslationRequest {
+    pub text: String,
+    pub pid: u64,
+    pub nickname: Option<String>,
+}
+
+// --- RESPONSE: Python -> Rust ---
+#[derive(Deserialize, Debug, Clone)]
+pub struct TranslationResponse {
+    pub pid: u64,
+    pub translated: String,
+    #[serde(rename = "nickname_info")]
+    pub nickname_info: Option<NicknameInfo>,
+    pub diagnostics: Option<serde_json::Value>, // For --debug mode
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct NicknameInfo {
+    pub original: String,
+    pub romanized: String,
+    pub display: String,
+}
 
 
 #[tauri::command]
@@ -49,43 +75,41 @@ pub async fn start_translator_sidecar(
             if let CommandEvent::Stdout(line_bytes) = event {
                 let line = String::from_utf8_lossy(&line_bytes).to_string();
 
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                    // 1. Status Log handling
-                    if json["type"] == "status" || json["type"] == "info" {
-                        let msg = json["message"].as_str().unwrap_or("");
-                        inject_system_message(&app_clone, format!("[Python] {}", msg));
-                        if msg.contains("Ready") { let _ = app_clone.emit("translator-status", "Connected"); }
-                    }
-                    // 2. Translation Result handling (PID-based)
-                    else if json.get("pid").is_some() {
-                        let target_pid = json["pid"].as_u64().unwrap_or(0);
-                        let translated_text = json["translated"].as_str().unwrap_or_default().to_string();
+                // Use the new struct to parse the result
+                if let Ok(resp) = serde_json::from_str::<TranslationResponse>(&line) {
+                    let target_pid = resp.pid;
+                    let translated_text = resp.translated;
+                    println!("[Python] Translated: {:?}", translated_text);
+                    println!("[Python] Diagnostic: {:?}", resp.diagnostics);
 
-                        println!("[Python] Diagnostic: {:?}", json);
+                    if let Some(state) = app_clone.try_state::<crate::AppState>() {
+                        let mut history = state.chat_history.lock().unwrap();
+                        if let Some(packet) = history.get_mut(&target_pid) {
+                            packet.translated = Some(translated_text);
 
-                        if let Some(state) = app_clone.try_state::<crate::AppState>() {
-                            let mut history = state.chat_history.lock().unwrap();
-                            // Persistence: Update the master history map
-                            if let Some(packet) = history.get_mut(&target_pid) {
-                                packet.translated = Some(translated_text);
+                            // You can now access the romanized nickname here
+                            if let Some(info) = resp.nickname_info {
+                                println!("[Python] Nickname: {:?}", info);
                             }
                         }
-                        // UI Update: Emit to the IndexMap<u64, RwSignal> in app.rs
-                        let _ = app_clone.emit("translator-event", line);
                     }
+                    // Emit to Frontend
+                    let _ = app_clone.emit("translator-event", &line);
                 }
             }
         }
         let _ = app_clone.emit("translator-status", "Disconnected");
     });
-
     Ok("Connected".into())
 }
+
+
 
 #[tauri::command]
 pub async fn manual_translate(
     text: String,
     pid: u64,
+    nickname: Option<String>, // Added nickname parameter
     state: State<'_, AppState>
 ) -> Result<(), String> {
     // 1. Diagnostics
@@ -93,14 +117,12 @@ pub async fn manual_translate(
 
     let mut guard = state.tx.lock().unwrap();
 
-    // 2. Check the child
     if let Some(child) = guard.as_mut() {
-        let msg = serde_json::json!({ "text": text, "pid": pid }).to_string() + "\n";
+        // Use the struct for type safety
+        let request = TranslationRequest { text, pid, nickname };
+        let msg = serde_json::to_string(&request).map_err(|e| e.to_string())? + "\n";
 
-        child.write(msg.as_bytes()).map_err(|e| {
-            println!("[Error] Pipe write failed: {}", e);
-            e.to_string()
-        })?;
+        child.write(msg.as_bytes()).map_err(|e| e.to_string())?;
 
         println!("[Rust] Message piped to Python stdin.");
         Ok(())

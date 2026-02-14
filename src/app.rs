@@ -523,8 +523,17 @@ pub fn App() -> impl IntoView {
                     "BPSR Translator"
                 </div>
                 <div class="window-controls">
-                    <button class="win-btn" on:click=move |_| { let _ = invoke("minimize_window", JsValue::NULL); }>"—"</button>
-                    <button class="win-btn close" on:click=move |_| { let _ = invoke("close_window", JsValue::NULL); }>"✕"</button>
+                    <button class="win-btn" on:click=move |_| {
+                        spawn_local(async move {
+                            let _ = invoke("minimize_window", JsValue::NULL).await;
+                        });
+                    }>"—"</button>
+
+                    <button class="win-btn close" on:click=move |_| {
+                        spawn_local(async move {
+                            let _ = invoke("close_window", JsValue::NULL).await;
+                        });
+                    }>"✕"</button>
                 </div>
             </div>
             <Show when=move || model_ready.get() fallback=move || view! {
@@ -892,7 +901,7 @@ pub fn App() -> impl IntoView {
                                     set_theme.set(new_theme.to_string());
                                     save_config_action.dispatch(()); // Persist choice
                                 }>
-                                    <span>"Theme Mode"</span>
+                                    <span class="toggle-label">"Theme Mode"</span>
                                     <button class="theme-toggle-btn">
                                         {move || if theme.get() == "dark" { "🌙 Dark" } else { "☀️ Light" }}
                                     </button>
@@ -1483,9 +1492,14 @@ pub fn App() -> impl IntoView {
                 .toggle-row {
                     display: flex; justify-content: space-between; align-items: center;
                     padding: 8px 0; cursor: pointer;
-                    font-size: 0.95rem; color: #ddd;
+                    font-size: 0.95rem;
+                    var(--text-main);
                 }
                 .toggle-row:hover { color: #fff; }
+                .toggle-label {
+                    font-size: 0.9rem;
+                    color: var(--text-main);
+                }
 
                 .action-btn {
                     width: 100%; padding: 10px;
@@ -1605,6 +1619,7 @@ pub fn App() -> impl IntoView {
                     display: flex;
                     height: 100%;
                     z-index: 10;
+                    -webkit-app-region: no-drag;
                 }
 
                 .win-btn {

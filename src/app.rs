@@ -1295,6 +1295,9 @@ pub fn App() -> impl IntoView {
 
                 .settings-modal {
                     width: 90%; max-width: 400px;
+                    max-height: 85vh;
+                    display: flex;
+                    flex-direction: column;
                     background: #1e1e1e;
                     border: 1px solid #444;
                     border-radius: 8px;
@@ -1302,6 +1305,22 @@ pub fn App() -> impl IntoView {
                     overflow: hidden;
                     animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
                 }
+
+                .settings-content {
+                    padding: 16px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 20px;
+                    overflow-y: auto; /* Enable vertical scrolling for content */
+                    flex: 1; /* Allow content to fill available space in the modal */
+                }
+
+                .settings-content::-webkit-scrollbar { width: 6px; }
+                .settings-content::-webkit-scrollbar-thumb {
+                    background: #444;
+                    border-radius: 3px;
+                }
+                .settings-content::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
                 .settings-header {
                     display: flex; justify-content: space-between; align-items: center;

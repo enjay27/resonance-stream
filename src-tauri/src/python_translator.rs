@@ -72,30 +72,53 @@ pub async fn start_translator_sidecar(
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
-            if let CommandEvent::Stdout(line_bytes) = event {
-                let line = String::from_utf8_lossy(&line_bytes).to_string();
+            match event {
+                CommandEvent::Stdout(line_bytes) => {
+                    let line = String::from_utf8_lossy(&line_bytes).to_string();
 
-                // Use the new struct to parse the result
-                if let Ok(resp) = serde_json::from_str::<TranslationResponse>(&line) {
-                    let target_pid = resp.pid;
-                    let translated_text = resp.translated;
-                    println!("[Python] Translated: {:?}", translated_text);
-                    println!("[Python] Diagnostic: {:?}", resp.diagnostics);
-
-                    if let Some(state) = app_clone.try_state::<crate::AppState>() {
-                        let mut history = state.chat_history.lock().unwrap();
-                        if let Some(packet) = history.get_mut(&target_pid) {
-                            packet.translated = Some(translated_text);
-
-                            // You can now access the romanized nickname here
-                            if let Some(info) = resp.nickname_info {
-                                println!("[Python] Nickname: {:?}", info);
+                    // Parse as generic JSON first to check the "type" field
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                        match json["type"].as_str() {
+                            Some("info") | Some("status") => {
+                                let msg = json["message"].as_str().unwrap_or("");
+                                inject_system_message(&app_clone, format!("[Python] {}", msg));
                             }
+                            Some("error") => {
+                                let msg = json["message"].as_str().unwrap_or("");
+                                inject_system_message(&app_clone, format!("[Python ERROR] {}", msg));
+                            }
+                            Some("result") => {
+                                // Only now attempt to parse as the strict TranslationResponse
+                                if let Ok(resp) = serde_json::from_value::<TranslationResponse>(json) {
+                                    if resp.diagnostics.is_some() {
+                                        println!("[Python] Translated: {:?}", resp.translated);
+                                        println!("[Python] Diagnostic: {:?}", resp.diagnostics);
+                                        println!("[Python] Nickname: {:?}", resp.nickname_info);
+                                    }
+
+                                    let target_pid = resp.pid;
+                                    if let Some(state) = app_clone.try_state::<crate::AppState>() {
+                                        let mut history = state.chat_history.lock().unwrap();
+                                        if let Some(packet) = history.get_mut(&target_pid) {
+                                            packet.translated = Some(resp.translated);
+                                            if let Some(info) = resp.nickname_info {
+                                                packet.nickname_romaji = Some(info.romanized);
+                                            }
+                                        }
+                                    }
+                                    let _ = app_clone.emit("translator-event", &line);
+                                }
+                            }
+                            _ => println!("[Rust] Unknown JSON type: {}", line),
                         }
                     }
-                    // Emit to Frontend
-                    let _ = app_clone.emit("translator-event", &line);
                 }
+                // 2. CRITICAL: Listen for Stderr to see Python crashes or library errors
+                CommandEvent::Stderr(error_bytes) => {
+                    let err = String::from_utf8_lossy(&error_bytes);
+                    inject_system_message(&app_clone, format!("[Python CRASH] {}", err));
+                }
+                _ => {}
             }
         }
         let _ = app_clone.emit("translator-status", "Disconnected");

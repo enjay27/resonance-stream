@@ -36,6 +36,8 @@ pub struct ChatPacket {
     pub message: String,
     #[serde(default)]
     pub translated: Option<String>,
+    #[serde(default)]
+    pub nickname_romaji: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -227,8 +229,10 @@ pub fn App() -> impl IntoView {
                         if is_japanese(&packet_clone.message) {
                             spawn_local(async move {
                                 let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                       "text": packet_clone.message, "pid": packet_clone.pid
-                   })).unwrap();
+                                    "text": packet_clone.message,
+                                    "pid": packet_clone.pid,
+                                    "nickname": packet_clone.nickname // Pass for romanization
+                                })).unwrap();
                                 let _ = invoke("manual_translate", args).await;
                             });
                         }
@@ -252,13 +256,14 @@ pub fn App() -> impl IntoView {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
                     if let Ok(resp) = serde_json::from_str::<serde_json::Value>(ev["payload"].as_str().unwrap_or("")) {
                         let target_pid = resp["pid"].as_u64().unwrap_or(0);
-                        let translated_text = resp["translated"].as_str().unwrap_or_default().to_string();
+                        let romaji = resp["nickname_info"]["romanized"].as_str().map(|s| s.to_string());
 
-                        // O(1) Lookup: Update ONLY the signal for this specific PID
                         chat_log.with_untracked(|log| {
                             if let Some(packet_sig) = log.get(&target_pid) {
-                                packet_sig.update(|p| p.translated = Some(translated_text));
-                                log!("Immediate Render Triggered for PID: {}", target_pid);
+                                packet_sig.update(|p| {
+                                    p.translated = Some(resp["translated"].as_str().unwrap_or_default().to_string());
+                                    p.nickname_romaji = romaji; // Update the signal
+                                });
                             }
                         });
                     }
@@ -633,7 +638,13 @@ pub fn App() -> impl IntoView {
                                                 }
                                             }
                                         >
-                                            {move || sig.get().nickname.clone()}
+                                            {move || {
+                                                let p = sig.get();
+                                                match p.nickname_romaji {
+                                                    Some(romaji) => format!("{}({})", p.nickname, romaji),
+                                                    None => p.nickname.clone()
+                                                }
+                                            }}
                                         </span>
 
                                         <Show when=is_active>

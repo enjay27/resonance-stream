@@ -35,6 +35,7 @@ pub struct AppState {
     pub chat_history: Mutex<IndexMap<u64, ChatPacket>>,
     pub system_history: Mutex<VecDeque<ChatPacket>>,
     pub next_pid: AtomicU64,
+    pub nickname_cache: Mutex<HashMap<String, String>>,
 }
 
 // --- GLOBAL STATE ---
@@ -231,10 +232,11 @@ pub fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
                         }
 
                         // Label as recruitment if no user profile was found
-                        if chat.uid == 0 {
-                            chat.nickname = format!("{}_RECRUIT", chat.channel);
-                            chat.uid = 999; // Placeholder to pass the final check
-                        }
+                        // Recruit will be released in the future release
+                        // if chat.uid == 0 {
+                        //     chat.nickname = format!("{}_RECRUIT", chat.channel);
+                        //     chat.uid = 999; // Placeholder to pass the final check
+                        // }
                     }
                 }
                 i = block_end;

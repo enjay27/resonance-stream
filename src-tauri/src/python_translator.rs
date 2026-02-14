@@ -100,7 +100,11 @@ pub async fn start_translator_sidecar(
                                     if let Some(state) = app_clone.try_state::<crate::AppState>() {
                                         let mut history = state.chat_history.lock().unwrap();
                                         if let Some(packet) = history.get_mut(&nick_resp.pid) {
-                                            packet.nickname_romaji = Some(nick_resp.romaji.clone());
+                                            let original_name = packet.nickname.clone();
+
+                                            // 2. Update only the Cache
+                                            let mut cache = state.nickname_cache.lock().unwrap();
+                                            cache.insert(original_name, nick_resp.romaji.clone());
                                         }
                                     }
                                     // Emit dedicated nickname event
@@ -142,8 +146,23 @@ pub async fn start_translator_sidecar(
 pub async fn translate_nickname(
     pid: u64,
     nickname: String,
+    app: AppHandle,
     state: State<'_, AppState>
 ) -> Result<(), String> {
+    // 1. Check Backend Cache first
+    {
+        let cache = state.nickname_cache.lock().unwrap();
+        if let Some(romaji) = cache.get(&nickname) {
+            // Instant return if found
+            let _ = app.emit("nickname-feature-event", NicknameResponse {
+                pid,
+                nickname,
+                romaji: romaji.clone(),
+            });
+            return Ok(());
+        }
+    }
+
     let mut guard = state.tx.lock().unwrap();
     if let Some(child) = guard.as_mut() {
         // Send a clean NicknameRequest

@@ -524,6 +524,13 @@ pub fn App() -> impl IntoView {
                     </Show>
                 </div>
             }>
+                <div class="custom-title-bar" data-tauri-drag-region>
+                    <div class="window-title">"BPSR Translator"</div>
+                    <div class="window-controls">
+                        <button class="win-btn" on:click=move |_| { let _ = invoke("minimize_window", JsValue::NULL); }>"—"</button>
+                        <button class="win-btn close" on:click=move |_| { let _ = invoke("close_window", JsValue::NULL); }>"✕"</button>
+                    </div>
+                </div>
                 <nav class="tab-bar">
                     <div class="tabs">
                         <Show when=move || !compact_mode.get()
@@ -996,8 +1003,8 @@ pub fn App() -> impl IntoView {
                 .tab-btn:hover, .tab-btn.active { opacity: 1; background: #252525; }
 
                 /* Tab Colors */
-                .tab-btn[data-tab='전체'] { color: #FFFFFF; }
-                .tab-btn.active[data-tab='전체'] { border-bottom-color: #FFFFFF; }
+                .tab-btn[data-tab='전체'] { color: var(--text-main); }
+                .tab-btn.active[data-tab='전체'] { border-bottom-color: var(--text-main); }
 
                 .tab-btn[data-tab='월드'] { color: var(--world-color); }
                 .tab-btn.active[data-tab='월드'] { border-bottom-color: var(--world-color); }
@@ -1325,10 +1332,10 @@ pub fn App() -> impl IntoView {
                     max-height: 85vh;
                     display: flex;
                     flex-direction: column;
-                    background: #1e1e1e;
-                    border: 1px solid #444;
+                    background: var(--bg-panel);
+                    border: 1px solid var(--border);
                     border-radius: 8px;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
                     overflow: hidden;
                     animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
                 }
@@ -1352,10 +1359,11 @@ pub fn App() -> impl IntoView {
                 .settings-header {
                     display: flex; justify-content: space-between; align-items: center;
                     padding: 12px 16px;
-                    background: #252525;
-                    border-bottom: 1px solid #333;
+                    background: var(--bg-bubble);
+                    border-bottom: 1px solid var(--border);
+                    color: var(--text-main);
                 }
-                .settings-header h2 { margin: 0; font-size: 1.1rem; color: #fff; }
+                .settings-header h2 { margin: 0; font-size: 1.1rem; color: var(--text-main); }
 
                 .close-btn {
                     background: none; border: none; color: #aaa;
@@ -1363,12 +1371,23 @@ pub fn App() -> impl IntoView {
                 }
                 .close-btn:hover { color: #fff; }
 
-                .settings-content { padding: 16px; display: flex; flex-direction: column; gap: 20px; }
+                .settings-content {
+                    padding: 16px;
+                    overflow-y: auto;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 20px;
+                    color: var(--text-main);
+                }
 
                 .setting-group h3 {
                     margin: 0 0 10px 0;
-                    font-size: 0.9rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px;
-                    border-bottom: 1px solid #333; padding-bottom: 4px;
+                    font-size: 0.9rem;
+                    color: var(--text-muted);
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    border-bottom: 1px solid var(--border);
+                    padding-bottom: 4px;
                 }
 
                 .filter-grid {
@@ -1384,7 +1403,6 @@ pub fn App() -> impl IntoView {
                     gap: 10px;
                     cursor: pointer;
                     font-size: 0.9rem;
-                    color: #ccc;
                     padding: 5px;
                     border-radius: 4px;
                 }
@@ -1410,9 +1428,8 @@ pub fn App() -> impl IntoView {
 
                 .limit-input {
                     width: 80px; /* Constrain the width */
-                    background: #2a2a2a;
+                    background: var(--bg-bubble);
                     border: 1px solid #444;
-                    color: #00ff88;
                     padding: 4px 8px;
                     border_radius: 4px;
                     text-align: right;
@@ -1422,6 +1439,10 @@ pub fn App() -> impl IntoView {
                 .limit-input:focus {
                     border-color: #00ff88;
                     outline: none;
+                }
+
+                .limit-input, .tier-select, .checkbox-row {
+                    color: var(--text-main);
                 }
 
                 /* --- GITHUB LINK BUTTON --- */
@@ -1450,7 +1471,9 @@ pub fn App() -> impl IntoView {
 
                 .action-btn {
                     width: 100%; padding: 10px;
-                    background: #2a2a2a; border: 1px solid #444; color: #ddd;
+                    background: var(--bg-bubble);
+                    border: 1px solid var(--border);
+                    color: var(--text-main);
                     border-radius: 4px; cursor: pointer;
                     transition: all 0.2s; text-align: left;
                 }
@@ -1525,6 +1548,46 @@ pub fn App() -> impl IntoView {
                 }
                 [data-theme='light'] .chat-container::-webkit-scrollbar-thumb {
                     background: #bbb; /* Darker thumb for white background */
+                }
+
+                .custom-title-bar {
+                    height: 30px;
+                    background: var(--bg-panel); /* Adapts to theme */
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding-left: 10px;
+                    user-select: none;
+                    border-bottom: 1px solid var(--border); /* Adapts to theme */
+                }
+
+                .window-title {
+                    font-size: 0.75rem;
+                    color: var(--text-muted); /* Dark gray in light, light gray in dark */
+                    font-weight: 600;
+                }
+
+                .window-controls {
+                    display: flex;
+                    height: 100%;
+                }
+
+                .win-btn {
+                    width: 45px;
+                    height: 100%;
+                    background: transparent;
+                    border: none;
+                    color: var(--text-main); /* Near-black in light mode */
+                    cursor: pointer;
+                    transition: background 0.2s;
+                }
+
+                .win-btn:hover { background: rgba(128, 128, 128, 0.2); }
+                .win-btn.close:hover { background: #e81123; color: #fff; }
+
+                /* Light Mode specific polish */
+                [data-theme='light'] .custom-title-bar {
+                    background: #f1f3f5; /* Slightly different gray for the bar in light mode */
                 }
                 "
             </style>

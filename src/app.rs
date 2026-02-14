@@ -214,13 +214,14 @@ pub fn App() -> impl IntoView {
             // --- LISTENER: MESSAGE TRANSLATIONS ---
             let msg_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    if let Ok(resp) = serde_json::from_str::<serde_json::Value>(ev["payload"].as_str().unwrap_or("")) {
-                        let target_pid = resp["pid"].as_u64().unwrap_or(0);
-                        let text = resp["translated"].as_str().unwrap_or_default().to_string();
+                    let resp = &ev["payload"];
+                    let target_pid = resp["pid"].as_u64().unwrap_or(0);
+                    let text = resp["translated"].as_str().unwrap_or_default().to_string();
 
+                    if target_pid > 0 {
                         chat_log.with_untracked(|log| {
                             if let Some(sig) = log.get(&target_pid) {
-                                sig.update(|p| p.translated = Some(text.clone()));
+                                sig.update(|p| p.translated = Some(text));
                             }
                         });
                     }
@@ -406,6 +407,8 @@ pub fn App() -> impl IntoView {
                         // Hydrate GAME History
                         if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
                             if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(res) {
+                                log!("History: {:?}", vec);
+
                                 set_chat_log.set(vec.into_iter().map(|p| (p.pid, RwSignal::new(p))).collect());
                             }
                         }
@@ -634,25 +637,6 @@ pub fn App() -> impl IntoView {
                         >
                             {move || unread_count.get()} "개의 새로운 메세지"
                         </div>
-                    </Show>
-
-                    // 5. FLOATING BUTTON
-                    // Show ONLY if there are unread messages (implies we are scrolled up)
-                    <Show when=move || { unread_count.get() > 0 }>
-                        <button class="scroll-bottom-btn"
-                            on:click=move |_| {
-                                if let Some(el) = chat_container_ref.get() {
-                                    // 1. Scroll to bottom
-                                    el.set_scroll_top(el.scroll_height());
-                                    // 2. Reset states immediately
-                                    set_is_at_bottom.set(true);
-                                    set_unread_count.set(0);
-                                }
-                            }
-                        >
-                            // Dynamic Label: "⬇ 3 New Messages"
-                            "⬇ " {move || unread_count.get()} " New Messages"
-                        </button>
                     </Show>
 
                     <For each=move || filtered_messages.get()

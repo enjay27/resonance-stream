@@ -23,7 +23,8 @@ pub fn run() {
             tx: Mutex::new(None),
             chat_history: Mutex::new(IndexMap::new()),
             system_history: Mutex::new(VecDeque::with_capacity(200)),
-            next_pid: 1.into()
+            next_pid: 1.into(),
+            nickname_cache: Mutex::new(std::collections::HashMap::new()),
         })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -84,6 +85,14 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatPacket) {
     if let Some(state) = app.try_state::<AppState>() {
         let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
         packet.pid = current_pid;
+
+        // Auto-populate from Backend Cache
+        {
+            let cache = state.nickname_cache.lock().unwrap();
+            if let Some(romaji) = cache.get(&packet.nickname) {
+                packet.nickname_romaji = Some(romaji.clone());
+            }
+        }
 
         // Store in HOT Storage (IndexMap)
         {

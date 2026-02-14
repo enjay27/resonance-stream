@@ -145,12 +145,23 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
                     if let Some(payload) = extract_tcp_payload(&*raw_data) {
 
                         // Skip empty ACKs
-                        if payload.is_empty() { continue; }
+                        // 1. Minimum Header Validation (4 bytes Length + 2 bytes OpCode)
+                        if payload.len() < 6 { continue; }
 
+                        // Extract the Type/Sequence field
+                        let type_field = (payload[4] as u16) << 8 | (payload[5] as u16);
+
+                        // BLACKLIST: Ignore only known non-chat high-traffic packets
+                        // 0x0004 = Heartbeat
+                        // 0x8002 = Massive Character Sync
+                        if type_field == 0x0004 || type_field == 0x8002 {
+                            if type_field == 0x8002 { streams.remove(&stream_key); }
+                            continue;
+                        }
+
+                        // Allow all other types (0x0001, 0x0002, 0x0003...)
                         let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
                         p_buf.add(payload);
-
-                        println!("[Sniffer] packet received {:?}", p_buf);
 
                         while let Some(full_packet) = p_buf.next() {
                             if let Some(chat) = parse_star_resonance(&full_packet) {
@@ -176,8 +187,6 @@ pub fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
     let mut chat = ChatPacket::default();
     let (total_len, header_read) = read_varint(&data[1..]);
     let mut i = 1 + header_read;
-
-    // Ensure we don't read past the actual Protobuf payload
     let safe_end = (i + total_len as usize).min(data.len());
 
     while i < safe_end {
@@ -187,14 +196,14 @@ pub fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
         i += 1;
 
         match field_num {
-            1 => { // Channel ID
+            1 => { // Standard Channel
                 let (val, read) = read_varint(&data[i..safe_end]);
                 chat.channel = match val {
                     2 => "LOCAL".into(), 3 => "PARTY".into(), 4 => "GUILD".into(), _ => "WORLD".into(),
                 };
                 i += read;
             }
-            2 => { // User Container Block
+            2 => { // Standard Chat (User Profile)
                 let (len, read) = read_varint(&data[i..safe_end]);
                 i += read;
                 let block_end = (i + len as usize).min(safe_end);
@@ -203,11 +212,52 @@ pub fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
                 }
                 i = block_end;
             }
+            4 => { // Broadcast/Recruitment Block
+                let (len, read) = read_varint(&data[i..safe_end]);
+                i += read;
+                let block_end = (i + len as usize).min(safe_end);
+
+                if let Some(sub_data) = data.get(i..block_end) {
+                    // Message text is always Tag 0x1A (Field 3)
+                    if let Some(msg) = find_string_by_tag(sub_data, 0x1A) {
+                        chat.message = msg;
+
+                        // Extract specific channel (Tag 0x10 / Field 2)
+                        // Your packet showed value 3 (PARTY)
+                        if let Some(chan_id) = find_int_by_tag(sub_data, 0x10) {
+                            chat.channel = match chan_id {
+                                3 => "PARTY".into(), 4 => "GUILD".into(), _ => chat.channel
+                            };
+                        }
+
+                        // Label as recruitment if no user profile was found
+                        if chat.uid == 0 {
+                            chat.nickname = format!("{}_RECRUIT", chat.channel);
+                            chat.uid = 999; // Placeholder to pass the final check
+                        }
+                    }
+                }
+                i = block_end;
+            }
             _ => i += skip_field(wire_type, &data[i..safe_end]),
         }
     }
 
     if !chat.message.is_empty() && chat.uid > 0 { Some(chat) } else { None }
+}
+
+fn find_int_by_tag(data: &[u8], target_tag: u8) -> Option<u64> {
+    let mut i = 0;
+    while i < data.len() {
+        let tag = data[i];
+        if tag == target_tag {
+            let (val, _) = read_varint(&data[i+1..]);
+            return Some(val);
+        }
+        let wire_type = tag & 0x07;
+        i += 1 + skip_field(wire_type, &data[i+1..]);
+    }
+    None
 }
 
 fn parse_user_container(data: &[u8], chat: &mut ChatPacket) {

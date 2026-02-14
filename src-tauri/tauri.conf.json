@@ -34,6 +34,11 @@
     ],
     "externalBin": [
       "bin/translator"
+    ],
+    "resources": [
+      "bin/WinDivert.dll",
+      "bin/WinDivert.lib",
+      "bin/WinDivert64.sys"
     ]
   }
 }

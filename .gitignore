@@ -15,6 +15,6 @@ WinDivert64.sys
 .venv
 
 # build
-build
-translator-x86_64-pc-windows-msvc.spec
-translator-x86_64-pc-windows-msvc.exe
+build/
+dist/
+*.exe

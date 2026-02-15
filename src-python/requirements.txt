@@ -7,3 +7,4 @@ sentencepiece==0.2.1
 
 # --- Build Tools (Required for package.bat) ---
 pip-tools==7.5.3
+pyinstaller==6.19.0

@@ -40,7 +40,7 @@
     "resources": [
       "bin/WinDivert.dll",
       "bin/WinDivert64.sys",
-      "../models.json"
+      "resources/models.json"
     ]
   }
 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use crate::{inject_system_message, model_manager};
-use crate::sniffer::{AppState, ChatPacket};
+use crate::sniffer::{AppState, ChatPacket, SystemLogLevel};
 
 // 1. Define State to hold the Channel
 
@@ -47,7 +47,7 @@ pub async fn start_translator_sidecar(
     state: State<'_, AppState>,
     use_gpu: bool,
 ) -> Result<String, String> {
-    inject_system_message(&app, format!("[Sidecar] Request received. GPU: {}", use_gpu));
+    inject_system_message(&app, SystemLogLevel::Info, "Sidecar", format!("Request received. GPU: {}", use_gpu));
     let version = app.package_info().version.to_string();
     let config = crate::config::load_config(app.clone()); // Load persistent tier
     let model_path = model_manager::get_model_path(&app);
@@ -80,7 +80,7 @@ pub async fn start_translator_sidecar(
         let mut tx_guard = state.tx.lock().unwrap();
         // Move 'child' into the Mutex. DO NOT CLONE.
         *tx_guard = Some(child);
-        inject_system_message(&app, "[Sidecar] SUCCESS: Child handle saved to AppState.");
+        inject_system_message(&app, SystemLogLevel::Success, "Sidecar", "Process handle saved to AppState.");
     }
 
     // 3. Handle Stdout (Unchanged logic, but uses updated State for O(1) history)
@@ -96,14 +96,14 @@ pub async fn start_translator_sidecar(
                         match json["type"].as_str() {
                             Some("info") | Some("status") => {
                                 let msg = json["message"].as_str().unwrap_or("");
-                                inject_system_message(&app_clone, format!("[Python] {}", msg));
+                                inject_system_message(&app_clone, SystemLogLevel::Info, "Sidecar", json["message"].as_str().unwrap_or(""));
                             }
                             Some("error") => {
                                 let msg = json["message"].as_str().unwrap_or("");
-                                inject_system_message(&app_clone, format!("[Python ERROR] {}", msg));
+                                inject_system_message(&app_clone, SystemLogLevel::Error, "Sidecar", json["message"].as_str().unwrap_or(""));
                             }
                             Some("result") => {
-                                inject_system_message(&app_clone, format!("[Python] result {:?}", json));
+                                inject_system_message(&app_clone, SystemLogLevel::Debug, "Sidecar", json["message"].as_str().unwrap_or(""));
                                 // 1. Try to parse as Nickname Response
                                 if let Ok(nick_resp) = serde_json::from_value::<NicknameResponse>(json.clone()) {
                                     // Update History for persistence
@@ -135,7 +135,7 @@ pub async fn start_translator_sidecar(
                                 }
 
                             }
-                            _ => inject_system_message(&app_clone, format!("[Rust] Unknown JSON type: {}", line)),
+                            _ => inject_system_message(&app_clone, SystemLogLevel::Warning, "Sidecar", format!("Unknown JSON type: {}", line)),
                         }
                     }
                 }
@@ -143,11 +143,11 @@ pub async fn start_translator_sidecar(
                 CommandEvent::Stderr(error_bytes) => {
                     let err = String::from_utf8_lossy(&error_bytes);
                     if err.contains("ImportError: DLL load failed") {
-                        inject_system_message(&app_clone, "[Sidecar] FATAL: Missing Visual C++ Redistributable.");
+                        inject_system_message(&app_clone, SystemLogLevel::Error, "Sidecar", "Missing Visual C++ Redistributable.");
                     } else if err.contains("CUDA error: out of memory") {
-                        inject_system_message(&app_clone, "[Sidecar] GPU Memory Out. Try lowering the Tier.");
+                        inject_system_message(&app_clone, SystemLogLevel::Error, "Sidecar", "GPU Memory Out. Try lowering the Tier.");
                     } else {
-                        inject_system_message(&app_clone, format!("[Python CRASH] {}", err));
+                        inject_system_message(&app_clone, SystemLogLevel::Error, "Sidecar", format!("Crash: {}", err));
                     }
                 }
                 _ => {}
@@ -165,7 +165,7 @@ pub async fn translate_nickname(
     app: AppHandle,
     state: State<'_, AppState>
 ) -> Result<(), String> {
-    inject_system_message(&app, format!("[Diagnostic] translate nickname called for: {}", nickname));
+    inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("Requesting nickname: {}", nickname));
     // 1. Check Backend Cache first
     {
         let cache = state.nickname_cache.lock().unwrap();
@@ -201,7 +201,7 @@ pub async fn translate_message(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    inject_system_message(&app, format!("[Diagnostic] translate message called for: {}", text));
+    inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("Requesting text: {}", text));
 
     let mut guard = state.tx.lock().unwrap();
     if let Some(child) = guard.as_mut() {

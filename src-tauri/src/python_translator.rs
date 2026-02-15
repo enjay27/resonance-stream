@@ -48,6 +48,7 @@ pub async fn start_translator_sidecar(
     use_gpu: bool,
 ) -> Result<String, String> {
     inject_system_message(&app, format!("[Sidecar] Request received. GPU: {}", use_gpu));
+    let version = app.package_info().version.to_string();
     let config = crate::config::load_config(app.clone()); // Load persistent tier
     let model_path = model_manager::get_model_path(&app);
 
@@ -61,6 +62,7 @@ pub async fn start_translator_sidecar(
         "--model", &model_path,
         "--dict", dict_path.to_str().unwrap(),
         "--tier", &config.tier, // Use the tier from config
+        "--version", &version,
     ];
     if config.is_debug {
         args.push("--debug");

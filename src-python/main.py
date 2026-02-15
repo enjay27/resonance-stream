@@ -141,6 +141,7 @@ def main():
     parser.add_argument("--tier", type=str, choices=["low", "middle", "high", "extreme"], default="middle")
     parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
     parser.add_argument("--debug", action="store_true", help="Enable diagnostics")
+    parser.add_argument("--version", type=str, default="0.0.0")
     args = parser.parse_args()
 
     manager = TranslationManager(args.dict)
@@ -180,8 +181,9 @@ def main():
 
         translator = ctranslate2.Translator(args.model, device=device, compute_type=compute_type, inter_threads=1, intra_threads=4)
         sp = spm.SentencePieceProcessor(model_file=os.path.join(args.model, "tokenizer.model"))
-        manager.log_info(f"AI Started: {device.upper()} | Tier: {args.tier.upper()} | Debug: {args.debug}")
-
+        manager.log_info(
+            f"Resonance Stream AI v{args.version} Started: {device.upper()} | Tier: {args.tier.upper()}"
+        )
         while True:
             line = sys.stdin.readline()
             if not line: break

@@ -15,9 +15,13 @@ WinDivert64.sys
 .venv
 
 # build
+.venv.build
 build/
 dist/
 *.exe
+
+# downloaded libraries
+/lib/
 
 # ENV
 .env

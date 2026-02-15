@@ -1,8 +1,8 @@
 [package]
-name = "bpsr-translator"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+name = "resonance-stream"
+version = "0.0.1"
+authors = ["Enjay27 <kdkm2002@gmail.com>"]
+description = "Blue Protocol: Star Resonance Real-time Translator"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -11,7 +11,7 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "bpsr_translator_lib"
+name = "resonance_stream_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -45,3 +45,10 @@ local-ip-address = "0.6.10"
 [dev-dependencies]
 pnet = "0.35"
 serde_json = "1.0"
+
+[profile.release]
+panic = "abort"      # 패닉 시 스택 추적을 생략하여 용량 감소
+codegen-units = 1    # 컴파일 단위를 하나로 합쳐 최적화 극대화
+lto = true           # Link Time Optimization 활성화
+opt-level = "s"      # 실행 파일 크기 최적화 (z도 가능)
+strip = true         # 바이너리 내 디버그 심볼 강제 제거

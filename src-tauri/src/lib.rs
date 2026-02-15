@@ -20,14 +20,15 @@ mod config;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            // [NEW] Log Admin Status
+            let handle = app.handle();
+
+            inject_system_message(handle, "[System] Initializing Resonance Stream...");
+
             let is_admin = is_elevated::is_elevated();
             inject_system_message(app.handle(), format!("[System] Admin Privileges: {}", is_admin));
             if !is_admin {
                 inject_system_message(app.handle(), "[System] WARNING: Sniffer may fail without Admin rights.");
             }
-
-            let handle = app.handle();
 
             // 1. Verify resources are accessible
             let res_dir = handle.path().resource_dir().unwrap_or_default();

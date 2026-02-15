@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "bpsr-translator",
-  "version": "0.1.0",
-  "identifier": "com.enjay.bpsr.utility",
+  "productName": "Resonance Stream",
+  "version": "0.0.1",
+  "identifier": "com.enjay.bpsr.resonance-stream",
   "build": {
     "beforeDevCommand": "trunk serve",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "bpsr-translator",
+        "title": "Resonance Stream",
         "width": 800,
         "height": 600,
         "decorations": false,

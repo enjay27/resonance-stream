@@ -119,7 +119,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     // --- MAIN SNIFFER THREAD ---
     let app_handle = app.clone();
     thread::spawn(move || {
-        inject_system_message(&app_handle, format!("Eye of Star Resonance: Active (Gen {})", my_generation));
+        inject_system_message(&app_handle, format!("Resonance Stream: Active (Gen {})", my_generation));
 
         let filter = "tcp.PayloadLength > 0 and (tcp.SrcPort == 5003 or tcp.DstPort == 5003)";
         let flags = WinDivertFlags::new().set_sniff();

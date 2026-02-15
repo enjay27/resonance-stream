@@ -172,7 +172,7 @@ def main():
         if args.tier == "extreme":
             compute_type = "float16"
 
-        model_files = ["model.bin", "config.json", "shared_vocabulary.json", "tokenizer.model"]
+        model_files = ["model.bin", "config.json", "shared_vocabulary.txt", "tokenizer.model"]
         for f in model_files:
             f_path = os.path.join(args.model, f)
             if not os.path.exists(f_path):

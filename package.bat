@@ -24,8 +24,9 @@ if not exist ".venv.build" (
     python -m venv .venv.build
 )
 call .venv.build\Scripts\activate
-pip install --quiet pip-tools pyinstaller
+pip install --quiet pip-tools
 pip-sync src-python\requirements.txt
+pip install --quiet pyinstaller
 
 :: [3/5] Build Dependencies
 echo [3/5] Building Sidecar & Copying Drivers...

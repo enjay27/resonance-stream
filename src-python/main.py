@@ -134,15 +134,47 @@ class TranslationManager:
         final_chunks = [(protected_map[c], True) if c in protected_map else (c, False) for c in raw_chunks]
         return final_chunks, original_input
 
+def notify_missing_model(model_directory):
+    manifest_path = get_resource_path("models.json")
+
+    print(f"[FATAL] Model directory not found: {model_directory}")
+
+    if os.path.exists(manifest_path):
+        with open(manifest_path, 'r') as f:
+            manifest = json.load(f)
+
+        print(f"\nPlease download the '{manifest['model_id']}' files from Hugging Face:")
+        for file in manifest['files']:
+            print(f" - {file['name']}: {file['url']}")
+    else:
+        print("\nError: models.json manifest not found. Please reinstall the application.")
+
+    sys.exit(1)
+
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    if getattr(sys, 'frozen', False):
+        # If bundled, the resource is in the same folder as the exe
+        base_path = os.path.dirname(sys.executable)
+    else:
+        # If running in dev, go up to the project root
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    return os.path.join(base_path, relative_path)
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, required=True)
+    parser.add_argument("--model", type=str, help="Path to the model directory")
     parser.add_argument("--dict", type=str, default="custom_dict.json")
     parser.add_argument("--tier", type=str, choices=["low", "middle", "high", "extreme"], default="middle")
     parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
     parser.add_argument("--debug", action="store_true", help="Enable diagnostics")
     parser.add_argument("--version", type=str, default="0.0.0")
     args = parser.parse_args()
+
+    # Dynamic Model Check
+    if not args.model or not os.path.exists(args.model):
+        notify_missing_model(args.model)
 
     manager = TranslationManager(args.dict)
     nick_manager = NicknameManager(limit=500)

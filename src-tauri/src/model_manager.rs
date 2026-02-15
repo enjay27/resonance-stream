@@ -1,7 +1,9 @@
+use std::fs;
 use futures_util::StreamExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri::path::BaseDirectory;
 use crate::inject_system_message;
 use crate::sniffer::AppState;
 
@@ -18,35 +20,56 @@ struct ProgressPayload {
     pub total_percent: u8,
 }
 
+#[derive(Deserialize, Serialize, Clone)]
 struct ModelFile {
-    name: &'static str,
-    url: &'static str,
+    name: String,
+    url: String,
 }
 
-const MODEL_FILES: [ModelFile; 4] = [
-    ModelFile {
-        name: "model.bin",
-        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-1.3B-ct2-int8/resolve/main/model.bin",
-    },
-    ModelFile {
-        name: "config.json",
-        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-1.3B-ct2-int8/resolve/main/config.json",
-    },
-    ModelFile {
-        name: "shared_vocabulary.txt",
-        url: "https://huggingface.co/JustFrederik/nllb-200-distilled-1.3B-ct2-int8/resolve/main/shared_vocabulary.txt",
-    },
-    ModelFile {
-        name: "tokenizer.model", // We save it as tokenizer.model locally for the Python script
-        url: "https://huggingface.co/facebook/nllb-200-distilled-1.3B/resolve/main/sentencepiece.bpe.model",
-    },
-];
+#[derive(Deserialize, Clone)]
+struct ModelManifest {
+    model_id: String,
+    files: Vec<ModelFile>,
+}
+
+fn load_manifest(app: &tauri::AppHandle) -> Result<ModelManifest, String> {
+    // 1. DEVELOPMENT: Embed the file directly into the binary during 'cargo tauri dev'
+    #[cfg(debug_assertions)]
+    {
+        // This path is relative to 'src-tauri/src/model_manager.rs'
+        let json_data = include_str!("../../models.json");
+        serde_json::from_str(json_data).map_err(|e| format!("Dev JSON parse error: {}", e))
+    }
+
+    // 2. PRODUCTION: Use the dynamic PathResolver for the bundled resource
+    #[cfg(not(debug_assertions))]
+    {
+        use tauri::path::BaseDirectory;
+
+        let resource_path = app.path()
+            .resolve("models.json", BaseDirectory::Resource)
+            .map_err(|e| format!("Resource resolution failed: {}", e))?;
+
+        let json_data = std::fs::read_to_string(&resource_path)
+            .map_err(|e| format!("Failed to read models.json at {:?}: {}", resource_path, e))?;
+
+        serde_json::from_str(&json_data).map_err(|e| format!("Prod JSON parse error: {}", e))
+    }
+}
 
 #[tauri::command]
-pub async fn check_model_status(app: AppHandle) -> Result<ModelStatus, String> {
-    // Update path to separate the 1.3B model from your old 600M files
-    let model_dir = app.path().app_data_dir().unwrap().join("models/nllb_1.3B_int8");
-    let all_exist = MODEL_FILES.iter().all(|f| model_dir.join(f.name).exists());
+pub async fn check_model_status(app: tauri::AppHandle) -> Result<ModelStatus, String> {
+    // 1. Load the manifest using the same hybrid logic as load_manifest
+    let manifest = load_manifest(&app)?;
+
+    // 2. Resolve the model directory based on the manifest's model_id
+    let model_dir = app.path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(format!("models/{}", manifest.model_id));
+
+    // 3. Verify if all required files exist in that directory
+    let all_exist = manifest.files.iter().all(|f| model_dir.join(&f.name).exists());
 
     Ok(ModelStatus {
         exists: all_exist,
@@ -56,22 +79,25 @@ pub async fn check_model_status(app: AppHandle) -> Result<ModelStatus, String> {
 
 #[tauri::command]
 pub async fn download_model(app: AppHandle) -> Result<(), String> {
-    let model_dir = app.path().app_data_dir().unwrap().join("models/nllb_1.3B_int8");
-    std::fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
+    let manifest = load_manifest(&app)?;
+    let model_dir = app.path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(format!("models/{}", manifest.model_id));
+
+    fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
 
     let client = reqwest::Client::new();
-    let total_files = MODEL_FILES.len() as f32;
+    let total_files = manifest.files.len() as f32;
 
-    for (idx, file_info) in MODEL_FILES.iter().enumerate() {
-        let dest_path = model_dir.join(file_info.name);
+    for (idx, file_info) in manifest.files.iter().enumerate() {
+        let dest_path = model_dir.join(&file_info.name);
+        if dest_path.exists() { continue; } // Basic resumption
 
-        // Skip if individual file exists (basic resumption)
-        if dest_path.exists() { continue; }
-
-        let res = client.get(file_info.url).send().await.map_err(|e| e.to_string())?;
+        let res = client.get(&file_info.url).send().await.map_err(|e| e.to_string())?;
         let total_size = res.content_length().unwrap_or(0);
 
-        let mut file = std::fs::File::create(&dest_path).map_err(|e| e.to_string())?;
+        let mut file = fs::File::create(&dest_path).map_err(|e| e.to_string())?;
         let mut downloaded: u64 = 0;
         let mut stream = res.bytes_stream();
 
@@ -85,22 +111,24 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
                 let total_percent = (((idx as f32 / total_files) * 100.0) + (file_percent as f32 / total_files)) as u8;
 
                 let _ = app.emit("download-progress", ProgressPayload {
-                    current_file: file_info.name.to_string(),
+                    current_file: file_info.name.clone(),
                     percent: file_percent,
                     total_percent,
                 });
             }
         }
     }
-
     Ok(())
 }
 
-pub fn get_model_path(app: &AppHandle) -> String {
+pub fn get_model_path(app: &tauri::AppHandle) -> String {
+    // We can unwrap safely here if we know load_manifest is solid
+    let manifest = load_manifest(app).expect("Failed to load manifest for path resolution");
+
     app.path()
         .app_data_dir()
         .expect("Failed to resolve AppData directory")
-        .join("models/nllb_1.3B_int8")
+        .join(format!("models/{}", manifest.model_id))
         .to_string_lossy()
         .into_owned()
 }

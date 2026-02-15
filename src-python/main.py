@@ -242,7 +242,6 @@ def main():
 
                 if pid is None or not input_text: continue
 
-                romaji = None
                 if raw_nickname:
                     romaji = manager.get_romaji(raw_nickname)
                     nick_manager.update(raw_nickname, romaji)
@@ -280,7 +279,7 @@ def main():
                 final_output = fix_korean_josa(final_output)
                 final_output = " ".join(final_output.split()).strip()
 
-                result = {"type": "result", "pid": pid, "translated": final_output, "nickname": f"{raw_nickname}({romaji})"}
+                result = {"type": "result", "pid": pid, "translated": final_output}
                 if args.debug:
                     result["diagnostics"] = [
                         {"step": "1. Original", "content": original_input},

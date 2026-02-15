@@ -1,0 +1,22 @@
+{
+  "model_id": "nllb_1.3B_int8",
+  "base_url": "https://huggingface.co/JustFrederik/nllb-200-distilled-1.3B-ct2-int8/resolve/main/",
+  "files": [
+    {
+      "name": "model.bin",
+      "url": "https://huggingface.co/JustFrederik/nllb-200-distilled-1.3B-ct2-int8/resolve/main/model.bin"
+    },
+    {
+      "name": "config.json",
+      "url": "https://huggingface.co/JustFrederik/nllb-200-distilled-1.3B-ct2-int8/resolve/main/config.json"
+    },
+    {
+      "name": "shared_vocabulary.txt",
+      "url": "https://huggingface.co/JustFrederik/nllb-200-distilled-1.3B-ct2-int8/resolve/main/shared_vocabulary.txt"
+    },
+    {
+      "name": "tokenizer.model",
+      "url": "https://huggingface.co/facebook/nllb-200-distilled-1.3B/resolve/main/sentencepiece.bpe.model"
+    }
+  ]
+}

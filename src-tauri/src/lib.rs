@@ -19,6 +19,24 @@ mod config;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            // [NEW] Log Admin Status
+            let is_admin = is_elevated::is_elevated();
+            inject_system_message(app.handle(), format!("[System] Admin Privileges: {}", is_admin));
+            if !is_admin {
+                inject_system_message(app.handle(), "[System] WARNING: Sniffer may fail without Admin rights.");
+            }
+
+            let handle = app.handle();
+
+            // 1. Verify resources are accessible
+            let res_dir = handle.path().resource_dir().unwrap_or_default();
+            let sys_file = res_dir.join("WinDivert64.sys");
+            inject_system_message(handle, format!("[System] Resource Path: {}", res_dir.display()));
+            inject_system_message(handle, format!("[System] Driver Integrity: {}", sys_file.exists()));
+
+            Ok(())
+        })
         .manage(AppState {
             tx: Mutex::new(None),
             chat_history: Mutex::new(IndexMap::new()),

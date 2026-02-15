@@ -140,7 +140,13 @@ pub async fn start_translator_sidecar(
                 // 2. CRITICAL: Listen for Stderr to see Python crashes or library errors
                 CommandEvent::Stderr(error_bytes) => {
                     let err = String::from_utf8_lossy(&error_bytes);
-                    inject_system_message(&app_clone, format!("[Python CRASH] {}", err));
+                    if err.contains("ImportError: DLL load failed") {
+                        inject_system_message(&app_clone, "[Sidecar] FATAL: Missing Visual C++ Redistributable.");
+                    } else if err.contains("CUDA error: out of memory") {
+                        inject_system_message(&app_clone, "[Sidecar] GPU Memory Out. Try lowering the Tier.");
+                    } else {
+                        inject_system_message(&app_clone, format!("[Python CRASH] {}", err));
+                    }
                 }
                 _ => {}
             }

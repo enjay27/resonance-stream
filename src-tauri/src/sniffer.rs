@@ -70,7 +70,18 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     state.next_pid.store(1, Ordering::SeqCst);
 
     // 2. Increment Generation (This kills the old thread logically)
+    let config = crate::config::load_config(app.clone()); //
     let my_generation = SNIFFER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+
+    if config.is_debug {
+        use local_ip_address::list_afinet_netifas;
+
+        if let Ok(network_interfaces) = list_afinet_netifas() {
+            for (name, ip) in network_interfaces {
+                inject_system_message(&app, format!("[Debug] Active Interface: {} ({:?})", name, ip));
+            }
+        }
+    }
 
     // Reset watchdog on start
     feed_watchdog();
@@ -116,7 +127,17 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
         let wd = match WinDivert::network(filter, 0, flags) {
             Ok(w) => w,
             Err(e) => {
-                inject_system_message(&app_handle, format!("[Sniffer] FATAL ERROR: {:?}", e));
+                // [NEW] Map common WinDivert error codes for the user
+                let err_str = format!("{:?}", e);
+                let diagnostic = if err_str.contains("Code 5") {
+                    "ACCESS_DENIED: Please Run as Administrator."
+                } else if err_str.contains("Code 577") {
+                    "INVALID_IMAGE_HASH: Driver signature blocked. Check Secure Boot or Windows Update."
+                } else {
+                    "DRIVER_INIT_FAILED: Ensure WinDivert64.sys is in the app folder."
+                };
+
+                inject_system_message(&app_handle, format!("[Sniffer FATAL] {}", diagnostic));
                 IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
                 return;
             }
@@ -134,6 +155,9 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
             }
 
             if let Ok(packet) = wd.recv(Some(&mut buffer)) {
+                if config.is_debug && LAST_TRAFFIC_TIME.load(Ordering::Relaxed) == 0 {
+                    inject_system_message(&app_handle, "[Debug] First Packet Captured! Network link established.");
+                }
                 // Feed the Watchdog because we saw traffic
                 feed_watchdog();
 
@@ -141,6 +165,12 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
 
                 // 1. Get the Stream Key
                 if let Some(stream_key) = extract_stream_key(&*raw_data) {
+                    // [NEW] Log new connection detection (IP/Port)
+                    if config.is_debug && !streams.contains_key(&stream_key) {
+                        let src_ip = format!("{}.{}.{}.{}", stream_key[0], stream_key[1], stream_key[2], stream_key[3]);
+                        let src_port = u16::from_be_bytes([stream_key[4], stream_key[5]]);
+                        inject_system_message(&app_handle, format!("[Debug] New Stream Detected: {}:{}", src_ip, src_port));
+                    }
 
                     // 2. Extract Payload
                     if let Some(payload) = extract_tcp_payload(&*raw_data) {

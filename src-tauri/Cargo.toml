@@ -33,12 +33,14 @@ tauri-plugin-fs = "2.4.5" # For handling the download stream
 pcap = "2.4"
 byteorder = "1.5"  # For reading u16/u32 from packets
 indexmap = { version = "2.0", features = ["serde"] }
+is_elevated = "0.1"
 
 # Cryptography (Matches BPSR-ZDPS logic)
 aes = "0.8"
 ctr = "0.9"
 hex = "0.4"
 chrono = "0.4.43"
+local-ip-address = "0.6.10"
 
 [dev-dependencies]
 pnet = "0.35"

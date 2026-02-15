@@ -30,10 +30,33 @@ pub struct ChatPacket {
     pub nickname_romaji: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemMessage {
+    pub pid: u64,             // Unique ID for Leptos 'For' loop keys
+    pub timestamp: u64,       // Milliseconds for sorting
+    pub level: String,        // "info", "warn", "error", "success"
+    pub source: String,       // "Backend", "Sniffer", "Translator"
+    pub message: String,      // The actual log text
+
+    // Keep translated only if you plan to support localized system errors
+    #[serde(default)]
+    pub translated: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum SystemLogLevel {
+    Info,    // Normal initialization logs
+    Warning, // Sniffer not active, GPU memory low
+    Error,   // Driver init failed, Sidecar crashed
+    Success, // Dictionary updated, Model ready
+    Debug,
+}
+
 pub struct AppState {
     pub tx: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
     pub chat_history: Mutex<IndexMap<u64, ChatPacket>>,
-    pub system_history: Mutex<VecDeque<ChatPacket>>,
+    pub system_history: Mutex<VecDeque<SystemMessage>>,
     pub next_pid: AtomicU64,
     pub nickname_cache: Mutex<HashMap<String, String>>,
 }
@@ -62,7 +85,7 @@ pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State
 fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     // 1. Check if we are "officially" running
     if IS_SNIFFER_RUNNING.load(Ordering::SeqCst) {
-        inject_system_message(&app, "System: Sniffer already active.");
+        inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Sniffer restart blocked: already active.");
         return;
     }
 
@@ -78,7 +101,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
 
         if let Ok(network_interfaces) = list_afinet_netifas() {
             for (name, ip) in network_interfaces {
-                inject_system_message(&app, format!("[Debug] Active Interface: {} ({:?})", name, ip));
+                inject_system_message(&app, SystemLogLevel::Info, "Sniffer", format!("Active Interface: {} ({:?})", name, ip));
             }
         }
     }
@@ -105,7 +128,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
 
             // TRIGGER: No packets for 15 seconds
             if now.saturating_sub(last) > 15 {
-                inject_system_message(&app_handle_watchdog, "[Warning] No game traffic detected for 15s.");
+                inject_system_message(&app_handle_watchdog, SystemLogLevel::Warning, "Sniffer", "Watchdog: No game traffic for 15s.");
 
                 // Emit event to Frontend (Red Dot)
                 let _ = app_handle_watchdog.emit("sniffer-status", "warning");
@@ -119,7 +142,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     // --- MAIN SNIFFER THREAD ---
     let app_handle = app.clone();
     thread::spawn(move || {
-        inject_system_message(&app_handle, format!("Resonance Stream: Active (Gen {})", my_generation));
+        inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", format!("Engine Active (Gen {})", my_generation));
 
         let filter = "tcp.PayloadLength > 0 and (tcp.SrcPort == 5003 or tcp.DstPort == 5003)";
         let flags = WinDivertFlags::new().set_sniff();
@@ -137,7 +160,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
                     "DRIVER_INIT_FAILED: Ensure WinDivert64.sys is in the app folder."
                 };
 
-                inject_system_message(&app_handle, format!("[Sniffer FATAL] {}", diagnostic));
+                inject_system_message(&app_handle, SystemLogLevel::Error, "Sniffer", format!("FATAL: {}", diagnostic));
                 IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
                 return;
             }
@@ -150,13 +173,13 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
             // [CRITICAL] COOPERATIVE SHUTDOWN
             // If the global generation has changed, I am obsolete.
             if SNIFFER_GENERATION.load(Ordering::Relaxed) != my_generation {
-                inject_system_message(&app_handle, format!("[Sniffer Gen {}] Shutdown signal received. Exiting.", my_generation));
+                inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", format!("Sniffer Gen {} Shutdown signal received. Exiting.", my_generation));
                 break; // This drops 'wd', closing the handle cleanly.
             }
 
             if let Ok(packet) = wd.recv(Some(&mut buffer)) {
                 if config.is_debug && LAST_TRAFFIC_TIME.load(Ordering::Relaxed) == 0 {
-                    inject_system_message(&app_handle, "[Debug] First Packet Captured! Network link established.");
+                    inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "First Packet Captured! Network link established.");
                 }
                 // Feed the Watchdog because we saw traffic
                 feed_watchdog();
@@ -169,7 +192,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
                     if config.is_debug && !streams.contains_key(&stream_key) {
                         let src_ip = format!("{}.{}.{}.{}", stream_key[0], stream_key[1], stream_key[2], stream_key[3]);
                         let src_port = u16::from_be_bytes([stream_key[4], stream_key[5]]);
-                        inject_system_message(&app_handle, format!("[Debug] New Stream Detected: {}:{}", src_ip, src_port));
+                        inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", format!("New Stream Detected: {}:{}", src_ip, src_port));
                     }
 
                     // 2. Extract Payload
@@ -203,8 +226,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
                 }
             }
         }
-
-        inject_system_message(&app_handle, "Old Sniffer Thread Terminated.");
+        inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", "Old Sniffer Thread Terminated.");
     });
 }
 
@@ -467,8 +489,8 @@ pub fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatPacket> {
 }
 
 #[tauri::command]
-pub fn get_system_history(state: tauri::State<AppState>) -> Vec<ChatPacket> {
-    // Returns ONLY System Logs
+pub fn get_system_history(state: tauri::State<AppState>) -> Vec<SystemMessage> {
+    // Change: Returns specialized SystemMessages
     let history = state.system_history.lock().unwrap();
     history.iter().cloned().collect()
 }

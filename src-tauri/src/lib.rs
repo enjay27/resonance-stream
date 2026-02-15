@@ -21,20 +21,23 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let handle = app.handle();
-
-            inject_system_message(handle, "[System] Initializing Resonance Stream...");
+            inject_system_message(handle, SystemLogLevel::Info, "Backend", "Initializing Resonance Stream...");
 
             let is_admin = is_elevated::is_elevated();
-            inject_system_message(app.handle(), format!("[System] Admin Privileges: {}", is_admin));
+            inject_system_message(handle, SystemLogLevel::Info, "Backend", format!("Admin Privileges: {}", is_admin));
+
             if !is_admin {
-                inject_system_message(app.handle(), "[System] WARNING: Sniffer may fail without Admin rights.");
+                inject_system_message(handle, SystemLogLevel::Warning, "Backend", "Sniffer may fail without Admin rights.");
             }
 
             // 1. Verify resources are accessible
             let res_dir = handle.path().resource_dir().unwrap_or_default();
             let sys_file = res_dir.join("WinDivert64.sys");
-            inject_system_message(handle, format!("[System] Resource Path: {}", res_dir.display()));
-            inject_system_message(handle, format!("[System] Driver Integrity: {}", sys_file.exists()));
+            if sys_file.exists() {
+                inject_system_message(handle, SystemLogLevel::Success, "Backend", "WinDivert driver located in resources.");
+            } else {
+                inject_system_message(handle, SystemLogLevel::Error, "Backend", "WinDivert64.sys missing from resource directory.");
+            }
 
             Ok(())
         })
@@ -69,36 +72,46 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-pub fn inject_system_message<S: Into<String>>(app: &tauri::AppHandle, message: S) {
+pub fn inject_system_message<S: Into<String>>(
+    app: &tauri::AppHandle,
+    level: SystemLogLevel,
+    source: &str,
+    message: S
+) {
     let msg = message.into();
-    println!("[System] {}", msg);
+    println!("[{}] [{:?}] {}", source, level, msg);
 
     if let Some(state) = app.try_state::<AppState>() {
-        // 1. Create Packet
-        // System logs don't strictly need PIDs for translation,
-        // but we assign one for unique keys in React/Leptos loops.
         let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
 
-        let sys_packet = ChatPacket {
-            pid: current_pid,
-            channel: "SYSTEM".into(),
-            nickname: "SYSTEM".into(),
-            message: msg,
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            ..Default::default()
+        // Map the Enum to the string expected by the frontend SystemMessage struct
+        let level_str = match level {
+            SystemLogLevel::Info => "info",
+            SystemLogLevel::Warning => "warn",
+            SystemLogLevel::Error => "error",
+            SystemLogLevel::Success => "success",
+            SystemLogLevel::Debug => "debug",
         };
 
-        // 2. Store in COLD Storage (VecDeque)
+        let system_message = SystemMessage {
+            pid: current_pid,
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            level: level_str.to_string(),
+            source: source.to_string(),
+            message: msg,
+            translated: None,
+        };
+
+        // Store in specialized system storage
         {
             let mut sys_hist = state.system_history.lock().unwrap();
             if sys_hist.len() >= 200 {
-                sys_hist.pop_front(); // Remove oldest log
+                sys_hist.pop_front();
             }
-            sys_hist.push_back(sys_packet.clone());
+            sys_hist.push_back(system_message.clone());
         }
 
-        // 3. Emit "system-event" (Distinct from packet-event)
-        let _ = app.emit("system-event", &sys_packet);
+        let _ = app.emit("system-event", &system_message);
     }
 }
 

@@ -5,7 +5,7 @@ use std::io::Write;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri::path::BaseDirectory;
 use crate::inject_system_message;
-use crate::sniffer::AppState;
+use crate::sniffer::{AppState, SystemLogLevel};
 
 #[derive(Serialize, Clone)]
 pub struct ModelStatus {
@@ -193,7 +193,7 @@ pub async fn sync_dictionary(app: tauri::AppHandle, state: tauri::State<'_, AppS
     std::fs::create_dir_all(dict_path.parent().unwrap()).map_err(|e| e.to_string())?;
     std::fs::write(&dict_path, &json_content).map_err(|e| e.to_string())?;
 
-    inject_system_message(&app, "[Translator] Dictionary downloaded and saved");
+    inject_system_message(&app, SystemLogLevel::Success, "ModelManager", "Dictionary saved to AppData.");
 
     // 5. Notify Python Sidecar via Stdin
     let mut tx_guard = state.tx.lock().unwrap();
@@ -202,12 +202,12 @@ pub async fn sync_dictionary(app: tauri::AppHandle, state: tauri::State<'_, AppS
 
         // Use the child's write method
         child.write(msg.as_bytes()).map_err(|e| e.to_string())?;
-        inject_system_message(&app, "[Sidecar] Dictionary reload command sent.");
+        inject_system_message(&app, SystemLogLevel::Info, "Sidecar", "Sent reload command via Stdin.");
     } else {
         return Err("Translator is not running".into());
     }
 
-    inject_system_message(&app, "[Translator] Dictionary successfully reloaded");
+    inject_system_message(&app, SystemLogLevel::Success, "Translator", "Dictionary successfully synchronized.");
 
     Ok("Dictionary updated and reloaded!".to_string())
 }

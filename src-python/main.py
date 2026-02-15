@@ -1,14 +1,16 @@
-import collections
-import os
-import sys
-import json
-import io
 import argparse
-import re
+import collections
 import gc
+import io
+import json
+import os
+import re
+import sys
+import time
+
 import ctranslate2
-import sentencepiece as spm
 import pykakasi
+import sentencepiece as spm
 
 # Force UTF-8 for stable pipe communication
 sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
@@ -67,14 +69,21 @@ class TranslationManager:
     def log_error(self, msg): print(json.dumps({"type": "error", "message": msg}), flush=True)
 
     def load_dictionary(self):
+        self.log_info(f"Attempting to load dict from: {self.dict_path}")
         if os.path.exists(self.dict_path):
             try:
                 with open(self.dict_path, 'r', encoding='utf-8') as f:
-                    raw_dict = json.load(f).get("data", {})
+                    content = f.read()
+                    if not content.strip():
+                        self.log_error("Dict file is empty.")
+                        return
+                    raw_dict = json.loads(content).get("data", {})
                 self.custom_dict = {k: v for k, v in raw_dict.items() if k not in "【】「」『』（）〈〉《》"}
                 # RESTORED: Confirms dictionary status to Rust UI
                 self.log_info(f"Dict Loaded: {len(self.custom_dict)} terms.")
             except Exception as e: self.log_error(f"Dict Error: {e}")
+            except json.JSONDecodeError as je:
+                self.log_error(f"Dict JSON Syntax Error: {je}") # 문법 오류 지점 표시
 
     def get_romaji(self, text):
         result = kks.convert(text)
@@ -137,6 +146,16 @@ def main():
     manager = TranslationManager(args.dict)
     nick_manager = NicknameManager(limit=500)
 
+    manager.log_info(f"Python Executable: {sys.executable}")
+    manager.log_info(f"Python Version: {sys.version}")
+    manager.log_info(f"Current Working Dir: {os.getcwd()}")
+
+    try:
+        cuda_count = ctranslate2.get_cuda_device_count()
+        manager.log_info(f"GPU Device: {cuda_count} found.")
+    except Exception:
+        pass
+
     tier_cfg = {
         "low": {"beam": 1, "patience": 1.0, "rep_pen": 1.0},
         "middle": {"beam": 5, "patience": 1.0, "rep_pen": 1.1},
@@ -152,6 +171,13 @@ def main():
             device, compute_type = ("cuda", "int8_float16") if cuda_count > 0 else ("cpu", "int8")
         if args.tier == "extreme":
             compute_type = "float16"
+
+        model_files = ["model.bin", "config.json", "shared_vocabulary.json", "tokenizer.model"]
+        for f in model_files:
+            f_path = os.path.join(args.model, f)
+            if not os.path.exists(f_path):
+                manager.log_error(f"Missing critical model file: {f}")
+
         translator = ctranslate2.Translator(args.model, device=device, compute_type=compute_type, inter_threads=1, intra_threads=4)
         sp = spm.SentencePieceProcessor(model_file=os.path.join(args.model, "tokenizer.model"))
         manager.log_info(f"AI Started: {device.upper()} | Tier: {args.tier.upper()} | Debug: {args.debug}")
@@ -191,6 +217,8 @@ def main():
                 chunks_data, original_input = manager.preprocess_chunking(input_text, nick_manager.get_map())
                 translated_parts, chunk_details = [], []
 
+                start_t = time.perf_counter()
+
                 for idx, (chunk_text, is_protected) in enumerate(chunks_data):
                     if is_protected:
                         translated_parts.append(chunk_text)
@@ -226,6 +254,12 @@ def main():
                         {"step": "3. Breakdown", "content": chunk_details},
                         {"step": "4. Final", "content": final_output}
                     ]
+
+                end_t = time.perf_counter()
+                latency_ms = (end_t - start_t) * 1000
+
+                if args.debug:
+                    manager.log_info(f"[Perf] Inference Time: {latency_ms:.2f}ms | Length: {len(input_text)} chars")
 
                 print(json.dumps(result, ensure_ascii=False), flush=True)
                 del chunks_data; gc.collect()

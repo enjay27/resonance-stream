@@ -129,7 +129,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--dict", type=str, default="custom_dict.json")
-    parser.add_argument("--tier", type=str, choices=["low", "middle", "high"], default="middle")
+    parser.add_argument("--tier", type=str, choices=["low", "middle", "high", "extreme"], default="middle")
+    parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
     parser.add_argument("--debug", action="store_true", help="Enable diagnostics")
     args = parser.parse_args()
 
@@ -139,13 +140,18 @@ def main():
     tier_cfg = {
         "low": {"beam": 1, "patience": 1.0, "rep_pen": 1.0},
         "middle": {"beam": 5, "patience": 1.0, "rep_pen": 1.1},
-        "high": {"beam": 10, "patience": 2.0, "rep_pen": 1.1}
+        "high": {"beam": 10, "patience": 2.0, "rep_pen": 1.1},
+        "extreme": {"beam": 10, "patience": 2.0, "rep_pen": 1.3, "no_repeat": 3}
     }
     cfg = tier_cfg[args.tier]
 
     try:
-        cuda_count = ctranslate2.get_cuda_device_count()
-        device, compute_type = ("cuda", "int8_float16") if cuda_count > 0 else ("cpu", "int8")
+        device, compute_type = ("cpu", "int8") if args.device == "cpu" else ("cuda", "int8_float16")
+        if args.device == "cuda":
+            cuda_count = ctranslate2.get_cuda_device_count()
+            device, compute_type = ("cuda", "int8_float16") if cuda_count > 0 else ("cpu", "int8")
+        if args.tier == "extreme":
+            compute_type = "float16"
         translator = ctranslate2.Translator(args.model, device=device, compute_type=compute_type, inter_threads=1, intra_threads=4)
         sp = spm.SentencePieceProcessor(model_file=os.path.join(args.model, "tokenizer.model"))
         manager.log_info(f"AI Started: {device.upper()} | Tier: {args.tier.upper()} | Debug: {args.debug}")
@@ -176,11 +182,10 @@ def main():
 
                 if pid is None or not input_text: continue
 
-                nickname_info = None
+                romaji = None
                 if raw_nickname:
                     romaji = manager.get_romaji(raw_nickname)
                     nick_manager.update(raw_nickname, romaji)
-                    nickname_info = {"original": raw_nickname, "romanized": romaji, "display": f"{raw_nickname}({romaji})"}
 
                 # Captures chunks and original input correctly for diagnostics
                 chunks_data, original_input = manager.preprocess_chunking(input_text, nick_manager.get_map())
@@ -192,7 +197,16 @@ def main():
                         if args.debug: chunk_details.append(f"Chunk {idx} [LOCKED]: {chunk_text}")
                     else:
                         tokens = ["jpn_Jpan"] + sp.encode(chunk_text, out_type=str) + ["</s>"]
-                        res = translator.translate_batch([tokens], target_prefix=[["kor_Hang"]], beam_size=cfg["beam"], patience=cfg["patience"], repetition_penalty=cfg["rep_pen"], max_batch_size=1, batch_type="tokens")
+                        res = translator.translate_batch(
+                            [tokens],
+                            target_prefix=[["kor_Hang"]],
+                            beam_size=cfg["beam"],
+                            patience=cfg["patience"],
+                            repetition_penalty=cfg["rep_pen"],
+                            no_repeat_ngram_size=cfg.get("no_repeat", 0),
+                            max_batch_size=1,
+                            batch_type="tokens"
+                        )
                         seg_out = sp.decode(res[0].hypotheses[0])
                         seg_out = re.sub(r'^[a-z]{3}_[A-Z][a-z]{3}\s*', '', seg_out).strip()
                         translated_parts.append(seg_out)
@@ -204,7 +218,7 @@ def main():
                 final_output = fix_korean_josa(final_output)
                 final_output = " ".join(final_output.split()).strip()
 
-                result = {"type": "result", "pid": pid, "translated": final_output, "nickname_info": nickname_info}
+                result = {"type": "result", "pid": pid, "translated": final_output, "nickname": f"{raw_nickname}({romaji})"}
                 if args.debug:
                     result["diagnostics"] = [
                         {"step": "1. Original", "content": original_input},

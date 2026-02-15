@@ -862,7 +862,7 @@ pub fn App() -> impl IntoView {
                             <div class="setting-group">
                                 <h3>"Performance Tier"</h3>
                                 <div class="tier-select">
-                                    {vec!["low", "middle", "high"].into_iter().map(|t| {
+                                    {vec!["low", "middle", "high", "extreme"].into_iter().map(|t| {
                                         let t_val = t.to_string();
                                         let t_val_tier = t.to_string();
                                         view! {
@@ -874,7 +874,7 @@ pub fn App() -> impl IntoView {
                                                         save_config_action.dispatch(()); // Persist choice
                                                     }
                                                 />
-                                                <span>{t.to_uppercase()}</span>
+                                                <span class:tier-extreme=move || t == "extreme">{t.to_uppercase()}</span>
                                             </label>
                                         }
                                     }).collect_view()}
@@ -1470,6 +1470,12 @@ pub fn App() -> impl IntoView {
 
                 .limit-input, .tier-select, .checkbox-row {
                     color: var(--text-main);
+                }
+
+                .tier-extreme {
+                    color: #ff00ff; /* Neon Magenta */
+                    font-weight: 600;
+                    text-shadow: 0 0 8px rgba(255, 0, 255, 0.4);
                 }
 
                 /* --- GITHUB LINK BUTTON --- */

@@ -35,6 +35,11 @@ byteorder = "1.5"  # For reading u16/u32 from packets
 indexmap = { version = "2.0", features = ["serde"] }
 is_elevated = "0.1"
 
+windows = { version = "0.62.2", features = [
+    "Win32_System_LibraryLoader", # [NEW] Required for SetDllDirectoryW
+    "Win32_Foundation",           # Required for PCWSTR
+] }
+
 # Cryptography (Matches BPSR-ZDPS logic)
 aes = "0.8"
 ctr = "0.9"

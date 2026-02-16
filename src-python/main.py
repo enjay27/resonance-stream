@@ -67,6 +67,7 @@ class TranslationManager:
 
     def log_info(self, msg): print(json.dumps({"type": "info", "message": msg}), flush=True)
     def log_error(self, msg): print(json.dumps({"type": "error", "message": msg}), flush=True)
+    def log_debug(self, msg): print(json.dumps({"type": "debug", "message": msg}), flush=True)
 
     def load_dictionary(self):
         self.log_info(f"Attempting to load dict from: {self.dict_path}")
@@ -238,6 +239,7 @@ def main():
                         "nickname": raw_nickname,
                         "romaji": romaji
                     }, ensure_ascii=False), flush=True)
+                    manager.log_debug(f"Added Romaji {raw_nickname}({romaji})")
                     continue
 
                 if pid is None or not input_text: continue
@@ -280,21 +282,22 @@ def main():
                 final_output = " ".join(final_output.split()).strip()
 
                 result = {"type": "result", "pid": pid, "translated": final_output}
+
+                end_t = time.perf_counter()
+                latency_ms = (end_t - start_t) * 1000
+
+                print(json.dumps(result, ensure_ascii=False), flush=True)
+
                 if args.debug:
-                    result["diagnostics"] = [
+                    diagnostics = [
                         {"step": "1. Original", "content": original_input},
                         {"step": "2. Segments", "content": [c[0] for c in chunks_data]},
                         {"step": "3. Breakdown", "content": chunk_details},
                         {"step": "4. Final", "content": final_output}
                     ]
+                    manager.log_debug(f"[Diagnostics] {diagnostics}")
+                    manager.log_debug(f"[Performance] Inference Time: {latency_ms:.2f}ms | Length: {len(input_text)} chars")
 
-                end_t = time.perf_counter()
-                latency_ms = (end_t - start_t) * 1000
-
-                if args.debug:
-                    manager.log_info(f"[Perf] Inference Time: {latency_ms:.2f}ms | Length: {len(input_text)} chars")
-
-                print(json.dumps(result, ensure_ascii=False), flush=True)
                 del chunks_data; gc.collect()
 
             except Exception as e: manager.log_error(f"Inference Error: {e}")

@@ -1,0 +1,59 @@
+[package]
+name = "resonance-stream"
+version = "0.0.1"
+authors = ["Enjay27 <kdkm2002@gmail.com>"]
+description = "Blue Protocol: Star Resonance Real-time Translator"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "resonance_stream_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["unstable"] }
+tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+windivert = { version = "0.6", features = ["vendored"] }
+etherparse = "0.19.0" # To parse the raw bytes into human-readable data
+tokio = { version = "1", features = ["fs", "io-util"] }
+reqwest = { version = "0.11", features = ["stream", "json", "blocking", "rustls-tls"] }
+futures-util = "0.3"
+tauri-plugin-fs = "2.4.5" # For handling the download stream
+# Network & Parsing
+pcap = "2.4"
+byteorder = "1.5"  # For reading u16/u32 from packets
+indexmap = { version = "2.0", features = ["serde"] }
+is_elevated = "0.1"
+
+windows = { version = "0.62.2", features = [
+    "Win32_System_LibraryLoader", # [NEW] Required for SetDllDirectoryW
+    "Win32_Foundation",           # Required for PCWSTR
+] }
+
+# Cryptography (Matches BPSR-ZDPS logic)
+aes = "0.8"
+ctr = "0.9"
+hex = "0.4"
+chrono = "0.4.43"
+local-ip-address = "0.6.10"
+
+[dev-dependencies]
+pnet = "0.35"
+serde_json = "1.0"
+
+[profile.release]
+panic = "abort"      # 패닉 시 스택 추적을 생략하여 용량 감소
+codegen-units = 1    # 컴파일 단위를 하나로 합쳐 최적화 극대화
+lto = true           # Link Time Optimization 활성화
+opt-level = "s"      # 실행 파일 크기 최적화 (z도 가능)
+strip = true         # 바이너리 내 디버그 심볼 강제 제거

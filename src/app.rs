@@ -114,6 +114,8 @@ pub fn App() -> impl IntoView {
     let (is_debug, set_is_debug) = signal(false);
     let (tier, set_tier) = signal("middle".to_string());
 
+    let (restart_required, set_restart_required) = signal(false);
+
     // Apply theme to the root element whenever it changes
     Effect::new(move |_| {
         if let Some(window) = web_sys::window() {
@@ -729,11 +731,11 @@ pub fn App() -> impl IntoView {
                                 <span class="update-dot"></span>
                             </Show>
                         </button>
-                        <button class="icon-btn"
-                            title="Settings & Info"
-                            on:click=move |_| set_show_settings.set(true)
-                        >
+                        <button class="icon-btn" on:click=move |_| set_show_settings.set(true)>
                             "⚙️"
+                            <Show when=move || restart_required.get()>
+                                <span class="restart-badge"></span>
+                            </Show>
                         </button>
                     </div>
                 </nav>
@@ -958,6 +960,25 @@ pub fn App() -> impl IntoView {
                                                     on:change=move |_| {
                                                         set_tier.set(t_val_tier.clone());
                                                         save_config_action.dispatch(()); // Persist choice
+
+                                                        let msg = format!(
+                                                            "성능 티어가 '{}'(으)로 변경되었습니다.\n새로운 설정을 적용하려면 앱을 재시작해야 합니다.\n\n지금 바로 새로고침할까요?",
+                                                            t_val_tier.to_uppercase()
+                                                        );
+
+                                                        if window().confirm_with_message(&msg).unwrap_or(false) {
+                                                            let _ = window().location().reload(); // Immediate refresh
+                                                        } else {
+                                                            // Log a warning in Korean in the System tab
+                                                            spawn_local(async move {
+                                                                let _ = invoke("inject_system_message", serde_wasm_bindgen::to_value(&serde_json::json!({
+                                                                    "level": "warn",
+                                                                    "source": "Settings",
+                                                                    "message": "새 성능 설정은 앱을 재시작한 후에 적용됩니다."
+                                                                })).unwrap()).await;
+                                                            });
+                                                            set_restart_required.set(true); // Show a persistent warning
+                                                        }
                                                     }
                                                 />
                                                 <span class:tier-extreme=move || t == "extreme">{t.to_uppercase()}</span>
@@ -1155,6 +1176,7 @@ pub fn App() -> impl IntoView {
                 }
 
                 .icon-btn {
+                    position: relative;
                     background: transparent;
                     border: none;
                     cursor: pointer;
@@ -1164,6 +1186,19 @@ pub fn App() -> impl IntoView {
                     color: #888;
                     transition: all 0.2s;
                     display: flex; align-items: center; justify-content: center;
+                }
+                .restart-badge {
+                    position: absolute;
+                    top: -2px;      /* Positioned slightly outside the icon */
+                    right: -2px;
+                    width: 10px;
+                    height: 10px;
+                    background: #ffd740; /* Yellow for 'Warning/Restart Pending' */
+                    border: 2px solid var(--bg-panel); /* Creates a clean gap */
+                    border-radius: 50%;
+                    box-shadow: 0 0 5px rgba(255, 215, 64, 0.5);
+                    z-index: 20;    /* Ensure it sits above the icon */
+                    pointer-events: none;
                 }
                 .icon-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
                 .icon-btn.danger:hover { color: #ff4444; background: rgba(255,68,68,0.1); }

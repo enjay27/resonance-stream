@@ -40,6 +40,16 @@ pub struct ChatPacket {
     pub nickname_romaji: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemMessage {
+    pub pid: u64,
+    pub timestamp: u64,
+    pub level: String,  // info, warn, error, success, debug
+    pub source: String, // Backend, Sniffer, Sidecar
+    pub message: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 struct AppConfig {
     compact_mode: bool,
@@ -78,7 +88,8 @@ pub fn App() -> impl IntoView {
     // 1. Game Chat (IndexMap for updates)
     let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatPacket>>::new());
     // 2. System Logs (VecDeque logic in frontend)
-    let (system_log, set_system_log) = signal(Vec::<RwSignal<ChatPacket>>::new());
+    let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
+    let (is_system_at_bottom, set_system_at_bottom) = signal(true);
 
     let (dict_update_available, set_dict_update_available) = signal(false);
 
@@ -163,40 +174,34 @@ pub fn App() -> impl IntoView {
     };
 
     // --- OPTIMIZED VIEW LOGIC ---
-    let filtered_messages = Memo::new(move |_| {
+    let filtered_chat = Memo::new(move |_| {
         let tab = active_tab.get();
         let search = search_term.get().to_lowercase();
         let filters = custom_filters.get();
 
-        let list_by_tab = match tab.as_str() {
-            "시스템" => system_log.get(),
-            "전체" => chat_log.get().values().cloned().collect(),
-            "커스텀" => { // NEW: Custom filtering logic
-                chat_log.get().values()
-                    .filter(|m| filters.contains(&m.get().channel))
-                    .cloned()
-                    .collect::<Vec<_>>()
-            },
+        // If viewing System, return empty here to avoid processing overhead
+        if tab == "시스템" { return Vec::new(); }
+
+        let base_list = match tab.as_str() {
+            "전체" => chat_log.get().values().cloned().collect::<Vec<_>>(),
+            "커스텀" => chat_log.get().values()
+                .filter(|m| filters.contains(&m.get().channel))
+                .cloned().collect(),
             _ => {
                 let key = match tab.as_str() {
                     "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD"
                 };
                 chat_log.get().values()
                     .filter(|m| m.get().channel == key)
-                    .cloned()
-                    .collect::<Vec<_>>()
+                    .cloned().collect()
             }
         };
 
-        // Step B: Filter by Search Term (if exists)
-        if search.is_empty() {
-            list_by_tab
-        } else {
-            list_by_tab.into_iter().filter(|sig| {
-                let msg = sig.get();
-                // Check Nickname OR Message content
-                msg.nickname.to_lowercase().contains(&search) ||
-                    msg.message.to_lowercase().contains(&search)
+        if search.is_empty() { base_list }
+        else {
+            base_list.into_iter().filter(|sig| {
+                let m = sig.get();
+                m.nickname.to_lowercase().contains(&search) || m.message.to_lowercase().contains(&search)
             }).collect()
         }
     });
@@ -212,7 +217,7 @@ pub fn App() -> impl IntoView {
     // 2. EFFECT: Auto-scroll when messages update
     Effect::new(move |_| {
         // We track 'filtered_messages' so this runs ONLY when the visible list changes
-        filtered_messages.track();
+        filtered_chat.track();
 
         // [CRITICAL FIX] Only execute scroll logic if the user is ALREADY at the bottom.
         // If they have scrolled up (is_at_bottom is false), this entire block is ignored.
@@ -223,6 +228,21 @@ pub fn App() -> impl IntoView {
                     if let Some(el) = chat_container_ref.get() {
                         el.set_scroll_top(el.scroll_height());
                     }
+                }
+            });
+        }
+    });
+
+    // Effect: Auto-scroll specifically for System Messages
+    Effect::new(move |_| {
+        // 1. Track the system_log signal
+        system_log.track();
+
+        // 2. Only scroll if the user is in the system tab and already at the bottom
+        if active_tab.get_untracked() == "시스템" && is_system_at_bottom.get_untracked() {
+            request_animation_frame(move || {
+                if let Some(el) = chat_container_ref.get() {
+                    el.set_scroll_top(el.scroll_height());
                 }
             });
         }
@@ -346,7 +366,8 @@ pub fn App() -> impl IntoView {
             // LISTENER 2: System Logs (New!)
             let system_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    if let Ok(packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
+                    // Parse as SystemMessage
+                    if let Ok(packet) = serde_json::from_value::<SystemMessage>(ev["payload"].clone()) {
                         set_system_log.update(|log| {
                             if log.len() >= 200 { log.remove(0); }
                             log.push(RwSignal::new(packet));
@@ -480,7 +501,7 @@ pub fn App() -> impl IntoView {
 
                         // Hydrate SYSTEM History
                         if let Ok(res) = invoke("get_system_history", JsValue::NULL).await {
-                            if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(res) {
+                            if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<SystemMessage>>(res) {
                                 set_system_log.set(vec.into_iter().map(|p| RwSignal::new(p)).collect());
                             }
                         }
@@ -695,11 +716,11 @@ pub fn App() -> impl IntoView {
                         // This prevents "fighting" the scroll bar.
                         let at_bottom = el.scroll_height() - el.scroll_top() - el.client_height() < 10;
 
-                        set_is_at_bottom.set(at_bottom);
-
-                        // If user manually scrolls to bottom, clear the unread count
-                        if at_bottom {
-                            set_unread_count.set(0);
+                        if active_tab.get_untracked() == "시스템" {
+                            set_system_at_bottom.set(at_bottom);
+                        } else {
+                            set_is_at_bottom.set(at_bottom);
+                            if at_bottom { set_unread_count.set(0); }
                         }
                     }
                 >
@@ -735,113 +756,110 @@ pub fn App() -> impl IntoView {
                         </div>
                     </Show>
 
-                    <For each=move || filtered_messages.get()
-                        key=|sig| sig.get_untracked().pid
-                        children=move |sig| {
-                            // This child closure now receives an individual RwSignal
-                            let msg = sig.get();
-                            let is_jp = is_japanese(&msg.message);
-                            let is_system = msg.channel == "SYSTEM";
-                            let pid = msg.pid;
-                            let nick_for_copy = msg.nickname.clone();
-                            let nick_for_filter = msg.nickname.clone();
-                            let is_active = move || active_menu_id.get() == Some(pid);
+                    <Show
+                        when=move || active_tab.get() == "시스템"
+                        fallback=move || view! {
+                            /* --- GAME CHAT LOOP (ChatPacket) --- */
+                            <For
+                                each=move || filtered_chat.get()
+                                key=|sig| sig.get_untracked().pid
+                                children=move |sig| {
+                                    let msg = sig.get();
+                                    let pid = msg.pid;
+                                    let is_jp = is_japanese(&msg.message);
+                                    let is_active = move || active_menu_id.get() == Some(pid);
 
-                            view! {
-                                <div class="chat-row"
-                                     data-channel=move || sig.get().channel.clone()
-                                     // [NEW] Lift the entire row when the menu is active
-                                     style:z-index=move || if is_active() { "10001" } else { "1" }
-                                >
-                                    <div class="msg-header"
-                                         style:position="relative"
-                                         style:z-index=move || if is_active() { "1001" } else { "1" }
-                                    >
-                                        // [CHANGED] Added Click Handler
-                                        <span class=move || if search_term.get() == sig.get().nickname { "nickname active" } else { "nickname" }
-                                            on:click=move |ev| {
-                                                // Stop the click from bubbling up (good practice)
-                                                ev.stop_propagation();
+                                    view! {
+                                        <div class="chat-row" data-channel=move || sig.get().channel.clone()
+                                             style:z-index=move || if is_active() { "10001" } else { "1" }>
 
-                                                if active_menu_id.get() == Some(pid) {
-                                                    set_active_menu_id.set(None);
-                                                } else {
-                                                    set_active_menu_id.set(Some(pid));
-                                                }
-                                            }
-                                        >
-                                            {move || {
-                                                let p = sig.get();
-                                                match p.nickname_romaji {
-                                                    Some(romaji) => format!("{}({})", p.nickname, romaji),
-                                                    None => p.nickname.clone()
-                                                }
-                                            }}
-                                        </span>
-
-                                        <Show when=is_active>
-                                            <div class="context-menu" on:click=move |ev| ev.stop_propagation()>
-                                                // OPTION 1: COPY
-                                                <button class="menu-item" on:click={
-                                                    // Create another clone for this specific closure
-                                                    let n = nick_for_copy.clone();
-                                                    move |_| {
-                                                        copy_text(n.clone());
-                                                        set_active_menu_id.set(None);
+                                            <div class="msg-header">
+                                                // Restore Nickname Click & Active Class
+                                                <span class=move || if search_term.get() == sig.get().nickname { "nickname active" } else { "nickname" }
+                                                    on:click=move |ev| {
+                                                        ev.stop_propagation();
+                                                        if is_active() { set_active_menu_id.set(None); }
+                                                        else { set_active_menu_id.set(Some(pid)); }
                                                     }
-                                                }>
-                                                    <span class="menu-icon">"📋"</span>
-                                                    <span class="menu-text">"Copy Name"</span>
-                                                </button>
-
-                                                // OPTION 2: FILTER
-                                                <button class="menu-item" on:click={
-                                                    let n = nick_for_filter.clone();
-                                                    move |_| {
-                                                        if search_term.get_untracked() == n {
-                                                            set_search_term.set("".into());
-                                                        } else {
-                                                            set_search_term.set(n.clone());
+                                                >
+                                                    {move || {
+                                                        let p = sig.get();
+                                                        match p.nickname_romaji {
+                                                            Some(romaji) => format!("{}({})", p.nickname, romaji),
+                                                            None => p.nickname.clone()
                                                         }
-                                                        set_active_menu_id.set(None);
-                                                    }
-                                                }>
-                                                    <span class="menu-icon">"🔍"</span>
-                                                    <span class="menu-text">"Filter Chat"</span>
-                                                </button>
-                                            </div>
-                                        </Show>
+                                                    }}
+                                                </span>
 
-                                        <span class="lvl">"Lv." {move || sig.get().level}</span>
-                                        <span class="time">{format_time(msg.timestamp)}</span>
-                                    </div>
-                                    <div class="msg-wrapper">
+                                                // Restore Context Menu
+                                                <Show when=is_active>
+                                                    <div class="context-menu" on:click=move |ev| ev.stop_propagation()>
+                                                        <button class="menu-item" on:click=move |_| {
+                                                            copy_text(sig.get_untracked().nickname);
+                                                            set_active_menu_id.set(None);
+                                                        }>
+                                                            <span class="menu-icon">"📋"</span>"Copy Name"
+                                                        </button>
+                                                        <button class="menu-item" on:click=move |_| {
+                                                            let n = sig.get_untracked().nickname;
+                                                            if search_term.get_untracked() == n { set_search_term.set("".into()); }
+                                                            else { set_search_term.set(n); }
+                                                            set_active_menu_id.set(None);
+                                                        }>
+                                                            <span class="menu-icon">"🔍"</span>"Filter Chat"
+                                                        </button>
+                                                    </div>
+                                                </Show>
 
-                                        // The Message Bubble
-                                        <div class="msg-body"
-                                             class:has-translation=move || sig.get().translated.is_some()
-                                        >
-                                            <div class="original">
-                                                {if is_jp && !is_system { "[원문] " } else { "" }} {move || sig.get().message.clone()}
+                                                <span class="lvl">"Lv." {move || sig.get().level}</span>
+                                                <span class="time">{format_time(msg.timestamp)}</span>
                                             </div>
-                                            {move || sig.get().translated.clone().map(|text| view! {
-                                                <div class="translated">"[번역] " {text}</div>
-                                            })}
+
+                                            <div class="msg-wrapper">
+                                                <div class="msg-body" class:has-translation=move || sig.get().translated.is_some()>
+                                                    // Restore [원문] and [번역] Labels
+                                                    <div class="original">
+                                                        {if is_jp { "[원문] " } else { "" }} {move || sig.get().message.clone()}
+                                                    </div>
+                                                    {move || sig.get().translated.clone().map(|text| view! {
+                                                        <div class="translated">"[번역] " {text}</div>
+                                                    })}
+                                                </div>
+                                                <button class="copy-btn" on:click=move |ev| {
+                                                    ev.stop_propagation();
+                                                    copy_text(sig.get().message.clone());
+                                                }> "📋" </button>
+                                            </div>
                                         </div>
+                                    }
+                                }
+                            />
+                        }
+                    >
+                        /* --- SYSTEM LOG LOOP (Zero Filtering) --- */
+                        <For
+                            each=move || system_log.get()
+                            key=|sig| sig.get_untracked().pid
+                            children=move |sig| {
+                                view! {
+                                    <div class="chat-row system-log"
+                                         data-level=move || sig.get().level.clone() //
+                                    >
+                                        <div class="msg-header">
+                                            // Level Badge
+                                            <span class="level-badge">{move || sig.get().level.to_uppercase()}</span>
 
-                                        // The Copy Button (Now OUTSIDE the bubble)
-                                        <button class="copy-btn" title="Copy Original"
-                                            on:click=move |ev| {
-                                                ev.stop_propagation();
-                                                copy_text(sig.get().message.clone());
-                                            }
-                                        >
-                                            "📋"
-                                        </button>
+                                            <span class="source-tag">"[" {move || sig.get().source.to_uppercase()} "]"</span>
+                                            <span class="time">{move || format_time(sig.get().timestamp)}</span>
+                                        </div>
+                                        <div class="msg-body">
+                                            {move || sig.get().message.clone()}
+                                        </div>
                                     </div>
-                                </div>
+                                }
                             }
-                        }/>
+                        />
+                    </Show>
                 </div>
             </Show>
 
@@ -1142,6 +1160,49 @@ pub fn App() -> impl IntoView {
 
                 .chat-row[data-channel='SYSTEM'] { border-left-color: #FFD54F; background: rgba(255,213,79,0.08); }
                 .chat-row[data-channel='SYSTEM'] .nickname { color: #FFD54F; }
+
+                /* --- System Log Core Styles --- */
+                .chat-row.system-log {
+                    border-left: 4px solid transparent;
+                    margin-bottom: 4px;
+                    background: rgba(var(--bg-rgb), 0.3);
+                }
+
+                .level-badge {
+                    font-size: 0.65rem;
+                    font-weight: 900;
+                    padding: 2px 5px;
+                    border-radius: 3px;
+                    margin-right: 6px;
+                    color: #000; /* Dark text on bright badge */
+                }
+
+                /* --- Level Specific Colors --- */
+
+                /* ERROR: High Urgency (Red) */
+                .chat-row[data-level='error'] { border-left-color: #ff5252; }
+                .chat-row[data-level='error'] .level-badge { background: #ff5252; }
+                .chat-row[data-level='error'] .msg-body { color: #ff8a80; }
+
+                /* WARN: Attention Needed (Amber) */
+                .chat-row[data-level='warn'] { border-left-color: #ffd740; }
+                .chat-row[data-level='warn'] .level-badge { background: #ffd740; }
+                .chat-row[data-level='warn'] .msg-body { color: #ffe57f; }
+
+                /* SUCCESS: Positive Feedback (Emerald) */
+                .chat-row[data-level='success'] { border-left-color: #69f0ae; }
+                .chat-row[data-level='success'] .level-badge { background: #69f0ae; }
+                .chat-row[data-level='success'] .msg-body { color: #b9f6ca; }
+
+                /* INFO: Standard Logs (Sky Blue) */
+                .chat-row[data-level='info'] { border-left-color: #40c4ff; }
+                .chat-row[data-level='info'] .level-badge { background: #40c4ff; }
+                .chat-row[data-level='info'] .msg-body { color: #81d4fa; }
+
+                /* DEBUG: Technical Data (Slate Gray) */
+                .chat-row[data-level='debug'] { border-left-color: #757575; opacity: 0.7; }
+                .chat-row[data-level='debug'] .level-badge { background: #757575; color: #fff; }
+                .chat-row[data-level='debug'] .msg-body { color: #9e9e9e; font-family: monospace; }
 
                 /* --- 5. MESSAGE CONTENT --- */
                 .msg-header {

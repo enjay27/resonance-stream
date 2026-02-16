@@ -103,7 +103,7 @@ pub async fn start_translator_sidecar(
                                 inject_system_message(&app_clone, SystemLogLevel::Error, "Sidecar", json["message"].as_str().unwrap_or(""));
                             }
                             Some("result") => {
-                                inject_system_message(&app_clone, SystemLogLevel::Debug, "Sidecar", json["message"].as_str().unwrap_or(""));
+                                inject_system_message(&app_clone, SystemLogLevel::Debug, "Sidecar", json.to_string());
                                 // 1. Try to parse as Nickname Response
                                 if let Ok(nick_resp) = serde_json::from_value::<NicknameResponse>(json.clone()) {
                                     // Update History for persistence

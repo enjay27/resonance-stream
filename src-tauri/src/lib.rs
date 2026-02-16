@@ -79,7 +79,6 @@ pub fn inject_system_message<S: Into<String>>(
     message: S
 ) {
     let msg = message.into();
-    println!("[{}] [{:?}] {}", source, level, msg);
 
     if let Some(state) = app.try_state::<AppState>() {
         let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
@@ -93,13 +92,14 @@ pub fn inject_system_message<S: Into<String>>(
             SystemLogLevel::Debug => "debug",
         };
 
+        println!("[{}] [{}] [{:?}] {}", current_pid, source, level, msg);
+
         let system_message = SystemMessage {
             pid: current_pid,
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             level: level_str.to_string(),
             source: source.to_string(),
             message: msg,
-            translated: None,
         };
 
         // Store in specialized system storage

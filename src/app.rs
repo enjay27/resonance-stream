@@ -91,6 +91,13 @@ pub fn App() -> impl IntoView {
     let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
     let (is_system_at_bottom, set_system_at_bottom) = signal(true);
 
+    // 1. Filter States
+    let (system_level_filter, set_system_level_filter) = signal(None::<String>);
+    let (system_source_filter, set_system_source_filter) = signal(None::<String>);
+
+    // 2. Unread Tracking for System Tab
+    let (system_unread_count, set_system_unread_count) = signal(0);
+
     let (dict_update_available, set_dict_update_available) = signal(false);
 
     let (compact_mode, set_compact_mode) = signal(false);
@@ -204,6 +211,23 @@ pub fn App() -> impl IntoView {
                 m.nickname.to_lowercase().contains(&search) || m.message.to_lowercase().contains(&search)
             }).collect()
         }
+    });
+
+    let filtered_system_logs = Memo::new(move |_| {
+        let logs = system_log.get();
+        let level_f = system_level_filter.get();
+        let source_f = system_source_filter.get(); // This replaces 'source_source'
+        let search = search_term.get().to_lowercase();
+
+        logs.into_iter().filter(|sig| {
+            let m = sig.get();
+
+            let matches_level = level_f.as_ref().map_or(true, |f| &m.level == f);
+            let matches_source = source_f.as_ref().map_or(true, |f| &m.source == f);
+            let matches_search = search.is_empty() || m.message.to_lowercase().contains(&search);
+
+            matches_level && matches_source && matches_search
+        }).collect::<Vec<_>>()
     });
 
     // 1. STATE: Track if the user is currently at the bottom
@@ -740,6 +764,25 @@ pub fn App() -> impl IntoView {
                         </div>
                     </Show>
 
+                    // 1. FILTER CHIPS (Inside chat-container)
+                    <Show when=move || active_tab.get() == "시스템" && (system_level_filter.get().is_some() || system_source_filter.get().is_some())>
+                        <div class="system-filter-toast">
+                            <span class="filter-info">
+                                "필터링: "
+                                {move || system_source_filter.get().map(|s| format!("[{}] ", s.to_uppercase()))}
+                                {move || system_level_filter.get().map(|l| l.to_uppercase())}
+                            </span>
+                            <button class="filter-reset-btn"
+                                    title="Clear Filters"
+                                    on:click=move |_| {
+                                        set_system_level_filter.set(None);
+                                        set_system_source_filter.set(None);
+                                    }>
+                                "✕"
+                            </button>
+                        </div>
+                    </Show>
+
                     // [NEW] Top-Right Notification Badge
                     <Show when=move || { unread_count.get() > 0 }>
                         <div class="new-msg-toast"
@@ -838,27 +881,47 @@ pub fn App() -> impl IntoView {
                     >
                         /* --- SYSTEM LOG LOOP (Zero Filtering) --- */
                         <For
-                            each=move || system_log.get()
+                            each=move || filtered_system_logs.get()
                             key=|sig| sig.get_untracked().pid
                             children=move |sig| {
                                 view! {
-                                    <div class="chat-row system-log"
-                                         data-level=move || sig.get().level.clone() //
-                                    >
+                                    <div class="chat-row system-log" data-level=move || sig.get().level.clone()>
                                         <div class="msg-header">
-                                            // Level Badge
-                                            <span class="level-badge">{move || sig.get().level.to_uppercase()}</span>
+                                            // Click Level to Filter
+                                            <span class="level-badge clickable"
+                                                  on:click=move |_| set_system_level_filter.set(Some(sig.get_untracked().level))
+                                            >
+                                                {move || sig.get().level.to_uppercase()}
+                                            </span>
 
-                                            <span class="source-tag">"[" {move || sig.get().source.to_uppercase()} "]"</span>
+                                            // Click Source to Filter
+                                            <span class="source-tag clickable"
+                                                  on:click=move |_| set_system_source_filter.set(Some(sig.get_untracked().source))
+                                            >
+                                                {move || sig.get().source.to_uppercase()}
+                                            </span>
+
                                             <span class="time">{move || format_time(sig.get().timestamp)}</span>
                                         </div>
-                                        <div class="msg-body">
-                                            {move || sig.get().message.clone()}
-                                        </div>
+                                        <div class="msg-body">{move || sig.get().message.clone()}</div>
                                     </div>
                                 }
                             }
                         />
+                    </Show>
+
+                    // 2. SCROLL LOCK TOAST (Visible ONLY when ON the 시스템 tab and scrolled up)
+                    <Show when=move || active_tab.get() == "시스템" && !is_system_at_bottom.get()>
+                        <div class="scroll-lock-toast-bottom"
+                             on:click=move |_| {
+                                if let Some(el) = chat_container_ref.get() {
+                                    el.set_scroll_top(el.scroll_height());
+                                    set_system_at_bottom.set(true);
+                                }
+                             }
+                        >
+                            "⬆️ Scroll Locked (Click to Resume)"
+                        </div>
                     </Show>
                 </div>
             </Show>
@@ -1161,48 +1224,163 @@ pub fn App() -> impl IntoView {
                 .chat-row[data-channel='SYSTEM'] { border-left-color: #FFD54F; background: rgba(255,213,79,0.08); }
                 .chat-row[data-channel='SYSTEM'] .nickname { color: #FFD54F; }
 
-                /* --- System Log Core Styles --- */
+                .level-badge {
+                    font-size: 0.75rem;      /* Increased from 0.65rem for balance */
+                    font-weight: 900;
+                    padding: 2px 8px;        /* Slightly wider padding */
+                    border-radius: 4px;
+                    margin-right: 10px;
+                    color: #000;
+                    vertical-align: middle;
+                    display: inline-flex;
+                    align-items: center;
+                }
+
+                /* --- 1. SHARED COMPONENT STYLES --- */
+                .clickable {
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                }
+                .clickable:hover {
+                    filter: brightness(1.2);
+                    text-decoration: underline;
+                }
+
+                /* Base System Log Row */
                 .chat-row.system-log {
                     border-left: 4px solid transparent;
                     margin-bottom: 4px;
                     background: rgba(var(--bg-rgb), 0.3);
+                    font-family: 'Consolas', 'Monaco', monospace; /* Technical feel */
+                }
+
+                .chat-row.system-log .msg-header {
+                    display: flex;
+                    align-items: center;     /* Changed from baseline to center for large tags */
+                    gap: 0;                  /* Managed via margins now */
+                    margin-bottom: 6px;
                 }
 
                 .level-badge {
                     font-size: 0.65rem;
                     font-weight: 900;
-                    padding: 2px 5px;
+                    padding: 2px 6px;
                     border-radius: 3px;
-                    margin-right: 6px;
-                    color: #000; /* Dark text on bright badge */
+                    margin-right: 8px;
+                    color: #000;
                 }
 
-                /* --- Level Specific Colors --- */
+                .source-tag {
+                    font-size: 0.95rem;     /* Matched to .nickname */
+                    font-weight: 800;        /* Matched to .nickname */
+                    margin-right: 10px;
+                    text-transform: uppercase;
+                    opacity: 1;              /* Increased for better visibility */
+                    letter-spacing: 0.5px;
+                }
 
-                /* ERROR: High Urgency (Red) */
-                .chat-row[data-level='error'] { border-left-color: #ff5252; }
-                .chat-row[data-level='error'] .level-badge { background: #ff5252; }
-                .chat-row[data-level='error'] .msg-body { color: #ff8a80; }
+                /* --- 2. LEVEL-SPECIFIC COLORING (DARK MODE) --- */
+                /* Consolidating logic into attribute-based rules */
 
-                /* WARN: Attention Needed (Amber) */
-                .chat-row[data-level='warn'] { border-left-color: #ffd740; }
-                .chat-row[data-level='warn'] .level-badge { background: #ffd740; }
-                .chat-row[data-level='warn'] .msg-body { color: #ffe57f; }
+                .chat-row[data-level='error']   { border-left-color: #ff5252; color: #ff8a80; }
+                .chat-row[data-level='warn']    { border-left-color: #ffd740; color: #ffe57f; }
+                .chat-row[data-level='success'] { border-left-color: #69f0ae; color: #b9f6ca; }
+                .chat-row[data-level='info']    { border-left-color: #40c4ff; color: #81d4fa; }
+                .chat-row[data-level='debug']   { border-left-color: #757575; color: #9e9e9e; opacity: 0.7; }
 
-                /* SUCCESS: Positive Feedback (Emerald) */
-                .chat-row[data-level='success'] { border-left-color: #69f0ae; }
+                /* Apply badge backgrounds */
+                .chat-row[data-level='error'] .level-badge   { background: #ff5252; }
+                .chat-row[data-level='warn'] .level-badge    { background: #ffd740; }
                 .chat-row[data-level='success'] .level-badge { background: #69f0ae; }
-                .chat-row[data-level='success'] .msg-body { color: #b9f6ca; }
+                .chat-row[data-level='info'] .level-badge    { background: #40c4ff; }
+                .chat-row[data-level='debug'] .level-badge   { background: #757575; color: #fff; }
 
-                /* INFO: Standard Logs (Sky Blue) */
-                .chat-row[data-level='info'] { border-left-color: #40c4ff; }
-                .chat-row[data-level='info'] .level-badge { background: #40c4ff; }
-                .chat-row[data-level='info'] .msg-body { color: #81d4fa; }
+                /* --- 3. TOASTS & OVERLAYS --- */
 
-                /* DEBUG: Technical Data (Slate Gray) */
-                .chat-row[data-level='debug'] { border-left-color: #757575; opacity: 0.7; }
-                .chat-row[data-level='debug'] .level-badge { background: #757575; color: #fff; }
-                .chat-row[data-level='debug'] .msg-body { color: #9e9e9e; font-family: monospace; }
+                /* TOP CENTER: Filter Toast */
+                .system-filter-toast {
+                    position: sticky;
+                    top: 10px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    z-index: 110;
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    background: #333;
+                    color: #fff;
+                    padding: 6px 16px;
+                    border-radius: 20px;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+                    border: 1px solid #555;
+                    font-size: 0.85rem;
+                    animation: slideDown 0.2s ease-out;
+                }
+
+                /* BOTTOM CENTER: Scroll Lock */
+                .scroll-lock-toast-bottom {
+                    position: sticky;
+                    bottom: 10px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    z-index: 110;
+                    background: var(--system-color); /* Amber/Yellow palette */
+                    color: #000;
+                    padding: 8px 20px;
+                    border-radius: 20px;
+                    font-weight: 800;
+                    font-size: 0.8rem;
+                    cursor: pointer;
+                    box-shadow: 0 -4px 15px rgba(0,0,0,0.3);
+                    animation: slideUp 0.2s ease-out;
+                }
+
+                .filter-reset-btn {
+                    background: rgba(255,255,255,0.1);
+                    border: none;
+                    color: #ff5252;
+                    cursor: pointer;
+                    width: 22px;
+                    height: 22px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: bold;
+                }
+
+                /* --- 4. LIGHT MODE OVERRIDES --- */
+                [data-theme='light'] .chat-row.system-log {
+                    background: rgba(0, 0, 0, 0.03);
+                    border-bottom: 1px solid var(--border);
+                }
+
+                [data-theme='light'] .source-tag {
+                    color: var(--text-main); /* High contrast black */
+                }
+
+                [data-theme='light'] .chat-row[data-level='error']   { border-left-color: #c62828; color: #b71c1c; }
+                [data-theme='light'] .chat-row[data-level='warn']    { border-left-color: #f57f17; color: #e65100; }
+                [data-theme='light'] .chat-row[data-level='success'] { border-left-color: #2e7d32; color: #1b5e20; }
+                [data-theme='light'] .chat-row[data-level='info']    { border-left-color: #0288d1; color: #01579b; }
+                [data-theme='light'] .chat-row[data-level='debug']   { border-left-color: #616161; color: #424242; }
+
+                [data-theme='light'] .level-badge { color: #fff; }
+
+                [data-theme='light'] .system-filter-toast {
+                    background: #fff;
+                    color: #111;
+                    border-color: #dee2e6;
+                }
+
+                [data-theme='light'] .scroll-lock-toast-bottom {
+                    background: #fff9c4;
+                    border: 1px solid #fbc02d;
+                }
+
+                /* --- 5. ANIMATIONS --- */
+                @keyframes slideDown { from { opacity: 0; transform: translate(-50%, -10px); } }
+                @keyframes slideUp   { from { opacity: 0; transform: translate(-50%, 10px); } }
 
                 /* --- 5. MESSAGE CONTENT --- */
                 .msg-header {

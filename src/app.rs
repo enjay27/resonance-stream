@@ -59,6 +59,7 @@ struct AppConfig {
     custom_tab_filters: Vec<String>,
     theme: String,
     overlay_opacity: f32,
+    show_system_tab: bool,
     is_debug: bool,
     tier: String,
 }
@@ -90,6 +91,7 @@ pub fn App() -> impl IntoView {
     // 2. System Logs (VecDeque logic in frontend)
     let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
     let (is_system_at_bottom, set_system_at_bottom) = signal(true);
+    let (show_system_tab, set_show_system_tab) = signal(false);
 
     // 1. Filter States
     let (system_level_filter, set_system_level_filter) = signal(None::<String>);
@@ -216,11 +218,14 @@ pub fn App() -> impl IntoView {
     let filtered_system_logs = Memo::new(move |_| {
         let logs = system_log.get();
         let level_f = system_level_filter.get();
-        let source_f = system_source_filter.get(); // This replaces 'source_source'
+        let source_f = system_source_filter.get();
         let search = search_term.get().to_lowercase();
+        let debug_enabled = is_debug.get();
 
         logs.into_iter().filter(|sig| {
             let m = sig.get();
+
+            if !debug_enabled && m.level == "debug" { return false; }
 
             let matches_level = level_f.as_ref().map_or(true, |f| &m.level == f);
             let matches_source = source_f.as_ref().map_or(true, |f| &m.source == f);
@@ -459,6 +464,7 @@ pub fn App() -> impl IntoView {
             custom_tab_filters: custom_filters.get_untracked(),
             theme: theme.get_untracked(),
             overlay_opacity: opacity.get_untracked(),
+            show_system_tab: show_system_tab.get_untracked(),
             is_debug: is_debug.get_untracked(),
             tier: tier.get_untracked(),
         };
@@ -628,7 +634,7 @@ pub fn App() -> impl IntoView {
                                 ];
 
                                 // Conditionally add the System tab based on the signal
-                                if is_debug.get() {
+                                if show_system_tab.get() {
                                     base_tabs.push(("시스템", "⚙️"));
                                 }
 
@@ -1022,15 +1028,27 @@ pub fn App() -> impl IntoView {
                                         class="limit-input"
                                     />
                                 </div>
-                                <h3>"Tab Settings"</h3>
-                                <div class="setting-row">
-                                    <span>"Debug Mode"</span>
+                                <h3>"Tab Visibility"</h3>
+                                <div class="toggle-row">
+                                    <span class="toggle-label">"Show System Tab"</span>
+                                    <input type="checkbox"
+                                        prop:checked=move || show_system_tab.get()
+                                        on:change=move |ev| {
+                                            let checked = event_target_checked(&ev);
+                                            set_show_system_tab.set(checked);
+                                            save_config_action.dispatch(());
+                                        }
+                                    />
+                                </div>
+                                <h3>"Log Detail"</h3>
+                                <div class="toggle-row">
+                                    <span class="toggle-label">"Enable Debug Logs (Technical)"</span>
                                     <input type="checkbox"
                                         prop:checked=move || is_debug.get()
                                         on:change=move |ev| {
                                             let checked = event_target_checked(&ev);
                                             set_is_debug.set(checked);
-                                            save_config_action.dispatch(()); // Persist change
+                                            save_config_action.dispatch(());
                                         }
                                     />
                                 </div>

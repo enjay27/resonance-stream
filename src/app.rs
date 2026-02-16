@@ -317,6 +317,9 @@ pub fn App() -> impl IntoView {
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
                     if let Ok(mut packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
 
+                        // [FIX] Ignore messages belonging to the SYSTEM channel in game tabs
+                        if packet.channel == "SYSTEM" { return; }
+
                         // [NEW] Sticker Transformation Logic
                         // Detects "emojiPic=" pattern and replaces it with "스티커 전송"
                         if packet.message.starts_with("emojiPic=") {
@@ -772,14 +775,10 @@ pub fn App() -> impl IntoView {
                                 {move || system_source_filter.get().map(|s| format!("[{}] ", s.to_uppercase()))}
                                 {move || system_level_filter.get().map(|l| l.to_uppercase())}
                             </span>
-                            <button class="filter-reset-btn"
-                                    title="Clear Filters"
-                                    on:click=move |_| {
-                                        set_system_level_filter.set(None);
-                                        set_system_source_filter.set(None);
-                                    }>
-                                "✕"
-                            </button>
+                            <button class="filter-reset-btn" on:click=move |_| {
+                                set_system_level_filter.set(None);
+                                set_system_source_filter.set(None);
+                            }> "✕" </button>
                         </div>
                     </Show>
 
@@ -1256,26 +1255,23 @@ pub fn App() -> impl IntoView {
 
                 .chat-row.system-log .msg-header {
                     display: flex;
-                    align-items: center;     /* Changed from baseline to center for large tags */
-                    gap: 0;                  /* Managed via margins now */
+                    align-items: center;
                     margin-bottom: 6px;
                 }
 
                 .level-badge {
-                    font-size: 0.65rem;
+                    font-size: 0.75rem;       /* Scaled for visual balance with larger source */
                     font-weight: 900;
-                    padding: 2px 6px;
-                    border-radius: 3px;
-                    margin-right: 8px;
-                    color: #000;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    margin-right: 10px;
                 }
 
                 .source-tag {
-                    font-size: 0.95rem;     /* Matched to .nickname */
-                    font-weight: 800;        /* Matched to .nickname */
-                    margin-right: 10px;
+                    font-size: 0.95rem;      /* Matched to player nicknames */
+                    font-weight: 800;        /* Matched to player nicknames */
+                    margin-right: 12px;
                     text-transform: uppercase;
-                    opacity: 1;              /* Increased for better visibility */
                     letter-spacing: 0.5px;
                 }
 
@@ -1296,43 +1292,39 @@ pub fn App() -> impl IntoView {
                 .chat-row[data-level='debug'] .level-badge   { background: #757575; color: #fff; }
 
                 /* --- 3. TOASTS & OVERLAYS --- */
-
-                /* TOP CENTER: Filter Toast */
-                .system-filter-toast {
+                .system-filter-toast,
+                .scroll-lock-toast-bottom {
                     position: sticky;
-                    top: 10px;
-                    left: 50%;
-                    transform: translateX(-50%);
+                    left: 0;
+                    right: 0;
+                    margin: 0 auto; /* [FIX] Force stable centering regardless of parent width */
+                    width: max-content;
                     z-index: 110;
                     display: flex;
                     align-items: center;
                     gap: 12px;
+                    border-radius: 20px;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+                    animation: fadeIn 0.2s ease-out;
+                }
+
+                .system-filter-toast {
+                    top: 10px;
                     background: #333;
                     color: #fff;
                     padding: 6px 16px;
-                    border-radius: 20px;
-                    box-shadow: 0 4px 15px rgba(0,0,0,0.4);
                     border: 1px solid #555;
                     font-size: 0.85rem;
-                    animation: slideDown 0.2s ease-out;
                 }
 
-                /* BOTTOM CENTER: Scroll Lock */
                 .scroll-lock-toast-bottom {
-                    position: sticky;
                     bottom: 10px;
-                    left: 50%;
-                    transform: translateX(-50%);
-                    z-index: 110;
-                    background: var(--system-color); /* Amber/Yellow palette */
+                    background: var(--system-color);
                     color: #000;
                     padding: 8px 20px;
-                    border-radius: 20px;
                     font-weight: 800;
-                    font-size: 0.8rem;
+                    font-size: 0.85rem;
                     cursor: pointer;
-                    box-shadow: 0 -4px 15px rgba(0,0,0,0.3);
-                    animation: slideUp 0.2s ease-out;
                 }
 
                 .filter-reset-btn {
@@ -1351,12 +1343,12 @@ pub fn App() -> impl IntoView {
 
                 /* --- 4. LIGHT MODE OVERRIDES --- */
                 [data-theme='light'] .chat-row.system-log {
-                    background: rgba(0, 0, 0, 0.03);
-                    border-bottom: 1px solid var(--border);
+                    background: rgba(0, 0, 0, 0.02);
+                    border-bottom: 1px solid #eee;
                 }
 
                 [data-theme='light'] .source-tag {
-                    color: var(--text-main); /* High contrast black */
+                    color: #111111;
                 }
 
                 [data-theme='light'] .chat-row[data-level='error']   { border-left-color: #c62828; color: #b71c1c; }
@@ -1368,14 +1360,16 @@ pub fn App() -> impl IntoView {
                 [data-theme='light'] .level-badge { color: #fff; }
 
                 [data-theme='light'] .system-filter-toast {
-                    background: #fff;
-                    color: #111;
-                    border-color: #dee2e6;
+                    background: #ffffff;
+                    color: #111111;
+                    border: 1px solid #dee2e6;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
                 }
 
                 [data-theme='light'] .scroll-lock-toast-bottom {
                     background: #fff9c4;
                     border: 1px solid #fbc02d;
+                    color: #333;
                 }
 
                 /* --- 5. ANIMATIONS --- */

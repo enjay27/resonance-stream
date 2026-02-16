@@ -38,10 +38,6 @@ pub struct SystemMessage {
     pub level: String,        // "info", "warn", "error", "success"
     pub source: String,       // "Backend", "Sniffer", "Translator"
     pub message: String,      // The actual log text
-
-    // Keep translated only if you plan to support localized system errors
-    #[serde(default)]
-    pub translated: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -50,7 +46,7 @@ pub enum SystemLogLevel {
     Warning, // Sniffer not active, GPU memory low
     Error,   // Driver init failed, Sidecar crashed
     Success, // Dictionary updated, Model ready
-    Debug,
+    Debug,   // high-frequency, technical events
 }
 
 pub struct AppState {

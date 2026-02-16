@@ -46,24 +46,23 @@ fn load_manifest(app: &tauri::AppHandle) -> Result<ModelManifest, String> {
     {
         use tauri::path::BaseDirectory;
 
-        // Change: Ensure we are using BaseDirectory::Resource
-        // and checking if the file actually exists there.
+        // Fix: Match the structure in tauri.conf.json ("resources/models.json")
         let resource_path = app.path()
-            .resolve("models.json", BaseDirectory::Resource)
+            .resolve("resources/models.json", BaseDirectory::Resource)
             .map_err(|e| format!("Resource resolution failed: {}", e))?;
 
         if !resource_path.exists() {
-            // Fallback: Check the same directory as the EXE
+            // Fallback: Check the same directory as the EXE (useful for local builds)
             let exe_path = std::env::current_exe().unwrap().parent().unwrap().join("models.json");
             if exe_path.exists() {
                 let json_data = std::fs::read_to_string(&exe_path).map_err(|e| e.to_string())?;
                 return serde_json::from_str(&json_data).map_err(|e| e.to_string());
             }
-            return Err(format!("models.json not found in Resources or EXE folder. Checked: {:?}", resource_path));
+            return Err(format!("models.json not found. Checked: {:?}", resource_path));
         }
 
         let json_data = std::fs::read_to_string(&resource_path)
-            .map_err(|e| format!("Failed to read models.json at {:?}: {}", resource_path, e))?;
+            .map_err(|e| format!("Failed to read models.json: {}", e))?;
 
         serde_json::from_str(&json_data).map_err(|e| format!("Prod JSON parse error: {}", e))
     }

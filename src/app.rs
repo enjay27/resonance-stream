@@ -671,31 +671,32 @@ pub fn App() -> impl IntoView {
                         {move || match wizard_step.get() {
                             0 => view! {
                                 <div class="wizard-step">
-                                    <h1>"Welcome to Resonance Stream"</h1>
-                                    <p>"Analyze and translate Blue Protocol game chat in real-time."</p>
-                                    <button class="primary-btn" on:click=move |_| set_wizard_step.set(1)>"Get Started"</button>
+                                    <h1>"Resonance Stream"</h1>
+                                    <p>"블루 프로토콜의 게임 채팅을 실시간으로 분석하고 번역합니다."</p>
+                                    <button class="primary-btn" on:click=move |_| set_wizard_step.set(1)>"시작하기"</button>
                                 </div>
                             }.into_any(),
                             1 => view! {
                                 <div class="wizard-step">
-                                    <h2>"Quick Setup"</h2>
+                                    <h2>"빠른 설정"</h2>
                                     <div class="setting-item">
                                         <label class="checkbox-row">
                                             <input type="checkbox" checked=move || use_translation.get() on:change=move |ev| set_use_translation.set(event_target_checked(&ev)) />
-                                            <span>"Enable Real-time Translation"</span>
+                                            <span>"실시간 번역 기능 활성화."</span>
+                                            <p>"설정에서 바꿀 수 있습니다."</p>
                                         </label>
                                     </div>
                                     <Show when=move || use_translation.get()>
                                         <div class="setting-item">
-                                            <h3>"Compute Mode"</h3>
+                                            <h3>"연산 장치 (Compute Mode)"</h3>
                                             <div class="radio-group">
                                                 <label class="radio-row">
                                                     <input type="radio" name="mode" value="cpu" checked=move || compute_mode.get() == "cpu" on:change=move |_| set_compute_mode.set("cpu".into()) />
-                                                    <span>"CPU (Most Compatible)"</span>
+                                                    <span>"CPU (가장 높은 호환성)"</span>
                                                 </label>
                                                 <label class="radio-row">
                                                     <input type="radio" name="mode" value="cuda" checked=move || compute_mode.get() == "cuda" on:change=move |_| set_compute_mode.set("cuda".into()) />
-                                                    <span>"GPU (High Performance, Requires CUDA)"</span>
+                                                    <span>"GPU (고성능, NVIDIA CUDA 필요)"</span>
                                                 </label>
                                             </div>
                                         </div>
@@ -706,8 +707,8 @@ pub fn App() -> impl IntoView {
                             2 => view! {
                                 <div class="wizard-step">
                                     <h2>"Model Installation"</h2>
-                                    <p>"A 1.3GB translation model is required for high-quality results."</p>
-                                    <Show when=move || downloading.get() fallback=move || view! { <button class="primary-btn" on:click=start_download>"Start Download"</button> }>
+                                    <p>"번역을 위해 약 1.3GB의 AI 모델 파일 다운로드가 필요합니다."</p>
+                                    <Show when=move || downloading.get() fallback=move || view! { <button class="primary-btn" on:click=start_download>"다운로드 시작"</button> }>
                                         <div class="progress-bar"><div class="fill" style:width=move || format!("{}%", progress.get())></div></div>
                                         <div class="progress-label">{move || format!("{}%", progress.get())}</div>
                                     </Show>

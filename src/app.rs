@@ -1144,7 +1144,7 @@ pub fn App() -> impl IntoView {
                                             }
                                         }).collect_view()}
                                     </div>
-                                    <p class="hint">"번역 성능이 좋아지지만 연산 시간이 오래걸리고 자원을 더 많이 소모합니다"</p>
+                                    <p class="hint">"번역 성능이 좋아지지만 번역 시간이 오래걸리고 자원을 더 많이 소모합니다. 번역에 걸리는 시간을 보고 조정해주세요."</p>
                                 </Show>
                                 <h3>"Overlay Settings"</h3>
                                 <div class="setting-row">

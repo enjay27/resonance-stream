@@ -184,11 +184,16 @@ def main():
     manager.log_info(f"Python Version: {sys.version}")
     manager.log_info(f"Current Working Dir: {os.getcwd()}")
 
-    try:
-        cuda_count = ctranslate2.get_cuda_device_count()
-        manager.log_info(f"GPU Device: {cuda_count} found.")
-    except Exception:
-        pass
+    # Check for CUDA availability if requested
+    if args.device == "cuda":
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() == 0:
+                manager.log_error("CUDA requested but no GPU found. Falling back to CPU.")
+                args.device = "cpu"
+        except Exception as e:
+            manager.log_error(f"CUDA Library Error: {e}. Falling back to CPU.")
+            args.device = "cpu"
 
     tier_cfg = {
         "low": {"device": "cpu", "compute_type": "int8", "beam": 1, "patience": 1.0, "rep_pen": 1.0},

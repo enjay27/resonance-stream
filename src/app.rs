@@ -52,6 +52,9 @@ pub struct SystemMessage {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 struct AppConfig {
+    init_done: bool,
+    use_translation: bool,
+    compute_mode: String,
     compact_mode: bool,
     always_on_top: bool,
     active_tab: String,
@@ -75,6 +78,13 @@ struct ProgressPayload { current: f64, total: f64, percent: u8 }
 
 #[component]
 pub fn App() -> impl IntoView {
+    // --- STATE SIGNALS ---
+    let (init_done, set_init_done) = signal(false); // Hydrated from config
+    let (use_translation, set_use_translation) = signal(false);
+    let (compute_mode, set_compute_mode) = signal("cpu".to_string());
+    let (wizard_step, set_wizard_step) = signal(0); // 0: Welcome, 1: Options, 2: Download
+
+    let (is_translator_active, set_is_translator_active) = signal(false);
     let (status_text, set_status_text) = signal("Initializing...".to_string());
     let (model_ready, set_model_ready) = signal(false);
     let (downloading, set_downloading) = signal(false);
@@ -82,39 +92,107 @@ pub fn App() -> impl IntoView {
 
     let (active_tab, set_active_tab) = signal("전체".to_string());
     let (search_term, set_search_term) = signal("".to_string());
-
     let (name_cache, set_name_cache) = signal(std::collections::HashMap::<String, String>::new());
-
-    // --- SEPARATE DATA STREAMS ---
-    // 1. Game Chat (IndexMap for updates)
     let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatPacket>>::new());
-    // 2. System Logs (VecDeque logic in frontend)
     let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
+
     let (is_system_at_bottom, set_system_at_bottom) = signal(true);
     let (show_system_tab, set_show_system_tab) = signal(false);
-
-    // 1. Filter States
     let (system_level_filter, set_system_level_filter) = signal(None::<String>);
     let (system_source_filter, set_system_source_filter) = signal(None::<String>);
 
-    // 2. Unread Tracking for System Tab
-    let (system_unread_count, set_system_unread_count) = signal(0);
-
-    let (dict_update_available, set_dict_update_available) = signal(false);
-
     let (compact_mode, set_compact_mode) = signal(false);
     let (is_pinned, set_is_pinned) = signal(false);
-
     let (show_settings, set_show_settings) = signal(false);
     let (chat_limit, set_chat_limit) = signal(1000);
     let (custom_filters, set_custom_filters) = signal(vec!["WORLD".to_string(), "GUILD".to_string(), "PARTY".to_string(), "LOCAL".to_string()]);
-
     let (theme, set_theme) = signal("dark".to_string());
     let (opacity, set_opacity) = signal(0.85f32);
     let (is_debug, set_is_debug) = signal(false);
     let (tier, set_tier) = signal("middle".to_string());
-
     let (restart_required, set_restart_required) = signal(false);
+    let (dict_update_available, set_dict_update_available) = signal(false);
+    let (is_at_bottom, set_is_at_bottom) = signal(true);
+    let (unread_count, set_unread_count) = signal(0);
+    let (active_menu_id, set_active_menu_id) = signal(None::<u64>);
+
+    // --- HELPERS ---
+    let add_system_log = move |level: &str, source: &str, message: &str| {
+        let msg_json = serde_json::json!({
+        "level": level,
+        "source": source,
+        "message": message
+    });
+
+        spawn_local(async move {
+            // This triggers the backend which emits 'system-event'
+            // that your existing listener already handles
+            let _ = invoke("inject_system_message", serde_wasm_bindgen::to_value(&msg_json).unwrap()).await;
+        });
+    };
+
+    let format_time = |ts: u64| {
+        let date = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
+        format!("{:02}:{:02}", date.get_hours(), date.get_minutes())
+    };
+
+    let is_japanese = |text: &str| {
+        let re = js_sys::RegExp::new("[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FAF]", "");
+        re.test(text)
+    };
+
+    // --- WATCHDOG: SIDE CAR MONITOR ---
+    spawn_local(async move {
+        loop {
+            if let Ok(res) = invoke("is_translator_running", JsValue::NULL).await {
+                if let Some(running) = res.as_bool() {
+                    set_is_translator_active.set(running);
+
+                    if !running && use_translation.get_untracked() && init_done.get_untracked() {
+                        add_system_log("Warning", "[WatchDog]", "Translator not running. Run Translator Sidecar.");
+                        let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                    }
+                }
+            }
+            // Poll every 3 seconds
+            gloo_timers::future::TimeoutFuture::new(5000).await;
+        }
+    });
+
+    // Copy Action
+    let copy_text = move |text: String| {
+        spawn_local(async move {
+            if let Some(window) = web_sys::window() {
+                let navigator = window.navigator();
+                // This requires "Clipboard" feature in web-sys (usually enabled by default in Tauri templates)
+                let _ = navigator.clipboard().write_text(&text);
+            }
+        });
+    };
+
+    // --- CONFIG ACTIONS ---
+    let save_config_action = Action::new_local(move |_: &()| {
+        let config = AppConfig {
+            init_done: init_done.get_untracked(),
+            use_translation: use_translation.get_untracked(),
+            compute_mode: compute_mode.get_untracked(),
+            compact_mode: compact_mode.get_untracked(),
+            always_on_top: is_pinned.get_untracked(),
+            active_tab: active_tab.get_untracked(),
+            chat_limit: chat_limit.get_untracked(),
+            custom_tab_filters: custom_filters.get_untracked(),
+            theme: theme.get_untracked(),
+            overlay_opacity: opacity.get_untracked(),
+            show_system_tab: show_system_tab.get_untracked(),
+            is_debug: is_debug.get_untracked(),
+            tier: tier.get_untracked(),
+        };
+
+        async move {
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "config": config })).unwrap();
+            let _ = invoke("save_config", args).await;
+        }
+    });
 
     // Apply theme to the root element whenever it changes
     Effect::new(move |_| {
@@ -161,28 +239,6 @@ pub fn App() -> impl IntoView {
 
     let (is_user_scrolling, set_user_scrolling) = signal(false);
     let chat_container_ref = create_node_ref::<html::Div>();
-
-    // --- HELPERS ---
-    let format_time = |ts: u64| {
-        let date = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
-        format!("{:02}:{:02}", date.get_hours(), date.get_minutes())
-    };
-
-    let is_japanese = |text: &str| {
-        let re = js_sys::RegExp::new("[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FAF]", "");
-        re.test(text)
-    };
-
-    // Copy Action
-    let copy_text = move |text: String| {
-        spawn_local(async move {
-            if let Some(window) = web_sys::window() {
-                let navigator = window.navigator();
-                // This requires "Clipboard" feature in web-sys (usually enabled by default in Tauri templates)
-                let _ = navigator.clipboard().write_text(&text);
-            }
-        });
-    };
 
     // --- OPTIMIZED VIEW LOGIC ---
     let filtered_chat = Memo::new(move |_| {
@@ -238,10 +294,6 @@ pub fn App() -> impl IntoView {
     });
 
     // 1. STATE: Track if the user is currently at the bottom
-    let (is_at_bottom, set_is_at_bottom) = signal(true);
-    let (unread_count, set_unread_count) = signal(0); // [NEW] Tracks missed messages
-
-    let (active_menu_id, set_active_menu_id) = signal(None::<u64>); // [NEW] Track open menu
 
     let chat_container_ref = create_node_ref::<html::Div>();
 
@@ -422,6 +474,30 @@ pub fn App() -> impl IntoView {
         });
     };
 
+    let finalize_setup = move |_| {
+        set_init_done.set(true);
+        add_system_log("success", "Setup", "Initial configuration completed.");
+        save_config_action.dispatch(());
+
+        spawn_local(async move {
+            add_system_log("info", "Sniffer", "Initializing packet capture...");
+            setup_listeners();
+            let _ = invoke("start_sniffer_command", JsValue::NULL).await;
+
+            if use_translation.get_untracked() {
+                add_system_log("info", "UI", "Starting AI translation engine...");
+                // Check model one last time before launching AI
+                if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
+                    if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
+                        if status.exists {
+                            let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
     let start_download = move |ev: web_sys::MouseEvent| {
         // Prevent the default button behavior if necessary
         ev.prevent_default();
@@ -441,113 +517,102 @@ pub fn App() -> impl IntoView {
                     set_downloading.set(false);
                     set_model_ready.set(true);
                     set_status_text.set("Ready".to_string());
-
-                    // [NEW] Automatic Startup Chain
-                    setup_listeners(); // Initialize packet/system listeners
-                    let _ = invoke("start_sniffer_command", JsValue::NULL).await;
-                    let _ = invoke("start_translator_sidecar", serde_wasm_bindgen::to_value(&serde_json::json!({"useGpu":true})).unwrap()).await;
+                    finalize_setup(());
                 }
                 Err(e) => {
                     set_downloading.set(false);
                     set_status_text.set(format!("Error: {:?}", e));
+                    add_system_log("error", "ModelManager", &format!("Download failed: {:?}", e));
                 }
             }
         });
     };
 
-    // This gathers the current state of all signals and sends them to Rust.
-    let save_config_action = Action::new_local(move |_: &()| {
-        // Use get_untracked() to read values without creating subscriptions
-        let config = AppConfig {
-            compact_mode: compact_mode.get_untracked(),
-            always_on_top: is_pinned.get_untracked(),
-            active_tab: active_tab.get_untracked(),
-            chat_limit: chat_limit.get_untracked(),
-            custom_tab_filters: custom_filters.get_untracked(),
-            theme: theme.get_untracked(),
-            overlay_opacity: opacity.get_untracked(),
-            show_system_tab: show_system_tab.get_untracked(),
-            is_debug: is_debug.get_untracked(),
-            tier: tier.get_untracked(),
-        };
-
-        async move {
-            // Send to Backend
-            let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                "config": config
-            })).unwrap();
-            let _ = invoke("save_config", args).await;
-        }
-    });
-
     // --- STARTUP HYDRATION ---
     Effect::new(move |_| {
         spawn_local(async move {
-
+            log!("App component hydration started...");
             // Load User Config
-            if let Ok(res) = invoke("load_config", JsValue::NULL).await {
-                if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(res) {
-                    set_compact_mode.set(config.compact_mode);
-                    set_active_tab.set(config.active_tab);
-                    set_is_pinned.set(config.always_on_top);
-                    set_chat_limit.set(config.chat_limit);
-                    set_custom_filters.set(config.custom_tab_filters);
-                    set_theme.set(config.theme);
-                    set_opacity.set(config.overlay_opacity);
-                    set_show_system_tab.set(config.show_system_tab);
-                    set_is_debug.set(config.is_debug);
-                    set_tier.set(config.tier);
+            match invoke("load_config", JsValue::NULL).await {
+                Ok(res) => {
+                    if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(res) {
+                        log!("Loaded Config: {:?}", config);
+                        set_init_done.set(config.init_done);
+                        set_use_translation.set(config.use_translation);
+                        set_compute_mode.set(config.compute_mode);
+                        set_compact_mode.set(config.compact_mode);
+                        set_active_tab.set(config.active_tab);
+                        set_is_pinned.set(config.always_on_top);
+                        set_chat_limit.set(config.chat_limit);
+                        set_custom_filters.set(config.custom_tab_filters);
+                        set_theme.set(config.theme);
+                        set_opacity.set(config.overlay_opacity);
+                        set_show_system_tab.set(config.show_system_tab);
+                        set_is_debug.set(config.is_debug);
+                        set_tier.set(config.tier);
 
-                    // Apply Window State (Backend)
-                    if config.always_on_top {
-                        let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                            "onTop": true
-                        })).unwrap();
-                        let _ = invoke("set_always_on_top", args).await;
-                    }
-                }
-            }
+                        // 2. If the user hasn't finished the wizard, stop here
+                        if config.init_done {
+                            log!("Existing user detected. Auto-starting services.");
+                            add_system_log("info", "Sniffer", "Auto-starting services...");
+                            setup_listeners();
 
-            if let Ok(res) = invoke("check_dict_update", JsValue::NULL).await {
-                if let Some(needed) = res.as_bool() {
-                    set_dict_update_available.set(needed);
-                }
-            }
+                            // Hydrate GAME History
+                            if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
+                                if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(res) {
+                                    let sanitized_vec: Vec<(u64, RwSignal<ChatPacket>)> = vec.into_iter().map(|mut p| {
+                                        if p.message.starts_with("emojiPic=") { p.message = "스티커 전송".to_string(); } else if p.message.contains("<sprite=") { p.message = "이모지 전송".to_string(); }
+                                        (p.pid, RwSignal::new(p))
+                                    }).collect();
+                                    set_chat_log.set(sanitized_vec.into_iter().collect());
+                                }
+                            }
 
-            if let Ok(res) = invoke("check_model_status", JsValue::NULL).await {
-                if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(res) {
-                    if status.exists {
-                        setup_listeners();
+                            // Hydrate SYSTEM History
+                            if let Ok(res) = invoke("get_system_history", JsValue::NULL).await {
+                                if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<SystemMessage>>(res) {
+                                    set_system_log.set(vec.into_iter().map(|p| RwSignal::new(p)).collect());
+                                }
+                            }
 
-                        // Hydrate GAME History
-                        if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
-                            if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(res) {
-                                let sanitized_vec: Vec<(u64, RwSignal<ChatPacket>)> = vec.into_iter().map(|mut p| {
-                                    if p.message.starts_with("emojiPic=") {
-                                        p.message = "스티커 전송".to_string();
-                                    } else if p.message.contains("<sprite=") {
-                                        p.message = "이모지 전송".to_string();
+                            let _ = invoke("start_sniffer_command", JsValue::NULL).await;
+
+                            if config.use_translation {
+                                if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
+                                    if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
+                                        if status.exists {
+                                            add_system_log("info", "UI", "Starting AI translation engine...");
+                                            let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                                            set_model_ready.set(true);
+                                        } else {
+                                            add_system_log("warn", "Sidecar", "Model missing. AI is disabled.");
+                                            set_model_ready.set(false);
+                                        }
                                     }
-                                    (p.pid, RwSignal::new(p))
-                                }).collect();
+                                }
 
-                                set_chat_log.set(sanitized_vec.into_iter().collect());
+                                if let Ok(res) = invoke("check_dict_update", JsValue::NULL).await {
+                                    if let Some(needed) = res.as_bool() {
+                                        set_dict_update_available.set(needed);
+                                    }
+                                }
                             }
-                        }
 
-                        // Hydrate SYSTEM History
-                        if let Ok(res) = invoke("get_system_history", JsValue::NULL).await {
-                            if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<SystemMessage>>(res) {
-                                set_system_log.set(vec.into_iter().map(|p| RwSignal::new(p)).collect());
+                            if config.always_on_top {
+                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                "onTop": true
+                            })).unwrap();
+                                let _ = invoke("set_always_on_top", args).await;
                             }
-                        }
 
-                        let _ = invoke("start_sniffer_command", JsValue::NULL).await;
-                        let _ = invoke("start_translator_sidecar", serde_wasm_bindgen::to_value(&serde_json::json!({"useGpu":true})).unwrap()).await;
-                        set_model_ready.set(true);
-                        set_status_text.set("Ready".to_string());
+                            set_status_text.set("Ready".to_string());
+                        } else {
+                            log!("New user detected. Showing Wizard.");
+                            add_system_log("info", "Setup", "Awaiting initial configuration.");
+                        }
                     }
-                }
+                },
+                Err(e) => log!("FATAL: Failed to load config: {:?}", e),
             }
         });
     });
@@ -577,7 +642,7 @@ pub fn App() -> impl IntoView {
             <div class="custom-title-bar" data-tauri-drag-region>
                 <div class="drag-handle" data-tauri-drag-region></div>
                 <div class="window-title" style="pointer-events: none;">
-                    "BPSR Translator"
+                    "Resonance Stream"
                 </div>
                 <div class="window-controls">
                     <button class="win-btn" on:click=move |_| {
@@ -593,26 +658,57 @@ pub fn App() -> impl IntoView {
                     }>"✕"</button>
                 </div>
             </div>
-            <Show when=move || model_ready.get() fallback=move || view! {
+            <Show when=move || init_done.get() fallback=move || view! {
                 <div class="setup-view">
-                    <h1>"BPSR Translator"</h1>
-                    <div class="status-card">
-                        <h2>"Model Installation"</h2>
-                        <p>{move || status_text.get()}</p>
-
-                        <Show when=move || downloading.get()>
-                            <div class="progress-bar">
-                                <div class="fill" style:width=move || format!("{}%", progress.get())></div>
-                            </div>
-                            <div class="progress-label">{move || format!("{}%", progress.get())}</div>
-                        </Show>
+                    <div class="wizard-card">
+                        {move || match wizard_step.get() {
+                            0 => view! {
+                                <div class="wizard-step">
+                                    <h1>"Welcome to Resonance Stream"</h1>
+                                    <p>"Analyze and translate Blue Protocol game chat in real-time."</p>
+                                    <button class="primary-btn" on:click=move |_| set_wizard_step.set(1)>"Get Started"</button>
+                                </div>
+                            }.into_any(),
+                            1 => view! {
+                                <div class="wizard-step">
+                                    <h2>"Quick Setup"</h2>
+                                    <div class="setting-item">
+                                        <label class="checkbox-row">
+                                            <input type="checkbox" checked=move || use_translation.get() on:change=move |ev| set_use_translation.set(event_target_checked(&ev)) />
+                                            <span>"Enable Real-time Translation"</span>
+                                        </label>
+                                    </div>
+                                    <Show when=move || use_translation.get()>
+                                        <div class="setting-item">
+                                            <h3>"Compute Mode"</h3>
+                                            <div class="radio-group">
+                                                <label class="radio-row">
+                                                    <input type="radio" name="mode" value="cpu" checked=move || compute_mode.get() == "cpu" on:change=move |_| set_compute_mode.set("cpu".into()) />
+                                                    <span>"CPU (Most Compatible)"</span>
+                                                </label>
+                                                <label class="radio-row">
+                                                    <input type="radio" name="mode" value="cuda" checked=move || compute_mode.get() == "cuda" on:change=move |_| set_compute_mode.set("cuda".into()) />
+                                                    <span>"GPU (High Performance, Requires CUDA)"</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </Show>
+                                    <button class="primary-btn" on:click=move |_| { if use_translation.get_untracked() { set_wizard_step.set(2); } else { finalize_setup(()); } }>"Next"</button>
+                                </div>
+                            }.into_any(),
+                            2 => view! {
+                                <div class="wizard-step">
+                                    <h2>"Model Installation"</h2>
+                                    <p>"A 1.3GB translation model is required for high-quality results."</p>
+                                    <Show when=move || downloading.get() fallback=move || view! { <button class="primary-btn" on:click=start_download>"Start Download"</button> }>
+                                        <div class="progress-bar"><div class="fill" style:width=move || format!("{}%", progress.get())></div></div>
+                                        <div class="progress-label">{move || format!("{}%", progress.get())}</div>
+                                    </Show>
+                                </div>
+                            }.into_any(),
+                            _ => view! { <div></div> }.into_any(),
+                        }}
                     </div>
-
-                    <Show when=move || !model_ready.get() && !downloading.get()>
-                        <button class="primary-btn" on:click=start_download>
-                            "🚀 Install Translation Model"
-                        </button>
-                    </Show>
                 </div>
             }>
                 <nav class="tab-bar">

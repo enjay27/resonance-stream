@@ -201,16 +201,16 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
                         // Extract the Type/Sequence field
                         let type_field = (payload[4] as u16) << 8 | (payload[5] as u16);
 
+                        let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
+
                         // BLACKLIST: Ignore only known non-chat high-traffic packets
                         // 0x0004 = Heartbeat
                         // 0x8002 = Massive Character Sync
                         if type_field == 0x0004 || type_field == 0x8002 {
-                            if type_field == 0x8002 { streams.remove(&stream_key); }
                             continue;
                         }
 
                         // Allow all other types (0x0001, 0x0002, 0x0003...)
-                        let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
                         p_buf.add(payload);
 
                         while let Some(full_packet) = p_buf.next() {

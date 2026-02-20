@@ -5,6 +5,9 @@ use tauri::{AppHandle, Manager}; // Import Manager trait
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AppConfig {
+    pub init_done: bool,
+    pub use_translation: bool,
+    pub compute_mode: String,
     pub compact_mode: bool,
     pub always_on_top: bool,
     pub active_tab: String,
@@ -20,6 +23,9 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            init_done: false,
+            use_translation: false,
+            compute_mode: "cpu".into(),
             compact_mode: false,
             always_on_top: false,
             active_tab: "전체".to_string(),

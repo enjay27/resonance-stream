@@ -1064,9 +1064,24 @@ pub fn App() -> impl IntoView {
                                             save_config_action.dispatch(()); // Persist choice
 
                                             if checked {
-                                                add_system_log("info", "Settings", "번역 기능이 활성화되었습니다. 엔진을 시작합니다.");
                                                 spawn_local(async move {
-                                                    let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                                                    // 1. Verify if the model files actually exist
+                                                    if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
+                                                        if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
+                                                            if status.exists {
+                                                                // 2a. Model exists: Start the AI sidecar immediately
+                                                                add_system_log("info", "Settings", "번역 기능이 활성화되었습니다. 엔진을 시작합니다.");
+                                                                let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                                                            } else {
+                                                                // 2b. Model missing: Forward to Download Page (Step 2)
+                                                                add_system_log("warn", "Settings", "AI 모델이 없습니다. 설치 마법사로 이동합니다.");
+
+                                                                set_init_done.set(false);      // Exit main view to show Wizard fallback
+                                                                set_wizard_step.set(2);      // Set Wizard to the Download step
+                                                                set_show_settings.set(false); // Close the settings modal
+                                                            }
+                                                        }
+                                                    }
                                                 });
                                             } else {
                                                 add_system_log("warn", "Settings", "번역 기능이 비활성화되었습니다. (재시작 권장)");

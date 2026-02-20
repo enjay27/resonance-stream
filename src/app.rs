@@ -645,6 +645,13 @@ pub fn App() -> impl IntoView {
                     "Resonance Stream"
                 </div>
                 <div class="window-controls">
+                    <Show when=move || use_translation.get()>
+                        <div class="status-dot-container title-bar-version"
+                             class:online=move || is_translator_active.get()>
+                             <span class="pulse-dot"></span>
+                             <span>{move || if is_translator_active.get() { "번역 ON" } else { "번역 OFF" }}</span>
+                        </div>
+                    </Show>
                     <button class="win-btn" on:click=move |_| {
                         spawn_local(async move {
                             let _ = invoke("minimize_window", JsValue::NULL).await;
@@ -2006,6 +2013,7 @@ pub fn App() -> impl IntoView {
                 .window-controls {
                     position: relative;
                     display: flex;
+                    align-items: center;
                     height: 100%;
                     z-index: 10;
                     -webkit-app-region: no-drag;
@@ -2096,6 +2104,61 @@ pub fn App() -> impl IntoView {
                     font-size: 0.8rem;
                     color: var(--accent);
                     font-weight: bold;
+                }
+
+                /* Compact Container */
+                .status-dot-container {
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;             /* Reduced from 8px */
+                    padding: 0px 8px;     /* Reduced from 4px 10px */
+                    background: rgba(0, 0, 0, 0.3);
+                    border: 1px solid #444;
+                    border-radius: 4px;   /* Squarer corners often look better in title bars */
+                    font-size: 0.65rem;   /* Reduced from 0.75rem */
+                    font-weight: 800;
+                    color: #888;
+                    height: 18px;         /* Fixed height to fit the 30px title bar perfectly */
+                    transition: all 0.3s ease;
+                }
+
+                /* Compact Dot */
+                .status-dot-container .pulse-dot {
+                    width: 6px;           /* Reduced from 8px */
+                    height: 6px;          /* Reduced from 8px */
+                    background: #555;
+                    border-radius: 50%;
+                    transition: all 0.3s ease;
+                    display: inline-block;
+                }
+
+                /* Online State */
+                .status-dot-container.online {
+                    color: #00ff88;
+                    border-color: rgba(0, 255, 136, 0.3);
+                    background: rgba(0, 255, 136, 0.05);
+                }
+
+                .status-dot-container.online .pulse-dot {
+                    background: #00ff88;
+                    box-shadow: 0 0 6px #00ff88; /* Tighter glow */
+                    animation: pulse-animation-compact 2s infinite;
+                }
+
+                /* Adjusted Animation for smaller scale */
+                @keyframes pulse-animation-compact {
+                    0% {
+                        transform: scale(0.95);
+                        box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.7);
+                    }
+                    70% {
+                        transform: scale(1);
+                        box-shadow: 0 0 0 4px rgba(0, 255, 136, 0); /* Reduced from 6px */
+                    }
+                    100% {
+                        transform: scale(0.95);
+                        box-shadow: 0 0 0 0 rgba(0, 255, 136, 0);
+                    }
                 }
                 "
             </style>

@@ -216,3 +216,36 @@ pub async fn sync_dictionary(app: tauri::AppHandle, state: tauri::State<'_, AppS
 
     Ok("Dictionary updated and reloaded!".to_string())
 }
+
+#[tauri::command]
+pub async fn open_model_folder(app: tauri::AppHandle) -> Result<(), String> {
+    // 1. Resolve the specific AppData/Roaming folder for this app
+    let app_dir = app.path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+
+    // 2. CRITICAL: Ensure the directory exists.
+    // If Explorer is called on a non-existent path, it defaults to 'Documents'.
+    if !app_dir.exists() {
+        std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
+    }
+
+    // 3. Open the folder using the system file explorer
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(app_dir.to_str().unwrap()) // Pass the absolute AppData path
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(app_dir.to_str().unwrap())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}

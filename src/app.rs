@@ -1099,7 +1099,16 @@ pub fn App() -> impl IntoView {
                                                     }
                                                 });
                                             } else {
-                                                add_system_log("warn", "Settings", "번역 기능이 비활성화되었습니다. (재시작 권장)");
+                                                let msg = "번역 기능을 비활성화했습니다.\n\n사용하지 않는 AI 모델 파일(약 1.3GB)이 디스크 공간을 차지하고 있을 수 있습니다. 파일을 삭제하시겠습니까? (폴더가 열립니다)";
+
+                                                if window().confirm_with_message(msg).unwrap_or(false) {
+                                                    spawn_local(async move {
+                                                        // Call backend to open the model folder
+                                                        let _ = invoke("open_model_folder", JsValue::NULL).await;
+                                                    });
+                                                }
+
+                                                add_system_log("warn", "Settings", "번역 기능 비활성화됨. (재시작 권장)");
                                                 set_restart_required.set(true);
                                             }
                                         }

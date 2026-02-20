@@ -45,11 +45,16 @@ pub async fn start_translator_sidecar(
     window: Window,
     app: AppHandle,
     state: State<'_, AppState>,
-    use_gpu: bool,
 ) -> Result<String, String> {
-    inject_system_message(&app, SystemLogLevel::Info, "Sidecar", format!("Request received. GPU: {}", use_gpu));
+    let config = crate::config::load_config(app.clone());
+
+    if !config.use_translation {
+        inject_system_message(&app, SystemLogLevel::Info, "Sidecar", "Translation is disabled in settings. Skipping startup.");
+        return Ok("Disabled".into());
+    }
+
+    inject_system_message(&app, SystemLogLevel::Info, "Sidecar", format!("Starting Sidecar with Device: {}, Tier: {}", config.compute_mode, config.tier));
     let version = app.package_info().version.to_string();
-    let config = crate::config::load_config(app.clone()); // Load persistent tier
     let model_path = model_manager::get_model_path(&app);
 
     // Resolve the local dictionary path in AppData
@@ -62,6 +67,7 @@ pub async fn start_translator_sidecar(
         "--model", &model_path,
         "--dict", dict_path.to_str().unwrap(),
         "--tier", &config.tier, // Use the tier from config
+        "--device", &config.compute_mode,
         "--version", &version,
     ];
     if config.is_debug {
@@ -217,4 +223,10 @@ pub async fn translate_message(
         child.write(msg.as_bytes()).map_err(|e| e.to_string())?;
         Ok(())
     } else { Err("Translator not initialized".into()) }
+}
+
+#[tauri::command]
+pub fn is_translator_running(state: tauri::State<'_, AppState>) -> bool {
+    // Returns true if the child process handle exists in the Mutex
+    state.tx.lock().unwrap().is_some()
 }

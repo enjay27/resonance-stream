@@ -1,7 +1,3 @@
-**Resonance Stream**의 정식 배포를 위한 전문적이고 직관적인(Functional & Sharp) **README.md** 초안입니다. 한국어를 기본으로 하되, 상단에 영어 버전으로 바로 이동할 수 있는 링크를 포함했습니다.
-
----
-
 # 🛰️ Resonance Stream
 
 **Blue Protocol: Star Resonance (BPSR) Real-time Packet-Sniffing Translator**

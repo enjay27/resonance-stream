@@ -47,15 +47,6 @@ pub fn run() {
                 inject_system_message(handle, SystemLogLevel::Warning, "Backend", "Sniffer may fail without Admin rights.");
             }
 
-            // 1. Verify resources are accessible
-            let res_dir = handle.path().resource_dir().unwrap_or_default();
-            let sys_file = res_dir.join("WinDivert64.sys");
-            if sys_file.exists() {
-                inject_system_message(handle, SystemLogLevel::Success, "Backend", "WinDivert driver located in resources.");
-            } else {
-                inject_system_message(handle, SystemLogLevel::Error, "Backend", "WinDivert64.sys missing from resource directory.");
-            }
-
             Ok(())
         })
         .manage(AppState {
@@ -70,6 +61,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             check_model_status,
             download_model,
+            is_translator_running,
             start_translator_sidecar,
             translate_message,
             translate_nickname,
@@ -84,6 +76,7 @@ pub fn run() {
             save_config,
             minimize_window,
             close_window,
+            open_model_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

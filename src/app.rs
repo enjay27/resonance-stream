@@ -52,6 +52,9 @@ pub struct SystemMessage {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 struct AppConfig {
+    init_done: bool,
+    use_translation: bool,
+    compute_mode: String,
     compact_mode: bool,
     always_on_top: bool,
     active_tab: String,
@@ -71,10 +74,23 @@ struct ModelStatus { exists: bool, path: String }
 struct TauriEvent { payload: ProgressPayload }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-struct ProgressPayload { current: f64, total: f64, percent: u8 }
+pub struct ProgressPayload {
+    #[serde(rename = "current_file")] // Match backend field name
+    pub current_file: String,
+    pub percent: u8,
+    #[serde(rename = "total_percent")] // Match backend field name
+    pub total_percent: u8,
+}
 
 #[component]
 pub fn App() -> impl IntoView {
+    // --- STATE SIGNALS ---
+    let (init_done, set_init_done) = signal(false); // Hydrated from config
+    let (use_translation, set_use_translation) = signal(false);
+    let (compute_mode, set_compute_mode) = signal("cpu".to_string());
+    let (wizard_step, set_wizard_step) = signal(0); // 0: Welcome, 1: Options, 2: Download
+
+    let (is_translator_active, set_is_translator_active) = signal(false);
     let (status_text, set_status_text) = signal("Initializing...".to_string());
     let (model_ready, set_model_ready) = signal(false);
     let (downloading, set_downloading) = signal(false);
@@ -82,39 +98,107 @@ pub fn App() -> impl IntoView {
 
     let (active_tab, set_active_tab) = signal("전체".to_string());
     let (search_term, set_search_term) = signal("".to_string());
-
     let (name_cache, set_name_cache) = signal(std::collections::HashMap::<String, String>::new());
-
-    // --- SEPARATE DATA STREAMS ---
-    // 1. Game Chat (IndexMap for updates)
     let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatPacket>>::new());
-    // 2. System Logs (VecDeque logic in frontend)
     let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
+
     let (is_system_at_bottom, set_system_at_bottom) = signal(true);
     let (show_system_tab, set_show_system_tab) = signal(false);
-
-    // 1. Filter States
     let (system_level_filter, set_system_level_filter) = signal(None::<String>);
     let (system_source_filter, set_system_source_filter) = signal(None::<String>);
 
-    // 2. Unread Tracking for System Tab
-    let (system_unread_count, set_system_unread_count) = signal(0);
-
-    let (dict_update_available, set_dict_update_available) = signal(false);
-
     let (compact_mode, set_compact_mode) = signal(false);
     let (is_pinned, set_is_pinned) = signal(false);
-
     let (show_settings, set_show_settings) = signal(false);
     let (chat_limit, set_chat_limit) = signal(1000);
     let (custom_filters, set_custom_filters) = signal(vec!["WORLD".to_string(), "GUILD".to_string(), "PARTY".to_string(), "LOCAL".to_string()]);
-
     let (theme, set_theme) = signal("dark".to_string());
     let (opacity, set_opacity) = signal(0.85f32);
     let (is_debug, set_is_debug) = signal(false);
     let (tier, set_tier) = signal("middle".to_string());
-
     let (restart_required, set_restart_required) = signal(false);
+    let (dict_update_available, set_dict_update_available) = signal(false);
+    let (is_at_bottom, set_is_at_bottom) = signal(true);
+    let (unread_count, set_unread_count) = signal(0);
+    let (active_menu_id, set_active_menu_id) = signal(None::<u64>);
+
+    // --- HELPERS ---
+    let add_system_log = move |level: &str, source: &str, message: &str| {
+        let msg_json = serde_json::json!({
+        "level": level,
+        "source": source,
+        "message": message
+    });
+
+        spawn_local(async move {
+            // This triggers the backend which emits 'system-event'
+            // that your existing listener already handles
+            let _ = invoke("inject_system_message", serde_wasm_bindgen::to_value(&msg_json).unwrap()).await;
+        });
+    };
+
+    let format_time = |ts: u64| {
+        let date = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
+        format!("{:02}:{:02}", date.get_hours(), date.get_minutes())
+    };
+
+    let is_japanese = |text: &str| {
+        let re = js_sys::RegExp::new("[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FAF]", "");
+        re.test(text)
+    };
+
+    // --- WATCHDOG: SIDE CAR MONITOR ---
+    spawn_local(async move {
+        loop {
+            if let Ok(res) = invoke("is_translator_running", JsValue::NULL).await {
+                if let Some(running) = res.as_bool() {
+                    set_is_translator_active.set(running);
+
+                    if !running && use_translation.get_untracked() && init_done.get_untracked() {
+                        add_system_log("Warning", "[WatchDog]", "Translator not running. Run Translator Sidecar.");
+                        let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                    }
+                }
+            }
+            // Poll every 3 seconds
+            gloo_timers::future::TimeoutFuture::new(5000).await;
+        }
+    });
+
+    // Copy Action
+    let copy_text = move |text: String| {
+        spawn_local(async move {
+            if let Some(window) = web_sys::window() {
+                let navigator = window.navigator();
+                // This requires "Clipboard" feature in web-sys (usually enabled by default in Tauri templates)
+                let _ = navigator.clipboard().write_text(&text);
+            }
+        });
+    };
+
+    // --- CONFIG ACTIONS ---
+    let save_config_action = Action::new_local(move |_: &()| {
+        let config = AppConfig {
+            init_done: init_done.get_untracked(),
+            use_translation: use_translation.get_untracked(),
+            compute_mode: compute_mode.get_untracked(),
+            compact_mode: compact_mode.get_untracked(),
+            always_on_top: is_pinned.get_untracked(),
+            active_tab: active_tab.get_untracked(),
+            chat_limit: chat_limit.get_untracked(),
+            custom_tab_filters: custom_filters.get_untracked(),
+            theme: theme.get_untracked(),
+            overlay_opacity: opacity.get_untracked(),
+            show_system_tab: show_system_tab.get_untracked(),
+            is_debug: is_debug.get_untracked(),
+            tier: tier.get_untracked(),
+        };
+
+        async move {
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "config": config })).unwrap();
+            let _ = invoke("save_config", args).await;
+        }
+    });
 
     // Apply theme to the root element whenever it changes
     Effect::new(move |_| {
@@ -161,28 +245,6 @@ pub fn App() -> impl IntoView {
 
     let (is_user_scrolling, set_user_scrolling) = signal(false);
     let chat_container_ref = create_node_ref::<html::Div>();
-
-    // --- HELPERS ---
-    let format_time = |ts: u64| {
-        let date = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
-        format!("{:02}:{:02}", date.get_hours(), date.get_minutes())
-    };
-
-    let is_japanese = |text: &str| {
-        let re = js_sys::RegExp::new("[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FAF]", "");
-        re.test(text)
-    };
-
-    // Copy Action
-    let copy_text = move |text: String| {
-        spawn_local(async move {
-            if let Some(window) = web_sys::window() {
-                let navigator = window.navigator();
-                // This requires "Clipboard" feature in web-sys (usually enabled by default in Tauri templates)
-                let _ = navigator.clipboard().write_text(&text);
-            }
-        });
-    };
 
     // --- OPTIMIZED VIEW LOGIC ---
     let filtered_chat = Memo::new(move |_| {
@@ -238,10 +300,6 @@ pub fn App() -> impl IntoView {
     });
 
     // 1. STATE: Track if the user is currently at the bottom
-    let (is_at_bottom, set_is_at_bottom) = signal(true);
-    let (unread_count, set_unread_count) = signal(0); // [NEW] Tracks missed messages
-
-    let (active_menu_id, set_active_menu_id) = signal(None::<u64>); // [NEW] Track open menu
 
     let chat_container_ref = create_node_ref::<html::Div>();
 
@@ -422,6 +480,31 @@ pub fn App() -> impl IntoView {
         });
     };
 
+    let finalize_setup = move |_| {
+        set_init_done.set(true);
+        add_system_log("success", "Setup", "Initial configuration completed.");
+        save_config_action.dispatch(());
+
+        spawn_local(async move {
+            add_system_log("info", "Sniffer", "Initializing packet capture...");
+            setup_listeners();
+            let _ = invoke("start_sniffer_command", JsValue::NULL).await;
+
+            if use_translation.get_untracked() {
+                add_system_log("info", "UI", "Starting AI translation engine...");
+                // Check model one last time before launching AI
+                if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
+                    if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
+                        if status.exists {
+                            let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                            set_status_text.set("AI Engine Starting...".to_string());
+                        }
+                    }
+                }
+            }
+        });
+    };
+
     let start_download = move |ev: web_sys::MouseEvent| {
         // Prevent the default button behavior if necessary
         ev.prevent_default();
@@ -431,122 +514,114 @@ pub fn App() -> impl IntoView {
         spawn_local(async move {
             let closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(wrapper) = serde_wasm_bindgen::from_value::<TauriEvent>(event_obj) {
-                    set_progress.set(wrapper.payload.percent);
+                    set_progress.set(wrapper.payload.total_percent);
+                    set_status_text.set(format!("Downloading AI Model {}%", wrapper.payload.total_percent));
                 }
             }) as Box<dyn FnMut(JsValue)>);
             let _ = listen("download-progress", &closure).await;
-            closure.forget();
             match invoke("download_model", JsValue::NULL).await {
                 Ok(_) => {
                     set_downloading.set(false);
                     set_model_ready.set(true);
                     set_status_text.set("Ready".to_string());
-
-                    // [NEW] Automatic Startup Chain
-                    setup_listeners(); // Initialize packet/system listeners
-                    let _ = invoke("start_sniffer_command", JsValue::NULL).await;
-                    let _ = invoke("start_translator_sidecar", serde_wasm_bindgen::to_value(&serde_json::json!({"useGpu":true})).unwrap()).await;
+                    finalize_setup(());
                 }
                 Err(e) => {
                     set_downloading.set(false);
                     set_status_text.set(format!("Error: {:?}", e));
+                    add_system_log("error", "ModelManager", &format!("Download failed: {:?}", e));
                 }
             }
+            closure.forget();
         });
     };
-
-    // This gathers the current state of all signals and sends them to Rust.
-    let save_config_action = Action::new_local(move |_: &()| {
-        // Use get_untracked() to read values without creating subscriptions
-        let config = AppConfig {
-            compact_mode: compact_mode.get_untracked(),
-            always_on_top: is_pinned.get_untracked(),
-            active_tab: active_tab.get_untracked(),
-            chat_limit: chat_limit.get_untracked(),
-            custom_tab_filters: custom_filters.get_untracked(),
-            theme: theme.get_untracked(),
-            overlay_opacity: opacity.get_untracked(),
-            show_system_tab: show_system_tab.get_untracked(),
-            is_debug: is_debug.get_untracked(),
-            tier: tier.get_untracked(),
-        };
-
-        async move {
-            // Send to Backend
-            let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                "config": config
-            })).unwrap();
-            let _ = invoke("save_config", args).await;
-        }
-    });
 
     // --- STARTUP HYDRATION ---
     Effect::new(move |_| {
         spawn_local(async move {
-
+            log!("App component hydration started...");
             // Load User Config
-            if let Ok(res) = invoke("load_config", JsValue::NULL).await {
-                if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(res) {
-                    set_compact_mode.set(config.compact_mode);
-                    set_active_tab.set(config.active_tab);
-                    set_is_pinned.set(config.always_on_top);
-                    set_chat_limit.set(config.chat_limit);
-                    set_custom_filters.set(config.custom_tab_filters);
-                    set_theme.set(config.theme);
-                    set_opacity.set(config.overlay_opacity);
-                    set_is_debug.set(config.is_debug);
-                    set_tier.set(config.tier);
+            match invoke("load_config", JsValue::NULL).await {
+                Ok(res) => {
+                    if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(res) {
+                        log!("Loaded Config: {:?}", config);
+                        set_init_done.set(config.init_done);
+                        set_use_translation.set(config.use_translation);
+                        set_compute_mode.set(config.compute_mode);
+                        set_compact_mode.set(config.compact_mode);
+                        set_active_tab.set(config.active_tab);
+                        set_is_pinned.set(config.always_on_top);
+                        set_chat_limit.set(config.chat_limit);
+                        set_custom_filters.set(config.custom_tab_filters);
+                        set_theme.set(config.theme);
+                        set_opacity.set(config.overlay_opacity);
+                        set_show_system_tab.set(config.show_system_tab);
+                        set_is_debug.set(config.is_debug);
+                        set_tier.set(config.tier);
 
-                    // Apply Window State (Backend)
-                    if config.always_on_top {
-                        let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                            "onTop": true
-                        })).unwrap();
-                        let _ = invoke("set_always_on_top", args).await;
-                    }
-                }
-            }
+                        // 2. If the user hasn't finished the wizard, stop here
+                        if config.init_done {
+                            log!("Existing user detected. Auto-starting services.");
+                            add_system_log("info", "Sniffer", "Auto-starting services...");
+                            setup_listeners();
 
-            if let Ok(res) = invoke("check_dict_update", JsValue::NULL).await {
-                if let Some(needed) = res.as_bool() {
-                    set_dict_update_available.set(needed);
-                }
-            }
+                            // Hydrate GAME History
+                            if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
+                                if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(res) {
+                                    let sanitized_vec: Vec<(u64, RwSignal<ChatPacket>)> = vec.into_iter().map(|mut p| {
+                                        if p.message.starts_with("emojiPic=") { p.message = "스티커 전송".to_string(); } else if p.message.contains("<sprite=") { p.message = "이모지 전송".to_string(); }
+                                        (p.pid, RwSignal::new(p))
+                                    }).collect();
+                                    set_chat_log.set(sanitized_vec.into_iter().collect());
+                                }
+                            }
 
-            if let Ok(res) = invoke("check_model_status", JsValue::NULL).await {
-                if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(res) {
-                    if status.exists {
-                        setup_listeners();
+                            // Hydrate SYSTEM History
+                            if let Ok(res) = invoke("get_system_history", JsValue::NULL).await {
+                                if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<SystemMessage>>(res) {
+                                    set_system_log.set(vec.into_iter().map(|p| RwSignal::new(p)).collect());
+                                }
+                            }
 
-                        // Hydrate GAME History
-                        if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
-                            if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(res) {
-                                let sanitized_vec: Vec<(u64, RwSignal<ChatPacket>)> = vec.into_iter().map(|mut p| {
-                                    if p.message.starts_with("emojiPic=") {
-                                        p.message = "스티커 전송".to_string();
-                                    } else if p.message.contains("<sprite=") {
-                                        p.message = "이모지 전송".to_string();
+                            let _ = invoke("start_sniffer_command", JsValue::NULL).await;
+
+                            if config.use_translation {
+                                if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
+                                    if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
+                                        if status.exists {
+                                            add_system_log("info", "UI", "Starting AI translation engine...");
+                                            let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                                            set_model_ready.set(true);
+                                            set_status_text.set("AI Engine Starting...".to_string());
+                                        } else {
+                                            add_system_log("warn", "Sidecar", "Model missing. AI is disabled.");
+                                            set_model_ready.set(false);
+                                        }
                                     }
-                                    (p.pid, RwSignal::new(p))
-                                }).collect();
+                                }
 
-                                set_chat_log.set(sanitized_vec.into_iter().collect());
+                                if let Ok(res) = invoke("check_dict_update", JsValue::NULL).await {
+                                    if let Some(needed) = res.as_bool() {
+                                        set_dict_update_available.set(needed);
+                                    }
+                                }
                             }
-                        }
 
-                        // Hydrate SYSTEM History
-                        if let Ok(res) = invoke("get_system_history", JsValue::NULL).await {
-                            if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<SystemMessage>>(res) {
-                                set_system_log.set(vec.into_iter().map(|p| RwSignal::new(p)).collect());
+                            if config.always_on_top {
+                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                "onTop": true
+                            })).unwrap();
+                                let _ = invoke("set_always_on_top", args).await;
                             }
-                        }
 
-                        let _ = invoke("start_sniffer_command", JsValue::NULL).await;
-                        let _ = invoke("start_translator_sidecar", serde_wasm_bindgen::to_value(&serde_json::json!({"useGpu":true})).unwrap()).await;
-                        set_model_ready.set(true);
-                        set_status_text.set("Ready".to_string());
+                            set_status_text.set("Ready".to_string());
+                        } else {
+                            log!("New user detected. Showing Wizard.");
+                            add_system_log("info", "Setup", "Awaiting initial configuration.");
+                        }
                     }
-                }
+                },
+                Err(e) => log!("FATAL: Failed to load config: {:?}", e),
             }
         });
     });
@@ -576,9 +651,21 @@ pub fn App() -> impl IntoView {
             <div class="custom-title-bar" data-tauri-drag-region>
                 <div class="drag-handle" data-tauri-drag-region></div>
                 <div class="window-title" style="pointer-events: none;">
-                    "BPSR Translator"
+                    "Resonance Stream"
                 </div>
+
+                <div class="title-bar-status">
+                    {move || status_text.get()}
+                </div>
+
                 <div class="window-controls">
+                    <Show when=move || use_translation.get()>
+                        <div class="status-dot-container title-bar-version"
+                             class:online=move || is_translator_active.get()>
+                             <span class="pulse-dot"></span>
+                             <span>{move || if is_translator_active.get() { "번역 ON" } else { "번역 OFF" }}</span>
+                        </div>
+                    </Show>
                     <button class="win-btn" on:click=move |_| {
                         spawn_local(async move {
                             let _ = invoke("minimize_window", JsValue::NULL).await;
@@ -592,26 +679,58 @@ pub fn App() -> impl IntoView {
                     }>"✕"</button>
                 </div>
             </div>
-            <Show when=move || model_ready.get() fallback=move || view! {
+            <Show when=move || init_done.get() fallback=move || view! {
                 <div class="setup-view">
-                    <h1>"BPSR Translator"</h1>
-                    <div class="status-card">
-                        <h2>"Model Installation"</h2>
-                        <p>{move || status_text.get()}</p>
-
-                        <Show when=move || downloading.get()>
-                            <div class="progress-bar">
-                                <div class="fill" style:width=move || format!("{}%", progress.get())></div>
-                            </div>
-                            <div class="progress-label">{move || format!("{}%", progress.get())}</div>
-                        </Show>
+                    <div class="wizard-card">
+                        {move || match wizard_step.get() {
+                            0 => view! {
+                                <div class="wizard-step">
+                                    <h1>"Resonance Stream"</h1>
+                                    <p>"블루 프로토콜의 게임 채팅을 실시간으로 분석하고 번역합니다."</p>
+                                    <button class="primary-btn" on:click=move |_| set_wizard_step.set(1)>"시작하기"</button>
+                                </div>
+                            }.into_any(),
+                            1 => view! {
+                                <div class="wizard-step">
+                                    <h2>"빠른 설정"</h2>
+                                    <div class="setting-item">
+                                        <label class="checkbox-row">
+                                            <input type="checkbox" checked=move || use_translation.get() on:change=move |ev| set_use_translation.set(event_target_checked(&ev)) />
+                                            <span>"실시간 번역 기능 활성화."</span>
+                                            <p>"설정에서 바꿀 수 있습니다."</p>
+                                        </label>
+                                    </div>
+                                    <Show when=move || use_translation.get()>
+                                        <div class="setting-item">
+                                            <h3>"연산 장치 (Compute Mode)"</h3>
+                                            <div class="radio-group">
+                                                <label class="radio-row">
+                                                    <input type="radio" name="mode" value="cpu" checked=move || compute_mode.get() == "cpu" on:change=move |_| set_compute_mode.set("cpu".into()) />
+                                                    <span>"CPU (가장 높은 호환성)"</span>
+                                                </label>
+                                                <label class="radio-row">
+                                                    <input type="radio" name="mode" value="cuda" checked=move || compute_mode.get() == "cuda" on:change=move |_| set_compute_mode.set("cuda".into()) />
+                                                    <span>"GPU (고성능, NVIDIA CUDA 필요)"</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </Show>
+                                    <button class="primary-btn" on:click=move |_| { if use_translation.get_untracked() { set_wizard_step.set(2); } else { finalize_setup(()); } }>"Next"</button>
+                                </div>
+                            }.into_any(),
+                            2 => view! {
+                                <div class="wizard-step">
+                                    <h2>"Model Installation"</h2>
+                                    <p>"번역을 위해 약 1.3GB의 AI 모델 파일 다운로드가 필요합니다."</p>
+                                    <Show when=move || downloading.get() fallback=move || view! { <button class="primary-btn" on:click=start_download>"다운로드 시작"</button> }>
+                                        <div class="progress-bar"><div class="fill" style:width=move || format!("{}%", progress.get())></div></div>
+                                        <div class="progress-label">{move || format!("{}%", progress.get())}</div>
+                                    </Show>
+                                </div>
+                            }.into_any(),
+                            _ => view! { <div></div> }.into_any(),
+                        }}
                     </div>
-
-                    <Show when=move || !model_ready.get() && !downloading.get()>
-                        <button class="primary-btn" on:click=start_download>
-                            "🚀 Install Translation Model"
-                        </button>
-                    </Show>
                 </div>
             }>
                 <nav class="tab-bar">
@@ -948,45 +1067,127 @@ pub fn App() -> impl IntoView {
                         // Content (Cleaned up)
                         <div class="settings-content">
                             <div class="setting-group">
-                                <h3>"Performance Tier"</h3>
-                                <div class="tier-select">
-                                    {vec!["low", "middle", "high", "extreme"].into_iter().map(|t| {
-                                        let t_val = t.to_string();
-                                        let t_val_tier = t.to_string();
-                                        view! {
-                                            <label class="radio-row">
-                                                <input type="radio" name="tier"
-                                                    checked=move || tier.get() == t_val
-                                                    on:change=move |_| {
-                                                        set_tier.set(t_val_tier.clone());
-                                                        save_config_action.dispatch(()); // Persist choice
+                                <h3>"AI Translation Features"</h3>
+                                <div class="toggle-row">
+                                    <span class="toggle-label">"실시간 번역 기능 사용"</span>
+                                    <input type="checkbox"
+                                        prop:checked=move || use_translation.get()
+                                        on:change=move |ev| {
+                                            let checked = event_target_checked(&ev);
+                                            set_use_translation.set(checked);
+                                            save_config_action.dispatch(()); // Persist choice
 
-                                                        let msg = format!(
-                                                            "성능 티어가 '{}'(으)로 변경되었습니다.\n새로운 설정을 적용하려면 앱을 재시작해야 합니다.\n\n지금 바로 새로고침할까요?",
-                                                            t_val_tier.to_uppercase()
-                                                        );
+                                            if checked {
+                                                spawn_local(async move {
+                                                    // 1. Verify if the model files actually exist
+                                                    if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
+                                                        if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
+                                                            if status.exists {
+                                                                // 2a. Model exists: Start the AI sidecar immediately
+                                                                add_system_log("info", "Settings", "번역 기능이 활성화되었습니다. 엔진을 시작합니다.");
+                                                                let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                                                                set_status_text.set("AI Engine Starting...".to_string());
+                                                            } else {
+                                                                // 2b. Model missing: Forward to Download Page (Step 2)
+                                                                add_system_log("warn", "Settings", "AI 모델이 없습니다. 설치 마법사로 이동합니다.");
 
-                                                        if window().confirm_with_message(&msg).unwrap_or(false) {
-                                                            let _ = window().location().reload(); // Immediate refresh
-                                                        } else {
-                                                            // Log a warning in Korean in the System tab
-                                                            spawn_local(async move {
-                                                                let _ = invoke("inject_system_message", serde_wasm_bindgen::to_value(&serde_json::json!({
-                                                                    "level": "warn",
-                                                                    "source": "Settings",
-                                                                    "message": "새 성능 설정은 앱을 재시작한 후에 적용됩니다."
-                                                                })).unwrap()).await;
-                                                            });
-                                                            set_restart_required.set(true); // Show a persistent warning
+                                                                set_init_done.set(false);      // Exit main view to show Wizard fallback
+                                                                set_wizard_step.set(2);      // Set Wizard to the Download step
+                                                                set_show_settings.set(false); // Close the settings modal
+                                                            }
                                                         }
                                                     }
-                                                />
-                                                <span class:tier-extreme=move || t == "extreme">{t.to_uppercase()}</span>
-                                            </label>
+                                                });
+                                            } else {
+                                                let msg = "번역 기능을 비활성화했습니다.\n\n사용하지 않는 AI 모델 파일(약 1.3GB)이 디스크 공간을 차지하고 있을 수 있습니다. 파일을 삭제하시겠습니까? (폴더가 열립니다)";
+
+                                                if window().confirm_with_message(msg).unwrap_or(false) {
+                                                    spawn_local(async move {
+                                                        // Call backend to open the model folder
+                                                        let _ = invoke("open_model_folder", JsValue::NULL).await;
+                                                    });
+                                                }
+
+                                                add_system_log("warn", "Settings", "번역 기능 비활성화됨. (재시작 권장)");
+                                                set_restart_required.set(true);
+                                            }
                                         }
-                                    }).collect_view()}
+                                    />
                                 </div>
-                                <p class="hint">"High uses more VRAM but has better accuracy."</p>
+
+                                <Show when=move || use_translation.get()>
+                                    <div class="setting-row">
+                                        <span class="toggle-label">"연산 장치 (Compute Mode)"</span>
+                                        <div class="radio-group-compact">
+                                            <label class="radio-row">
+                                                <input type="radio" name="mode-settings" value="cpu"
+                                                    checked=move || compute_mode.get() == "cpu"
+                                                    on:change=move |_| {
+                                                        set_compute_mode.set("cpu".into());
+                                                        save_config_action.dispatch(());
+                                                        add_system_log("warn", "Settings", "CPU 모드로 설정되었습니다. 재시작 후 적용됩니다.");
+                                                        set_restart_required.set(true);
+                                                    }
+                                                />
+                                                <span>"CPU"</span>
+                                            </label>
+                                            <label class="radio-row">
+                                                <input type="radio" name="mode-settings" value="cuda"
+                                                    checked=move || compute_mode.get() == "cuda"
+                                                    on:change=move |_| {
+                                                        set_compute_mode.set("cuda".into());
+                                                        save_config_action.dispatch(());
+                                                        add_system_log("warn", "Settings", "GPU 모드로 설정되었습니다. 재시작 후 적용됩니다.");
+                                                        set_restart_required.set(true);
+                                                    }
+                                                />
+                                                <span>"GPU"</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <p class="hint">"GPU 사용을 위해서는 NVIDIA 그래픽카드 + CUDA Toolkit 이 필요합니다. 설치되어있지 않다면 CPU 사용을 추천합니다."</p>
+                                    <div class="setting-row">
+                                        <span class="toggle-label">"성능"</span>
+                                        <div class="radio-group-compact">
+                                            {vec!["low", "middle", "high", "extreme"].into_iter().map(|t| {
+                                                let t_val = t.to_string();
+                                                let t_val_tier = t.to_string();
+                                                view! {
+                                                    <label class="radio-row">
+                                                        <input type="radio" name="tier"
+                                                            checked=move || tier.get() == t_val
+                                                            on:change=move |_| {
+                                                                set_tier.set(t_val_tier.clone());
+                                                                save_config_action.dispatch(()); // Persist choice
+
+                                                                let msg = format!(
+                                                                    "성능 티어가 '{}'(으)로 변경되었습니다.\n새로운 설정을 적용하려면 앱을 재시작해야 합니다.\n\n지금 바로 새로고침할까요?",
+                                                                    t_val_tier.to_uppercase()
+                                                                );
+
+                                                                if window().confirm_with_message(&msg).unwrap_or(false) {
+                                                                    let _ = window().location().reload(); // Immediate refresh
+                                                                } else {
+                                                                    // Log a warning in Korean in the System tab
+                                                                    spawn_local(async move {
+                                                                        let _ = invoke("inject_system_message", serde_wasm_bindgen::to_value(&serde_json::json!({
+                                                                            "level": "warn",
+                                                                            "source": "Settings",
+                                                                            "message": "새 성능 설정은 앱을 재시작한 후에 적용됩니다."
+                                                                        })).unwrap()).await;
+                                                                    });
+                                                                    set_restart_required.set(true); // Show a persistent warning
+                                                                }
+                                                            }
+                                                        />
+                                                        <span class:tier-extreme=move || t == "extreme">{t.to_uppercase()}</span>
+                                                    </label>
+                                                }
+                                            }).collect_view()}
+                                        </div>
+                                    </div>
+                                    <p class="hint">"번역 성능이 좋아지지만 번역 시간이 오래걸리고 자원을 더 많이 소모합니다. 번역에 걸리는 시간을 보고 조정해주세요."</p>
+                                </Show>
                                 <h3>"Overlay Settings"</h3>
                                 <div class="setting-row">
                                     <span>"Background Opacity"</span>
@@ -1821,6 +2022,10 @@ pub fn App() -> impl IntoView {
                     width: 120px;
                 }
 
+                .hint {
+                    font-size: 0.75rem;
+                }
+
                 .opacity-value {
                     font-family: 'Consolas', monospace;
                     font-size: 0.85rem;
@@ -1887,6 +2092,24 @@ pub fn App() -> impl IntoView {
                     border-bottom: 1px solid var(--border); /* Adapts to theme */
                 }
 
+                .title-bar-status {
+                    position: absolute;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    font-size: 0.75rem;
+                    font-weight: 700;
+                    color: var(--accent); /* Uses your forest green or neon accent */
+                    letter-spacing: 0.5px;
+                    pointer-events: none; /* Allows dragging through the text */
+                    white-space: nowrap;
+                    opacity: 0.8;
+                    text-transform: uppercase;
+                }
+
+                [data-theme='light'] .title-bar-status {
+                    color: var(--text-muted); /* Subtler gray for light mode */
+                }
+
                 .drag-handle {
                     position: absolute;
                     top: 0;
@@ -1909,6 +2132,7 @@ pub fn App() -> impl IntoView {
                 .window-controls {
                     position: relative;
                     display: flex;
+                    align-items: center;
                     height: 100%;
                     z-index: 10;
                     -webkit-app-region: no-drag;
@@ -1999,6 +2223,61 @@ pub fn App() -> impl IntoView {
                     font-size: 0.8rem;
                     color: var(--accent);
                     font-weight: bold;
+                }
+
+                /* Compact Container */
+                .status-dot-container {
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;             /* Reduced from 8px */
+                    padding: 0px 8px;     /* Reduced from 4px 10px */
+                    background: rgba(0, 0, 0, 0.3);
+                    border: 1px solid #444;
+                    border-radius: 4px;   /* Squarer corners often look better in title bars */
+                    font-size: 0.65rem;   /* Reduced from 0.75rem */
+                    font-weight: 800;
+                    color: #888;
+                    height: 18px;         /* Fixed height to fit the 30px title bar perfectly */
+                    transition: all 0.3s ease;
+                }
+
+                /* Compact Dot */
+                .status-dot-container .pulse-dot {
+                    width: 6px;           /* Reduced from 8px */
+                    height: 6px;          /* Reduced from 8px */
+                    background: #555;
+                    border-radius: 50%;
+                    transition: all 0.3s ease;
+                    display: inline-block;
+                }
+
+                /* Online State */
+                .status-dot-container.online {
+                    color: #00ff88;
+                    border-color: rgba(0, 255, 136, 0.3);
+                    background: rgba(0, 255, 136, 0.05);
+                }
+
+                .status-dot-container.online .pulse-dot {
+                    background: #00ff88;
+                    box-shadow: 0 0 6px #00ff88; /* Tighter glow */
+                    animation: pulse-animation-compact 2s infinite;
+                }
+
+                /* Adjusted Animation for smaller scale */
+                @keyframes pulse-animation-compact {
+                    0% {
+                        transform: scale(0.95);
+                        box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.7);
+                    }
+                    70% {
+                        transform: scale(1);
+                        box-shadow: 0 0 0 4px rgba(0, 255, 136, 0); /* Reduced from 6px */
+                    }
+                    100% {
+                        transform: scale(0.95);
+                        box-shadow: 0 0 0 0 rgba(0, 255, 136, 0);
+                    }
                 }
                 "
             </style>

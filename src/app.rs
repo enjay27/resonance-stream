@@ -74,7 +74,13 @@ struct ModelStatus { exists: bool, path: String }
 struct TauriEvent { payload: ProgressPayload }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-struct ProgressPayload { current: f64, total: f64, percent: u8 }
+pub struct ProgressPayload {
+    #[serde(rename = "current_file")] // Match backend field name
+    pub current_file: String,
+    pub percent: u8,
+    #[serde(rename = "total_percent")] // Match backend field name
+    pub total_percent: u8,
+}
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -507,11 +513,11 @@ pub fn App() -> impl IntoView {
         spawn_local(async move {
             let closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(wrapper) = serde_wasm_bindgen::from_value::<TauriEvent>(event_obj) {
-                    set_progress.set(wrapper.payload.percent);
+                    set_progress.set(wrapper.payload.total_percent);
+                    set_status_text.set(format!("{}", wrapper.payload.current_file));
                 }
             }) as Box<dyn FnMut(JsValue)>);
             let _ = listen("download-progress", &closure).await;
-            closure.forget();
             match invoke("download_model", JsValue::NULL).await {
                 Ok(_) => {
                     set_downloading.set(false);
@@ -525,6 +531,7 @@ pub fn App() -> impl IntoView {
                     add_system_log("error", "ModelManager", &format!("Download failed: {:?}", e));
                 }
             }
+            closure.forget();
         });
     };
 

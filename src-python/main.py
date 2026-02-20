@@ -191,31 +191,24 @@ def main():
         pass
 
     tier_cfg = {
-        "low": {"beam": 1, "patience": 1.0, "rep_pen": 1.0},
-        "middle": {"beam": 5, "patience": 1.0, "rep_pen": 1.1},
-        "high": {"beam": 10, "patience": 2.0, "rep_pen": 1.1},
-        "extreme": {"beam": 10, "patience": 2.0, "rep_pen": 1.3, "no_repeat": 3}
+        "low": {"device": "cpu", "compute_type": "int8", "beam": 1, "patience": 1.0, "rep_pen": 1.0},
+        "middle": {"device": "cuda", "compute_type": "int8_float16", "beam": 5, "patience": 1.0, "rep_pen": 1.1},
+        "high": {"device": "cuda", "compute_type": "int8_float16", "beam": 10, "patience": 2.0, "rep_pen": 1.1},
+        "extreme": {"device": "cpu", "compute_type": "float16", "beam": 10, "patience": 2.0, "rep_pen": 1.3, "no_repeat": 3}
     }
     cfg = tier_cfg[args.tier]
 
     try:
-        device, compute_type = ("cpu", "int8") if args.device == "cpu" else ("cuda", "int8_float16")
-        if args.device == "cuda":
-            cuda_count = ctranslate2.get_cuda_device_count()
-            device, compute_type = ("cuda", "int8_float16") if cuda_count > 0 else ("cpu", "int8")
-        if args.tier == "extreme":
-            compute_type = "float16"
-
         model_files = ["model.bin", "config.json", "shared_vocabulary.txt", "tokenizer.model"]
         for f in model_files:
             f_path = os.path.join(args.model, f)
             if not os.path.exists(f_path):
                 manager.log_error(f"Missing critical model file: {f}")
 
-        translator = ctranslate2.Translator(args.model, device=device, compute_type=compute_type, inter_threads=1, intra_threads=4)
+        translator = ctranslate2.Translator(args.model, device=cfg["device"], compute_type=cfg["compute_type"], inter_threads=1, intra_threads=4)
         sp = spm.SentencePieceProcessor(model_file=os.path.join(args.model, "tokenizer.model"))
         manager.log_info(
-            f"Resonance Stream AI v{args.version} Started: {device.upper()} | Tier: {args.tier.upper()}"
+            f"Resonance Stream AI v{args.version} Started with Tier: {args.tier.upper()} | {cfg["device"].upper()} | {cfg["compute_type"]}"
         )
         while True:
             line = sys.stdin.readline()

@@ -494,6 +494,7 @@ pub fn App() -> impl IntoView {
                     set_custom_filters.set(config.custom_tab_filters);
                     set_theme.set(config.theme);
                     set_opacity.set(config.overlay_opacity);
+                    set_show_system_tab.set(config.show_system_tab);
                     set_is_debug.set(config.is_debug);
                     set_tier.set(config.tier);
 

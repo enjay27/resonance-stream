@@ -163,6 +163,50 @@ def get_resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
+def get_tier_config(device, tier):
+    # Specialized CPU Tiers
+    cpu_tier_cfg = {
+        "low": {
+            "compute_type": "int8", "beam": 1, "patience": 1.0, "rep_pen": 1.0,
+            "len_pen": 0.6, "cov_pen": 0.0 # Fast, direct
+        },
+        "middle": {
+            "compute_type": "int8", "beam": 3, "patience": 1.0, "rep_pen": 1.1,
+            "len_pen": 0.8, "cov_pen": 0.1 # Balanced
+        },
+        "high": {
+            "compute_type": "int8", "beam": 5, "patience": 1.5, "rep_pen": 1.1,
+            "len_pen": 1.0, "cov_pen": 0.2 # High accuracy
+        },
+        "extreme": {
+            "compute_type": "int8", "beam": 10, "patience": 2.0, "rep_pen": 1.3,
+            "no_repeat": 3, "len_pen": 1.2, "cov_pen": 0.3 # Maximum quality
+        }
+    }
+
+    gpu_tier_cfg = {
+        "low": {
+            "compute_type": "int8_float16", "beam": 1, "patience": 1.0, "rep_pen": 1.0,
+            "len_pen": 0.6, "cov_pen": 0.0
+        },
+        "middle": {
+            "compute_type": "int8_float16", "beam": 3, "patience": 1.0, "rep_pen": 1.1,
+            "len_pen": 0.8, "cov_pen": 0.1
+        },
+        "high": {
+            "compute_type": "float16", "beam": 5, "patience": 1.2, "rep_pen": 1.1,
+            "len_pen": 1.0, "cov_pen": 0.2
+        },
+        "extreme": {
+            "compute_type": "float16", "beam": 10, "patience": 2.0, "rep_pen": 1.2,
+            "no_repeat": 3, "len_pen": 1.2, "cov_pen": 0.3
+        }
+    }
+
+    if device == "cuda":
+        return gpu_tier_cfg.get(tier, gpu_tier_cfg["middle"])
+    return cpu_tier_cfg.get(tier, cpu_tier_cfg["middle"])
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, help="Path to the model directory")
@@ -184,24 +228,7 @@ def main():
     manager.log_info(f"Python Version: {sys.version}")
     manager.log_info(f"Current Working Dir: {os.getcwd()}")
 
-    # Check for CUDA availability if requested
-    if args.device == "cuda":
-        try:
-            import ctranslate2
-            if ctranslate2.get_cuda_device_count() == 0:
-                manager.log_error("CUDA requested but no GPU found. Falling back to CPU.")
-                args.device = "cpu"
-        except Exception as e:
-            manager.log_error(f"CUDA Library Error: {e}. Falling back to CPU.")
-            args.device = "cpu"
-
-    tier_cfg = {
-        "low": {"device": "cpu", "compute_type": "int8", "beam": 1, "patience": 1.0, "rep_pen": 1.0},
-        "middle": {"device": "cuda", "compute_type": "int8_float16", "beam": 5, "patience": 1.0, "rep_pen": 1.1},
-        "high": {"device": "cuda", "compute_type": "int8_float16", "beam": 10, "patience": 2.0, "rep_pen": 1.1},
-        "extreme": {"device": "cpu", "compute_type": "float16", "beam": 10, "patience": 2.0, "rep_pen": 1.3, "no_repeat": 3}
-    }
-    cfg = tier_cfg[args.tier]
+    cfg = get_tier_config(args.device, args.tier)
 
     try:
         model_files = ["model.bin", "config.json", "shared_vocabulary.txt", "tokenizer.model"]
@@ -210,10 +237,10 @@ def main():
             if not os.path.exists(f_path):
                 manager.log_error(f"Missing critical model file: {f}")
 
-        translator = ctranslate2.Translator(args.model, device=cfg["device"], compute_type=cfg["compute_type"], inter_threads=1, intra_threads=4)
+        translator = ctranslate2.Translator(args.model, device=args.device, compute_type=cfg["compute_type"], inter_threads=1, intra_threads=4 if args.device == "cpu" else 1)
         sp = spm.SentencePieceProcessor(model_file=os.path.join(args.model, "tokenizer.model"))
         manager.log_info(
-            f"Resonance Stream AI v{args.version} Started with Tier: {args.tier.upper()} | {cfg["device"].upper()} | {cfg["compute_type"]}"
+            f"Resonance Stream AI v{args.version} Started with {args.device.upper()} | {args.tier.upper()} | {cfg["compute_type"]} | beam {cfg["beam"]}"
         )
         while True:
             line = sys.stdin.readline()
@@ -265,6 +292,8 @@ def main():
                             patience=cfg["patience"],
                             repetition_penalty=cfg["rep_pen"],
                             no_repeat_ngram_size=cfg.get("no_repeat", 0),
+                            length_penalty=cfg.get("len_pen", 1.0),   # Higher values = longer, more natural output
+                            coverage_penalty=cfg.get("cov_pen", 0.0), # Higher values = translates every word
                             max_batch_size=1,
                             batch_type="tokens"
                         )

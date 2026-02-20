@@ -1052,45 +1052,100 @@ pub fn App() -> impl IntoView {
                         // Content (Cleaned up)
                         <div class="settings-content">
                             <div class="setting-group">
-                                <h3>"Performance Tier"</h3>
-                                <div class="tier-select">
-                                    {vec!["low", "middle", "high", "extreme"].into_iter().map(|t| {
-                                        let t_val = t.to_string();
-                                        let t_val_tier = t.to_string();
-                                        view! {
+                                <h3>"AI Translation Features"</h3>
+                                <div class="toggle-row">
+                                    <span class="toggle-label">"실시간 번역 기능 사용"</span>
+                                    <input type="checkbox"
+                                        prop:checked=move || use_translation.get()
+                                        on:change=move |ev| {
+                                            let checked = event_target_checked(&ev);
+                                            set_use_translation.set(checked);
+                                            save_config_action.dispatch(()); // Persist choice
+
+                                            if checked {
+                                                add_system_log("info", "Settings", "번역 기능이 활성화되었습니다. 엔진을 시작합니다.");
+                                                spawn_local(async move {
+                                                    let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                                                });
+                                            } else {
+                                                add_system_log("warn", "Settings", "번역 기능이 비활성화되었습니다. (재시작 권장)");
+                                                set_restart_required.set(true);
+                                            }
+                                        }
+                                    />
+                                </div>
+
+                                <Show when=move || use_translation.get()>
+                                    <div class="setting-row">
+                                        <span class="toggle-label">"연산 장치 (Compute Mode)"</span>
+                                        <div class="radio-group-compact">
                                             <label class="radio-row">
-                                                <input type="radio" name="tier"
-                                                    checked=move || tier.get() == t_val
+                                                <input type="radio" name="mode-settings" value="cpu"
+                                                    checked=move || compute_mode.get() == "cpu"
                                                     on:change=move |_| {
-                                                        set_tier.set(t_val_tier.clone());
-                                                        save_config_action.dispatch(()); // Persist choice
-
-                                                        let msg = format!(
-                                                            "성능 티어가 '{}'(으)로 변경되었습니다.\n새로운 설정을 적용하려면 앱을 재시작해야 합니다.\n\n지금 바로 새로고침할까요?",
-                                                            t_val_tier.to_uppercase()
-                                                        );
-
-                                                        if window().confirm_with_message(&msg).unwrap_or(false) {
-                                                            let _ = window().location().reload(); // Immediate refresh
-                                                        } else {
-                                                            // Log a warning in Korean in the System tab
-                                                            spawn_local(async move {
-                                                                let _ = invoke("inject_system_message", serde_wasm_bindgen::to_value(&serde_json::json!({
-                                                                    "level": "warn",
-                                                                    "source": "Settings",
-                                                                    "message": "새 성능 설정은 앱을 재시작한 후에 적용됩니다."
-                                                                })).unwrap()).await;
-                                                            });
-                                                            set_restart_required.set(true); // Show a persistent warning
-                                                        }
+                                                        set_compute_mode.set("cpu".into());
+                                                        save_config_action.dispatch(());
+                                                        add_system_log("warn", "Settings", "CPU 모드로 설정되었습니다. 재시작 후 적용됩니다.");
+                                                        set_restart_required.set(true);
                                                     }
                                                 />
-                                                <span class:tier-extreme=move || t == "extreme">{t.to_uppercase()}</span>
+                                                <span>"CPU"</span>
                                             </label>
-                                        }
-                                    }).collect_view()}
-                                </div>
-                                <p class="hint">"High uses more VRAM but has better accuracy."</p>
+                                            <label class="radio-row">
+                                                <input type="radio" name="mode-settings" value="cuda"
+                                                    checked=move || compute_mode.get() == "cuda"
+                                                    on:change=move |_| {
+                                                        set_compute_mode.set("cuda".into());
+                                                        save_config_action.dispatch(());
+                                                        add_system_log("warn", "Settings", "GPU 모드로 설정되었습니다. 재시작 후 적용됩니다.");
+                                                        set_restart_required.set(true);
+                                                    }
+                                                />
+                                                <span>"GPU"</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <p class="hint">"GPU 사용을 위해서는 NVIDIA 그래픽카드 + CUDA Toolkit 이 필요합니다. 설치되어있지 않다면 CPU 사용을 추천합니다."</p>
+                                    <div class="tier-select">
+                                        <span class="toggle-label">"성능"</span>
+                                        {vec!["low", "middle", "high", "extreme"].into_iter().map(|t| {
+                                            let t_val = t.to_string();
+                                            let t_val_tier = t.to_string();
+                                            view! {
+                                                <label class="radio-row">
+                                                    <input type="radio" name="tier"
+                                                        checked=move || tier.get() == t_val
+                                                        on:change=move |_| {
+                                                            set_tier.set(t_val_tier.clone());
+                                                            save_config_action.dispatch(()); // Persist choice
+
+                                                            let msg = format!(
+                                                                "성능 티어가 '{}'(으)로 변경되었습니다.\n새로운 설정을 적용하려면 앱을 재시작해야 합니다.\n\n지금 바로 새로고침할까요?",
+                                                                t_val_tier.to_uppercase()
+                                                            );
+
+                                                            if window().confirm_with_message(&msg).unwrap_or(false) {
+                                                                let _ = window().location().reload(); // Immediate refresh
+                                                            } else {
+                                                                // Log a warning in Korean in the System tab
+                                                                spawn_local(async move {
+                                                                    let _ = invoke("inject_system_message", serde_wasm_bindgen::to_value(&serde_json::json!({
+                                                                        "level": "warn",
+                                                                        "source": "Settings",
+                                                                        "message": "새 성능 설정은 앱을 재시작한 후에 적용됩니다."
+                                                                    })).unwrap()).await;
+                                                                });
+                                                                set_restart_required.set(true); // Show a persistent warning
+                                                            }
+                                                        }
+                                                    />
+                                                    <span class:tier-extreme=move || t == "extreme">{t.to_uppercase()}</span>
+                                                </label>
+                                            }
+                                        }).collect_view()}
+                                    </div>
+                                    <p class="hint">"번역 성능이 좋아지지만 연산 시간이 오래걸리고 자원을 더 많이 소모합니다"</p>
+                                </Show>
                                 <h3>"Overlay Settings"</h3>
                                 <div class="setting-row">
                                     <span>"Background Opacity"</span>
@@ -1923,6 +1978,10 @@ pub fn App() -> impl IntoView {
                     accent-color: var(--accent);
                     cursor: pointer;
                     width: 120px;
+                }
+
+                .hint {
+                    font-size: 0.75rem;
                 }
 
                 .opacity-value {

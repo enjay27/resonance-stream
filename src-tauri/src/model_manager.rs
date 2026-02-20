@@ -99,11 +99,12 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
     fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
 
     let client = reqwest::Client::new();
-    let total_files = manifest.files.len() as f32;
 
     for (idx, file_info) in manifest.files.iter().enumerate() {
         let dest_path = model_dir.join(&file_info.name);
-        if dest_path.exists() { continue; } // Basic resumption
+        if dest_path.exists() {
+            continue;
+        }
 
         let res = client.get(&file_info.url).send().await.map_err(|e| e.to_string())?;
         let total_size = res.content_length().unwrap_or(0);
@@ -117,18 +118,23 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
             file.write_all(&chunk).map_err(|e| e.to_string())?;
             downloaded += chunk.len() as u64;
 
-            if total_size > 0 {
-                let file_percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
-                let total_percent = (((idx as f32 / total_files) * 100.0) + (file_percent as f32 / total_files)) as u8;
-
+            if file_info.name == "model.bin" && total_size > 0 {
+                let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
                 let _ = app.emit("download-progress", ProgressPayload {
                     current_file: file_info.name.clone(),
-                    percent: file_percent,
-                    total_percent,
+                    percent, // Local file percent
+                    total_percent: percent, // We use this as the primary UI driver
                 });
             }
         }
     }
+
+    let _ = app.emit("download-progress", ProgressPayload {
+        current_file: "완료".into(),
+        percent: 100,
+        total_percent: 100,
+    });
+
     Ok(())
 }
 

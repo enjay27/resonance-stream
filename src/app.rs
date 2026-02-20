@@ -497,6 +497,7 @@ pub fn App() -> impl IntoView {
                     if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
                         if status.exists {
                             let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                            set_status_text.set("AI Engine Starting...".to_string());
                         }
                     }
                 }
@@ -514,7 +515,7 @@ pub fn App() -> impl IntoView {
             let closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(wrapper) = serde_wasm_bindgen::from_value::<TauriEvent>(event_obj) {
                     set_progress.set(wrapper.payload.total_percent);
-                    set_status_text.set(format!("{}", wrapper.payload.current_file));
+                    set_status_text.set(format!("Downloading AI Model {}%", wrapper.payload.total_percent));
                 }
             }) as Box<dyn FnMut(JsValue)>);
             let _ = listen("download-progress", &closure).await;
@@ -591,6 +592,7 @@ pub fn App() -> impl IntoView {
                                             add_system_log("info", "UI", "Starting AI translation engine...");
                                             let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
                                             set_model_ready.set(true);
+                                            set_status_text.set("AI Engine Starting...".to_string());
                                         } else {
                                             add_system_log("warn", "Sidecar", "Model missing. AI is disabled.");
                                             set_model_ready.set(false);
@@ -651,6 +653,11 @@ pub fn App() -> impl IntoView {
                 <div class="window-title" style="pointer-events: none;">
                     "Resonance Stream"
                 </div>
+
+                <div class="title-bar-status">
+                    {move || status_text.get()}
+                </div>
+
                 <div class="window-controls">
                     <Show when=move || use_translation.get()>
                         <div class="status-dot-container title-bar-version"
@@ -1079,6 +1086,7 @@ pub fn App() -> impl IntoView {
                                                                 // 2a. Model exists: Start the AI sidecar immediately
                                                                 add_system_log("info", "Settings", "번역 기능이 활성화되었습니다. 엔진을 시작합니다.");
                                                                 let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                                                                set_status_text.set("AI Engine Starting...".to_string());
                                                             } else {
                                                                 // 2b. Model missing: Forward to Download Page (Step 2)
                                                                 add_system_log("warn", "Settings", "AI 모델이 없습니다. 설치 마법사로 이동합니다.");
@@ -2073,6 +2081,24 @@ pub fn App() -> impl IntoView {
                     cursor: default;
                     position: relative;
                     border-bottom: 1px solid var(--border); /* Adapts to theme */
+                }
+
+                .title-bar-status {
+                    position: absolute;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    font-size: 0.75rem;
+                    font-weight: 700;
+                    color: var(--accent); /* Uses your forest green or neon accent */
+                    letter-spacing: 0.5px;
+                    pointer-events: none; /* Allows dragging through the text */
+                    white-space: nowrap;
+                    opacity: 0.8;
+                    text-transform: uppercase;
+                }
+
+                [data-theme='light'] .title-bar-status {
+                    color: var(--text-muted); /* Subtler gray for light mode */
                 }
 
                 .drag-handle {

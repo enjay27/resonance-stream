@@ -7,6 +7,7 @@ set VERSION=0.0.1
 set OUTPUT_DIR=dist
 set LIB_DIR=lib
 set TARGET_BIN_DIR=src-tauri\bin
+set BACKEND_SOURCE_DIR=src-tauri
 
 :: [1/5] Check & Install Dependencies (Automated)
 if not exist "%LIB_DIR%\npcap-sdk" (
@@ -29,17 +30,14 @@ pip install -r src-python\requirements.txt
 :: [3/5] Build Dependencies
 echo [3/5] Building Sidecar & Copying Drivers...
 
-:: Ensure the target binary folder exists
-if not exist "%TARGET_BIN_DIR%" mkdir "%TARGET_BIN_DIR%"
-
 :: A. Build Python Sidecar
 :: Note: Changed output to "%TARGET_BIN_DIR%" to match where WinDivert goes
 PyInstaller --noconfirm --distpath "%TARGET_BIN_DIR%" --clean translator.spec
 
 :: B. Copy WinDivert Drivers (From local lib to target bin)
 echo Copying WinDivert drivers...
-copy /Y "%LIB_DIR%\WinDivert\x64\WinDivert.dll" "%TARGET_BIN_DIR%\" >nul
-copy /Y "%LIB_DIR%\WinDivert\x64\WinDivert64.sys" "%TARGET_BIN_DIR%\" >nul
+copy /Y "%LIB_DIR%\WinDivert\x64\WinDivert.dll" "%BACKEND_SOURCE_DIR%\" >nul
+copy /Y "%LIB_DIR%\WinDivert\x64\WinDivert64.sys" "%BACKEND_SOURCE_DIR%\" >nul
 
 :: [4/5] Build Tauri Installer
 echo [4/5] Building Windows Installer...

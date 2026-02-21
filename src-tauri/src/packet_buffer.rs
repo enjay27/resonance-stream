@@ -38,51 +38,40 @@ impl PacketBuffer {
     }
 
     pub fn next(&mut self) -> Option<Vec<u8>> {
-        // 1. Find the start of a Chat Packet (0x0A)
-        if let Some(start_idx) = self.buffer.iter().position(|&b| b == 0x0A) {
-            // If there's garbage before 0x0A, drop it (Sliding Window Recovery)
-            if start_idx > 0 {
-                self.buffer.drain(0..start_idx);
-            }
-        } else {
-            // No 0x0A found. Wait for more data.
-            // [CHANGED] Increased safety limit from 8192 to 65536
-            if self.buffer.len() > 65536 {
+        while self.buffer.len() >= 3 {
+            // 1. Find the next possible start (0x0A)
+            let start_pos = self.buffer.iter().position(|&b| b == 0x0A);
+
+            if let Some(idx) = start_pos {
+                // Drop any garbage before the 0x0A
+                if idx > 0 { self.buffer.drain(0..idx); }
+
+                // 2. Read the Varint length
+                let (msg_len, varint_size) = read_varint_safe(&self.buffer[1..]);
+                if varint_size == 0 { return None; } // Need more data
+
+                let total_len = 1 + varint_size + msg_len as usize;
+
+                // 3. SANITY CHECK:
+                // If the buffer length is 471 but the packet claims to be 32,000,
+                // the 0x0A was a 'fake' one from the header.
+                if total_len > 65535 || (total_len > self.buffer.len() && self.buffer.len() > 1024) {
+                    self.buffer.drain(0..1); // Discard fake 0x0A and retry
+                    continue;
+                }
+
+                // 4. Extract full packet if available
+                if self.buffer.len() >= total_len {
+                    let packet: Vec<u8> = self.buffer.drain(0..total_len).collect();
+                    self.last_success_ms = get_timestamp();
+                    return Some(packet);
+                }
+                return None; // Wait for TCP segmentation to complete
+            } else {
                 self.buffer.clear();
+                return None;
             }
-            return None;
         }
-
-        // 2. We need at least 2 bytes to read the Tag + Varint Length
-        if self.buffer.len() < 2 { return None; }
-
-        // 3. Read the Varint length right after the 0x0A
-        let (msg_len, varint_size) = read_varint_safe(&self.buffer[1..]);
-
-        // If varint_size is 0, it means the Varint was split across TCP packets
-        if varint_size == 0 { return None; }
-
-        // Total packet length = 1 byte (0x0A) + Varint size + the actual message length
-        let total_packet_len = 1 + varint_size + msg_len as usize;
-
-        // Sanity Check
-        if total_packet_len > 65535 {
-            self.buffer.drain(0..1); // Pop invalid 0x0A and retry
-            return None;
-        }
-
-        // 4. Do we have the full assembled packet?
-        if self.buffer.len() >= total_packet_len {
-            // Extract the full Protobuf stream
-            let packet: Vec<u8> = self.buffer.drain(0..total_packet_len).collect();
-
-            // [NEW] SUCCESS! Update the watchdog timestamp.
-            self.last_success_ms = get_timestamp();
-
-            return Some(packet);
-        }
-
-        // Not enough data yet. TCP segmentation happened.
         None
     }
 }
@@ -95,7 +84,7 @@ fn get_timestamp() -> u64 {
 }
 
 /// A safe Varint reader that returns (0,0) if the buffer ends before the Varint is finished
-fn read_varint_safe(data: &[u8]) -> (u64, usize) {
+pub(crate) fn read_varint_safe(data: &[u8]) -> (u64, usize) {
     let mut value = 0u64;
     let mut shift = 0;
     let mut pos = 0;

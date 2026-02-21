@@ -1,14 +1,16 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+use byteorder::{LittleEndian, ReadBytesExt};
 use indexmap::IndexMap;
+use lazy_static::lazy_static;
 use windivert::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 use crate::{inject_system_message, store_and_emit};
-use crate::packet_buffer::PacketBuffer;
+use crate::packet_buffer::{PacketBuffer, read_varint_safe};
 
 // --- DATA STRUCTURES ---
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -23,6 +25,7 @@ pub struct ChatPacket {
     pub status_flag: u64,
     pub level: u64,
     pub timestamp: u64,
+    pub sequence_id: u64,
     pub message: String,
     #[serde(default)]
     pub translated: Option<String>,
@@ -55,6 +58,66 @@ pub struct AppState {
     pub system_history: Mutex<VecDeque<SystemMessage>>,
     pub next_pid: AtomicU64,
     pub nickname_cache: Mutex<HashMap<String, String>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityStatePacket {
+    pub pid: u64,
+    pub entity_id: u64,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub level: u64,      // Field 18
+    pub mount_id: u64,   // Field 25
+    pub hp_percent: u64, // Field 15
+    pub state_id: u64,   // Field 13
+    pub anim_speed: f64,   // Field 20 (Wire 1/4)
+    pub target_id: u64,    // Field 34
+    pub zone_id: u64,      // Field 35
+    pub status_code: u64, // Extracted from Field 10/11 logic
+    pub timestamp: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ZoneRecruitment {
+    pub pid: u64,
+    pub nickname: String,
+    pub level: u64,
+    pub message: String,      // The recruitment text
+    pub class_id: u64,
+    pub timestamp: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LobbyRecruitment {
+    pub leader_nickname: String,
+    pub description: String,
+    pub member_count: u32,
+    pub max_members: u32,
+    pub level_requirement: u32,
+    pub party_id: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PartyLobbySnapshot {
+    pub total_parties: u32,
+    pub entries: Vec<LobbyRecruitment>,
+    pub timestamp: u64,
+}
+
+lazy_static! {
+    // Tracks already seen fields to prevent log flooding
+    static ref DISCOVERED_FIELDS: Mutex<HashSet<u32>> = Mutex::new(HashSet::from([
+        1, 2, 3, 7, 10, 11, 13, 15, 18, 20, 25, 34, 35
+    ]));
+
+    static ref DISCOVERED_FIELDS_5003: Mutex<HashSet<u32>> = Mutex::new(HashSet::from([
+        0, 1, 2, 3, 4, 5, 6, 7, 12, 16, 17, 21, 22, 23, 25, 26, 29, 31
+    ]));
 }
 
 // --- GLOBAL STATE ---
@@ -188,34 +251,39 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
                     if config.is_debug && !streams.contains_key(&stream_key) {
                         let src_ip = format!("{}.{}.{}.{}", stream_key[0], stream_key[1], stream_key[2], stream_key[3]);
                         let src_port = u16::from_be_bytes([stream_key[4], stream_key[5]]);
-                        inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", format!("New Stream Detected: {}:{}", src_ip, src_port));
+                        // inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", format!("New Stream Detected: {}:{}", src_ip, src_port));
                     }
+
+                    let port = u16::from_be_bytes([stream_key[4], stream_key[5]]);
 
                     // 2. Extract Payload
                     if let Some(payload) = extract_tcp_payload(&*raw_data) {
+                        if let Some(game_data) = strip_application_header(payload, port) {
+                            let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
+                            p_buf.add(game_data);
 
-                        // Skip empty ACKs
-                        // 1. Minimum Header Validation (4 bytes Length + 2 bytes OpCode)
-                        if payload.len() < 6 { continue; }
-
-                        // Extract the Type/Sequence field
-                        let type_field = (payload[4] as u16) << 8 | (payload[5] as u16);
-
-                        let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
-
-                        // BLACKLIST: Ignore only known non-chat high-traffic packets
-                        // 0x0004 = Heartbeat
-                        // 0x8002 = Massive Character Sync
-                        if type_field == 0x0004 || type_field == 0x8002 {
-                            continue;
-                        }
-
-                        // Allow all other types (0x0001, 0x0002, 0x0003...)
-                        p_buf.add(payload);
-
-                        while let Some(full_packet) = p_buf.next() {
-                            if let Some(chat) = parse_star_resonance(&full_packet) {
-                                store_and_emit(&app_handle, chat);
+                            while let Some(full_packet) = p_buf.next() {
+                                if port == 10250 {
+                                    if let Some(state) = parse_entity_state(&full_packet, &app_handle) {
+                                        let _ = app_handle.emit("entity-state-event", state);
+                                    }
+                                } else if port == 5003 {
+                                    // Try Chat first, then Party, then Broadcasts
+                                    println!("payload {:?}", full_packet);
+                                    if let Some(chat) = parse_port_5003(&full_packet, &app) {
+                                        store_and_emit(&app_handle, chat);
+                                    }
+                                    if let Some(lobby) = parse_party_lobby(&full_packet, &app_handle) {
+                                        println!("parse party lobby {:?}", lobby);
+                                        let _ = app_handle.emit("party-lobby-update", lobby.clone());
+                                        crate::inject_system_message(
+                                            &app_handle,
+                                            SystemLogLevel::Info,
+                                            "Lobby",
+                                            format!("Lobby Refresh: {} parties found.", lobby.total_parties)
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
@@ -229,8 +297,177 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
 // ==========================================
 // PARSING & UTILITIES (Keep your existing functions below)
 // ==========================================
+pub fn parse_entity_state(data: &[u8], app: &AppHandle) -> Option<EntityStatePacket> {
+    if data.len() < 5 || data[0] != 0x0A { return None; }
 
-pub fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
+    // Fast-fail for synchronization stubs
+    if data.ends_with(&[26, 0]) && data.len() < 30 { return None; }
+
+    let mut state = EntityStatePacket::default();
+    let (total_len, header_read) = read_varint(&data[1..]);
+    let mut i = 1 + header_read;
+    let safe_end = (i + total_len as usize).min(data.len());
+
+    while i < safe_end {
+        let tag = data[i];
+        let wire_type = tag & 0x07;
+        let field_num = tag >> 3;
+        i += 1;
+
+        match field_num {
+            1 => { // Entity ID
+                let (val, read) = read_varint(&data[i..safe_end]);
+                state.entity_id = val;
+                i += read;
+            }
+            2 => { // Position Container
+                let (len, read) = read_varint(&data[i..safe_end]);
+                i += read;
+                let block_end = (i + len as usize).min(safe_end);
+                let mut sub_i = i;
+                while sub_i < block_end {
+                    let sub_tag = data[sub_i];
+                    sub_i += 1;
+                    if (sub_tag & 0x07) == 5 { // 32-bit Float
+                        if let Ok(v) = (&data[sub_i..]).read_f32::<LittleEndian>() {
+                            match sub_tag >> 3 { 1 => state.x = v, 2 => state.y = v, 3 => state.z = v, _ => {} }
+                        }
+                        sub_i += 4;
+                    } else { sub_i += skip_field(sub_tag & 0x07, &data[sub_i..block_end]); }
+                }
+                i = block_end;
+            }
+            20 => { // Animation Speed / Scale (Fixed64)
+                if let Ok(v) = (&data[i..safe_end]).read_f64::<LittleEndian>() { state.anim_speed = v; }
+                i += 8;
+            }
+            7 | 10 | 11 => { // Nested Metadata Containers
+                let (len, read) = read_varint(&data[i..safe_end]);
+                i += read;
+                // Currently skipping internal structure but silencing the warning
+                i = (i + len as usize).min(safe_end);
+            }
+            13 | 15 | 18 | 25 | 34 | 35 => { // Varint Metadata
+                let (val, read) = read_varint(&data[i..safe_end]);
+                match field_num {
+                    13 => state.state_id = val,
+                    15 => state.hp_percent = val,
+                    18 => state.level = val,
+                    25 => state.mount_id = val,
+                    34 => state.target_id = val,
+                    35 => state.zone_id = val,
+                    _ => {}
+                }
+                i += read;
+            }
+            unknown => {
+                log_missing_field(app, unknown as u32, wire_type, data);
+                i += skip_field(wire_type, &data[i..safe_end]);
+            }
+        }
+    }
+    state.timestamp = chrono::Utc::now().timestamp_millis() as u64;
+    Some(state)
+}
+
+fn strip_application_header(payload: &[u8], port: u16) -> Option<&[u8]> {
+    if payload.len() < 5 { return None; }
+
+    return match port {
+        10250 => {
+            if payload.len() > 32 && payload[32] == 0x0A { Some(&payload[32..]) } else { None }
+        },
+        5003 => {
+            // Search for the 0x0A that correctly describes the rest of the payload
+            for i in 0..payload.len().saturating_sub(3) {
+                if payload[i] == 0x0A {
+                    let (msg_len, varint_size) = read_varint_safe(&payload[i+1..]);
+                    // If this 0x0A + its length exactly matches the end of the TCP packet, it's real
+                    if varint_size > 0 && (i + 1 + varint_size + msg_len as usize) == payload.len() {
+                        return Some(&payload[i..]);
+                    }
+                }
+            }
+            None
+        },
+        _ => if payload[0] == 0x0A { Some(payload) } else { None }
+    }
+}
+
+/// Logs a warning with full packet data when a new protocol field is found
+fn log_missing_field(app: &tauri::AppHandle, field_num: u32, wire_type: u8, data: &[u8]) {
+    let mut discovered = DISCOVERED_FIELDS.lock().unwrap();
+    if discovered.insert(field_num) {
+        crate::inject_system_message(
+            app,
+            SystemLogLevel::Warning,
+            "Discovery",
+            format!("New Field #{} (Wire {}). Packet: {:?}", field_num, wire_type, data)
+        );
+    }
+}
+
+fn log_missing_field_5003(app: &AppHandle, field_num: u32, wire_type: u8, data: &[u8]) {
+    let mut discovered = DISCOVERED_FIELDS_5003.lock().unwrap();
+    if discovered.insert(field_num) {
+        inject_system_message(
+            app,
+            SystemLogLevel::Warning,
+            "Discovery-5003",
+            format!("New Chat/Party Field #{} (Wire {}). Packet: {:?}", field_num, wire_type, data)
+        );
+    }
+}
+
+pub fn parse_zone_broadcast(data: &[u8]) -> Option<ZoneRecruitment> {
+    if data.len() < 15 || data[0] != 0x0A { return None; }
+
+    let mut recruit = ZoneRecruitment::default();
+    let (total_len, header_read) = read_varint(&data[1..]);
+    let mut i = 1 + header_read;
+    let safe_end = (i + total_len as usize).min(data.len());
+
+    while i < safe_end {
+        let tag = data[i];
+        let wire_type = tag & 0x07;
+        let field_num = tag >> 3;
+        i += 1;
+
+        match field_num {
+            2 => { // Player Info Container (Nickname/Level)
+                let (len, read) = read_varint(&data[i..safe_end]);
+                i += read;
+                let block_end = (i + len as usize).min(safe_end);
+                // Reuse existing profile parser
+                let mut temp_chat = ChatPacket::default();
+                parse_user_container(&data[i..block_end], &mut temp_chat);
+                recruit.nickname = temp_chat.nickname;
+                recruit.level = temp_chat.level;
+                recruit.class_id = temp_chat.class_id;
+                i = block_end;
+            }
+            4 | 5 => { // System Broadcast Fields (Recruitment Text)
+                let (len, read) = read_varint(&data[i..safe_end]);
+                i += read;
+                let block_end = (i + len as usize).min(safe_end);
+                if let Some(msg_bytes) = data.get(i..block_end) {
+                    recruit.message = String::from_utf8_lossy(msg_bytes).into_owned();
+                }
+                i = block_end;
+            }
+            _ => i += skip_field(wire_type, &data[i..safe_end]),
+        }
+    }
+
+    if !recruit.message.is_empty() {
+        recruit.timestamp = chrono::Utc::now().timestamp_millis() as u64;
+        Some(recruit)
+    } else {
+        None
+    }
+}
+
+pub fn parse_port_5003(data: &[u8], app: &AppHandle) -> Option<ChatPacket> {
     if data.len() < 3 || data[0] != 0x0A { return None; }
 
     let mut chat = ChatPacket::default();
@@ -261,39 +498,94 @@ pub fn parse_star_resonance(data: &[u8]) -> Option<ChatPacket> {
                 }
                 i = block_end;
             }
+            3 => { // [NEW] Top-level Message or Nested Container
+                let (len, read) = read_varint(&data[i..safe_end]);
+                i += read;
+                let block_end = (i + len as usize).min(safe_end);
+                if let Some(sub_data) = data.get(i..block_end) {
+                    // Check if this container itself has a string at tag 0x1A
+                    if let Some(msg) = find_string_by_tag(sub_data, 0x1A) {
+                        chat.message = msg;
+                    }
+                }
+                i = block_end;
+            }
             4 => { // Broadcast/Recruitment Block
                 let (len, read) = read_varint(&data[i..safe_end]);
                 i += read;
                 let block_end = (i + len as usize).min(safe_end);
-
                 if let Some(sub_data) = data.get(i..block_end) {
-                    // Message text is always Tag 0x1A (Field 3)
                     if let Some(msg) = find_string_by_tag(sub_data, 0x1A) {
                         chat.message = msg;
-
-                        // Extract specific channel (Tag 0x10 / Field 2)
-                        // Your packet showed value 3 (PARTY)
                         if let Some(chan_id) = find_int_by_tag(sub_data, 0x10) {
                             chat.channel = match chan_id {
                                 3 => "PARTY".into(), 4 => "GUILD".into(), _ => chat.channel
                             };
                         }
-
-                        // Label as recruitment if no user profile was found
-                        // Recruit will be released in the future release
-                        // if chat.uid == 0 {
-                        //     chat.nickname = format!("{}_RECRUIT", chat.channel);
-                        //     chat.uid = 999; // Placeholder to pass the final check
-                        // }
                     }
                 }
                 i = block_end;
             }
-            _ => i += skip_field(wire_type, &data[i..safe_end]),
+            22 => {
+                // Field 22 (Wire 0): Varint
+                let (_, read) = read_varint(&data[i..safe_end]);
+                i += read;
+            }
+            0 | 5 | 6 | 7 | 12 | 16 | 17 | 21 | 23 | 25 | 26 | 29 | 31 => {
+                i += skip_field(wire_type, &data[i..safe_end]);
+            }
+            unknown_field => {
+                log_missing_field_5003(app, unknown_field as u32, wire_type, data);
+                i += skip_field(wire_type, &data[i..safe_end]);
+            }
         }
     }
 
     if !chat.message.is_empty() && chat.uid > 0 { Some(chat) } else { None }
+}
+
+pub fn parse_party_lobby(data: &[u8], app: &tauri::AppHandle) -> Option<PartyLobbySnapshot> {
+    // If the data is compressed, standard Protobuf parsing will fail here.
+    // However, if it's just a long list of messages, we can iterate through them.
+    if data.len() < 100 || data[0] != 0x0A { return None; }
+
+    let mut snapshot = PartyLobbySnapshot::default();
+    let (total_len, header_read) = read_varint_safe(&data[1..]);
+    let mut i = 1 + header_read;
+    let safe_end = (i + total_len as usize).min(data.len());
+
+    while i < safe_end {
+        let tag = data[i];
+        let field_num = tag >> 3;
+        i += 1;
+
+        match field_num {
+            4 => { // [REPEATED] The Recruitment Entry Block
+                let (len, read) = read_varint_safe(&data[i..safe_end]);
+                i += read;
+                let block_end = (i + len as usize).min(safe_end);
+
+                if let Some(sub_data) = data.get(i..block_end) {
+                    let mut entry = LobbyRecruitment::default();
+                    // Extract fields like description (Tag 0x1A) and counts
+                    if let Some(msg) = find_string_by_tag(sub_data, 0x1A) {
+                        entry.description = msg;
+                        snapshot.entries.push(entry);
+                    }
+                }
+                i = block_end;
+            }
+            _ => i += skip_field(tag & 0x07, &data[i..safe_end]),
+        }
+    }
+
+    if !snapshot.entries.is_empty() {
+        snapshot.total_parties = snapshot.entries.len() as u32;
+        snapshot.timestamp = chrono::Utc::now().timestamp_millis() as u64;
+        Some(snapshot)
+    } else {
+        None
+    }
 }
 
 fn find_int_by_tag(data: &[u8], target_tag: u8) -> Option<u64> {

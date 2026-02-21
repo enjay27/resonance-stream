@@ -38,8 +38,8 @@
       "bin/translator"
     ],
     "resources": [
-      "WinDivert.dll",
-      "WinDivert64.sys",
+      "bin/WinDivert.dll",
+      "bin/WinDivert64.sys",
       "resources/models.json"
     ]
   }

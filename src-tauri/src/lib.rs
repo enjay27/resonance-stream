@@ -1,14 +1,12 @@
+use crate::config::*;
 use crate::model_manager::*;
 use crate::python_translator::*;
 use crate::sniffer::*;
-use crate::config::*;
+use indexmap::IndexMap;
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
-use indexmap::IndexMap;
 use tauri::{Emitter, Manager};
-use windows::core::{HSTRING, PCWSTR};
-use windows::Win32::System::LibraryLoader::SetDllDirectoryW;
 
 mod model_manager;
 mod python_translator;
@@ -22,21 +20,6 @@ mod config;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            // 1. Resolve the absolute path to your bundled 'bin' folder
-            let resource_path = app.path().resource_dir()?
-                .join("bin");
-
-            // 2. Add this path to the DLL search order
-            if resource_path.exists() {
-                let path_str = resource_path.to_str().ok_or("Invalid path")?;
-                let path_hstring = HSTRING::from(path_str);
-
-                unsafe {
-                    // SetDllDirectoryW expects a PCWSTR
-                    let _ = SetDllDirectoryW(PCWSTR(path_hstring.as_ptr()));
-                }
-            }
-
             let handle = app.handle();
             inject_system_message(handle, SystemLogLevel::Info, "Backend", "Initializing Resonance Stream...");
 

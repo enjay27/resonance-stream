@@ -36,8 +36,8 @@ PyInstaller --noconfirm --distpath "%TARGET_BIN_DIR%" --clean translator.spec
 
 :: B. Copy WinDivert Drivers (From local lib to target bin)
 echo Copying WinDivert drivers...
-copy /Y "%LIB_DIR%\WinDivert\x64\WinDivert.dll" "%BACKEND_SOURCE_DIR%\" >nul
-copy /Y "%LIB_DIR%\WinDivert\x64\WinDivert64.sys" "%BACKEND_SOURCE_DIR%\" >nul
+copy /Y "%LIB_DIR%\WinDivert\x64\WinDivert.dll" "%TARGET_BIN_DIR%\" >nul
+copy /Y "%LIB_DIR%\WinDivert\x64\WinDivert64.sys" "%TARGET_BIN_DIR%\" >nul
 
 :: [4/5] Build Tauri Installer
 echo [4/5] Building Windows Installer...

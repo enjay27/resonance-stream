@@ -1,11 +1,9 @@
-use std::collections::VecDeque;
-use tauri::{AppHandle, Emitter, Manager, State, Window};
-use std::sync::Mutex;
+use crate::sniffer::{AppState, SystemLogLevel};
+use crate::{inject_system_message, model_manager};
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
-use crate::{inject_system_message, model_manager};
-use crate::sniffer::{AppState, ChatPacket, SystemLogLevel};
 
 // 1. Define State to hold the Channel
 

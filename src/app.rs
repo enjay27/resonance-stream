@@ -91,7 +91,8 @@ pub fn App() -> impl IntoView {
     let (wizard_step, set_wizard_step) = signal(0); // 0: Welcome, 1: Options, 2: Download
 
     let (is_translator_active, set_is_translator_active) = signal(false);
-    let (status_text, set_status_text) = signal("Initializing...".to_string());
+    let (is_sniffer_active, set_is_sniffer_active) = signal(false);
+    let (status_text, set_status_text) = signal("".to_string());
     let (model_ready, set_model_ready) = signal(false);
     let (downloading, set_downloading) = signal(false);
     let (progress, set_progress) = signal(0u8);
@@ -160,7 +161,19 @@ pub fn App() -> impl IntoView {
                     }
                 }
             }
-            // Poll every 3 seconds
+
+            if let Ok(res) = invoke("is_sniffer_active", JsValue::NULL).await {
+                if let Some(active) = res.as_bool() {
+                    set_is_sniffer_active.set(active);
+
+                    if !active && init_done.get_untracked() {
+                        add_system_log("Warning", "[WatchDog]", "Sniffer not running. Run Sniffer.");
+                        let _ = invoke("start_sniffer_command", JsValue::NULL).await;
+                    }
+                }
+            }
+
+            // Poll every 5 seconds
             gloo_timers::future::TimeoutFuture::new(5000).await;
         }
     });
@@ -488,6 +501,7 @@ pub fn App() -> impl IntoView {
         spawn_local(async move {
             add_system_log("info", "Sniffer", "Initializing packet capture...");
             setup_listeners();
+            set_is_sniffer_active.set(true);
             let _ = invoke("start_sniffer_command", JsValue::NULL).await;
 
             if use_translation.get_untracked() {
@@ -582,7 +596,7 @@ pub fn App() -> impl IntoView {
                                     set_system_log.set(vec.into_iter().map(|p| RwSignal::new(p)).collect());
                                 }
                             }
-
+                            set_is_sniffer_active.set(true);
                             let _ = invoke("start_sniffer_command", JsValue::NULL).await;
 
                             if config.use_translation {
@@ -659,6 +673,11 @@ pub fn App() -> impl IntoView {
                 </div>
 
                 <div class="window-controls">
+                    <div class="status-dot-container title-bar-version"
+                         class:online=move || is_sniffer_active.get()>
+                         <span class="pulse-dot"></span>
+                         <span>{move || if is_sniffer_active.get() { "SNIFFER" } else { "NO SNIFFER" }}</span>
+                    </div>
                     <Show when=move || use_translation.get()>
                         <div class="status-dot-container title-bar-version"
                              class:online=move || is_translator_active.get()>

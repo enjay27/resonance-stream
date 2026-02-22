@@ -18,6 +18,7 @@ pub struct AppConfig {
     pub show_system_tab: bool,
     pub is_debug: bool,
     pub tier: String,
+    pub archive_chat: bool,
 }
 
 impl Default for AppConfig {
@@ -36,6 +37,7 @@ impl Default for AppConfig {
             show_system_tab: false,
             is_debug: false,
             tier: "middle".to_string(),
+            archive_chat: false,
         }
     }
 }

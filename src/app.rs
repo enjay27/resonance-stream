@@ -23,17 +23,17 @@ extern "C" {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatPacket {
+pub struct ChatMessage {
     pub pid: u64,
     pub channel: String,
-    pub entity_id: u64,
-    pub uid: u64,
     pub nickname: String,
-    pub class_id: u64,
-    pub status_flag: u64,
-    pub level: u64,
-    pub timestamp: u64,
     pub message: String,
+    pub timestamp: u64,
+    pub uid: u64,
+    pub class_id: u64,
+    pub level: u64,
+    pub sequence_id: u64,
+    // --- Translation Support ---
     #[serde(default)]
     pub translated: Option<String>,
     #[serde(default)]
@@ -65,6 +65,7 @@ struct AppConfig {
     show_system_tab: bool,
     is_debug: bool,
     tier: String,
+    archive_chat: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -100,7 +101,7 @@ pub fn App() -> impl IntoView {
     let (active_tab, set_active_tab) = signal("전체".to_string());
     let (search_term, set_search_term) = signal("".to_string());
     let (name_cache, set_name_cache) = signal(std::collections::HashMap::<String, String>::new());
-    let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatPacket>>::new());
+    let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatMessage>>::new());
     let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
 
     let (is_system_at_bottom, set_system_at_bottom) = signal(true);
@@ -122,6 +123,7 @@ pub fn App() -> impl IntoView {
     let (is_at_bottom, set_is_at_bottom) = signal(true);
     let (unread_count, set_unread_count) = signal(0);
     let (active_menu_id, set_active_menu_id) = signal(None::<u64>);
+    let (archive_chat, set_archive_chat) = signal(false);
 
     // --- HELPERS ---
     let add_system_log = move |level: &str, source: &str, message: &str| {
@@ -205,6 +207,7 @@ pub fn App() -> impl IntoView {
             show_system_tab: show_system_tab.get_untracked(),
             is_debug: is_debug.get_untracked(),
             tier: tier.get_untracked(),
+            archive_chat: archive_chat.get_untracked(),
         };
 
         async move {
@@ -392,8 +395,13 @@ pub fn App() -> impl IntoView {
 
             // LISTENER 1: Game Packets
             let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+                log!("Packet {:?}", &event_obj);
+
                 if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    if let Ok(mut packet) = serde_json::from_value::<ChatPacket>(ev["payload"].clone()) {
+                    let payload_json = ev["payload"].clone();
+
+                    if let Ok(mut packet) = serde_json::from_value::<ChatMessage>(payload_json) {
+                        log!("payload {:?}", packet);
 
                         // [FIX] Ignore messages belonging to the SYSTEM channel in game tabs
                         if packet.channel == "SYSTEM" { return; }
@@ -461,9 +469,6 @@ pub fn App() -> impl IntoView {
                                 })).unwrap()).await;
                             });
                         }
-
-                        // Store in UI log
-                        set_chat_log.update(|log| { log.insert(pid, RwSignal::new(packet.clone())); });
                     }
                 }
             }) as Box<dyn FnMut(JsValue)>);
@@ -572,6 +577,7 @@ pub fn App() -> impl IntoView {
                         set_show_system_tab.set(config.show_system_tab);
                         set_is_debug.set(config.is_debug);
                         set_tier.set(config.tier);
+                        set_archive_chat.set(config.archive_chat);
 
                         // 2. If the user hasn't finished the wizard, stop here
                         if config.init_done {
@@ -581,8 +587,8 @@ pub fn App() -> impl IntoView {
 
                             // Hydrate GAME History
                             if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
-                                if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatPacket>>(res) {
-                                    let sanitized_vec: Vec<(u64, RwSignal<ChatPacket>)> = vec.into_iter().map(|mut p| {
+                                if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatMessage>>(res) {
+                                    let sanitized_vec: Vec<(u64, RwSignal<ChatMessage>)> = vec.into_iter().map(|mut p| {
                                         if p.message.starts_with("emojiPic=") { p.message = "스티커 전송".to_string(); } else if p.message.contains("<sprite=") { p.message = "이모지 전송".to_string(); }
                                         (p.pid, RwSignal::new(p))
                                     }).collect();
@@ -1293,6 +1299,22 @@ pub fn App() -> impl IntoView {
                                         }
                                     />
                                 </div>
+                                <Show when=move || is_debug.get()>
+                                    <h3>"Data Factory (Fine-Tuning)"</h3>
+                                    <div class="toggle-row">
+                                        <span class="toggle-label">"채팅 로그 및 번역본 저장"</span>
+                                        <input type="checkbox"
+                                            prop:checked=move || archive_chat.get() // Assuming you added this signal
+                                            on:change=move |ev| {
+                                                let checked = event_target_checked(&ev);
+                                                log!("checked : {:?}", checked);
+                                                set_archive_chat.set(checked);
+                                                // This will trigger the "translate_and_save" cmd in the backend
+                                            }
+                                        />
+                                    </div>
+                                    <p class="hint">"활성화 시 모든 번역 결과가 LoRA 학습용 dataset_raw.jsonl로 저장됩니다."</p>
+                                </Show>
                                 <h3>"About"</h3>
                                 <p>"Blue Protocol Chat Translator v1.0"</p>
                                 <a href="https://github.com/enjay27/bpsr-translator" target="_blank" class="github-link">

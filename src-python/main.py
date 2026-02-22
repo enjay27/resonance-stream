@@ -1,32 +1,41 @@
 import argparse
 import collections
-import gc
 import io
 import json
 import os
 import re
 import sys
 import time
+import gc
 
 import ctranslate2
 import pykakasi
-import sentencepiece as spm
+from transformers import AutoTokenizer
+
+# --- Post-Processing Libraries ---
+import hanja
+from kyujipy import KyujitaiConverter
 
 # Force UTF-8 for stable pipe communication
 sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-# --- PRONUNCIATION SETUP ---
+# --- GLOBALLY PRE-COMPILED REGEXES ---
+JOSA_PATTERN = re.compile(r'([가-힣a-zA-Z0-9\)]+)(을|를|이|가|은|는|와|과)(?![가-힣])')
+RECRUIT_PATTERN = re.compile(r'@[A-Za-z0-9\u3040-\u30ff\u4e00-\u9faf]+(?:[\s]+[A-Za-z0-9\u3040-\u30ff\u4e00-\u9faf]+)*')
+NUM_PATTERNS = [
+    (re.compile(r'(\d+)種'), '종'),
+    (re.compile(r'(\d+)人'), '인'),
+    (re.compile(r'(\d+)周'), '회'),
+    (re.compile(r'(\d+)回'), '회')
+]
+
 kks = pykakasi.kakasi()
 
-# --- JOSA (PARTICLE) FIXER ---
 def fix_korean_josa(text):
     def has_batchim(char):
         if not ('가' <= char <= '힣'): return False
-        code = ord(char) - 44032
-        return (code % 28) != 0
-
-    pattern = re.compile(r'([가-힣a-zA-Z0-9\)]+)(을|를|이|가|은|는|와|과)(?![가-힣])')
+        return ((ord(char) - 44032) % 28) != 0
 
     def replace_callback(match):
         word, particle = match.group(1), match.group(2)
@@ -38,16 +47,16 @@ def fix_korean_josa(text):
             '와': '과' if has_final else '와', '과': '과' if has_final else '와'
         }
         return f"{word}{mapping.get(particle, particle)}"
-    return pattern.sub(replace_callback, text)
 
-# --- STATEFUL NICKNAME MANAGER ---
+    return JOSA_PATTERN.sub(replace_callback, text)
+
 class NicknameManager:
     def __init__(self, limit=500):
         self.limit = limit
         self.nick_map = collections.OrderedDict()
 
     def update(self, jp_name, romaji):
-        """FIFO logic to store and prioritize nicknames."""
+        """FIFO logic restored from previous version"""
         if not jp_name: return
         if jp_name in self.nick_map:
             self.nick_map.move_to_end(jp_name)
@@ -58,11 +67,13 @@ class NicknameManager:
     def get_map(self):
         return self.nick_map
 
-# --- TRANSLATION MANAGER ---
 class TranslationManager:
-    def __init__(self, dict_path):
+    def __init__(self, dict_path, model_path=None):
         self.dict_path = dict_path
+        self.model_path = model_path
         self.custom_dict = {}
+        self.dict_pattern = None
+        self.kanji_converter = KyujitaiConverter()
         self.load_dictionary()
 
     def log_info(self, msg): print(json.dumps({"type": "info", "message": msg}), flush=True)
@@ -70,265 +81,186 @@ class TranslationManager:
     def log_debug(self, msg): print(json.dumps({"type": "debug", "message": msg}), flush=True)
 
     def load_dictionary(self):
-        self.log_info(f"Attempting to load dict from: {self.dict_path}")
-        if os.path.exists(self.dict_path):
+        target_path = self.dict_path
+        if not os.path.exists(target_path) and self.model_path:
+            app_data_root = os.path.abspath(os.path.join(self.model_path, "../../"))
+            fallback_path = os.path.join(app_data_root, "custom_dict.json")
+            if os.path.exists(fallback_path): target_path = fallback_path
+
+        self.log_info(f"Loading dictionary from: {target_path}")
+        if os.path.exists(target_path):
             try:
-                with open(self.dict_path, 'r', encoding='utf-8') as f:
+                with open(target_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                    if not content.strip():
-                        self.log_error("Dict file is empty.")
-                        return
+                    if not content.strip(): return
                     raw_dict = json.loads(content).get("data", {})
                 self.custom_dict = {k: v for k, v in raw_dict.items() if k not in "【】「」『』（）〈〉《》"}
-                # RESTORED: Confirms dictionary status to Rust UI
-                self.log_info(f"Dict Loaded: {len(self.custom_dict)} terms.")
-            except Exception as e: self.log_error(f"Dict Error: {e}")
-            except json.JSONDecodeError as je:
-                self.log_error(f"Dict JSON Syntax Error: {je}") # 문법 오류 지점 표시
+                if self.custom_dict:
+                    sorted_keys = sorted(self.custom_dict.keys(), key=len, reverse=True)
+                    self.dict_pattern = re.compile(f"({'|'.join([re.escape(k) for k in sorted_keys])})")
+                    self.log_info(f"Dictionary ready: {len(self.custom_dict)} terms vectorized.")
+            except Exception as e: self.log_error(f"Dictionary Load Error: {e}")
 
     def get_romaji(self, text):
-        result = kks.convert(text)
-        return "".join([item['hepburn'].capitalize() for item in result])
+        return "".join([item['hepburn'].capitalize() for item in kks.convert(text)])
 
     def preprocess_chunking(self, text, stateful_nicks):
-        original_input = text
-        current_text = text
-
-        # 1. Neutralize known nicknames
+        current_text = text.replace('、', ', ').replace('。', '. ').replace('・', ', ').replace('　', ' ')
         for jp_name, romaji in stateful_nicks.items():
-            if jp_name in current_text:
-                current_text = current_text.replace(jp_name, romaji)
+            if jp_name in current_text: current_text = current_text.replace(jp_name, romaji)
 
-        split_marker, protected_map, protected_count = "||SPLIT||", {}, 0
-        all_targets = []
-
-        # 2. Recruitment & @-Tag
-        recruit_pattern = r'@[A-Za-z0-9\u3040-\u30ff\u4e00-\u9faf]+(?:[\s]+[A-Za-z0-9\u3040-\u30ff\u4e00-\u9faf]+)*'
-        for m in set(re.findall(recruit_pattern, current_text)):
-            all_targets.append((m, m))
-
-        # 3. Dictionary Terms
-        for ja, ko in self.custom_dict.items():
-            if ja in current_text:
-                all_targets.append((ja, ko))
-
-        all_targets.sort(key=lambda x: len(x[0]), reverse=True)
-        for ja, replacement in all_targets:
-            placeholder = f"__PTD_{protected_count}__"
-            protected_map[placeholder] = replacement
-            current_text = current_text.replace(ja, f"{split_marker}{placeholder}{split_marker}")
+        split_marker, protected_map, protected_count = "💠SPLIT💠", {}, 0
+        def protect(val):
+            nonlocal protected_count
+            placeholder = f"💠{protected_count}💠"
+            protected_map[placeholder] = val
             protected_count += 1
+            return f"{split_marker}{placeholder}{split_marker}"
 
-        # 4. Numeric Units
-        num_patterns = [r'(\d+)種', r'(\d+)人', r'(\d+)周', r'(\d+)回']
-        for p in num_patterns:
-            def num_sub(m):
-                nonlocal protected_count
-                unit = "종" if "種" in m.group(0) else "인" if "人" in m.group(0) else "회"
-                val, placeholder = f"{m.group(1)}{unit}", f"__PTD_{protected_count}__"
-                protected_map[placeholder] = val
-                protected_count += 1
-                return f"{split_marker}{placeholder}{split_marker}"
-            current_text = re.sub(p, num_sub, current_text)
+        current_text = RECRUIT_PATTERN.sub(lambda m: protect(m.group(0)), current_text)
+        if self.dict_pattern: current_text = self.dict_pattern.sub(lambda m: protect(self.custom_dict[m.group(1)]), current_text)
+        for pattern, unit in NUM_PATTERNS: current_text = pattern.sub(lambda m: protect(f"{m.group(1)}{unit}"), current_text)
 
         raw_chunks = [c.strip() for c in current_text.split(split_marker) if c.strip()]
-        final_chunks = [(protected_map[c], True) if c in protected_map else (c, False) for c in raw_chunks]
-        return final_chunks, original_input
+        return [(protected_map[c], True) if c in protected_map else (c, False) for c in raw_chunks]
 
-def notify_missing_model(model_directory):
-    manifest_path = get_resource_path("models.json")
+# --- REFACTORED INFERENCE CORE ---
+def process_batch_inference(messages, manager, nick_manager, generator, tokenizer, cfg):
+    chunk_mapping = []
+    ai_prompts_tokens = []
+    diagnostic_info = []
 
-    print(f"[FATAL] Model directory not found: {model_directory}")
+    sys_prompt = (
+        "<|im_start|>system\n"
+        "당신은 MMORPG 번역기입니다. 모르는 한자와 단축어(T, D, DPS 등)는 원본 그대로 유지하고, "
+        "부연 설명 없이 한국어 번역만 출력하세요. /no_think<|im_end|>\n"
+        "<|im_start|>user\n"
+    )
+    sys_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(sys_prompt))
+    end_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode("<|im_end|>\n<|im_start|>assistant\n"))
 
-    if os.path.exists(manifest_path):
-        with open(manifest_path, 'r') as f:
-            manifest = json.load(f)
+    for msg_idx, msg in enumerate(messages):
+        nickname = msg.get("nickname")
+        if nickname: nick_manager.update(nickname, manager.get_romaji(nickname))
 
-        print(f"\nPlease download the '{manifest['model_id']}' files from Hugging Face:")
-        for file in manifest['files']:
-            print(f" - {file['name']}: {file['url']}")
-    else:
-        print("\nError: models.json manifest not found. Please reinstall the application.")
+        chunks_data = manager.preprocess_chunking(msg.get("text", ""), nick_manager.get_map())
+        diagnostic_info.append(chunks_data)
 
-    sys.exit(1)
+        for chunk_idx, (chunk_text, is_protected) in enumerate(chunks_data):
+            if is_protected or not re.search(r'[a-zA-Z\u3040-\u30ff\u4e00-\u9faf가-힣]', chunk_text):
+                chunk_mapping.append((msg_idx, chunk_idx, True, chunk_text))
+            else:
+                tokens = sys_tokens + tokenizer.convert_ids_to_tokens(tokenizer.encode(chunk_text)) + end_tokens
+                chunk_mapping.append((msg_idx, chunk_idx, False, len(ai_prompts_tokens)))
+                ai_prompts_tokens.append(tokens)
 
-def get_resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    if getattr(sys, 'frozen', False):
-        # If bundled, the resource is in the same folder as the exe
-        base_path = os.path.dirname(sys.executable)
-    else:
-        # If running in dev, go up to the project root
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if ai_prompts_tokens:
+        ai_results = generator.generate_batch(
+            ai_prompts_tokens,
+            beam_size=cfg["beam"],
+            sampling_temperature=cfg["temp"],
+            repetition_penalty=1.1,
+            max_length=60,
+            batch_type="tokens",
+            include_prompt_in_result=False
+        )
 
-    return os.path.join(base_path, relative_path)
+    results_map = collections.defaultdict(list)
+    for msg_idx, chunk_idx, is_protected, payload in chunk_mapping:
+        if is_protected:
+            results_map[msg_idx].append((chunk_idx, payload))
+        else:
+            seg_out = tokenizer.decode(ai_results[payload].sequences_ids[0]).strip()
+            seg_out = re.sub(r'<think>.*?</think>', '', seg_out, flags=re.DOTALL).strip()
+            seg_out = manager.kanji_converter.shinjitai_to_kyujitai(seg_out)
+            seg_out = hanja.translate(seg_out, 'substitution')
+            results_map[msg_idx].append((chunk_idx, seg_out))
 
-def get_tier_config(device, tier):
-    # Specialized CPU Tiers
-    cpu_tier_cfg = {
-        "low": {
-            "compute_type": "int8", "beam": 1, "patience": 1.0, "rep_pen": 1.0,
-            "len_pen": 0.6, "cov_pen": 0.0 # Fast, direct
-        },
-        "middle": {
-            "compute_type": "int8", "beam": 3, "patience": 1.0, "rep_pen": 1.1,
-            "len_pen": 0.8, "cov_pen": 0.1 # Balanced
-        },
-        "high": {
-            "compute_type": "int8", "beam": 5, "patience": 1.5, "rep_pen": 1.1,
-            "len_pen": 1.0, "cov_pen": 0.2 # High accuracy
-        },
-        "extreme": {
-            "compute_type": "int8", "beam": 10, "patience": 2.0, "rep_pen": 1.3,
-            "no_repeat": 3, "len_pen": 1.2, "cov_pen": 0.3 # Maximum quality
-        }
-    }
+    final_results = []
+    diag_outputs = []
+    for msg_idx in range(len(messages)):
+        sorted_chunks = sorted(results_map[msg_idx], key=lambda x: x[0])
+        parts = [c[1] for c in sorted_chunks]
+        txt = re.sub(r'\s+([.!?,~])', r'\1', " ".join(filter(None, parts)))
+        final_txt = fix_korean_josa(txt).strip()
 
-    gpu_tier_cfg = {
-        "low": {
-            "compute_type": "int8_float16", "beam": 1, "patience": 1.0, "rep_pen": 1.0,
-            "len_pen": 0.6, "cov_pen": 0.0
-        },
-        "middle": {
-            "compute_type": "int8_float16", "beam": 3, "patience": 1.0, "rep_pen": 1.1,
-            "len_pen": 0.8, "cov_pen": 0.1
-        },
-        "high": {
-            "compute_type": "float16", "beam": 5, "patience": 1.2, "rep_pen": 1.1,
-            "len_pen": 1.0, "cov_pen": 0.2
-        },
-        "extreme": {
-            "compute_type": "float16", "beam": 10, "patience": 2.0, "rep_pen": 1.2,
-            "no_repeat": 3, "len_pen": 1.2, "cov_pen": 0.3
-        }
-    }
+        final_results.append({"pid": messages[msg_idx].get("pid"), "translated": final_txt})
 
-    if device == "cuda":
-        return gpu_tier_cfg.get(tier, gpu_tier_cfg["middle"])
-    return cpu_tier_cfg.get(tier, cpu_tier_cfg["middle"])
+        breakdown = []
+        for i, (orig_chunk, is_locked) in enumerate(diagnostic_info[msg_idx]):
+            status = "[LOCKED]" if is_locked else "[AI]"
+            breakdown.append(f"Chunk {i} {status}: {orig_chunk} -> {parts[i]}")
+
+        diag_outputs.append({
+            "pid": messages[msg_idx].get("pid"),
+            "original": messages[msg_idx].get("text"),
+            "breakdown": breakdown,
+            "final": final_txt
+        })
+
+    return final_results, diag_outputs, len(ai_prompts_tokens)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, help="Path to the model directory")
+    parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--dict", type=str, default="custom_dict.json")
-    parser.add_argument("--tier", type=str, choices=["low", "middle", "high", "extreme"], default="middle")
-    parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
-    parser.add_argument("--debug", action="store_true", help="Enable diagnostics")
+    parser.add_argument("--tier", default="middle")
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--debug", action="store_true", help="Performance and detailed logs")
+    parser.add_argument("--diagnostics", action="store_true", help="Chunk breakdown logs")
     parser.add_argument("--version", type=str, default="0.0.0")
     args = parser.parse_args()
 
-    # Dynamic Model Check
-    if not args.model or not os.path.exists(args.model):
-        notify_missing_model(args.model)
+    manager = TranslationManager(args.dict, args.model)
+    nick_manager = NicknameManager()
+    cfg = {"beam": 2, "temp": 0.1}
 
-    manager = TranslationManager(args.dict)
-    nick_manager = NicknameManager(limit=500)
-
-    manager.log_info(f"Python Executable: {sys.executable}")
-    manager.log_info(f"Python Version: {sys.version}")
-    manager.log_info(f"Current Working Dir: {os.getcwd()}")
-
-    cfg = get_tier_config(args.device, args.tier)
+    manager.log_info(f"Python: {sys.version.split()[0]} | Device: {args.device.upper()} | Model: {os.path.basename(args.model)}")
+    compute_type = "float16" if "AWQ" in args.model else ("int8_float16" if args.device == "cuda" else "int8")
 
     try:
-        model_files = ["model.bin", "config.json", "shared_vocabulary.txt", "tokenizer.model"]
-        for f in model_files:
-            f_path = os.path.join(args.model, f)
-            if not os.path.exists(f_path):
-                manager.log_error(f"Missing critical model file: {f}")
+        generator = ctranslate2.Generator(args.model, device=args.device, compute_type=compute_type)
+        tokenizer = AutoTokenizer.from_pretrained(args.model)
+        print(json.dumps({"type": "ready"}), flush=True)
+        manager.log_info(f"Engine Ready | Tier: {args.tier} | Compute: {compute_type} | Beam: {cfg['beam']}")
 
-        translator = ctranslate2.Translator(args.model, device=args.device, compute_type=cfg["compute_type"], inter_threads=1, intra_threads=4 if args.device == "cpu" else 1)
-        sp = spm.SentencePieceProcessor(model_file=os.path.join(args.model, "tokenizer.model"))
-        manager.log_info(
-            f"Resonance Stream AI v{args.version} Started with {args.device.upper()} | {args.tier.upper()} | {cfg["compute_type"]} | beam {cfg["beam"]}"
-        )
         while True:
             line = sys.stdin.readline()
-            if not line: break
-            if not line.strip(): continue
-
+            if not line or not line.strip(): continue
             try:
                 data = json.loads(line)
-                if data.get("cmd") == "reload":
-                    manager.load_dictionary()
-                    continue
+                cmd = data.get("cmd")
 
-                input_text, pid = data.get("text", ""), data.get("pid")
-                raw_nickname = data.get("nickname")
-
-                if data.get("cmd") == "nickname_only":
+                # --- RESTORED: NICKNAME ONLY COMMAND ---
+                if cmd == "nickname_only":
+                    raw_nickname = data.get("nickname")
                     romaji = manager.get_romaji(raw_nickname)
                     print(json.dumps({
-                        "type": "result",
-                        "pid": pid,
-                        "nickname": raw_nickname,
-                        "romaji": romaji
+                        "type": "result", "pid": data.get("pid"),
+                        "nickname": raw_nickname, "romaji": romaji
                     }, ensure_ascii=False), flush=True)
-                    manager.log_debug(f"Added Romaji {raw_nickname}({romaji})")
                     continue
 
-                if pid is None or not input_text: continue
+                if cmd in ["batch_translate"]:
+                    msgs = data.get("messages")
+                    if msgs is None: msgs = [data] if data.get("text") else []
+                    if not msgs: continue
 
-                if raw_nickname:
-                    romaji = manager.get_romaji(raw_nickname)
-                    nick_manager.update(raw_nickname, romaji)
+                    start_t = time.perf_counter()
+                    results, diags, ai_count = process_batch_inference(msgs, manager, nick_manager, generator, tokenizer, cfg)
 
-                # Captures chunks and original input correctly for diagnostics
-                chunks_data, original_input = manager.preprocess_chunking(input_text, nick_manager.get_map())
-                translated_parts, chunk_details = [], []
+                    print(json.dumps({"type": "batch_result", "results": results}, ensure_ascii=False), flush=True)
 
-                start_t = time.perf_counter()
+                    if args.debug:
+                        manager.log_debug(f"[Performance] Processed {len(msgs)} msgs ({ai_count} AI) in {(time.perf_counter() - start_t) * 1000:.2f}ms")
+                    if args.diagnostics:
+                        for d in diags: manager.log_debug(f"[Diagnostics PID {d['pid']}] {d}")
 
-                for idx, (chunk_text, is_protected) in enumerate(chunks_data):
-                    if is_protected:
-                        translated_parts.append(chunk_text)
-                        if args.debug: chunk_details.append(f"Chunk {idx} [LOCKED]: {chunk_text}")
-                    else:
-                        tokens = ["jpn_Jpan"] + sp.encode(chunk_text, out_type=str) + ["</s>"]
-                        res = translator.translate_batch(
-                            [tokens],
-                            target_prefix=[["kor_Hang"]],
-                            beam_size=cfg["beam"],
-                            patience=cfg["patience"],
-                            repetition_penalty=cfg["rep_pen"],
-                            no_repeat_ngram_size=cfg.get("no_repeat", 0),
-                            length_penalty=cfg.get("len_pen", 1.0),   # Higher values = longer, more natural output
-                            coverage_penalty=cfg.get("cov_pen", 0.0), # Higher values = translates every word
-                            max_batch_size=1,
-                            batch_type="tokens"
-                        )
-                        seg_out = sp.decode(res[0].hypotheses[0])
-                        seg_out = re.sub(r'^[a-z]{3}_[A-Z][a-z]{3}\s*', '', seg_out).strip()
-                        translated_parts.append(seg_out)
-                        if args.debug: chunk_details.append(f"Chunk {idx} [AI]: {chunk_text} -> {seg_out}")
+                    # --- RESTORED: MEMORY MANAGEMENT ---
+                    del results; gc.collect()
 
-                # Final assembly and polishing
-                final_output = " ".join(filter(None, translated_parts))
-                final_output = re.sub(r'\s+([.!?,~])', r'\1', final_output)
-                final_output = fix_korean_josa(final_output)
-                final_output = " ".join(final_output.split()).strip()
-
-                result = {"type": "result", "pid": pid, "translated": final_output}
-
-                end_t = time.perf_counter()
-                latency_ms = (end_t - start_t) * 1000
-
-                print(json.dumps(result, ensure_ascii=False), flush=True)
-
-                if args.debug:
-                    diagnostics = [
-                        {"step": "1. Original", "content": original_input},
-                        {"step": "2. Segments", "content": [c[0] for c in chunks_data]},
-                        {"step": "3. Breakdown", "content": chunk_details},
-                        {"step": "4. Final", "content": final_output}
-                    ]
-                    manager.log_debug(f"[Diagnostics] {diagnostics}")
-                    manager.log_debug(f"[Performance] Inference Time: {latency_ms:.2f}ms | Length: {len(input_text)} chars")
-
-                del chunks_data; gc.collect()
-
-            except Exception as e: manager.log_error(f"Inference Error: {e}")
+                elif cmd == "reload": manager.load_dictionary()
+            except Exception as e: manager.log_error(f"Inference Loop Error: {e}")
     except Exception as e: manager.log_error(f"Fatal Startup Error: {e}")
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

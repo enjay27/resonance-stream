@@ -1,16 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 a = Analysis(
     ['src-python\\main.py'],
     pathex=[],
     binaries=[],
-    datas=[('.venv.build\\Lib\\site-packages\\pykakasi\\data', 'pykakasi\\data')],
-    hiddenimports=[],
+    datas=[
+        ('.venv.build\\Lib\\site-packages\\hanja\\table.yml', 'hanja'),
+        ('.venv.build\\Lib\\site-packages\\kyujipy\\data', 'kyujipy\\data'),
+        ('.venv.build\\Lib\\site-packages\\pykakasi\\data', 'pykakasi\\data'),
+    ],
+    hiddenimports=[
+        'hanja',
+        'hanja.impl',
+        'kyujipy',
+        'ctranslate2'
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['torch', 'IPython', 'notebook', 'matplotlib', 'tkinter', 'PIL', 'pandas'],
+    excludes=['torch', 'IPython', 'notebook', 'matplotlib', 'tkinter', 'PIL', 'pandas', 'tensorflow', 'flax'],
     noarchive=False,
     optimize=2,
 )

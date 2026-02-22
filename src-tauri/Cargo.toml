@@ -23,7 +23,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-windivert = "0.6"
+windivert = { version = "0.6", features = ["vendored"] }
 etherparse = "0.19.0" # To parse the raw bytes into human-readable data
 tokio = { version = "1", features = ["fs", "io-util"] }
 reqwest = { version = "0.11", features = ["stream", "json", "blocking", "rustls-tls"] }
@@ -47,6 +47,7 @@ hex = "0.4"
 chrono = "0.4.43"
 local-ip-address = "0.6.10"
 lazy_static = "1.5.0"
+regex = "1.12.3"
 
 [dev-dependencies]
 pnet = "0.35"

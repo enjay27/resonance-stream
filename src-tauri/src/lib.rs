@@ -3,10 +3,11 @@ use crate::model_manager::*;
 use crate::python_translator::*;
 use crate::sniffer::*;
 use indexmap::IndexMap;
-use std::collections::VecDeque;
-use std::sync::atomic::Ordering;
-use std::sync::Mutex;
-use tauri::{Emitter, Manager};
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager};
 
 mod model_manager;
 mod python_translator;
@@ -30,10 +31,17 @@ pub fn run() {
                 inject_system_message(handle, SystemLogLevel::Warning, "Backend", "Sniffer may fail without Admin rights.");
             }
 
+            // 2. Spawn the Watchdog Thread
+            let watchdog_app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                start_batch_watchdog(watchdog_app_handle);
+            });
+
             Ok(())
         })
         .manage(AppState {
-            tx: Mutex::new(None),
+            batch_data: Arc::new((Mutex::new((vec![], 0)), Default::default())),
+            sidecar_child: Mutex::new(None),
             chat_history: Mutex::new(IndexMap::new()),
             system_history: Mutex::new(VecDeque::with_capacity(200)),
             next_pid: 1.into(),

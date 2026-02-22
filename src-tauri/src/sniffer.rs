@@ -6,15 +6,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State, Window};
 use windivert::prelude::*;
+use crate::config::load_config;
+use crate::python_translator::{translate_batch, MessageRequest};
 
 // --- DATA STRUCTURES ---
 // 1. Standard Chat: Focuses on player communication
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
     pub pid: u64,
@@ -92,7 +94,8 @@ pub struct SplitPayload {
 }
 
 pub struct AppState {
-    pub tx: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
+    pub batch_data: Arc<(Mutex<(Vec<MessageRequest>, u64)>, Condvar)>,
+    pub sidecar_child: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
     pub chat_history: Mutex<IndexMap<u64, ChatMessage>>,
     pub system_history: Mutex<VecDeque<SystemMessage>>,
     pub next_pid: AtomicU64,
@@ -262,7 +265,6 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
                             while let Some(full_packet) = p_buf.next() {
                                 if port == 5003 {
                                     // Try Chat first, then Party, then Broadcasts
-                                    println!("Payload {:?}", full_packet);
                                     parse_and_emit_5003(&full_packet, &app_handle);
                                 }
                             }

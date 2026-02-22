@@ -1,0 +1,3 @@
+[172] [Discovery-5003] [Warning] New Chat/Party Field #18 (Wire 2). Packet: [10, 13, 10, 3, 255, 227, 12, 18, 6, 142, 146, 217, 132, 200, 51]
+[532] [Discovery-5003] [Warning] New Chat/Party Field #30 (Wire 7). Packet: [10, 14, 10, 4, 247, 151, 193, 20, 18, 6, 180, 147, 239, 132, 200, 51]
+[533] [Discovery-5003] [Warning] New Chat/Party Field #24 (Wire 1). Packet: [10, 14, 10, 4, 247, 151, 193, 20, 18, 6, 180, 147, 239, 132, 200, 51]

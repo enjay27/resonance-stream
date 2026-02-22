@@ -84,6 +84,7 @@ pub enum SystemLogLevel {
     Debug,   // high-frequency, technical events
 }
 
+#[derive(Debug)]
 pub struct SplitPayload {
     pub channel: String,
     pub chat_blocks: Vec<(u32, Vec<u8>)>,
@@ -280,7 +281,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
 fn strip_application_header(payload: &[u8], port: u16) -> Option<&[u8]> {
     if payload.len() < 5 { return None; }
 
-    return match port {
+    match port {
         10250 => {
             if payload.len() > 32 && payload[32] == 0x0A { Some(&payload[32..]) } else { None }
         },
@@ -350,18 +351,20 @@ pub enum Port5003Event {
 
 // --- STAGE 1: SPLIT ---
 // Separates the raw Protobuf packet into categorized byte blocks.
-fn stage1_split(data: &[u8]) -> SplitPayload {
+fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
     let mut payload = SplitPayload {
         channel: "WORLD".to_string(),
         chat_blocks: Vec::new(),
         recruit_asset_blocks: Vec::new(),
     };
 
-    if data.len() < 3 || data[0] != 0x0A { return payload; }
+    if data.len() < 3 || data[0] != 0x0A { return None; }
 
     let (total_len, header_read) = read_varint(&data[1..]);
     let mut i = 1 + header_read;
     let safe_end = (i + total_len as usize).min(data.len());
+
+    let mut is_valid_chat_packet = false;
 
     while i < safe_end {
         let tag = data[i];
@@ -370,13 +373,11 @@ fn stage1_split(data: &[u8]) -> SplitPayload {
         i += 1; // Move past the tag byte
 
         if wire_type == 2 {
-            // [FIX] Read the length to strip the prefix from sub_data
             let (len, read) = read_varint(&data[i..safe_end]);
             i += read;
             let block_end = (i + len as usize).min(safe_end);
 
             if let Some(sub_data) = data.get(i..block_end) {
-                // sub_data is now perfectly aligned for parse_user_container
                 match field_num {
                     2 | 3 | 4 => payload.chat_blocks.push((field_num, sub_data.to_vec())),
                     18 => payload.recruit_asset_blocks.push(sub_data.to_vec()),
@@ -385,9 +386,10 @@ fn stage1_split(data: &[u8]) -> SplitPayload {
             }
             i = block_end; // Advance the pointer past this block
         } else if wire_type == 0 {
-            // Handle top-level Varints directly (like the Channel ID)
             let (val, read) = read_varint(&data[i..safe_end]);
             if field_num == 1 {
+                // Real Chat/Recruit packets ALWAYS have a Channel ID varint here.
+                is_valid_chat_packet = true;
                 payload.channel = match val {
                     2 => "LOCAL".into(), 3 => "PARTY".into(), 4 => "GUILD".into(), _ => "WORLD".into(),
                 };
@@ -398,7 +400,13 @@ fn stage1_split(data: &[u8]) -> SplitPayload {
             i += skip_field(wire_type, &data[i..safe_end]);
         }
     }
-    payload
+
+    // Filter out Server/Metadata packets immediately
+    if is_valid_chat_packet {
+        Some(payload)
+    } else {
+        None
+    }
 }
 
 // --- STAGE 2: PROCESS ---
@@ -466,10 +474,13 @@ fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
 // --- STAGE 3: EMIT ---
 // Filters out duplicates and dispatches the final events to Tauri.
 pub fn parse_and_emit_5003(data: &[u8], app: &AppHandle) {
-    let raw_payload = stage1_split(data);
-    let events = stage2_process(raw_payload);
+    // If it's a server packet, this safely returns without spamming logs
+    let raw_payload = match stage1_split(data) {
+        Some(p) => p,
+        None => return,
+    };
 
-    println!("Events: {:?}", events);
+    let events = stage2_process(raw_payload);
 
     for event in events {
         if should_emit(&event) {
@@ -515,16 +526,16 @@ fn parse_user_container(data: &[u8], chat: &mut ChatMessage) {
     while i < data.len() {
         let tag = data[i];
         let wire_type = tag & 0x07;
-        let field_num = tag >> 3;
-        i += 1;
+        i += 1; // Advance past the tag
 
-        match field_num {
-            1 => { // Session ID
+        // Match on the EXACT tag byte, not just the field number
+        match tag {
+            8 => { // Tag 8 = Field 1, Wire 0 (Session ID)
                 let (val, read) = read_varint(&data[i..]);
                 chat.pid = val;
                 i += read;
             }
-            2 => { // Profile Block
+            18 => { // Tag 18 = Field 2, Wire 2 (Profile Block)
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
@@ -533,12 +544,12 @@ fn parse_user_container(data: &[u8], chat: &mut ChatMessage) {
                 }
                 i = block_end;
             }
-            3 => { // Timestamp
+            24 => { // Tag 24 = Field 3, Wire 0 (Timestamp)
                 let (val, read) = read_varint(&data[i..]);
                 chat.timestamp = val;
                 i += read;
             }
-            4 => { // Message Block
+            34 => { // Tag 34 = Field 4, Wire 2 (Message Block)
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
@@ -549,6 +560,7 @@ fn parse_user_container(data: &[u8], chat: &mut ChatMessage) {
                 }
                 i = block_end;
             }
+            // If we see Tag 32 (Field 4, Wire 0), it safely falls through to skip_field!
             _ => i += skip_field(wire_type, &data[i..]),
         }
     }
@@ -559,16 +571,15 @@ fn parse_profile_block(data: &[u8], chat: &mut ChatMessage) {
     while i < data.len() {
         let tag = data[i];
         let wire_type = tag & 0x07;
-        let field_num = tag >> 3;
         i += 1;
 
-        match field_num {
-            1 => { // Permanent UID
+        match tag {
+            8 => { // Tag 8 = Field 1, Wire 0 (Permanent UID)
                 let (val, read) = read_varint(&data[i..]);
                 chat.uid = val;
                 i += read;
             }
-            2 => { // Nickname
+            18 => { // Tag 18 = Field 2, Wire 2 (Nickname)
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
@@ -577,16 +588,16 @@ fn parse_profile_block(data: &[u8], chat: &mut ChatMessage) {
                 }
                 i = block_end;
             }
-            3 => { // Class ID
+            24 => { // Tag 24 = Field 3, Wire 0 (Class ID)
                 let (val, read) = read_varint(&data[i..]);
                 chat.class_id = val;
                 i += read;
             }
-            4 => { // Status Flag
+            32 => { // Tag 32 = Field 4, Wire 0 (Status Flag)
                 let (_, read) = read_varint(&data[i..]);
                 i += read;
             }
-            5 => { // Level
+            40 => { // Tag 40 = Field 5, Wire 0 (Level)
                 let (val, read) = read_varint(&data[i..]);
                 chat.level = val;
                 i += read;

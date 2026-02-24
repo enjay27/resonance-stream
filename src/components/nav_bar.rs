@@ -3,7 +3,9 @@ use crate::tauri_bridge::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::JsValue;
-use leptos::html::Input; // ADDED: Required to focus the input box
+use leptos::html::{Input, Div, Button}; // ADDED: Div and Button for our new refs
+use leptos::ev::{keydown, click}; // ADDED: click event
+use web_sys::Node; // ADDED: Node to verify click targets
 
 #[component]
 pub fn NavBar() -> impl IntoView {
@@ -12,12 +14,52 @@ pub fn NavBar() -> impl IntoView {
 
     let (is_search_open, set_is_search_open) = signal(false);
 
-    // ADDED: A reference to the input element so we can auto-focus it
+    // --- NODE REFERENCES ---
     let search_input_ref = create_node_ref::<Input>();
+    let search_container_ref = create_node_ref::<Div>(); // The absolute popup box
+    let search_btn_ref = create_node_ref::<Button>(); // The magnifier toggle button
+
+    // ==========================================
+    // GLOBAL KEYBOARD SHORTCUT (Ctrl+F)
+    // ==========================================
+    window_event_listener(keydown, move |ev| {
+        if (ev.ctrl_key() || ev.meta_key()) && ev.key().to_lowercase() == "f" {
+            ev.prevent_default();
+            set_is_search_open.set(true);
+
+            request_animation_frame(move || {
+                if let Some(el) = search_input_ref.get() {
+                    let _ = el.focus();
+                    el.select();
+                }
+            });
+        }
+    });
+
+    // ==========================================
+    // NEW: CLICK-OUTSIDE TO CLOSE
+    // ==========================================
+    window_event_listener(click, move |ev| {
+        // Only run this logic if the search bar is actually open
+        if is_search_open.get_untracked() {
+            let target = event_target::<Node>(&ev);
+
+            let container = search_container_ref.get();
+            let btn = search_btn_ref.get();
+
+            // Check if the click target is inside the Search Box OR the Magnifier Button
+            let clicked_inside = container.map(|c| c.contains(Some(&target))).unwrap_or(false);
+            let clicked_btn = btn.map(|b| b.contains(Some(&target))).unwrap_or(false);
+
+            // If they clicked somewhere else entirely, close it!
+            if !clicked_inside && !clicked_btn {
+                set_is_search_open.set(false);
+            }
+        }
+    });
 
     view! {
         <nav
-            // CHANGED: Added 'relative' so the absolute search box centers perfectly within the window
             class="relative flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 py-1 bg-base-content/5 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300"
             data-tauri-drag-region
         >
@@ -77,18 +119,19 @@ pub fn NavBar() -> impl IntoView {
             // ==========================================
             // CENTER: GLOBAL SEARCH PALETTE
             // ==========================================
-            // Extracted from the right-side icons and perfectly centered
-            <div class=move || format!(
-                "absolute left-1/2 -translate-x-1/2 top-full mt-2 p-1.5 bg-base-300 border border-base-content/10 rounded-lg shadow-2xl z-50 transition-all duration-200 origin-top {}",
-                if is_search_open.get() { "opacity-100 scale-100 pointer-events-auto" } else { "opacity-0 scale-95 pointer-events-none" }
-            )>
+            <div
+                node_ref=search_container_ref // <-- Attached ref here
+                class=move || format!(
+                    "absolute left-1/2 -translate-x-1/2 top-full mt-2 p-1.5 bg-base-300 border border-base-content/10 rounded-lg shadow-2xl z-50 transition-all duration-200 origin-top {}",
+                    if is_search_open.get() { "opacity-100 scale-100 pointer-events-auto" } else { "opacity-0 scale-95 pointer-events-none" }
+                )
+            >
                 <div class="flex items-center gap-1">
                     <input type="text" placeholder="대화 검색 (Ctrl+F)..."
-                        node_ref=search_input_ref // Bound the reference here
+                        node_ref=search_input_ref
                         class="input input-xs input-bordered w-64 bg-base-200 text-xs focus:outline-none focus:border-success"
                         prop:value=move || signals.search_term.get()
                         on:input=move |ev| signals.set_search_term.set(event_target_value(&ev))
-                        // Optional: Pressing Escape closes the search box instantly
                         on:keydown=move |ev| {
                             if ev.key() == "Escape" {
                                 set_is_search_open.set(false);
@@ -110,17 +153,19 @@ pub fn NavBar() -> impl IntoView {
 
                 // The Magnifier Button
                 <div class="tooltip tooltip-bottom" data-tip="Search (Ctrl+F)">
-                    <button class="btn btn-ghost btn-xs text-lg"
+                    <button
+                        node_ref=search_btn_ref // <-- Attached ref here
+                        class="btn btn-ghost btn-xs text-lg"
                         class:text-success=move || !signals.search_term.get().is_empty()
                         on:click=move |_| {
                             let new_state = !is_search_open.get_untracked();
                             set_is_search_open.set(new_state);
 
-                            // ADDED: Instantly focus the input box when opened!
                             if new_state {
                                 request_animation_frame(move || {
                                     if let Some(el) = search_input_ref.get() {
                                         let _ = el.focus();
+                                        el.select();
                                     }
                                 });
                             }

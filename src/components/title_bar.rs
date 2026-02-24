@@ -47,6 +47,23 @@ pub fn TitleBar() -> impl IntoView {
                     {move || if store.is_sniffer_active.get() { "SNIFFER ON" } else { "SNIFFER OFF" }}
                 </div>
 
+                <Show when=move || store.use_translation.get()>
+                    <div class=move || format!(
+                        "badge badge-xs gap-1.5 px-2 py-2 font-black text-[9px] mr-2 border-white/5 shadow-inner transition-all {}",
+                        if store.is_translator_active.get() {
+                            "badge-success bg-success/10 text-success border-success/20"
+                        } else {
+                            "badge-ghost bg-white/5 text-gray-600 border-white/10"
+                        }
+                    )>
+                        <div class=move || format!(
+                            "w-1 h-1 rounded-full {}",
+                            if store.is_translator_active.get() { "bg-success animate-pulse shadow-[0_0_8px_#00ff88]" } else { "bg-gray-600" }
+                        )></div>
+                        {move || if store.is_translator_active.get() { "번역 ON" } else { "번역 OFF" }}
+                    </div>
+                </Show>
+
                 // Window Control Buttons
                 <div class="flex h-8 ml-1">
                     <button class="btn btn-ghost btn-xs rounded-none h-full w-10 hover:bg-white/10"

@@ -27,12 +27,22 @@ pub async fn setup_event_listeners(signals: AppSignals) {
                     log.insert(packet.pid, RwSignal::new(packet.clone()));
                 });
 
-                log!("New Message! Unread count is {:?}", signals.unread_count.get_untracked());
-                log!("is at bottom: {:?}", signals.is_at_bottom.get_untracked());
+                let active_tab = signals.active_tab.get_untracked();
+                let is_visible = match active_tab.as_str() {
+                    "전체" => true,
+                    "커스텀" => signals.custom_filters.get_untracked().contains(&packet.channel),
+                    "시스템" => false,
+                    _ => {
+                        let key = match active_tab.as_str() {
+                            "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD"
+                        };
+                        packet.channel == key
+                    }
+                };
 
-                if !signals.is_at_bottom.get_untracked() {
-                    signals.set_unread_count.update(|n| *n += 1);
-                    log!("New Message! Unread count is {:?}", signals.unread_count.get_untracked());
+                // Only increment if the message belongs to the tab we are currently looking at
+                if is_visible && !signals.is_at_bottom.get_untracked() {
+                    signals.set_unread_count.update(|c| *c += 1);
                 }
 
                 let pid = packet.pid;

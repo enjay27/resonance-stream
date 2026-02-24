@@ -55,6 +55,9 @@ pub fn NavBar() -> impl IntoView {
                                 )
                                 on:click=move |_| {
                                     signals.set_active_tab.set(t_click.clone());
+                                    signals.set_unread_count.set(0);
+                                    signals.set_is_at_bottom.set(true);
+                                    signals.set_system_at_bottom.set(true);
                                     actions.save_config.dispatch(());
                                 }
                             >

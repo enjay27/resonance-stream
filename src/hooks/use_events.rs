@@ -7,7 +7,7 @@ use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 
 pub async fn clear_backend_history() {
-    let _ = invoke("clear_chat_history", wasm_bindgen::JsValue::NULL).await;
+    let _ = invoke("clear_chat_history", JsValue::NULL).await;
 }
 
 pub async fn setup_event_listeners(signals: AppSignals) {

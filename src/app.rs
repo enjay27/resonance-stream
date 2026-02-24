@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlDivElement;
-use crate::components::ChatRow;
+use crate::components::{ChatRow, NavBar};
 use crate::components::settings::Settings;
 use crate::components::title_bar::TitleBar;
 use crate::hooks::use_config::save_app_config;
@@ -507,131 +507,7 @@ pub fn App() -> impl IntoView {
                     </div>
                 </div>
             }>
-                <nav class="tab-bar">
-                    <div class="tabs">
-                        <Show when=move || !compact_mode.get()
-                            fallback=move || view! {
-                                // Compact Header: Just show current tab name
-                                <div class="compact-tab-indicator">
-                                    <span class="indicator-dot" data-tab=move || active_tab.get()></span>
-                                    <span class="indicator-text">{move || active_tab.get()}</span>
-                                </div>
-                            }
-                        >
-                            {move || {
-                                let mut base_tabs = vec![
-                                    ("전체", "♾️"),
-                                    ("커스텀", "⭐"),
-                                    ("월드", "🌐"),
-                                    ("길드", "🛡️"),
-                                    ("파티", "⚔️"),
-                                    ("로컬", "📍"),
-                                ];
-
-                                // Conditionally add the System tab based on the signal
-                                if show_system_tab.get() {
-                                    base_tabs.push(("시스템", "⚙️"));
-                                }
-
-                                base_tabs.into_iter().map(|(full, short)| {
-                                    let t_full = full.to_string();
-                                    let t_click = t_full.clone();
-                                    let t_data = t_full.clone();
-                                    let t_tab = t_full.clone();
-
-                                    view! {
-                                        <button
-                                            class=move || if active_tab.get() == t_tab { "tab-btn active" } else { "tab-btn" }
-                                            data-tab=t_data
-                                            on:click=move |_| {
-                                                set_active_tab.set(t_click.clone());
-                                                save_config.dispatch(());
-                                            }
-                                            title=t_full
-                                        >
-                                            <span class="tab-full">{full}</span>
-                                            <span class="tab-short">{short}</span>
-                                        </button>
-                                    }
-                                }).collect_view()
-                            }}
-                        </Show>
-                    </div>
-
-                    // --- DICTIONARY SYNC BUTTON ---
-                    <div class="control-area">
-                        <button class="icon-btn"
-                            title=move || if compact_mode.get() { "Expand Mode" } else { "Compact Mode" }
-                            on:click=move |_| {
-                                set_compact_mode.update(|b| *b = !*b);
-                                save_config.dispatch(()); // <--- TRIGGER SAVE
-                            }
-                        >
-                            {move || if compact_mode.get() { "🔽" } else { "🔼" }}
-                        </button>
-
-                        // 1. Clear Chat Button
-                        <button class="icon-btn danger"
-                            title="Clear Chat History"
-                            on:click=move |_| { actions.clear_history.dispatch(()); }
-                        >
-                            "🗑️"
-                        </button>
-
-                        <button
-                            class=move || if is_pinned.get() { "icon-btn active-pin" } else { "icon-btn" }
-                            title=move || if is_pinned.get() { "Unpin Window" } else { "Pin on Top" }
-                            on:click=move |_| {
-                                let new_state = !is_pinned.get();
-                                set_is_pinned.set(new_state);
-
-                                // Call Backend
-                                spawn_local(async move {
-                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                                        "onTop": new_state
-                                    })).unwrap();
-                                    let _ = invoke("set_always_on_top", args).await;
-                                });
-
-                                // 2. Save to Config
-                                save_config.dispatch(());
-                            }
-                        >
-                            // Rotate the pin slightly when active for visual flair
-                            <span style=move || if is_pinned.get() { "transform: rotate(45deg); display:block;" } else { "" }>
-                                "📌"
-                            </span>
-                        </button>
-
-                        // 2. Sync Dictionary Button
-                        <button class="sync-btn"
-                            title="Update Dictionary"
-                            on:click=move |_| {
-                                sync_dict_action.dispatch(());
-                                set_dict_update_available.set(false);
-                            }
-                            disabled=is_syncing
-                        >
-                            // Use a span to control Emoji size independently if needed
-                            {move || if is_syncing.get() {
-                                view! { <span style="font-size: 0.8rem">"동기화 중..."</span> }
-                            } else {
-                                // Emojis look better slightly larger
-                                view! { <span style="font-size: 1.1rem; vertical-align: middle;">"📘🔁"</span> }
-                            }}
-
-                            <Show when=move || dict_update_available.get()>
-                                <span class="update-dot"></span>
-                            </Show>
-                        </button>
-                        <button class="icon-btn" on:click=move |_| set_show_settings.set(true)>
-                            "⚙️"
-                            <Show when=move || restart_required.get()>
-                                <span class="restart-badge"></span>
-                            </Show>
-                        </button>
-                    </div>
-                </nav>
+                <NavBar />
 
                 <div class="chat-container"
                     node_ref=chat_container_ref

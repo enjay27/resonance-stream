@@ -1,0 +1,56 @@
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden; /* Prevent outer window scroll */
+    background: #121212;
+    font-family: 'Segoe UI', sans-serif;
+    color: #fff;
+}
+
+/* --- Light / Dark Theme --- */
+:root {
+    /* --- DARK MODE (Default) --- */
+    --bg-main: #121212;
+    --bg-panel: #1e1e1e;
+    --bg-bubble: #252525;
+    --text-main: #eeeeee;
+    --text-muted: #888888;
+    --border: #333333;
+    --accent: #00ff88;
+    --bg-rgb: 18, 18, 18;
+
+    /* Channel Colors (Pastel for Dark) */
+    --world-color: #BA68C8;
+    --guild-color: #81C784;
+    --party-color: #4FC3F7;
+    --local-color: #BDBDBD;
+    --system-color: #FFD54F;
+
+    --overlay-opacity: 0.85; /* Default */
+}
+
+[data-theme='light'] {
+    /* --- LIGHT MODE (High Contrast) --- */
+    --bg-main: #fcfcfc;    /* Clean page background */
+    --bg-panel: #ffffff;   /* Solid white for navigation */
+    --bg-bubble: #e9ecef;  /* Light gray bubble for visibility */
+    --bg-rgb: 252, 252, 252;
+
+    --text-main: #111111;  /* "Ink" black for original Japanese */
+    --text-muted: #495057; /* Dark gray for secondary info */
+
+    --border: #dee2e6;     /* Subtle divider lines */
+    --accent: #006b3d;     /* Deep Forest Green for translations */
+
+    /* Channel Colors (Deepened for readability on white) */
+    --world-color: #7b1fa2;
+    --guild-color: #2e7d32;
+    --party-color: #0277bd;
+    --local-color: #616161;
+    --system-color: #f57f17;
+}
+[data-theme='light'] .chat-container::-webkit-scrollbar-thumb {
+    background: #bbb; /* Darker thumb for white background */
+}

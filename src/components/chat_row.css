@@ -1,0 +1,62 @@
+/*.chat-row {*/
+/*    position: relative;*/
+/*    margin-bottom: 8px;*/
+/*    padding: 6px 10px;*/
+/*    border-radius: 4px;*/
+/*    border-left: 3px solid transparent;*/
+/*    color: #ddd;*/
+/*    overflow: visible !important; !* Allow context menu to pop out *!*/
+/*}*/
+
+/*!* Channel Specific Styles *!*/
+/*.chat-row[data-channel='LOCAL'] { border-left-color: #BDBDBD; background: rgba(189,189,189,0.05); }*/
+/*.chat-row[data-channel='LOCAL'] .nickname { color: #BDBDBD; }*/
+
+/*.chat-row[data-channel='PARTY'] { border-left-color: #4FC3F7; background: rgba(79,195,247,0.08); }*/
+/*.chat-row[data-channel='PARTY'] .nickname { color: #4FC3F7; }*/
+
+/*.chat-row[data-channel='GUILD'] { border-left-color: var(--guild-color); background: var(--bg-panel); }*/
+/*.chat-row[data-channel='GUILD'] .nickname { color: var(--guild-color); }*/
+
+/*.chat-row[data-channel='WORLD'] { border-left-color: var(--world-color); background: var(--bg-panel); }*/
+/*.chat-row[data-channel='WORLD'] .nickname { color: var(--world-color); }*/
+
+/*.chat-row[data-channel='SYSTEM'] { border-left-color: #FFD54F; background: rgba(255,213,79,0.08); }*/
+/*.chat-row[data-channel='SYSTEM'] .nickname { color: #FFD54F; }*/
+
+/*.chat-row.system-log {*/
+/*    border-left: 4px solid transparent;*/
+/*    margin-bottom: 4px;*/
+/*    background: rgba(var(--bg-rgb), 0.3);*/
+/*    font-family: 'Consolas', 'Monaco', monospace; !* Technical feel *!*/
+/*}*/
+
+/*.chat-row.system-log .msg-header {*/
+/*    display: flex;*/
+/*    align-items: center;*/
+/*    margin-bottom: 6px;*/
+/*}*/
+
+/*.chat-row[data-level='error']   { border-left-color: #ff5252; color: #ff8a80; }*/
+/*.chat-row[data-level='warn']    { border-left-color: #ffd740; color: #ffe57f; }*/
+/*.chat-row[data-level='success'] { border-left-color: #69f0ae; color: #b9f6ca; }*/
+/*.chat-row[data-level='info']    { border-left-color: #40c4ff; color: #81d4fa; }*/
+/*.chat-row[data-level='debug']   { border-left-color: #757575; color: #9e9e9e; opacity: 0.7; }*/
+
+/*!* Apply badge backgrounds *!*/
+/*.chat-row[data-level='error'] .level-badge   { background: #ff5252; }*/
+/*.chat-row[data-level='warn'] .level-badge    { background: #ffd740; }*/
+/*.chat-row[data-level='success'] .level-badge { background: #69f0ae; }*/
+/*.chat-row[data-level='info'] .level-badge    { background: #40c4ff; }*/
+/*.chat-row[data-level='debug'] .level-badge   { background: #757575; color: #fff; }*/
+
+/*[data-theme='light'] .chat-row.system-log {*/
+/*    background: rgba(0, 0, 0, 0.02);*/
+/*    border-bottom: 1px solid #eee;*/
+/*}*/
+
+/*[data-theme='light'] .chat-row[data-level='error']   { border-left-color: #c62828; color: #b71c1c; }*/
+/*[data-theme='light'] .chat-row[data-level='warn']    { border-left-color: #f57f17; color: #e65100; }*/
+/*[data-theme='light'] .chat-row[data-level='success'] { border-left-color: #2e7d32; color: #1b5e20; }*/
+/*[data-theme='light'] .chat-row[data-level='info']    { border-left-color: #0288d1; color: #01579b; }*/
+/*[data-theme='light'] .chat-row[data-level='debug']   { border-left-color: #616161; color: #424242; }*/

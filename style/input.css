@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Add a fallback background to ensure the app container is visible */
+body {
+    background-color: #121212;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}

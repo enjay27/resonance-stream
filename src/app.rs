@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlDivElement;
-use crate::components::{ChatRow, NavBar};
+use crate::components::{ChatContainer, ChatRow, NavBar};
 use crate::components::settings::Settings;
 use crate::components::title_bar::TitleBar;
 use crate::hooks::use_config::save_app_config;
@@ -509,132 +509,7 @@ pub fn App() -> impl IntoView {
             }>
                 <NavBar />
 
-                <div class="chat-container"
-                    node_ref=chat_container_ref
-                    style="position: relative;"
-                    // 4. SCROLL EVENT (Reset Logic)
-                    on:scroll=move |ev| {
-                        let el = event_target::<HtmlDivElement>(&ev);
-
-                        // [CHANGED] Stricter tolerance (10px instead of 30px)
-                        // This prevents "fighting" the scroll bar.
-                        let at_bottom = el.scroll_height() - el.scroll_top() - el.client_height() < 10;
-
-                        if active_tab.get_untracked() == "시스템" {
-                            set_system_at_bottom.set(at_bottom);
-                        } else {
-                            set_is_at_bottom.set(at_bottom);
-                            if at_bottom { set_unread_count.set(0); }
-                        }
-                    }
-                >
-                    // [NEW] Active Filter Chip
-                    <Show when=move || !search_term.get().is_empty()>
-                        <div class="filter-overlay-container">
-                            <div class="filter-chip"
-                                 data-filter-type=move || active_tab.get() // Pass tab name to CSS
-                            >
-                                <span class="filter-label">"Filtering: " {move || search_term.get()}</span>
-                                <button class="filter-close-btn"
-                                    on:click=move |_| set_search_term.set("".to_string())
-                                >
-                                    "✕"
-                                </button>
-                            </div>
-                        </div>
-                    </Show>
-
-                    // 1. FILTER CHIPS (Inside chat-container)
-                    <Show when=move || active_tab.get() == "시스템" && (system_level_filter.get().is_some() || system_source_filter.get().is_some())>
-                        <div class="system-filter-toast">
-                            <span class="filter-info">
-                                "필터링: "
-                                {move || system_source_filter.get().map(|s| format!("[{}] ", s.to_uppercase()))}
-                                {move || system_level_filter.get().map(|l| l.to_uppercase())}
-                            </span>
-                            <button class="filter-reset-btn" on:click=move |_| {
-                                set_system_level_filter.set(None);
-                                set_system_source_filter.set(None);
-                            }> "✕" </button>
-                        </div>
-                    </Show>
-
-                    // [NEW] Top-Right Notification Badge
-                    <Show when=move || { unread_count.get() > 0 }>
-                        <div class="new-msg-toast"
-                             data-filter-type=move || active_tab.get() // Apply same logic here
-                             on:click=move |_| {
-                                if let Some(el) = chat_container_ref.get() {
-                                    el.set_scroll_top(el.scroll_height());
-                                    set_is_at_bottom.set(true);
-                                    set_unread_count.set(0);
-                                }
-                            }
-                        >
-                            {move || unread_count.get()} "개의 새로운 메세지"
-                        </div>
-                    </Show>
-
-                    <Show
-                        when=move || active_tab.get() == "시스템"
-                        fallback=move || view! {
-                            /* --- GAME CHAT LOOP (ChatPacket) --- */
-                            <For
-                                each=move || filtered_chat.get()
-                                key=|sig| sig.get_untracked().pid
-                                children=move |sig| {
-                                    view! {
-                                        <ChatRow sig=sig />
-                                    }
-                                }
-                            />
-                        }
-                    >
-                        /* --- SYSTEM LOG LOOP (Zero Filtering) --- */
-                        <For
-                            each=move || filtered_system_logs.get()
-                            key=|sig| sig.get_untracked().pid
-                            children=move |sig| {
-                                view! {
-                                    <div class="chat-row system-log" data-level=move || sig.get().level.clone()>
-                                        <div class="msg-header">
-                                            // Click Level to Filter
-                                            <span class="level-badge clickable"
-                                                  on:click=move |_| set_system_level_filter.set(Some(sig.get_untracked().level))
-                                            >
-                                                {move || sig.get().level.to_uppercase()}
-                                            </span>
-
-                                            // Click Source to Filter
-                                            <span class="source-tag clickable"
-                                                  on:click=move |_| set_system_source_filter.set(Some(sig.get_untracked().source))
-                                            >
-                                                {move || sig.get().source.to_uppercase()}
-                                            </span>
-
-                                            <span class="time">{move || format_time(sig.get().timestamp)}</span>
-                                        </div>
-                                        <div class="msg-body">{move || sig.get().message.clone()}</div>
-                                    </div>
-                                }
-                            }
-                        />
-                    </Show>
-
-                    // 2. SCROLL LOCK TOAST (Visible ONLY when ON the 시스템 tab and scrolled up)
-                    <Show when=move || active_tab.get() == "시스템" && !is_system_at_bottom.get()>
-                        <div class="scroll-lock-toast-bottom"
-                             on:click=move |_| {
-                                if let Some(el) = chat_container_ref.get() {
-                                    el.set_scroll_top(el.scroll_height());
-                                    set_system_at_bottom.set(true);
-                                }
-                             }
-                        >
-                            "⬆️ Scroll Locked (Click to Resume)"
-                        </div>
-                    </Show>
-                </div>
+                <ChatContainer />
             </Show>
 
             // Settings Modal

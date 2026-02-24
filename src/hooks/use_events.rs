@@ -1,3 +1,4 @@
+use leptos::logging::log;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
 use crate::types::{ChatMessage, SystemMessage};
@@ -25,6 +26,14 @@ pub async fn setup_event_listeners(signals: AppSignals) {
                     }
                     log.insert(packet.pid, RwSignal::new(packet.clone()));
                 });
+
+                log!("New Message! Unread count is {:?}", signals.unread_count.get_untracked());
+                log!("is at bottom: {:?}", signals.is_at_bottom.get_untracked());
+
+                if !signals.is_at_bottom.get_untracked() {
+                    signals.set_unread_count.update(|n| *n += 1);
+                    log!("New Message! Unread count is {:?}", signals.unread_count.get_untracked());
+                }
 
                 // Auto-Translate Logic
                 if is_japanese(&packet.message) && signals.use_translation.get_untracked() {

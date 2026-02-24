@@ -3,6 +3,7 @@ use crate::store::AppSignals;
 use crate::types::{ChatMessage, SystemMessage};
 use crate::utils::format_time;
 use leptos::html;
+use leptos::leptos_dom::log;
 use leptos::prelude::*;
 use web_sys::HtmlDivElement;
 
@@ -60,7 +61,7 @@ pub fn ChatContainer() -> impl IntoView {
         }).collect::<Vec<_>>()
     });
 
-    // --- SCROLL LOGIC ---
+    // --- AUTO-SCROLL EFFECT ---
     Effect::new(move |_| {
         filtered_chat.track();
         if signals.is_at_bottom.get_untracked() {
@@ -73,87 +74,125 @@ pub fn ChatContainer() -> impl IntoView {
     });
 
     view! {
-        <div class="relative flex-1 min-h-0 bg-black/20"
-            node_ref=chat_container_ref
-            on:scroll=move |ev| {
-                let el = event_target::<HtmlDivElement>(&ev);
-                let at_bottom = el.scroll_height() - el.scroll_top() - el.client_height() < 15;
-                if signals.active_tab.get_untracked() == "시스템" {
-                    signals.set_system_at_bottom.set(at_bottom);
-                } else {
-                    signals.set_is_at_bottom.set(at_bottom);
-                    if at_bottom { signals.set_unread_count.set(0); }
-                }
-            }
-        >
-            // --- SCROLLABLE CONTENT ---
-            <div class="overflow-y-auto h-full custom-scrollbar p-2">
-                <Show
-                    when=move || signals.active_tab.get() == "시스템"
-                    fallback=move || view! {
-                        <For
-                            each=move || filtered_chat.get()
-                            key=|sig| sig.get_untracked().pid
-                            children=move |sig| view! { <ChatRow sig=sig /> }
-                        />
+        <div class="relative flex-1 min-h-0 bg-base-100 transition-colors duration-300">
+            <div class="overflow-y-auto h-full custom-scrollbar p-2"
+                node_ref=chat_container_ref
+                on:scroll=move |ev| {
+                    let el = event_target::<HtmlDivElement>(&ev);
+
+                    // [Logic restored from your app.rs]
+                    let at_bottom = el.scroll_height() - el.scroll_top() - el.client_height() < 15;
+
+                    log!("at bottom : {:?}", at_bottom); // This will now log correctly!
+
+                    if signals.active_tab.get_untracked() == "시스템" {
+                        signals.set_system_at_bottom.set(at_bottom);
+                    } else {
+                        signals.set_is_at_bottom.set(at_bottom);
+                        if at_bottom { signals.set_unread_count.set(0); }
                     }
-                >
-                    <For
-                        each=move || filtered_system_logs.get()
-                        key=|sig| sig.get_untracked().pid
-                        children={move |sig: RwSignal<SystemMessage>| {
-                            let level = sig.get().level.clone();
-                            view! {
-                                <div class="chat chat-start opacity-80 mb-1">
-                                    <div class=move || format!("chat-bubble chat-bubble-xs border border-white/5 bg-base-300 min-h-0 text-[11px] leading-tight {}",
-                                        match level.as_str() {
-                                            "error" => "text-error",
-                                            "warning" => "text-warning",
-                                            "success" => "text-success",
-                                            _ => "text-gray-400"
-                                        }
-                                    )>
-                                        <span class="font-black mr-2">"[" {move || sig.get().source.to_uppercase()} "]"</span>
-                                        {move || sig.get().message.clone()}
-                                        <span class="ml-2 opacity-30 text-[9px]">{move || format_time(sig.get().timestamp)}</span>
+                }
+            >
+                <Show when=move || signals.active_tab.get() == "시스템">
+                    <div class="flex gap-2 p-2 bg-base-300/50 border-b border-white/5 animate-in slide-in-from-top-2">
+                        // Level Filter
+                        <select class="select select-ghost select-xs font-bold"
+                            on:change=move |ev| {
+                                let val = event_target_value(&ev);
+                                signals.set_system_level_filter.set(if val == "all" { None } else { Some(val) });
+                            }>
+                            <option value="all">"모든 레벨"</option>
+                            <option value="info">"INFO"</option>
+                            <option value="warning">"WARN"</option>
+                            <option value="error">"ERROR"</option>
+                        </select>
+
+                        // Source Filter
+                        <select class="select select-ghost select-xs font-bold"
+                            on:change=move |ev| {
+                                let val = event_target_value(&ev);
+                                signals.set_system_source_filter.set(if val == "all" { None } else { Some(val) });
+                            }>
+                            <option value="all">"모든 소스"</option>
+                            <option value="Sniffer">"SNIFFER"</option>
+                            <option value="Translator">"AI"</option>
+                            <option value="Setup">"SYSTEM"</option>
+                        </select>
+                    </div>
+                </Show>
+
+                // --- SCROLLABLE CONTENT ---
+                <div class="overflow-y-auto h-full custom-scrollbar p-2">
+                    <Show
+                        when=move || signals.active_tab.get() == "시스템"
+                        fallback=move || view! {
+                            <For
+                                each=move || filtered_chat.get()
+                                key=|sig| sig.get_untracked().pid
+                                children=move |sig| view! { <ChatRow sig=sig /> }
+                            />
+                        }
+                    >
+                        <For
+                            each=move || filtered_system_logs.get()
+                            key=|sig| sig.get_untracked().pid
+                            children={move |sig: RwSignal<SystemMessage>| {
+                                let level = sig.get().level.clone();
+                                view! {
+                                    <div class="chat chat-start opacity-80 mb-1">
+                                        <div class=move || format!("chat-bubble chat-bubble-xs border border-white/5 bg-base-300 min-h-0 text-[11px] leading-tight {}",
+                                            match level.as_str() {
+                                                "error" => "text-error",
+                                                "warning" => "text-warning",
+                                                "success" => "text-success",
+                                                _ => "text-gray-400"
+                                            }
+                                        )>
+                                            <span class="font-black mr-2">"[" {move || sig.get().source.to_uppercase()} "]"</span>
+                                            {move || sig.get().message.clone()}
+                                            <span class="ml-2 opacity-30 text-[9px]">{move || format_time(sig.get().timestamp)}</span>
+                                        </div>
                                     </div>
-                                </div>
-                            }
-                        }}
+                                }
+                            }}
+                        />
                     />
-                />
-            </Show>
+                </Show>
+                </div>
+
+                // --- OVERLAY: NEW MESSAGE TOAST ---
+                <Show when=move || signals.unread_count.get().gt(&0) && !signals.is_at_bottom.get()>
+                    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-50">
+                        <button class="btn btn-success btn-sm shadow-lg gap-2 animate-bounce"
+                            on:click=move |_| {
+                                if let Some(el) = chat_container_ref.get() {
+                                    el.set_scroll_top(el.scroll_height());
+                                    // Manually reset so the toast disappears immediately
+                                    signals.set_is_at_bottom.set(true);
+                                    signals.set_unread_count.set(0);
+                                }
+                            }>
+                            <span class="badge badge-neutral badge-sm">{move || signals.unread_count.get()}</span>
+                            "새로운 메시지"
+                        </button>
+                    </div>
+                </Show>
+
+                // --- OVERLAY: SCROLL LOCK TOAST ---
+                <Show when=move || signals.active_tab.get() == "시스템" && !signals.is_system_at_bottom.get()>
+                    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-50">
+                        <button class="btn btn-warning btn-sm opacity-90 shadow-lg"
+                            on:click=move |_| {
+                                if let Some(el) = chat_container_ref.get() {
+                                    el.set_scroll_top(el.scroll_height());
+                                    signals.set_system_at_bottom.set(true);
+                                }
+                            }>
+                            "⬆️ Scroll Locked"
+                        </button>
+                    </div>
+                </Show>
             </div>
-
-            // --- OVERLAY: NEW MESSAGE TOAST ---
-            <Show when=move || signals.unread_count.get().gt(&0) >
-                <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-50">
-                    <button class="btn btn-success btn-sm shadow-lg gap-2 animate-bounce"
-                        on:click=move |_| {
-                            if let Some(el) = chat_container_ref.get() {
-                                el.set_scroll_top(el.scroll_height());
-                            }
-                        }>
-                        <span class="badge badge-ghost badge-sm">{move || signals.unread_count.get()}</span>
-                        "새로운 메시지"
-                    </button>
-                </div>
-            </Show>
-
-            // --- OVERLAY: SCROLL LOCK TOAST ---
-            <Show when=move || signals.active_tab.get() == "시스템" && !signals.is_system_at_bottom.get()>
-                <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-50">
-                    <button class="btn btn-warning btn-sm opacity-90 shadow-lg"
-                        on:click=move |_| {
-                            if let Some(el) = chat_container_ref.get() {
-                                el.set_scroll_top(el.scroll_height());
-                                signals.set_system_at_bottom.set(true);
-                            }
-                        }>
-                        "⬆️ Scroll Locked"
-                    </button>
-                </div>
-            </Show>
         </div>
     }
 }

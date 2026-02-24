@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlDivElement;
-use crate::components::{ChatContainer, ChatRow, NavBar};
+use crate::components::{ChatContainer, ChatRow, NavBar, SetupWizard};
 use crate::components::settings::Settings;
 use crate::components::title_bar::TitleBar;
 use crate::hooks::use_config::save_app_config;
@@ -208,96 +208,9 @@ pub fn App() -> impl IntoView {
     let sync_status = move || sync_dict_action.value().get().unwrap_or_else(|| "".to_string());
     let is_syncing = sync_dict_action.pending();
 
-    // --- OPTIMIZED VIEW LOGIC ---
-    let filtered_chat = Memo::new(move |_| {
-        let tab = active_tab.get();
-        let search = search_term.get().to_lowercase();
-        let filters = custom_filters.get();
-
-        // If viewing System, return empty here to avoid processing overhead
-        if tab == "시스템" { return Vec::new(); }
-
-        let base_list = match tab.as_str() {
-            "전체" => chat_log.get().values().cloned().collect::<Vec<_>>(),
-            "커스텀" => chat_log.get().values()
-                .filter(|m| filters.contains(&m.get().channel))
-                .cloned().collect(),
-            _ => {
-                let key = match tab.as_str() {
-                    "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD"
-                };
-                chat_log.get().values()
-                    .filter(|m| m.get().channel == key)
-                    .cloned().collect()
-            }
-        };
-
-        if search.is_empty() { base_list }
-        else {
-            base_list.into_iter().filter(|sig| {
-                let m = sig.get();
-                m.nickname.to_lowercase().contains(&search) || m.message.to_lowercase().contains(&search)
-            }).collect()
-        }
-    });
-
-    let filtered_system_logs = Memo::new(move |_| {
-        let logs = system_log.get();
-        let level_f = system_level_filter.get();
-        let source_f = system_source_filter.get();
-        let search = search_term.get().to_lowercase();
-        let debug_enabled = is_debug.get();
-
-        logs.into_iter().filter(|sig| {
-            let m = sig.get();
-
-            if !debug_enabled && m.level == "debug" { return false; }
-
-            let matches_level = level_f.as_ref().map_or(true, |f| &m.level == f);
-            let matches_source = source_f.as_ref().map_or(true, |f| &m.source == f);
-            let matches_search = search.is_empty() || m.message.to_lowercase().contains(&search);
-
-            matches_level && matches_source && matches_search
-        }).collect::<Vec<_>>()
-    });
-
     // 1. STATE: Track if the user is currently at the bottom
 
     let chat_container_ref = create_node_ref::<html::Div>();
-
-    // 2. EFFECT: Auto-scroll when messages update
-    Effect::new(move |_| {
-        // We track 'filtered_messages' so this runs ONLY when the visible list changes
-        filtered_chat.track();
-
-        // [CRITICAL FIX] Only execute scroll logic if the user is ALREADY at the bottom.
-        // If they have scrolled up (is_at_bottom is false), this entire block is ignored.
-        if is_at_bottom.get_untracked() {
-            request_animation_frame(move || {
-                // Double-check after render to ensure the state is still 'at_bottom'
-                if is_at_bottom.get_untracked() {
-                    if let Some(el) = chat_container_ref.get() {
-                        el.set_scroll_top(el.scroll_height());
-                    }
-                }
-            });
-        }
-    });
-
-    // Effect: Auto-scroll specifically for System Messages
-    Effect::new(move |_| {
-        // 1. Track the system_log signal
-        system_log.track();
-
-        // 2. Only scroll if the user is in the system tab and already at the bottom
-        if active_tab.get_untracked() == "시스템" && is_system_at_bottom.get_untracked() {
-            request_animation_frame(move || {
-                if let Some(el) = chat_container_ref.get() {
-                    el.set_scroll_top(el.scroll_height());
-                }
-            });
-        }
-    });
 
     let finalize_setup = move |_| {
         set_init_done.set(true);
@@ -448,65 +361,20 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
-        <main id="main-app-container" class=move || if compact_mode.get() { "chat-app compact" } else { "chat-app" }>
+        <main id="main-app-container" class=move || if compact_mode.get() { "chat-app compact flex flex-col h-screen" } else { "chat-app flex flex-col h-screen" }>
             <Show when=move || active_menu_id.get().is_some()>
                 <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
             </Show>
             <TitleBar />
-            <Show when=move || init_done.get() fallback=move || view! {
-                <div class="setup-view">
-                    <div class="wizard-card">
-                        {move || match wizard_step.get() {
-                            0 => view! {
-                                <div class="wizard-step">
-                                    <h1>"Resonance Stream"</h1>
-                                    <p>"블루 프로토콜의 게임 채팅을 실시간으로 분석하고 번역합니다."</p>
-                                    <button class="primary-btn" on:click=move |_| set_wizard_step.set(1)>"시작하기"</button>
-                                </div>
-                            }.into_any(),
-                            1 => view! {
-                                <div class="wizard-step">
-                                    <h2>"빠른 설정"</h2>
-                                    <div class="setting-item">
-                                        <label class="checkbox-row">
-                                            <input type="checkbox" checked=move || use_translation.get() on:change=move |ev| set_use_translation.set(event_target_checked(&ev)) />
-                                            <span>"실시간 번역 기능 활성화."</span>
-                                            <p>"설정에서 바꿀 수 있습니다."</p>
-                                        </label>
-                                    </div>
-                                    <Show when=move || use_translation.get()>
-                                        <div class="setting-item">
-                                            <h3>"연산 장치 (Compute Mode)"</h3>
-                                            <div class="radio-group">
-                                                <label class="radio-row">
-                                                    <input type="radio" name="mode" value="cpu" checked=move || compute_mode.get() == "cpu" on:change=move |_| set_compute_mode.set("cpu".into()) />
-                                                    <span>"CPU (가장 높은 호환성)"</span>
-                                                </label>
-                                                <label class="radio-row">
-                                                    <input type="radio" name="mode" value="cuda" checked=move || compute_mode.get() == "cuda" on:change=move |_| set_compute_mode.set("cuda".into()) />
-                                                    <span>"GPU (고성능, NVIDIA CUDA 필요)"</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </Show>
-                                    <button class="primary-btn" on:click=move |_| { if use_translation.get_untracked() { set_wizard_step.set(2); } else { finalize_setup(()); } }>"Next"</button>
-                                </div>
-                            }.into_any(),
-                            2 => view! {
-                                <div class="wizard-step">
-                                    <h2>"Model Installation"</h2>
-                                    <p>"번역을 위해 약 1.3GB의 AI 모델 파일 다운로드가 필요합니다."</p>
-                                    <Show when=move || downloading.get() fallback=move || view! { <button class="primary-btn" on:click=start_download>"다운로드 시작"</button> }>
-                                        <div class="progress-bar"><div class="fill" style:width=move || format!("{}%", progress.get())></div></div>
-                                        <div class="progress-label">{move || format!("{}%", progress.get())}</div>
-                                    </Show>
-                                </div>
-                            }.into_any(),
-                            _ => view! { <div></div> }.into_any(),
-                        }}
-                    </div>
-                </div>
-            }>
+            <Show
+                when=move || signals.init_done.get()
+                fallback=move || view! {
+                    <SetupWizard
+                        finalize=Callback::new(finalize_setup)
+                        start_download=Callback::new(start_download)
+                    />
+                }
+            >
                 <NavBar />
 
                 <ChatContainer />

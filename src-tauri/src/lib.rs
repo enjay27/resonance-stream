@@ -57,7 +57,8 @@ pub fn run() {
             save_config,
             minimize_window,
             close_window,
-            open_model_folder,
+            open_app_data_folder,
+            export_chat_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -136,3 +136,12 @@ pub struct BatchMessageResponse {
     pub msg_type: String,
     pub results: Vec<TranslationResult>,
 }
+
+#[derive(Deserialize)]
+pub struct ExportMessage {
+    pub channel: String,
+    pub nickname: String,
+    pub message: String,
+    pub translated: Option<String>,
+    pub timestamp: u64,
+}

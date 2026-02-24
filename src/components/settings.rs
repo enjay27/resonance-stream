@@ -1,6 +1,7 @@
 use leptos::leptos_dom::log;
 use crate::store::{AppActions, AppSignals};
 use leptos::prelude::*;
+use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
 use crate::tauri_bridge::invoke;
 
@@ -16,6 +17,25 @@ pub fn Settings() -> impl IntoView {
         }
     });
     let is_syncing = sync_dict_action.pending();
+
+    let save_chat_action = Action::new_local(move |_: &()| {
+        // 1. Extract the raw chat messages from the signal map
+        let logs_to_export: Vec<_> = signals.chat_log.get_untracked()
+            .values()
+            .map(|sig| sig.get_untracked()) // Unpack the RwSignal<ChatMessage>
+            .collect();
+
+        // 2. Send them to Tauri
+        async move {
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "logs": logs_to_export })).unwrap();
+
+            match invoke("export_chat_log", args).await {
+                Ok(_) => "저장 완료".to_string(),
+                Err(_) => "저장 실패".to_string(),
+            }
+        }
+    });
+    let is_saving_chat = save_chat_action.pending();
 
     view! {
         <Show when=move || signals.show_settings.get()>
@@ -249,6 +269,47 @@ pub fn Settings() -> impl IntoView {
                                         } else {
                                             view! { "업데이트" }.into_any()
                                         }}
+                                    </button>
+                                </div>
+
+                                <div class="divider m-0 opacity-10"></div>
+
+                                <div class="flex items-center justify-between">
+                                    <div class="flex flex-col">
+                                        <span class="text-xs font-bold text-base-content/80">"대화 기록 저장"</span>
+                                        <span class="text-[9px] opacity-60">"현재 대화 내용을 텍스트로 내보냅니다."</span>
+                                    </div>
+                                    <button class="btn btn-xs btn-outline w-16"
+                                        disabled=move || is_saving_chat.get()
+                                        on:click=move |_| { save_chat_action.dispatch(()); }
+                                    >
+                                        {move || if is_saving_chat.get() {
+                                            view! { <span class="loading loading-spinner loading-xs"></span> }.into_any()
+                                        } else if let Some(res) = save_chat_action.value().get() {
+                                            // Displays "저장 완료" (Saved) or "저장 실패" (Failed) temporarily
+                                            view! { {res} }.into_any()
+                                        } else {
+                                            view! { "저장" }.into_any()
+                                        }}
+                                    </button>
+                                </div>
+
+                                <div class="divider m-0 opacity-10"></div>
+
+                                // --- NEW: Open AppData Directory ---
+                                <div class="flex items-center justify-between">
+                                    <div class="flex flex-col">
+                                        <span class="text-xs font-bold text-base-content/80">"앱 데이터 폴더 열기"</span>
+                                        <span class="text-[9px] opacity-60">"설정 및 로그 파일이 저장된 폴더를 엽니다."</span>
+                                    </div>
+                                    <button class="btn btn-xs btn-outline"
+                                        on:click=move |_| {
+                                            spawn_local(async {
+                                                let _ = invoke("open_app_data_folder", JsValue::NULL).await;
+                                            });
+                                        }
+                                    >
+                                        "폴더 열기"
                                     </button>
                                 </div>
 

@@ -200,18 +200,6 @@ pub async fn sync_dictionary(app: tauri::AppHandle, state: tauri::State<'_, AppS
 
     inject_system_message(&app, SystemLogLevel::Success, "ModelManager", "Dictionary saved to AppData.");
 
-    // 5. Notify Python Sidecar via Stdin
-    let mut tx_guard = state.sidecar_child.lock().unwrap();
-    if let Some(child) = tx_guard.as_mut() {
-        let msg = serde_json::json!({ "cmd": "reload" }).to_string() + "\n";
-
-        // Use the child's write method
-        child.write(msg.as_bytes()).map_err(|e| e.to_string())?;
-        inject_system_message(&app, SystemLogLevel::Info, "Sidecar", "Sent reload command via Stdin.");
-    } else {
-        return Err("Translator is not running".into());
-    }
-
     inject_system_message(&app, SystemLogLevel::Success, "Translator", "Dictionary successfully synchronized.");
 
     Ok("Dictionary updated and reloaded!".to_string())

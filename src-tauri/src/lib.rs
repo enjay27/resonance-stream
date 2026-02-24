@@ -1,6 +1,5 @@
 use crate::config::*;
 use crate::model_manager::*;
-use crate::python_translator::*;
 use crate::sniffer::*;
 use indexmap::IndexMap;
 use std::collections::{HashMap, VecDeque};
@@ -10,7 +9,6 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 mod model_manager;
-mod python_translator;
 mod sniffer_logic_test;
 mod sniffer;
 mod packet_buffer;
@@ -31,17 +29,10 @@ pub fn run() {
                 inject_system_message(handle, SystemLogLevel::Warning, "Backend", "Sniffer may fail without Admin rights.");
             }
 
-            // 2. Spawn the Watchdog Thread
-            let watchdog_app_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                start_batch_watchdog(watchdog_app_handle);
-            });
-
             Ok(())
         })
         .manage(AppState {
             batch_data: Arc::new((Mutex::new((vec![], 0)), Default::default())),
-            sidecar_child: Mutex::new(None),
             chat_history: Mutex::new(IndexMap::new()),
             system_history: Mutex::new(VecDeque::with_capacity(200)),
             next_pid: 1.into(),
@@ -52,10 +43,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             check_model_status,
             download_model,
-            is_translator_running,
-            start_translator_sidecar,
-            translate_message,
-            translate_nickname,
             start_sniffer_command,
             get_chat_history,
             get_system_history,

@@ -12,7 +12,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State, Window};
 use windivert::prelude::*;
 use crate::config::load_config;
-use crate::python_translator::{translate_batch, MessageRequest};
 
 // --- DATA STRUCTURES ---
 // 1. Standard Chat: Focuses on player communication
@@ -95,11 +94,58 @@ pub struct SplitPayload {
 
 pub struct AppState {
     pub batch_data: Arc<(Mutex<(Vec<MessageRequest>, u64)>, Condvar)>,
-    pub sidecar_child: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
     pub chat_history: Mutex<IndexMap<u64, ChatMessage>>,
     pub system_history: Mutex<VecDeque<SystemMessage>>,
     pub next_pid: AtomicU64,
     pub nickname_cache: Mutex<HashMap<String, String>>,
+}
+
+#[derive(Serialize)]
+pub struct NicknameRequest {
+    pub cmd: String,          // Always "nickname_only"
+    pub pid: u64,
+    pub nickname: String,     // Required for this request type
+}
+
+#[derive(Serialize)]
+pub struct MessageRequest {
+    pub cmd: String,          // Always "translate"
+    pub pid: u64,
+    pub text: String,         // The Japanese message
+}
+
+// --- RESPONSE: Python -> Rust ---
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NicknameResponse {
+    pub pid: u64,
+    pub nickname: String,
+    pub romaji: String, // Flat string, no object
+}
+
+// --- For Full translation requests ---
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MessageResponse {
+    pub pid: u64,
+    pub translated: String,
+}
+
+#[derive(Serialize)]
+pub struct BatchMessageRequest {
+    pub cmd: String, // "batch_translate" or "translate_and_save"
+    pub messages: Vec<MessageRequest>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TranslationResult {
+    pub pid: u64,
+    pub translated: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BatchMessageResponse {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    pub results: Vec<TranslationResult>,
 }
 
 lazy_static! {

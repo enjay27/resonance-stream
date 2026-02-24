@@ -34,13 +34,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": [
-      "bin/translator"
-    ],
     "resources": [
       "bin/WinDivert.dll",
-      "bin/WinDivert64.sys",
-      "resources/models.json"
+      "bin/WinDivert64.sys"
     ]
   }
 }

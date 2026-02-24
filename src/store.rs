@@ -74,6 +74,8 @@ pub struct AppSignals {
     pub set_active_menu_id: WriteSignal<Option<u64>>,
     pub archive_chat: ReadSignal<bool>,
     pub set_archive_chat: WriteSignal<bool>,
+    pub hide_original_in_compact: ReadSignal<bool>,
+    pub set_hide_original_in_compact: WriteSignal<bool>,
 }
 
 #[derive(Copy, Clone)]

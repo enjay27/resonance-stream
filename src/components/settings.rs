@@ -175,6 +175,19 @@ pub fn Settings() -> impl IntoView {
                                     />
                                 </label>
                             </div>
+
+                            <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
+                                <label class="label cursor-pointer p-0">
+                                    <span class="label-text text-xs font-bold text-base-content/80">"컴팩트 모드: 번역 시 원문 숨기기"</span>
+                                    <input type="checkbox" class="toggle toggle-success toggle-sm"
+                                        prop:checked=move || signals.hide_original_in_compact.get()
+                                        on:change=move |ev| {
+                                            signals.set_hide_original_in_compact.set(event_target_checked(&ev));
+                                            actions.save_config.dispatch(());
+                                        }
+                                    />
+                                </label>
+                            </div>
                         </section>
 
                         // ==========================================

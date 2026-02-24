@@ -45,6 +45,7 @@ pub struct AppConfig {
     pub is_debug: bool,
     pub tier: String,
     pub archive_chat: bool,
+    pub hide_original_in_compact: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

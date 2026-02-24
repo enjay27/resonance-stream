@@ -59,6 +59,7 @@ pub fn App() -> impl IntoView {
     let (unread_count, set_unread_count) = signal(0);
     let (active_menu_id, set_active_menu_id) = signal(None::<u64>);
     let (archive_chat, set_archive_chat) = signal(false);
+    let (hide_original_in_compact, set_hide_original_in_compact) = signal(false);
 
     let signals = AppSignals {
         init_done, set_init_done,
@@ -95,6 +96,8 @@ pub fn App() -> impl IntoView {
         unread_count, set_unread_count,
         active_menu_id, set_active_menu_id,
         archive_chat, set_archive_chat,
+        hide_original_in_compact,
+        set_hide_original_in_compact,
     };
 
     provide_context(signals);
@@ -146,6 +149,7 @@ pub fn App() -> impl IntoView {
             is_debug: is_debug.get_untracked(),
             tier: tier.get_untracked(),
             archive_chat: archive_chat.get_untracked(),
+            hide_original_in_compact: hide_original_in_compact.get_untracked(),
         };
 
         async move {
@@ -270,6 +274,7 @@ pub fn App() -> impl IntoView {
                         set_is_debug.set(config.is_debug);
                         set_tier.set(config.tier);
                         set_archive_chat.set(config.archive_chat);
+                        set_hide_original_in_compact.set(config.hide_original_in_compact);
 
                         let mut safe_op = config.overlay_opacity;
                         if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85

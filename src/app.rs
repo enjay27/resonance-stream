@@ -166,21 +166,6 @@ pub fn App() -> impl IntoView {
         }.boxed_local()
     });
 
-    // --- DICTIONARY SYNC ACTION ---
-    let sync_dict = Action::new_local(|_: &()| async move {
-        // We move the !Send Tauri future into this local action
-        match invoke("sync_dictionary", JsValue::NULL).await {
-            Ok(_) => {
-                log!("Dictionary Synced Successfully");
-                "최신 상태".to_string()
-            }
-            Err(e) => {
-                log!("Sync Error: {:?}", e);
-                "동기화 실패".to_string()
-            }
-        }
-    });
-
     let finalize_setup = move |_| {
         set_init_done.set(true);
         add_system_log("success", "Setup", "Initial configuration completed.");
@@ -246,18 +231,17 @@ pub fn App() -> impl IntoView {
     Effect::new(move |_| {
         if let Some(window) = web_sys::window() {
             if let Some(doc) = window.document() {
-                if let Some(body) = doc.body() {
-                    let _ = body.set_attribute("data-theme", &theme.get());
-                }
-            }
-        }
-    });
 
-    Effect::new(move |_| {
-        if let Some(window) = web_sys::window() {
-            if let Some(doc) = window.document() {
-                if let Some(el) = doc.get_element_by_id("main-app-container") {
-                    let _ = el.set_attribute("style", &format!("--overlay-opacity: {};", opacity.get()));
+                // 1. Apply theme to <html> (DaisyUI standard) and FORCE transparency
+                if let Some(html) = doc.document_element() {
+                    let _ = html.set_attribute("data-theme", &theme.get());
+                    // This strips DaisyUI's solid background so the Tauri window is clear
+                    let _ = html.set_attribute("style", "background-color: transparent !important;");
+                }
+
+                // 2. Ensure <body> is also fully transparent
+                if let Some(body) = doc.body() {
+                    let _ = body.set_attribute("style", "background-color: transparent !important;");
                 }
             }
         }
@@ -286,6 +270,11 @@ pub fn App() -> impl IntoView {
                         set_is_debug.set(config.is_debug);
                         set_tier.set(config.tier);
                         set_archive_chat.set(config.archive_chat);
+
+                        let mut safe_op = config.overlay_opacity;
+                        if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85
+                        if safe_op <= 0.0 { safe_op = 0.85; } // Safety fallback
+                        set_opacity.set(safe_op);
 
                         // 2. If the user hasn't finished the wizard, stop here
                         if config.init_done {
@@ -361,6 +350,17 @@ pub fn App() -> impl IntoView {
             } else {
                 "chat-app flex flex-col h-screen overflow-hidden"
             }
+            // Natively binds your opacity signal to the DaisyUI theme background
+            // style:background-color=move || {
+            style=move || {
+                let current_opacity = opacity.get();
+                if theme.get() == "dark" {
+                    format!("background-color: rgba(18, 18, 18, {}) !important;", current_opacity)
+                } else {
+                    format!("background-color: rgba(252, 252, 252, {}) !important;", current_opacity)
+                }
+            }
+            // Note: Use `signals.opacity.get()` if your app.rs uses the signals struct instead of local signals.
         >
             <Show when=move || active_menu_id.get().is_some()>
                 <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>

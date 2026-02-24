@@ -23,32 +23,32 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
     };
 
     view! {
-        // chat-start alignment matches your previous bubble flow
         <div class=move || format!(
             "flex flex-col items-start px-2 group transition-colors hover:bg-base-content/5 {}",
             if signals.compact_mode.get() { "py-0.5" } else { "py-1" }
         )>
 
-            // --- HEADER: Nickname(Romaji) + Level + Time ---
-            <div class="opacity-90 mb-1 flex gap-2 items-baseline">
+            <div class="opacity-90 mb-1 flex gap-2 items-center">
                 <span
                     class=move || {
                         let size_class = if signals.compact_mode.get() { "text-[12px]" } else { "text-[13px]" };
+
                         let color_class = if signals.search_term.get() == sig.get().nickname {
                             "text-success underline decoration-2"
                         } else {
                             channel_colors().0
                         };
 
-                        // Combine static classes with the dynamic variables into one string
-                        format!("font-black cursor-pointer hover:underline transition-all {} {}", size_class, color_class)
+                        // Removed the background box classes, just keeping the font styling
+                        format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide {} {}", size_class, color_class)
                     }
+                    // ADDED: The "Subtitle Style" text-stroke and subtle drop shadow
+                    style="text-shadow: -1px -1px 0 oklch(var(--b3)), 1px -1px 0 oklch(var(--b3)), -1px 1px 0 oklch(var(--b3)), 1px 1px 0 oklch(var(--b3)), 0px 2px 3px rgba(0,0,0,0.5);"
                     on:click=move |ev| {
                         ev.stop_propagation();
                         if is_active.get() {
                             signals.set_active_menu_id.set(None);
                         } else {
-                            // Save the exact screen coordinates of the click
                             set_menu_pos.set((ev.client_x(), ev.client_y()));
                             signals.set_active_menu_id.set(Some(sig.get_untracked().pid));
                         }
@@ -68,7 +68,6 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                         <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
                              style=move || {
                                  let (x, y) = menu_pos.get();
-                                 // Add a slight 8px offset so the menu doesn't spawn exactly under the cursor
                                  format!("top: {}px; left: {}px;", y + 8, x + 8)
                              }
                              on:click=move |ev| ev.stop_propagation()>
@@ -97,24 +96,23 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                     </Portal>
                 </Show>
 
-                <span class=move || format!("text-gray-500 font-bold {}", if signals.compact_mode.get() { "text-[9px]" } else { "text-[10px]" })>
+                <span class=move || format!("text-base-content/50 font-bold {}", if signals.compact_mode.get() { "text-[9px]" } else { "text-[10px]" })>
                     "Lv." {move || sig.get().level}
                 </span>
-                <time class=move || format!("ml-2 text-gray-500 opacity-70 {}", if signals.compact_mode.get() { "text-[9px]" } else { "text-[10px]" })>
+                <time class=move || format!("ml-2 text-base-content/50 opacity-70 {}", if signals.compact_mode.get() { "text-[9px]" } else { "text-[10px]" })>
                     {move || format_time(sig.get().timestamp)}
                 </time>
             </div>
 
             <div class="flex items-center gap-2 w-full">
-                // --- BUBBLE: Styled with DaisyUI + Custom BPSR Accents ---
                 <div class=move || format!(
                     "px-3 w-fit max-w-[85%] bg-base-200 border-y border-r border-base-content/5 border-l-[3px] rounded-md text-base-content shadow-sm transition-all {} {}",
                     channel_colors().1,
-                    if signals.compact_mode.get() { "py-1" } else { "py-2" } // Dynamic bubble padding
+                    if signals.compact_mode.get() { "py-1" } else { "py-2" }
                 )>
                     <div class=move || if signals.compact_mode.get() { "text-[12px] leading-snug" } else { "text-[14px] leading-relaxed" }>
                         {move || if is_japanese(&sig.get().message) {
-                            view! { <span class="text-gray-500 mr-1.5 font-bold">[원문]</span> }.into_any()
+                            view! { <span class="text-base-content/50 mr-1.5 font-bold">[원문]</span> }.into_any()
                         } else {
                             view! {}.into_any()
                         }}
@@ -132,9 +130,8 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                     })}
                 </div>
 
-                // --- ACTION BAR: Visible on hover for copy/search ---
                 <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                    <button class="btn btn-ghost btn-xs text-[10px] text-gray-500 h-6 min-h-0 px-2 hover:bg-base-content/10 hover:text-base-content"
+                    <button class="btn btn-ghost btn-xs text-[10px] text-base-content/50 h-6 min-h-0 px-2 hover:bg-base-content/10 hover:text-base-content"
                         on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
                         "COPY"
                     </button>

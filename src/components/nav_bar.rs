@@ -13,7 +13,7 @@ pub fn NavBar() -> impl IntoView {
 
     view! {
         <nav
-            class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 py-1 bg-base-200 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300"
+            class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 py-1 bg-base-content/5 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300"
             data-tauri-drag-region
         >
 

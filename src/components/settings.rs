@@ -1,3 +1,4 @@
+use leptos::leptos_dom::log;
 use crate::store::{AppActions, AppSignals};
 use leptos::prelude::*;
 use wasm_bindgen::JsValue;
@@ -194,6 +195,7 @@ pub fn Settings() -> impl IntoView {
                                     on:input=move |ev| {
                                         let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
                                         signals.set_opacity.set(val);
+                                        log!("opacity {:?}", signals.opacity.get_untracked());
                                         actions.save_config.dispatch(());
                                     }
                                 />

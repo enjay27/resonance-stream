@@ -74,7 +74,33 @@ pub fn ChatContainer() -> impl IntoView {
     });
 
     view! {
-        <div class="relative flex-1 min-h-0 bg-base-100 transition-colors duration-300">
+        <div class="relative flex-1 min-h-0 flex flex-col bg-base-100 transition-colors duration-300">
+
+            <Show when=move || signals.active_tab.get() == "시스템">
+                <div class="flex-none flex gap-2 p-2 bg-base-200 border-b border-base-content/5 z-10 shadow-sm animate-in slide-in-from-top-2">
+                    <select class="select select-bordered select-xs font-bold bg-base-100 text-base-content"
+                        on:change=move |ev| {
+                            let val = event_target_value(&ev);
+                            signals.set_system_level_filter.set(if val == "all" { None } else { Some(val) });
+                        }>
+                        <option value="all">"모든 레벨"</option>
+                        <option value="info">"INFO"</option>
+                        <option value="warning">"WARN"</option>
+                        <option value="error">"ERROR"</option>
+                    </select>
+                    <select class="select select-bordered select-xs font-bold bg-base-100 text-base-content"
+                        on:change=move |ev| {
+                            let val = event_target_value(&ev);
+                            signals.set_system_source_filter.set(if val == "all" { None } else { Some(val) });
+                        }>
+                        <option value="all">"모든 소스"</option>
+                        <option value="Sniffer">"SNIFFER"</option>
+                        <option value="Translator">"AI"</option>
+                        <option value="Setup">"SYSTEM"</option>
+                    </select>
+                </div>
+            </Show>
+
             <div class="overflow-y-auto h-full custom-scrollbar p-2"
                 node_ref=chat_container_ref
                 on:scroll=move |ev| {
@@ -93,33 +119,6 @@ pub fn ChatContainer() -> impl IntoView {
                     }
                 }
             >
-                <Show when=move || signals.active_tab.get() == "시스템">
-                    <div class="flex gap-2 p-2 bg-base-300/50 border-b border-white/5 animate-in slide-in-from-top-2">
-                        // Level Filter
-                        <select class="select select-ghost select-xs font-bold"
-                            on:change=move |ev| {
-                                let val = event_target_value(&ev);
-                                signals.set_system_level_filter.set(if val == "all" { None } else { Some(val) });
-                            }>
-                            <option value="all">"모든 레벨"</option>
-                            <option value="info">"INFO"</option>
-                            <option value="warning">"WARN"</option>
-                            <option value="error">"ERROR"</option>
-                        </select>
-
-                        // Source Filter
-                        <select class="select select-ghost select-xs font-bold"
-                            on:change=move |ev| {
-                                let val = event_target_value(&ev);
-                                signals.set_system_source_filter.set(if val == "all" { None } else { Some(val) });
-                            }>
-                            <option value="all">"모든 소스"</option>
-                            <option value="Sniffer">"SNIFFER"</option>
-                            <option value="Translator">"AI"</option>
-                            <option value="Setup">"SYSTEM"</option>
-                        </select>
-                    </div>
-                </Show>
 
                 // --- SCROLLABLE CONTENT ---
                 <Show

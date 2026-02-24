@@ -9,16 +9,6 @@ pub fn NavBar() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
     let actions = use_context::<AppActions>().expect("AppActions missing");
 
-    // --- DICTIONARY SYNC ACTION (Restored from app.rs) ---
-    let sync_dict_action = Action::new_local(|_: &()| async move {
-        match invoke("sync_dictionary", JsValue::NULL).await {
-            Ok(_) => "최신 상태".to_string(),
-            Err(_) => "동기화 실패".to_string(),
-        }
-    });
-
-    let is_syncing = sync_dict_action.pending();
-
     view! {
         <nav
             class="flex items-center justify-between px-2 bg-base-200 border-b border-base-content/5 h-10 select-none"
@@ -76,35 +66,6 @@ pub fn NavBar() -> impl IntoView {
 
             // --- RIGHT: Control Icons & Dictionary ---
             <div class="flex items-center gap-1">
-
-                // 📘 Dictionary Sync Button (Restored Features)
-                <div class="tooltip tooltip-bottom" data-tip="Update Dictionary">
-                    <button
-                        class="btn btn-ghost btn-xs gap-2 relative"
-                        disabled=move || is_syncing.get()
-                        on:click=move |_| {
-                            sync_dict_action.dispatch(());
-                            signals.set_dict_update_available.set(false);
-                        }
-                    >
-                        {move || if is_syncing.get() {
-                            view! {
-                                <>
-                                    <span class="loading loading-spinner loading-xs text-success"></span>
-                                    <span class="text-[10px] font-bold">"동기화 중..."</span>
-                                </>
-                            }.into_any()
-                        } else {
-                            view! { <span class="text-lg">"📘"</span> }.into_any()
-                        }}
-
-                        // The Update Badge (Blue Protocol style)
-                        <Show when=move || signals.dict_update_available.get()>
-                            <span class="absolute top-0 right-0 w-2 h-2 bg-info rounded-full animate-ping"></span>
-                            <span class="absolute top-0 right-0 w-2 h-2 bg-info rounded-full"></span>
-                        </Show>
-                    </button>
-                </div>
 
                 <div class="divider divider-horizontal mx-0 opacity-10"></div>
 

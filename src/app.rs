@@ -128,6 +128,7 @@ pub fn App() -> impl IntoView {
             gloo_timers::future::TimeoutFuture::new(5000).await;
         }
     });
+
     // --- CONFIG ACTIONS ---
     let save_config = Action::new_local(move |_: &()| {
         let config = AppConfig {
@@ -165,33 +166,8 @@ pub fn App() -> impl IntoView {
         }.boxed_local()
     });
 
-    let actions = AppActions { save_config, clear_history };
-
-    provide_context(actions);
-
-    // Apply theme to the root element whenever it changes
-    Effect::new(move |_| {
-        if let Some(window) = web_sys::window() {
-            if let Some(doc) = window.document() {
-                if let Some(body) = doc.body() {
-                    let _ = body.set_attribute("data-theme", &theme.get());
-                }
-            }
-        }
-    });
-
-    Effect::new(move |_| {
-        if let Some(window) = web_sys::window() {
-            if let Some(doc) = window.document() {
-                if let Some(el) = doc.get_element_by_id("main-app-container") {
-                    let _ = el.set_attribute("style", &format!("--overlay-opacity: {};", opacity.get()));
-                }
-            }
-        }
-    });
-
     // --- DICTIONARY SYNC ACTION ---
-    let sync_dict_action = Action::new_local(|_: &()| async move {
+    let sync_dict = Action::new_local(|_: &()| async move {
         // We move the !Send Tauri future into this local action
         match invoke("sync_dictionary", JsValue::NULL).await {
             Ok(_) => {
@@ -204,13 +180,6 @@ pub fn App() -> impl IntoView {
             }
         }
     });
-
-    let sync_status = move || sync_dict_action.value().get().unwrap_or_else(|| "".to_string());
-    let is_syncing = sync_dict_action.pending();
-
-    // 1. STATE: Track if the user is currently at the bottom
-
-    let chat_container_ref = create_node_ref::<html::Div>();
 
     let finalize_setup = move |_| {
         set_init_done.set(true);
@@ -268,6 +237,31 @@ pub fn App() -> impl IntoView {
             closure.forget();
         });
     };
+
+    let actions = AppActions { save_config, clear_history };
+
+    provide_context(actions);
+
+    // Apply theme to the root element whenever it changes
+    Effect::new(move |_| {
+        if let Some(window) = web_sys::window() {
+            if let Some(doc) = window.document() {
+                if let Some(body) = doc.body() {
+                    let _ = body.set_attribute("data-theme", &theme.get());
+                }
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        if let Some(window) = web_sys::window() {
+            if let Some(doc) = window.document() {
+                if let Some(el) = doc.get_element_by_id("main-app-container") {
+                    let _ = el.set_attribute("style", &format!("--overlay-opacity: {};", opacity.get()));
+                }
+            }
+        }
+    });
 
     // --- STARTUP HYDRATION ---
     Effect::new(move |_| {

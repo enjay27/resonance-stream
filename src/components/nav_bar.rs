@@ -20,7 +20,10 @@ pub fn NavBar() -> impl IntoView {
     let is_syncing = sync_dict_action.pending();
 
     view! {
-        <nav class="flex items-center justify-between px-2 bg-base-200 border-b border-white/5 h-10 select-none">
+        <nav
+            class="flex items-center justify-between px-2 bg-base-200 border-b border-base-content/5 h-10 select-none"
+            data-tauri-drag-region
+        >
 
             // --- LEFT: DaisyUI Tabs ---
             <div class="join bg-base-300/50 p-0.5 rounded-lg border border-base-content/5">
@@ -109,7 +112,13 @@ pub fn NavBar() -> impl IntoView {
                 <div class="tooltip tooltip-bottom" data-tip="Compact Mode">
                     <button class="btn btn-ghost btn-xs text-lg"
                         on:click=move |_| {
-                            signals.set_compact_mode.update(|b| *b = !*b);
+                            let new_compact_state = !signals.compact_mode.get_untracked();
+                            signals.set_compact_mode.set(new_compact_state);
+
+                            if new_compact_state && signals.active_tab.get_untracked() != "시스템" {
+                                signals.set_active_tab.set("커스텀".to_string());
+                            }
+
                             actions.save_config.dispatch(());
                         }>
                         {move || if signals.compact_mode.get() { "🔽" } else { "🔼" }}

@@ -365,7 +365,9 @@ pub fn App() -> impl IntoView {
             <Show when=move || active_menu_id.get().is_some()>
                 <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
             </Show>
-            <TitleBar />
+            <Show when=move || !compact_mode.get()>
+                <TitleBar />
+            </Show>
             <Show
                 when=move || signals.init_done.get()
                 fallback=move || view! {

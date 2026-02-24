@@ -10,35 +10,54 @@ pub fn TitleBar() -> impl IntoView {
     let store = use_context::<AppSignals>().expect("Store missing");
 
     view! {
-        <div class="flex items-center justify-between h-8 bg-black/40 border-b border-white/10 select-none px-2" data-tauri-drag-region>
-            <div class="absolute inset-0 z-0" data-tauri-drag-region></div>
+        // navbar provides the structural flexbox and min-height
+        <div class="navbar bg-base-300/60 backdrop-blur-md min-h-8 h-8 px-2 border-b border-white/5 select-none relative" data-tauri-drag-region>
 
-            <div class="relative z-10 text-[10px] font-semibold text-gray-500 pointer-events-none">
-                "Resonance Stream"
+            // --- LEFT: App Title ---
+            <div class="flex-1 pointer-events-none">
+                <span class="text-[10px] font-black tracking-tighter text-gray-500 uppercase opacity-70">
+                    "Resonance Stream"
+                </span>
             </div>
 
-            <div class="relative z-10 text-xs text-gray-300">
-                {move || store.status_text.get()}
+            // --- CENTER: App Status (READY / INITIALIZING) ---
+            <div class="absolute left-1/2 -translate-x-1/2 pointer-events-none">
+                <span class="text-[10px] font-black tracking-[0.2em] text-bpsr-green uppercase animate-in fade-in duration-500">
+                    {move || store.status_text.get()}
+                </span>
             </div>
 
-            <div class="relative z-20 flex items-center h-full no-drag">
-                // Sniffer Status Dot
-                <div class="flex items-center gap-1 px-2 py-0.5 rounded bg-black/30 border border-white/5 text-[10px] font-extrabold mr-2">
-                     <span class=move || format!("w-1.5 h-1.5 rounded-full {}",
-                        if store.is_sniffer_active.get() { "bg-bpsr-green shadow-[0_0_6px_#00ff88] animate-pulse" } else { "bg-gray-600" }
-                     )></span>
-                     <span class=move || if store.is_sniffer_active.get() { "text-bpsr-green" } else { "text-gray-500" }>
-                        {move || if store.is_sniffer_active.get() { "SNIFFER" } else { "OFFLINE" }}
-                     </span>
+            // --- RIGHT: System Badges & Controls ---
+            <div class="flex-none flex items-center h-full no-drag">
+
+                // DaisyUI Badge for Sniffer Status
+                <div class=move || format!(
+                    "badge badge-xs gap-1.5 px-2 py-2 font-black text-[9px] mr-2 border-white/5 shadow-inner transition-all {}",
+                    if store.is_sniffer_active.get() {
+                        "badge-success bg-success/10 text-success border-success/20"
+                    } else {
+                        "badge-ghost bg-white/5 text-gray-600 border-white/10"
+                    }
+                )>
+                    // The Pulsing Indicator Dot
+                    <div class=move || format!(
+                        "w-1 h-1 rounded-full {}",
+                        if store.is_sniffer_active.get() { "bg-success animate-pulse shadow-[0_0_8px_#00ff88]" } else { "bg-gray-600" }
+                    )></div>
+                    {move || if store.is_sniffer_active.get() { "SNIFFER ON" } else { "SNIFFER OFF" }}
                 </div>
 
-                <button class="w-11 h-full hover:bg-white/10 transition-colors" on:click=move |_| {
-                    spawn_local(async { let _ = invoke("minimize_window", JsValue::NULL).await; });
-                }>"—"</button>
-
-                <button class="w-11 h-full hover:bg-red-600 hover:text-white transition-colors" on:click=move |_| {
-                    spawn_local(async { let _ = invoke("close_window", JsValue::NULL).await; });
-                }>"✕"</button>
+                // Window Control Buttons
+                <div class="flex h-8 ml-1">
+                    <button class="btn btn-ghost btn-xs rounded-none h-full w-10 hover:bg-white/10"
+                        on:click=move |_| { spawn_local(async { let _ = invoke("minimize_window", JsValue::NULL).await; }); }>
+                        <span class="opacity-70 text-[10px]">"—"</span>
+                    </button>
+                    <button class="btn btn-ghost btn-xs rounded-none h-full w-10 hover:bg-error hover:text-error-content transition-colors group"
+                        on:click=move |_| { spawn_local(async { let _ = invoke("close_window", JsValue::NULL).await; }); }>
+                        <span class="opacity-70 group-hover:opacity-100 text-xs">"✕"</span>
+                    </button>
+                </div>
             </div>
         </div>
     }

@@ -1,11 +1,5 @@
-// src/components/settings.rs
 use crate::store::{AppActions, AppSignals};
-use crate::tauri_bridge::invoke;
 use leptos::prelude::*;
-use leptos::task::spawn_local;
-use wasm_bindgen::JsValue;
-use crate::types::ModelStatus;
-use crate::utils::add_system_log;
 
 #[component]
 pub fn Settings() -> impl IntoView {
@@ -14,59 +8,55 @@ pub fn Settings() -> impl IntoView {
 
     view! {
         <Show when=move || signals.show_settings.get()>
-            // Overlay: Backdrop blur and semi-transparent black
-            <div class="fixed inset-0 z-[10000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-                 on:click=move |_| signals.set_show_settings.set(false)>
-
-                // Modal Body: Dark themed with BPSR green accents
-                <div class="bg-[#1a1a1a] border border-white/10 w-full max-w-md max-h-[90vh] rounded-xl shadow-2xl flex flex-col animate-in fade-in zoom-in duration-200"
-                     on:click=move |ev| ev.stop_propagation()>
+            // DaisyUI Modal with Backdrop
+            <div class="modal modal-open backdrop-blur-sm transition-all duration-300">
+                <div class="modal-box bg-base-300 border border-white/10 w-full max-w-sm p-0 overflow-hidden shadow-2xl animate-in zoom-in duration-200">
 
                     // --- HEADER ---
-                    <div class="flex items-center justify-between p-4 border-b border-white/5">
-                        <h2 class="text-lg font-black text-white tracking-tight">"SETTINGS"</h2>
-                        <button class="text-gray-500 hover:text-white transition-colors text-xl"
+                    <div class="flex items-center justify-between p-4 border-b border-white/5 bg-base-200">
+                        <h2 class="text-sm font-black tracking-widest text-white">"SETTINGS"</h2>
+                        <button class="btn btn-ghost btn-xs text-xl"
                                 on:click=move |_| signals.set_show_settings.set(false)>"✕"</button>
                     </div>
 
                     // --- CONTENT (Scrollable) ---
-                    <div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+                    <div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar max-h-[70vh]">
 
                         // Section: AI Translation
                         <section class="space-y-3">
                             <h3 class="text-[10px] font-bold text-bpsr-green uppercase tracking-widest opacity-80">"AI Translation Features"</h3>
 
-                            <div class="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5 hover:border-bpsr-green/30 transition-all cursor-pointer"
-                                 on:click=move |_| {
-                                     let current = signals.use_translation.get();
-                                     // Logic for handling download/toggle remains the same
-                                 }>
-                                <span class="text-sm font-medium">"실시간 번역 기능 사용"</span>
-                                <input type="checkbox" class="w-4 h-4 accent-bpsr-green"
-                                    prop:checked=move || signals.use_translation.get()
-                                    on:change=move |_| {} // Handled by parent div click for better UX
-                                />
+                            <div class="form-control">
+                                <label class="label cursor-pointer bg-base-100 rounded-lg px-4 py-3 border border-white/5 hover:border-bpsr-green/30 transition-all"
+                                     on:click=move |_| {
+                                         let current = signals.use_translation.get();
+                                         signals.set_use_translation.set(!current);
+                                         actions.save_config.dispatch(());
+                                     }>
+                                    <span class="label-text font-bold text-gray-200">"실시간 번역 기능 사용"</span>
+                                    <input type="checkbox" class="toggle toggle-success toggle-sm"
+                                        prop:checked=move || signals.use_translation.get()
+                                        on:change=move |_| {} // Handled by label click
+                                    />
+                                </label>
                             </div>
 
                             <Show when=move || signals.use_translation.get()>
                                 // Compute Mode Radio Group
-                                <div class="p-3 bg-white/5 rounded-lg space-y-2">
-                                    <span class="text-xs text-gray-400">"연산 장치 (Compute Mode)"</span>
-                                    <div class="flex gap-2">
+                                <div class="p-3 bg-base-200 rounded-lg space-y-3 border border-white/5">
+                                    <span class="text-[11px] font-bold text-gray-400 uppercase">"연산 장치 (Compute Mode)"</span>
+                                    <div class="join w-full">
                                         {vec!["cpu", "cuda"].into_iter().map(|m| {
-                                            let m_val = m.to_string().clone();
-                                            let m_move = m.to_string().clone();
+                                            let m_val = m.to_string();
+                                            let m_line = m.to_string();
+                                            let m_click = m.to_string();
                                             view! {
                                                 <button
-                                                    class=move || {
-                                                        if signals.compute_mode.get() == m_val.clone() {
-                                                            "bg-bpsr-green text-black border-bpsr-green"
-                                                        } else {
-                                                            "border-white/10 text-gray-400"
-                                                        }
-                                                    }
+                                                    class="join-item btn btn-xs flex-1 font-black"
+                                                    class:btn-success=move || signals.compute_mode.get() == m_val
+                                                    class:btn-outline=move || signals.compute_mode.get() != m_line
                                                     on:click=move |_| {
-                                                        signals.set_compute_mode.set(m_move.clone());
+                                                        signals.set_compute_mode.set(m_click.clone());
                                                         actions.save_config.dispatch(());
                                                         signals.set_restart_required.set(true);
                                                     }
@@ -76,22 +66,27 @@ pub fn Settings() -> impl IntoView {
                                             }
                                         }).collect_view()}
                                     </div>
+                                    <Show when=move || signals.restart_required.get()>
+                                        <div class="text-[9px] text-warning font-bold animate-pulse">
+                                            "⚠️ 변경 사항을 적용하려면 재시작이 필요합니다."
+                                        </div>
+                                    </Show>
                                 </div>
                             </Show>
                         </section>
 
                         // Section: Appearance
-                        <section class="space-y-3">
+                        <section class="space-y-4">
                             <h3 class="text-[10px] font-bold text-bpsr-green uppercase tracking-widest opacity-80">"Appearance"</h3>
 
                             // Opacity Slider
-                            <div class="space-y-2">
-                                <div class="flex justify-between text-xs">
-                                    <span class="text-gray-300">"Background Opacity"</span>
-                                    <span class="text-bpsr-green font-mono">{move || format!("{:.0}%", signals.opacity.get() * 100.0)}</span>
+                            <div class="space-y-2 px-1">
+                                <div class="flex justify-between text-[11px] font-bold">
+                                    <span class="text-gray-400">"BACKGROUND OPACITY"</span>
+                                    <span class="text-bpsr-green">{move || format!("{:.0}%", signals.opacity.get() * 100.0)}</span>
                                 </div>
                                 <input type="range" min="0.1" max="1.0" step="0.05"
-                                    class="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-bpsr-green"
+                                    class="range range-xs range-success"
                                     prop:value=move || signals.opacity.get().to_string()
                                     on:input=move |ev| {
                                         let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
@@ -102,46 +97,51 @@ pub fn Settings() -> impl IntoView {
                             </div>
 
                             // Theme Toggle
-                            <button class="w-full flex justify-between items-center p-3 bg-white/5 rounded-lg border border-white/5 hover:border-white/20 transition-all"
+                            <button class="btn btn-sm btn-block justify-between bg-base-100 border-white/5 font-bold"
                                     on:click=move |_| {
                                         let new_theme = if signals.theme.get() == "dark" { "light" } else { "dark" };
                                         signals.set_theme.set(new_theme.to_string());
                                         actions.save_config.dispatch(());
                                     }>
-                                <span class="text-sm">"Theme Mode"</span>
-                                <span class="text-xs font-bold uppercase tracking-widest">
+                                <span class="text-xs">"Theme Mode"</span>
+                                <span class="text-[10px] uppercase tracking-widest opacity-70">
                                     {move || if signals.theme.get() == "dark" { "🌙 Dark" } else { "☀️ Light" }}
                                 </span>
                             </button>
                         </section>
 
-                        // Section: Data Factory
+                        // Section: Data Factory (Fine-Tuning)
                         <Show when=move || signals.is_debug.get()>
-                            <section class="space-y-3 p-3 bg-bpsr-green/5 border border-bpsr-green/20 rounded-lg">
-                                <h3 class="text-[10px] font-bold text-bpsr-green uppercase">"Data Factory (Fine-Tuning)"</h3>
+                            <section class="p-3 bg-success/5 border border-success/20 rounded-lg space-y-2">
                                 <div class="flex items-center justify-between">
-                                    <span class="text-xs text-gray-300">"채팅 로그 및 번역본 저장"</span>
-                                    <input type="checkbox" class="accent-bpsr-green"
+                                    <div class="flex flex-col">
+                                        <span class="text-[11px] font-black text-bpsr-green uppercase">"Data Factory"</span>
+                                        <span class="text-[9px] text-gray-500 italic">"dataset_raw.jsonl 저장"</span>
+                                    </div>
+                                    <input type="checkbox" class="checkbox checkbox-success checkbox-xs"
                                         prop:checked=move || signals.archive_chat.get()
                                         on:change=move |ev| {
                                             signals.set_archive_chat.set(event_target_checked(&ev));
+                                            actions.save_config.dispatch(());
                                         }
                                     />
                                 </div>
-                                <p class="text-[10px] text-gray-500 italic">"dataset_raw.jsonl 형태로 저장됩니다."</p>
                             </section>
                         </Show>
                     </div>
 
-                    // --- FOOTER ---
-                    <div class="p-4 bg-black/20 text-center border-t border-white/5">
+                    // --- FOOTER: GitHub Link ---
+                    <div class="p-4 bg-base-200 text-center border-t border-white/5">
                         <a href="https://github.com/enjay27/bpsr-translator" target="_blank"
-                           class="inline-flex items-center gap-2 text-[11px] text-gray-500 hover:text-bpsr-green transition-colors">
-                           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                           class="btn btn-ghost btn-xs gap-2 text-gray-500 hover:text-bpsr-green transition-all lowercase italic">
+                           <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
                            "BPSR Translator v1.0"
                         </a>
                     </div>
                 </div>
+
+                // Modal Backdrop to close
+                <div class="modal-backdrop bg-black/40" on:click=move |_| signals.set_show_settings.set(false)></div>
             </div>
         </Show>
     }

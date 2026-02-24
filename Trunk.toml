@@ -13,7 +13,7 @@ stage = "pre_build"
 command = "cmd"
 command_arguments = [
     "/c",
-    "tailwindcss.exe -i ./style/input.css -o ./style/output.css"
+    "npx @tailwindcss/cli -i ./style/input.css -o ./style/output.css"
 ]
 
 [[assets]]

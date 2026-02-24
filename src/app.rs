@@ -10,6 +10,7 @@ use crate::components::ChatRow;
 use crate::components::settings::Settings;
 use crate::components::title_bar::TitleBar;
 use crate::hooks::use_config::save_app_config;
+use crate::hooks::use_events::setup_event_listeners;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::{invoke, listen};
 use crate::types::{
@@ -207,10 +208,6 @@ pub fn App() -> impl IntoView {
     let sync_status = move || sync_dict_action.value().get().unwrap_or_else(|| "".to_string());
     let is_syncing = sync_dict_action.pending();
 
-    // --- FINE-GRAINED REACTIVE STATE ---
-    // The IndexMap now holds individual RwSignals for each message.
-    // let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatPacket>>::new());
-
     // --- OPTIMIZED VIEW LOGIC ---
     let filtered_chat = Memo::new(move |_| {
         let tab = active_tab.get();
@@ -302,151 +299,6 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // --- ACTIONS ---
-    let setup_listeners = move || {
-        spawn_local(async move {
-            // --- LISTENER: NICKNAME UPDATES ---
-            let nick_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    let payload = &ev["payload"];
-                    let nickname = payload["nickname"].as_str().unwrap_or_default().to_string();
-                    let romaji = payload["romaji"].as_str().unwrap_or_default().to_string();
-                    let target_pid = payload["pid"].as_u64().unwrap_or(0);
-
-                    // Update Cache for future lookups
-                    set_name_cache.update(|cache| { cache.insert(nickname, romaji.clone()); });
-
-                    // Update the specific message that triggered this
-                    chat_log.with_untracked(|log| {
-                        if let Some(sig) = log.get(&target_pid) {
-                            sig.update(|p| p.nickname_romaji = Some(romaji.clone()));
-                        }
-                    });
-                }
-            }) as Box<dyn FnMut(JsValue)>);
-
-            // --- LISTENER: MESSAGE TRANSLATIONS ---
-            let msg_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    let resp = &ev["payload"];
-                    let target_pid = resp["pid"].as_u64().unwrap_or(0);
-                    let text = resp["translated"].as_str().unwrap_or_default().to_string();
-
-                    if target_pid > 0 {
-                        chat_log.with_untracked(|log| {
-                            if let Some(sig) = log.get(&target_pid) {
-                                sig.update(|p| p.translated = Some(text));
-                            }
-                        });
-                    }
-                }
-            }) as Box<dyn FnMut(JsValue)>);
-
-            // LISTENER 1: Game Packets
-            let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                log!("Packet {:?}", &event_obj);
-
-                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    let payload_json = ev["payload"].clone();
-
-                    if let Ok(mut packet) = serde_json::from_value::<ChatMessage>(payload_json) {
-                        log!("payload {:?}", packet);
-
-                        // [FIX] Ignore messages belonging to the SYSTEM channel in game tabs
-                        if packet.channel == "SYSTEM" { return; }
-
-                        // [NEW] Sticker Transformation Logic
-                        // Detects "emojiPic=" pattern and replaces it with "스티커 전송"
-                        if packet.message.starts_with("emojiPic=") {
-                            packet.message = "스티커 전송".to_string();
-                            // Optional: We can force translation to None since it's already "translated"
-                            packet.translated = None;
-                        }
-                        if packet.message.starts_with("<sprite=") {
-                            packet.message = "이모지 전송".to_string();
-                            // Optional: We can force translation to None since it's already "translated"
-                            packet.translated = None;
-                        }
-
-                        let packet_clone = packet.clone();
-                        let packet_nickname = packet_clone.clone();
-
-                        set_chat_log.update(|log| {
-                            let limit = chat_limit.get_untracked();
-                            while log.len() >= limit && !log.is_empty() {
-                                log.shift_remove_index(0);
-                            }
-                            log.insert(packet.pid, RwSignal::new(packet.clone()));
-                        });
-
-                        let current_tab = active_tab.get_untracked();
-                        let is_relevant = match current_tab.as_str() {
-                            "전체" => true,
-                            "월드" => packet_clone.channel == "WORLD",
-                            "길드" => packet_clone.channel == "GUILD",
-                            "파티" => packet_clone.channel == "PARTY",
-                            "로컬" => packet_clone.channel == "LOCAL",
-                            _ => false,
-                        };
-
-                        if is_relevant && !is_at_bottom.get_untracked() {
-                            set_unread_count.update(|n| *n += 1);
-                        }
-
-                        let pid = packet.pid;
-                        let nickname = packet.nickname.clone();
-
-                        // NICKNAME STRATEGY: Check Cache -> Request if Missing
-                        let cached_nickname = name_cache.with(|cache| cache.get(&nickname).cloned());
-
-                        if let Some(romaji) = cached_nickname {
-                            packet.nickname_romaji = Some(romaji);
-                        } else if is_japanese(&nickname) {
-                            // Request nickname-only romanization
-                            spawn_local(async move {
-                                let _ = invoke("translate_nickname", serde_wasm_bindgen::to_value(&serde_json::json!({
-                                    "pid": pid, "nickname": nickname
-                                })).unwrap()).await;
-                            });
-                        }
-
-                        // MESSAGE STRATEGY: Request translation if Japanese
-                        if is_japanese(&packet.message) {
-                            spawn_local(async move {
-                                let _ = invoke("translate_message", serde_wasm_bindgen::to_value(&serde_json::json!({
-                                    "text": packet_nickname.message, "pid": pid, "nickname": None::<String>
-                                })).unwrap()).await;
-                            });
-                        }
-                    }
-                }
-            }) as Box<dyn FnMut(JsValue)>);
-
-            // LISTENER 2: System Logs (New!)
-            let system_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
-                if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-                    // Parse as SystemMessage
-                    if let Ok(packet) = serde_json::from_value::<SystemMessage>(ev["payload"].clone()) {
-                        set_system_log.update(|log| {
-                            if log.len() >= 200 { log.remove(0); }
-                            log.push(RwSignal::new(packet));
-                        });
-                    }
-                }
-            }) as Box<dyn FnMut(JsValue)>);
-
-            listen("packet-event", &packet_closure).await;
-            listen("system-event", &system_closure).await;
-            listen("nickname-feature-event", &nick_closure).await;
-            listen("translation-feature-event", &msg_closure).await;
-
-            packet_closure.forget();
-            system_closure.forget();
-            nick_closure.forget();
-            msg_closure.forget();
-        });
-    };
-
     let finalize_setup = move |_| {
         set_init_done.set(true);
         add_system_log("success", "Setup", "Initial configuration completed.");
@@ -454,7 +306,7 @@ pub fn App() -> impl IntoView {
 
         spawn_local(async move {
             add_system_log("info", "Sniffer", "Initializing packet capture...");
-            setup_listeners();
+            setup_event_listeners(signals).await;
             set_is_sniffer_active.set(true);
             let _ = invoke("start_sniffer_command", JsValue::NULL).await;
 
@@ -532,7 +384,7 @@ pub fn App() -> impl IntoView {
                         if config.init_done {
                             log!("Existing user detected. Auto-starting services.");
                             add_system_log("info", "Sniffer", "Auto-starting services...");
-                            setup_listeners();
+                            setup_event_listeners(signals).await;
 
                             // Hydrate GAME History
                             if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {

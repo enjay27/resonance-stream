@@ -1,11 +1,7 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss"; /* */
+@plugin "daisyui";     /* v4 handles plugins via the @plugin directive */
 
-/* Add a fallback background to ensure the app container is visible */
-body {
-    background-color: #121212;
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
+/* Define your theme variables directly in CSS */
+@theme {
+    --color-bpsr-green: #00ff88; /* */
 }

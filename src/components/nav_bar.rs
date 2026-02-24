@@ -3,6 +3,7 @@ use crate::tauri_bridge::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::JsValue;
+use leptos::html::Input; // ADDED: Required to focus the input box
 
 #[component]
 pub fn NavBar() -> impl IntoView {
@@ -11,9 +12,13 @@ pub fn NavBar() -> impl IntoView {
 
     let (is_search_open, set_is_search_open) = signal(false);
 
+    // ADDED: A reference to the input element so we can auto-focus it
+    let search_input_ref = create_node_ref::<Input>();
+
     view! {
         <nav
-            class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 py-1 bg-base-content/5 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300"
+            // CHANGED: Added 'relative' so the absolute search box centers perfectly within the window
+            class="relative flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 py-1 bg-base-content/5 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300"
             data-tauri-drag-region
         >
 
@@ -61,10 +66,7 @@ pub fn NavBar() -> impl IntoView {
                                     actions.save_config.dispatch(());
                                 }
                             >
-                                // 1. SMALL SCREENS: Show only the text ("전체")
                                 <span class="sm:hidden">{full}</span>
-
-                                // 2. LARGE SCREENS: Show text + sign ("전체 ♾️")
                                 <span class="hidden sm:inline">{full} " " {icon}</span>
                             </button>
                         }
@@ -72,33 +74,60 @@ pub fn NavBar() -> impl IntoView {
                 }}
             </div>
 
-            // --- RIGHT: Control Icons & Dictionary ---
+            // ==========================================
+            // CENTER: GLOBAL SEARCH PALETTE
+            // ==========================================
+            // Extracted from the right-side icons and perfectly centered
+            <div class=move || format!(
+                "absolute left-1/2 -translate-x-1/2 top-full mt-2 p-1.5 bg-base-300 border border-base-content/10 rounded-lg shadow-2xl z-50 transition-all duration-200 origin-top {}",
+                if is_search_open.get() { "opacity-100 scale-100 pointer-events-auto" } else { "opacity-0 scale-95 pointer-events-none" }
+            )>
+                <div class="flex items-center gap-1">
+                    <input type="text" placeholder="대화 검색 (Ctrl+F)..."
+                        node_ref=search_input_ref // Bound the reference here
+                        class="input input-xs input-bordered w-64 bg-base-200 text-xs focus:outline-none focus:border-success"
+                        prop:value=move || signals.search_term.get()
+                        on:input=move |ev| signals.set_search_term.set(event_target_value(&ev))
+                        // Optional: Pressing Escape closes the search box instantly
+                        on:keydown=move |ev| {
+                            if ev.key() == "Escape" {
+                                set_is_search_open.set(false);
+                            }
+                        }
+                    />
+                    <button class="btn btn-ghost btn-xs btn-circle text-base-content/50 hover:text-error"
+                        on:click=move |_| {
+                            signals.set_search_term.set("".to_string());
+                            set_is_search_open.set(false);
+                        }>
+                        "✕"
+                    </button>
+                </div>
+            </div>
+
+            // --- RIGHT: Control Icons ---
             <div class="flex items-center gap-1 ml-auto" data-tauri-no-drag>
 
-                // ==========================================
-                // NEW: EXPANDING SEARCH BAR
-                // ==========================================
-                <div class="flex items-center">
-                    // The input container animates its width from w-0 to w-32
-                    <div class=move || format!("transition-all duration-300 ease-in-out overflow-hidden flex items-center {}",
-                        if is_search_open.get() { "w-32 opacity-100 mr-1" } else { "w-0 opacity-0 mr-0" })>
-                        <input type="text" placeholder="대화 검색..."
-                            class="input input-xs input-bordered w-full bg-base-300/50 text-xs focus:outline-none focus:border-success"
-                            prop:value=move || signals.search_term.get()
-                            on:input=move |ev| signals.set_search_term.set(event_target_value(&ev))
-                        />
-                    </div>
+                // The Magnifier Button
+                <div class="tooltip tooltip-bottom" data-tip="Search (Ctrl+F)">
+                    <button class="btn btn-ghost btn-xs text-lg"
+                        class:text-success=move || !signals.search_term.get().is_empty()
+                        on:click=move |_| {
+                            let new_state = !is_search_open.get_untracked();
+                            set_is_search_open.set(new_state);
 
-                    // The Magnifier Button
-                    <div class="tooltip tooltip-bottom" data-tip="Search">
-                        <button class="btn btn-ghost btn-xs text-lg"
-                            // Turn the icon green if there is an active search filter
-                            class:text-success=move || !signals.search_term.get().is_empty()
-                            on:click=move |_| set_is_search_open.update(|b| *b = !*b)
-                        >
-                            "🔍"
-                        </button>
-                    </div>
+                            // ADDED: Instantly focus the input box when opened!
+                            if new_state {
+                                request_animation_frame(move || {
+                                    if let Some(el) = search_input_ref.get() {
+                                        let _ = el.focus();
+                                    }
+                                });
+                            }
+                        }
+                    >
+                        "🔍"
+                    </button>
                 </div>
 
                 <div class="divider divider-horizontal mx-0 opacity-10"></div>

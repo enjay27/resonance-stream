@@ -15,12 +15,21 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
     let (menu_pos, set_menu_pos) = signal((0, 0));
 
+    let channel_colors = move || match sig.get().channel.as_str() {
+        "WORLD" => ("text-purple-400", "border-l-purple-500"),
+        "GUILD" => ("text-emerald-400", "border-l-emerald-500"),
+        "PARTY" => ("text-sky-400", "border-l-sky-500"),
+        "LOCAL" => ("text-gray-400", "border-l-gray-500"),
+        "SYSTEM" => ("text-warning", "border-l-warning"),
+        _ => ("text-gray-300", "border-l-gray-500"),
+    };
+
     view! {
         // chat-start alignment matches your previous bubble flow
-        <div class="chat chat-start px-2 py-1 group transition-colors hover:bg-white/5">
+        <div class="flex flex-col items-start px-2 py-1.5 group transition-colors hover:bg-white/5">
 
             // --- HEADER: Nickname(Romaji) + Level + Time ---
-            <div class="chat-header opacity-90 mb-1 flex gap-2 items-baseline">
+            <div class="opacity-90 mb-1 flex gap-2 items-baseline">
                 <span class="text-[13px] font-black cursor-pointer hover:underline transition-all"
                     class=("text-bpsr-green", move || signals.search_term.get() == sig.get().nickname)
                     on:click=move |ev| {
@@ -45,7 +54,6 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
                 <Show when=move || is_active.get()>
                     <Portal>
-                        // FIXED positioning based on the captured mouse coordinates
                         <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
                              style=move || {
                                  let (x, y) = menu_pos.get();
@@ -82,33 +90,36 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                 <time class="ml-2 text-[10px] text-gray-600 opacity-50">{move || format_time(sig.get().timestamp)}</time>
             </div>
 
-            // --- BUBBLE: Styled with DaisyUI + Custom BPSR Accents ---
-            <div class="chat-bubble bg-zinc-900/80 border border-white/5 text-neutral-content min-h-0 shadow-lg transition-all">
-                // Original Message with [원문] tag
-                <div class="text-[14px] leading-relaxed">
-                    {move || if is_japanese(&sig.get().message) {
-                        view! { <span class="text-gray-500 mr-1.5 font-bold">[원문]</span> }.into_any()
-                    } else {
-                        view! {}.into_any()
-                    }}
-                    {move || sig.get().message.clone()}
+            <div class="flex items-center gap-2 w-full">
+                // --- BUBBLE: Styled with DaisyUI + Custom BPSR Accents ---
+                <div class=move || format!(
+                    "px-3 py-2 w-fit max-w-[85%] bg-zinc-900/80 border-y border-r border-white/5 border-l-[3px] rounded-md text-neutral-content shadow-sm transition-all {}",
+                    channel_colors().1
+                )>
+                    <div class="text-[14px] leading-relaxed">
+                        {move || if is_japanese(&sig.get().message) {
+                            view! { <span class="text-gray-500 mr-1.5 font-bold">[원문]</span> }.into_any()
+                        } else {
+                            view! {}.into_any()
+                        }}
+                        {move || sig.get().message.clone()}
+                    </div>
+
+                    {move || sig.get().translated.clone().map(|text| view! {
+                        <div class="mt-1.5 pt-1.5 border-t border-white/10 text-success font-bold text-[14px] animate-in slide-in-from-top-1 duration-200">
+                             <span class="opacity-70 mr-1.5 font-bold">[번역]</span>
+                             {text}
+                        </div>
+                    })}
                 </div>
 
-                // Translation Result with [번역] tag
-                {move || sig.get().translated.clone().map(|text| view! {
-                    <div class="mt-1.5 pt-1.5 border-t border-white/10 text-bpsr-green font-bold text-[14px] animate-in slide-in-from-top-1 duration-200">
-                         <span class="opacity-70 mr-1.5 font-bold">[번역]</span>
-                         {text}
-                    </div>
-                })}
-            </div>
-
-            // --- ACTION BAR: Visible on hover for copy/search ---
-            <div class="chat-footer opacity-0 group-hover:opacity-100 transition-opacity pt-1">
-                <button class="btn btn-ghost btn-xs text-[10px] text-gray-500"
-                    on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
-                    "COPY"
-                </button>
+                // --- ACTION BAR: Visible on hover for copy/search ---
+                <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <button class="btn btn-ghost btn-xs text-[10px] text-gray-500 h-6 min-h-0 px-2 hover:bg-white/10 hover:text-white"
+                        on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
+                        "COPY"
+                    </button>
+                </div>
             </div>
         </div>
     }

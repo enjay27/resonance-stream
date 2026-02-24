@@ -158,6 +158,20 @@ pub fn ChatContainer() -> impl IntoView {
                 </Show>
             </div>
 
+            // --- OVERLAY: ACTIVE SEARCH FILTER TOAST (RESTORED) ---
+            <Show when=move || !signals.search_term.get().is_empty()>
+                <div class="absolute top-4 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-2 duration-200">
+                    <div class="badge badge-success badge-lg gap-2 shadow-2xl font-black p-4 border border-white/20 text-success-content backdrop-blur-md bg-success/90">
+                        <span class="opacity-70 text-[10px] uppercase tracking-widest">"🔍 필터링:"</span>
+                        <span class="text-sm">{move || signals.search_term.get()}</span>
+                        <button class="btn btn-ghost btn-xs btn-circle ml-1 hover:bg-black/20 text-current"
+                            on:click=move |_| signals.set_search_term.set("".to_string())>
+                            "✕"
+                        </button>
+                    </div>
+                </div>
+            </Show>
+
             // --- OVERLAY: NEW MESSAGE TOAST ---
             <Show when=move || signals.unread_count.get().gt(&0) && !signals.is_at_bottom.get()>
                 <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-50">

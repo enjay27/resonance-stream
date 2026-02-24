@@ -23,7 +23,7 @@ pub fn NavBar() -> impl IntoView {
         <nav class="flex items-center justify-between px-2 bg-base-200 border-b border-white/5 h-10 select-none">
 
             // --- LEFT: DaisyUI Tabs ---
-            <div class="join bg-base-300/50 p-0.5 rounded-lg border border-white/5">
+            <div class="join bg-base-300/50 p-0.5 rounded-lg border border-base-content/5">
                 {move || {
                     let mut tabs = vec![
                         ("전체", "♾️"), ("커스텀", "⭐"), ("월드", "🌐"),
@@ -36,17 +36,34 @@ pub fn NavBar() -> impl IntoView {
                         let t_click = t_full.clone();
                         let is_active = move || signals.active_tab.get() == t_full;
 
+                        let (text_color, border_color) = match full {
+                            "전체" => ("text-base-content", "border-base-content"),
+                            "커스텀" => ("text-success", "border-success"),
+                            "월드" => ("text-purple-500", "border-purple-500"),
+                            "길드" => ("text-emerald-500", "border-emerald-500"),
+                            "파티" => ("text-sky-500", "border-sky-500"),
+                            "로컬" => ("text-base-content opacity-70", "border-base-content opacity-70"),
+                            "시스템" => ("text-warning", "border-warning"),
+                            _ => ("text-base-content", "border-transparent"),
+                        };
+
                         view! {
                             <button
-                                class="join-item btn btn-xs h-7 px-3 border-none transition-all font-black"
-                                class:btn-success=is_active.clone()
-                                class:bg-transparent=move || !is_active()
+                                class=move || format!(
+                                    "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] {} {}",
+                                    text_color,
+                                    if is_active() {
+                                        format!("{} bg-white/5 opacity-100", border_color)
+                                    } else {
+                                        "border-transparent bg-transparent opacity-40 hover:opacity-100".to_string()
+                                    }
+                                )
                                 on:click=move |_| {
                                     signals.set_active_tab.set(t_click.clone());
                                     actions.save_config.dispatch(());
                                 }
                             >
-                                <span class="mr-1">{icon}</span>
+                                <span class="sm:hidden text-base">{icon}</span>
                                 <span class="hidden sm:inline">{full}</span>
                             </button>
                         }

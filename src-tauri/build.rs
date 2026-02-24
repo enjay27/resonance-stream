@@ -35,16 +35,27 @@ fn main() {
     }
 
     // 4. Copy to target profile dir (for dev runtime)
+    // The PROFILE env var is usually "debug" or "release", but the actual output dir might differ.
+    // A more robust way is to copy to the directory where the executable will be run from.
+    // However, build scripts run *before* the binary is linked, so we can't know the final path for sure.
+    // But we can guess based on standard cargo layout: target/debug or target/release.
+
+    // We also need to consider that `src-tauri` is a member of a workspace, so the target dir is at the workspace root.
+    let workspace_target_dir = root_path.parent().unwrap().join("target");
+
     if let Ok(profile) = env::var("PROFILE") {
-        let target_profile_dir = root_path.join("target").join(&profile);
-        // Ensure target dir exists
-        if target_profile_dir.exists() {
-             if dll_src.exists() {
-                let _ = fs::copy(&dll_src, target_profile_dir.join("WinDivert.dll"));
-             }
-             if sys_src.exists() {
-                let _ = fs::copy(&sys_src, target_profile_dir.join("WinDivert64.sys"));
-             }
+        let target_profile_dir = workspace_target_dir.join(&profile);
+
+        // Create the directory if it doesn't exist (it might not yet on a fresh build)
+        if !target_profile_dir.exists() {
+            let _ = fs::create_dir_all(&target_profile_dir);
+        }
+
+        if dll_src.exists() {
+            let _ = fs::copy(&dll_src, target_profile_dir.join("WinDivert.dll"));
+        }
+        if sys_src.exists() {
+            let _ = fs::copy(&sys_src, target_profile_dir.join("WinDivert64.sys"));
         }
     }
 

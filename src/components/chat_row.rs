@@ -116,10 +116,14 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                           && sig.get().translated.is_some())
                     }>
                         <div class=move || if signals.compact_mode.get() { "text-[12px] leading-snug" } else { "text-[14px] leading-relaxed" }>
-                            {move || if is_japanese(&sig.get().message) {
-                                view! { <span class="text-base-content/50 mr-1.5 font-bold">[원문]</span> }.into_any()
-                            } else {
-                                view! {}.into_any()
+                            {move || {
+                                let show_original_prefix = is_japanese(&sig.get().message) && signals.use_translation.get();
+
+                                if show_original_prefix {
+                                    view! { <span class="text-base-content/50 mr-1.5 font-bold">[원문]</span> }.into_any()
+                                } else {
+                                    view! {}.into_any()
+                                }
                             }}
                             {move || sig.get().message.clone()}
                         </div>

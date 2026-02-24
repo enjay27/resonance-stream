@@ -9,6 +9,8 @@ pub fn NavBar() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
     let actions = use_context::<AppActions>().expect("AppActions missing");
 
+    let (is_search_open, set_is_search_open) = signal(false);
+
     view! {
         <nav
             class="flex items-center justify-between px-2 bg-base-200 border-b border-base-content/5 h-10 select-none"
@@ -65,9 +67,53 @@ pub fn NavBar() -> impl IntoView {
             </div>
 
             // --- RIGHT: Control Icons & Dictionary ---
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-1" data-tauri-no-drag>
+
+                // ==========================================
+                // NEW: EXPANDING SEARCH BAR
+                // ==========================================
+                <div class="flex items-center">
+                    // The input container animates its width from w-0 to w-32
+                    <div class=move || format!("transition-all duration-300 ease-in-out overflow-hidden flex items-center {}",
+                        if is_search_open.get() { "w-32 opacity-100 mr-1" } else { "w-0 opacity-0 mr-0" })>
+                        <input type="text" placeholder="대화 검색..."
+                            class="input input-xs input-bordered w-full bg-base-300/50 text-xs focus:outline-none focus:border-success"
+                            prop:value=move || signals.search_term.get()
+                            on:input=move |ev| signals.set_search_term.set(event_target_value(&ev))
+                        />
+                    </div>
+
+                    // The Magnifier Button
+                    <div class="tooltip tooltip-bottom" data-tip="Search">
+                        <button class="btn btn-ghost btn-xs text-lg"
+                            // Turn the icon green if there is an active search filter
+                            class:text-success=move || !signals.search_term.get().is_empty()
+                            on:click=move |_| set_is_search_open.update(|b| *b = !*b)
+                        >
+                            "🔍"
+                        </button>
+                    </div>
+                </div>
 
                 <div class="divider divider-horizontal mx-0 opacity-10"></div>
+
+                // Always on Top
+                <div class="tooltip tooltip-bottom" data-tip="Always on Top">
+                    <button class="btn btn-xs"
+                        class:btn-success=move || signals.is_pinned.get()
+                        class:btn-ghost=move || !signals.is_pinned.get()
+                        on:click=move |_| {
+                            let new_state = !signals.is_pinned.get();
+                            signals.set_is_pinned.set(new_state);
+                            spawn_local(async move {
+                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
+                                let _ = invoke("set_always_on_top", args).await;
+                            });
+                            actions.save_config.dispatch(());
+                        }>
+                        <span class=move || if signals.is_pinned.get() { "rotate-45 block" } else { "block" }>"📌"</span>
+                    </button>
+                </div>
 
                 // Compact Mode Toggle
                 <div class="tooltip tooltip-bottom" data-tip="Compact Mode">
@@ -91,24 +137,6 @@ pub fn NavBar() -> impl IntoView {
                     <button class="btn btn-ghost btn-xs text-lg hover:text-error"
                         on:click=move |_| { actions.clear_history.dispatch(()); }>
                         "🗑️"
-                    </button>
-                </div>
-
-                // Always on Top
-                <div class="tooltip tooltip-bottom" data-tip="Always on Top">
-                    <button class="btn btn-xs"
-                        class:btn-success=move || signals.is_pinned.get()
-                        class:btn-ghost=move || !signals.is_pinned.get()
-                        on:click=move |_| {
-                            let new_state = !signals.is_pinned.get();
-                            signals.set_is_pinned.set(new_state);
-                            spawn_local(async move {
-                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
-                                let _ = invoke("set_always_on_top", args).await;
-                            });
-                            actions.save_config.dispatch(());
-                        }>
-                        <span class=move || if signals.is_pinned.get() { "rotate-45 block" } else { "block" }>"📌"</span>
                     </button>
                 </div>
 

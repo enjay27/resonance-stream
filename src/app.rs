@@ -3,9 +3,14 @@ use leptos::html;
 use leptos::leptos_dom::log;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlDivElement;
+use crate::components::ChatRow;
+use crate::store::GlobalStore;
+use crate::types::{
+    ChatMessage, SystemMessage, AppConfig, ModelStatus, ProgressPayload, TauriEvent
+};
+use crate::utils::{copy_to_clipboard, format_time, is_japanese};
 
 #[wasm_bindgen]
 extern "C" {
@@ -17,70 +22,6 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"], js_name = listen)]
     async fn listen(event: &str, handler: &Closure<dyn FnMut(JsValue)>) -> JsValue;
-}
-
-// --- DATA STRUCTURES ---
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatMessage {
-    pub pid: u64,
-    pub channel: String,
-    pub nickname: String,
-    pub message: String,
-    pub timestamp: u64,
-    pub uid: u64,
-    pub class_id: u64,
-    pub level: u64,
-    pub sequence_id: u64,
-    // --- Translation Support ---
-    #[serde(default)]
-    pub translated: Option<String>,
-    #[serde(default)]
-    pub nickname_romaji: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SystemMessage {
-    pub pid: u64,
-    pub timestamp: u64,
-    pub level: String,  // info, warn, error, success, debug
-    pub source: String, // Backend, Sniffer, Sidecar
-    pub message: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-struct AppConfig {
-    init_done: bool,
-    use_translation: bool,
-    compute_mode: String,
-    compact_mode: bool,
-    always_on_top: bool,
-    active_tab: String,
-    chat_limit: usize,
-    custom_tab_filters: Vec<String>,
-    theme: String,
-    overlay_opacity: f32,
-    show_system_tab: bool,
-    is_debug: bool,
-    tier: String,
-    archive_chat: bool,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct ModelStatus { exists: bool, path: String }
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct TauriEvent { payload: ProgressPayload }
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ProgressPayload {
-    #[serde(rename = "current_file")] // Match backend field name
-    pub current_file: String,
-    pub percent: u8,
-    #[serde(rename = "total_percent")] // Match backend field name
-    pub total_percent: u8,
 }
 
 #[component]
@@ -125,6 +66,45 @@ pub fn App() -> impl IntoView {
     let (active_menu_id, set_active_menu_id) = signal(None::<u64>);
     let (archive_chat, set_archive_chat) = signal(false);
 
+    let store = GlobalStore {
+        init_done, set_init_done,
+        use_translation, set_use_translation,
+        compute_mode, set_compute_mode,
+        wizard_step, set_wizard_step,
+        is_translator_active, set_is_translator_active,
+        is_sniffer_active, set_is_sniffer_active,
+        status_text, set_status_text,
+        model_ready, set_model_ready,
+        downloading, set_downloading,
+        progress, set_progress,
+        active_tab, set_active_tab,
+        search_term, set_search_term,
+        name_cache, set_name_cache,
+        chat_log, set_chat_log,
+        system_log, set_system_log,
+        is_system_at_bottom, set_system_at_bottom,
+        show_system_tab, set_show_system_tab,
+        system_level_filter, set_system_level_filter,
+        system_source_filter, set_system_source_filter,
+        compact_mode, set_compact_mode,
+        is_pinned, set_is_pinned,
+        show_settings, set_show_settings,
+        chat_limit, set_chat_limit,
+        custom_filters, set_custom_filters,
+        theme, set_theme,
+        opacity, set_opacity,
+        is_debug, set_is_debug,
+        tier, set_tier,
+        restart_required, set_restart_required,
+        dict_update_available, set_dict_update_available,
+        is_at_bottom, set_is_at_bottom,
+        unread_count, set_unread_count,
+        active_menu_id, set_active_menu_id,
+        archive_chat, set_archive_chat,
+    };
+
+    provide_context(store);
+
     // --- HELPERS ---
     let add_system_log = move |level: &str, source: &str, message: &str| {
         let msg_json = serde_json::json!({
@@ -138,16 +118,6 @@ pub fn App() -> impl IntoView {
             // that your existing listener already handles
             let _ = invoke("inject_system_message", serde_wasm_bindgen::to_value(&msg_json).unwrap()).await;
         });
-    };
-
-    let format_time = |ts: u64| {
-        let date = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
-        format!("{:02}:{:02}", date.get_hours(), date.get_minutes())
-    };
-
-    let is_japanese = |text: &str| {
-        let re = js_sys::RegExp::new("[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FAF]", "");
-        re.test(text)
     };
 
     // --- WATCHDOG: SIDE CAR MONITOR ---
@@ -179,17 +149,6 @@ pub fn App() -> impl IntoView {
             gloo_timers::future::TimeoutFuture::new(5000).await;
         }
     });
-
-    // Copy Action
-    let copy_text = move |text: String| {
-        spawn_local(async move {
-            if let Some(window) = web_sys::window() {
-                let navigator = window.navigator();
-                // This requires "Clipboard" feature in web-sys (usually enabled by default in Tauri templates)
-                let _ = navigator.clipboard().write_text(&text);
-            }
-        });
-    };
 
     // --- CONFIG ACTIONS ---
     let save_config_action = Action::new_local(move |_: &()| {
@@ -958,74 +917,9 @@ pub fn App() -> impl IntoView {
                                 each=move || filtered_chat.get()
                                 key=|sig| sig.get_untracked().pid
                                 children=move |sig| {
-                                    let msg = sig.get();
-                                    let pid = msg.pid;
-                                    let is_jp = is_japanese(&msg.message);
-                                    let is_active = move || active_menu_id.get() == Some(pid);
-
                                     view! {
-                                        <div class="chat-row" data-channel=move || sig.get().channel.clone()
-                                             style:z-index=move || if is_active() { "10001" } else { "1" }>
-
-                                            <div class="msg-header">
-                                                // Restore Nickname Click & Active Class
-                                                <span class=move || if search_term.get() == sig.get().nickname { "nickname active" } else { "nickname" }
-                                                    on:click=move |ev| {
-                                                        ev.stop_propagation();
-                                                        if is_active() { set_active_menu_id.set(None); }
-                                                        else { set_active_menu_id.set(Some(pid)); }
-                                                    }
-                                                >
-                                                    {move || {
-                                                        let p = sig.get();
-                                                        match p.nickname_romaji {
-                                                            Some(romaji) => format!("{}({})", p.nickname, romaji),
-                                                            None => p.nickname.clone()
-                                                        }
-                                                    }}
-                                                </span>
-
-                                                // Restore Context Menu
-                                                <Show when=is_active>
-                                                    <div class="context-menu" on:click=move |ev| ev.stop_propagation()>
-                                                        <button class="menu-item" on:click=move |_| {
-                                                            copy_text(sig.get_untracked().nickname);
-                                                            set_active_menu_id.set(None);
-                                                        }>
-                                                            <span class="menu-icon">"📋"</span>"Copy Name"
-                                                        </button>
-                                                        <button class="menu-item" on:click=move |_| {
-                                                            let n = sig.get_untracked().nickname;
-                                                            if search_term.get_untracked() == n { set_search_term.set("".into()); }
-                                                            else { set_search_term.set(n); }
-                                                            set_active_menu_id.set(None);
-                                                        }>
-                                                            <span class="menu-icon">"🔍"</span>"Filter Chat"
-                                                        </button>
-                                                    </div>
-                                                </Show>
-
-                                                <span class="lvl">"Lv." {move || sig.get().level}</span>
-                                                <span class="time">{format_time(msg.timestamp)}</span>
-                                            </div>
-
-                                            <div class="msg-wrapper">
-                                                <div class="msg-body" class:has-translation=move || sig.get().translated.is_some()>
-                                                    // Restore [원문] and [번역] Labels
-                                                    <div class="original">
-                                                        {if is_jp { "[원문] " } else { "" }} {move || sig.get().message.clone()}
-                                                    </div>
-                                                    {move || sig.get().translated.clone().map(|text| view! {
-                                                        <div class="translated">"[번역] " {text}</div>
-                                                    })}
-                                                </div>
-                                                <button class="copy-btn" on:click=move |ev| {
-                                                    ev.stop_propagation();
-                                                    copy_text(sig.get().message.clone());
-                                                }> "📋" </button>
-                                            </div>
-                                        </div>
-                                    }
+                                        <ChatRow sig=sig />
+                                    }           
                                 }
                             />
                         }

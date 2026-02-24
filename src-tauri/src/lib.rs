@@ -1,19 +1,22 @@
 use crate::config::*;
-use crate::model_manager::*;
-use crate::sniffer::*;
+
 use indexmap::IndexMap;
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use std::collections::VecDeque;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager};
 
-mod model_manager;
-mod sniffer_logic_test;
-mod sniffer;
-mod packet_buffer;
-mod config;
+pub mod config;
+pub mod io;
+pub mod packet_buffer;
 
+pub mod protocol;
+pub mod services;
+
+pub use protocol::parser::*;
+pub use protocol::types::*;
+pub use services::downloader::*;
+pub use services::sniffer::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -157,4 +160,18 @@ fn minimize_window(window: tauri::Window) {
 #[tauri::command]
 fn close_window(window: tauri::Window) {
     let _ = window.close();
+}
+
+#[tauri::command]
+fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatMessage> {
+    // Returns ONLY Game Chat
+    let history = state.chat_history.lock().unwrap();
+    history.values().cloned().collect()
+}
+
+#[tauri::command]
+fn get_system_history(state: tauri::State<AppState>) -> Vec<SystemMessage> {
+    // Change: Returns specialized SystemMessages
+    let history = state.system_history.lock().unwrap();
+    history.iter().cloned().collect()
 }

@@ -1,11 +1,10 @@
-use std::fs;
+use crate::inject_system_message;
+use crate::protocol::types::{AppState, SystemLogLevel};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::io::Write;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri::path::BaseDirectory;
-use crate::inject_system_message;
-use crate::sniffer::{AppState, SystemLogLevel};
 
 #[derive(Serialize, Clone)]
 pub struct ModelStatus {
@@ -37,7 +36,7 @@ fn load_manifest(app: &tauri::AppHandle) -> Result<ModelManifest, String> {
     #[cfg(debug_assertions)]
     {
         // This path is relative to 'src-tauri/src/model_manager.rs'
-        let json_data = include_str!("../resources/models.json");
+        let json_data = include_str!("../../resources/models.json");
         serde_json::from_str(json_data).map_err(|e| format!("Dev JSON parse error: {}", e))
     }
 

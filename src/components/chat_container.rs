@@ -12,6 +12,15 @@ pub fn ChatContainer() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
     let chat_container_ref = create_node_ref::<html::Div>();
 
+    // Start by only rendering the last 50 messages to keep the DOM blazing fast
+    let (display_limit, set_display_limit) = signal(50);
+
+    Effect::new(move |_| {
+        signals.active_tab.track();
+        signals.search_term.track();
+        set_display_limit.set(50);
+    });
+
     // --- FILTERED VIEW LOGIC ---
     let filtered_chat = Memo::new(move |_| {
         let tab = signals.active_tab.get();
@@ -36,12 +45,23 @@ pub fn ChatContainer() -> impl IntoView {
             }
         };
 
-        if search.is_empty() { base_list }
+        let full_list: Vec<_> = if search.is_empty() { base_list }
         else {
             base_list.into_iter().filter(|sig| {
                 let m = sig.get();
                 m.nickname.to_lowercase().contains(&search) || m.message.to_lowercase().contains(&search)
             }).collect()
+        };
+
+        // --- NEW: SLICE THE LIST (PAGING) ---
+        let current_limit = display_limit.get();
+        let total = full_list.len();
+
+        // Only return the bottom `current_limit` amount of messages
+        if total > current_limit {
+            full_list[total - current_limit..].to_vec()
+        } else {
+            full_list
         }
     });
 
@@ -76,10 +96,17 @@ pub fn ChatContainer() -> impl IntoView {
     view! {
         <div class="relative flex-1 min-h-0 flex flex-col transition-colors duration-300">
             <div class="flex-1 overflow-y-auto custom-scrollbar p-2 min-h-0"
+                style="overflow-anchor: auto;"
                 node_ref=chat_container_ref
                 on:scroll=move |ev| {
                     let el = event_target::<HtmlDivElement>(&ev);
-                    let at_bottom = el.scroll_height() - el.scroll_top() - el.client_height() < 15;
+                    let scroll_top = el.scroll_top();
+                    let at_bottom = el.scroll_height() - scroll_top - el.client_height() < 15;
+
+                    // --- NEW: LOAD OLDER MESSAGES IF SCROLLED TO TOP ---
+                    if scroll_top < 50 {
+                        set_display_limit.update(|limit| *limit += 50);
+                    }
 
                     if signals.active_tab.get_untracked() == "시스템" {
                         signals.set_system_at_bottom.set(at_bottom);

@@ -12,7 +12,7 @@ pub fn ChatContainer() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
     let chat_container_ref = create_node_ref::<html::Div>();
 
-    // --- FILTERED VIEW LOGIC (Restored from app.rs) ---
+    // --- FILTERED VIEW LOGIC ---
     let filtered_chat = Memo::new(move |_| {
         let tab = signals.active_tab.get();
         let search = signals.search_term.get().to_lowercase();
@@ -75,41 +75,11 @@ pub fn ChatContainer() -> impl IntoView {
 
     view! {
         <div class="relative flex-1 min-h-0 flex flex-col transition-colors duration-300">
-
-            <Show when=move || signals.active_tab.get() == "시스템">
-                <div class="flex-none flex gap-2 p-2 bg-base-content/5 border-b border-base-content/5 z-10 shadow-sm animate-in slide-in-from-top-2">
-                    <select class="select select-bordered select-xs font-bold bg-base-100 text-base-content"
-                        on:change=move |ev| {
-                            let val = event_target_value(&ev);
-                            signals.set_system_level_filter.set(if val == "all" { None } else { Some(val) });
-                        }>
-                        <option value="all">"모든 레벨"</option>
-                        <option value="info">"INFO"</option>
-                        <option value="warning">"WARN"</option>
-                        <option value="error">"ERROR"</option>
-                    </select>
-                    <select class="select select-bordered select-xs font-bold bg-base-100 text-base-content"
-                        on:change=move |ev| {
-                            let val = event_target_value(&ev);
-                            signals.set_system_source_filter.set(if val == "all" { None } else { Some(val) });
-                        }>
-                        <option value="all">"모든 소스"</option>
-                        <option value="Sniffer">"SNIFFER"</option>
-                        <option value="Translator">"AI"</option>
-                        <option value="Setup">"SYSTEM"</option>
-                    </select>
-                </div>
-            </Show>
-
-            <div class="overflow-y-auto h-full custom-scrollbar p-2"
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-2 min-h-0"
                 node_ref=chat_container_ref
                 on:scroll=move |ev| {
                     let el = event_target::<HtmlDivElement>(&ev);
-
-                    // [Logic restored from your app.rs]
                     let at_bottom = el.scroll_height() - el.scroll_top() - el.client_height() < 15;
-
-                    log!("at bottom : {:?}", at_bottom); // This will now log correctly!
 
                     if signals.active_tab.get_untracked() == "시스템" {
                         signals.set_system_at_bottom.set(at_bottom);
@@ -119,7 +89,6 @@ pub fn ChatContainer() -> impl IntoView {
                     }
                 }
             >
-
                 // --- SCROLLABLE CONTENT ---
                 <Show
                     when=move || signals.active_tab.get() == "시스템"
@@ -136,19 +105,48 @@ pub fn ChatContainer() -> impl IntoView {
                         key=|sig| sig.get_untracked().pid
                         children={move |sig: RwSignal<SystemMessage>| {
                             let level = sig.get().level.clone();
+                            let level_badge = level.clone();
+                            let level_filter = level.clone();
+                            let level_match = level.clone();
+                            let source = sig.get().source.clone();
+                            let source_badge = sig.get().source.clone();
                             view! {
-                                <div class="chat chat-start opacity-80 mb-1">
-                                    <div class=move || format!("chat-bubble chat-bubble-xs border border-white/5 bg-base-300 min-h-0 text-[11px] leading-tight {}",
-                                        match level.as_str() {
+                                <div class="chat chat-start opacity-90 mb-1">
+                                    <div class="chat-bubble chat-bubble-xs border border-base-content/5 bg-base-300 min-h-0 text-[11px] leading-tight text-base-content">
+
+                                        // --- LEVEL BADGE (Clickable) ---
+                                        <span class=move || format!("cursor-pointer hover:brightness-125 font-black mr-1 transition-all {}",
+                                                match level_badge.as_str() {
+                                                    "error" => "text-error",
+                                                    "warning" => "text-warning",
+                                                    "success" => "text-success",
+                                                    _ => "text-info"
+                                                }
+                                            )
+                                            on:click=move |_| signals.set_system_level_filter.set(Some(level_filter.clone()))
+                                        >
+                                            "[" {move || level.clone().to_uppercase()} "]"
+                                        </span>
+
+                                        // --- SOURCE BADGE (Clickable) ---
+                                        <span class="cursor-pointer hover:brightness-125 font-black mr-2 text-base-content/50 transition-all"
+                                            on:click=move |_| signals.set_system_source_filter.set(Some(source_badge.clone()))
+                                        >
+                                            "[" {move || source.clone().to_uppercase()} "]"
+                                        </span>
+
+                                        // --- MESSAGE TEXT ---
+                                        <span class=move || match level_match.clone().as_str() {
                                             "error" => "text-error",
                                             "warning" => "text-warning",
                                             "success" => "text-success",
-                                            _ => "text-gray-400"
-                                        }
-                                    )>
-                                        <span class="font-black mr-2">"[" {move || sig.get().source.to_uppercase()} "]"</span>
-                                        {move || sig.get().message.clone()}
-                                        <span class="ml-2 opacity-30 text-[9px]">{move || format_time(sig.get().timestamp)}</span>
+                                            _ => "text-base-content/80"
+                                        }>
+                                            {move || sig.get().message.clone()}
+                                        </span>
+
+                                        // --- TIMESTAMP ---
+                                        <span class="ml-2 opacity-40 text-[9px] text-base-content/50">{move || format_time(sig.get().timestamp)}</span>
                                     </div>
                                 </div>
                             }
@@ -157,14 +155,33 @@ pub fn ChatContainer() -> impl IntoView {
                 </Show>
             </div>
 
-            // --- OVERLAY: ACTIVE SEARCH FILTER TOAST (RESTORED) ---
-            <Show when=move || !signals.search_term.get().is_empty()>
+            // --- OVERLAY: ACTIVE SEARCH / LOG FILTER TOAST ---
+            // CHANGED: Expanded to show up when ANY filter is active (Level, Source, or General Search)
+            <Show when=move || !signals.search_term.get().is_empty() || signals.system_level_filter.get().is_some() || signals.system_source_filter.get().is_some()>
                 <div class="absolute top-4 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-2 duration-200">
                     <div class="badge badge-success badge-lg gap-2 shadow-2xl font-black p-4 border border-white/20 text-success-content backdrop-blur-md bg-success/90">
                         <span class="opacity-70 text-[10px] uppercase tracking-widest">"🔍 필터링:"</span>
-                        <span class="text-sm">{move || signals.search_term.get()}</span>
+
+                        <span class="text-sm">
+                            {move || {
+                                let mut filters = Vec::new();
+                                if let Some(l) = signals.system_level_filter.get() { filters.push(l.to_uppercase()); }
+                                if let Some(s) = signals.system_source_filter.get() { filters.push(s.to_uppercase()); }
+
+                                let st = signals.search_term.get();
+                                if !st.is_empty() { filters.push(st); }
+
+                                filters.join(" + ")
+                            }}
+                        </span>
+
                         <button class="btn btn-ghost btn-xs btn-circle ml-1 hover:bg-black/20 text-current"
-                            on:click=move |_| signals.set_search_term.set("".to_string())>
+                            on:click=move |_| {
+                                // Clear ALL filters at once
+                                signals.set_search_term.set("".to_string());
+                                signals.set_system_level_filter.set(None);
+                                signals.set_system_source_filter.set(None);
+                            }>
                             "✕"
                         </button>
                     </div>

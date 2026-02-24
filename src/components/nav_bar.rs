@@ -13,12 +13,12 @@ pub fn NavBar() -> impl IntoView {
 
     view! {
         <nav
-            class="flex items-center justify-between px-2 bg-base-200 border-b border-base-content/5 h-10 select-none"
+            class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 py-1 bg-base-200 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300"
             data-tauri-drag-region
         >
 
             // --- LEFT: DaisyUI Tabs ---
-            <div class="join bg-base-300/50 p-0.5 rounded-lg border border-base-content/5">
+            <div class="join bg-base-300/50 p-0.5 rounded-lg border border-base-content/5 flex-shrink-0">
                 {move || {
                     let mut tabs = vec![
                         ("전체", "♾️"), ("커스텀", "⭐"), ("월드", "🌐"),
@@ -61,8 +61,11 @@ pub fn NavBar() -> impl IntoView {
                                     actions.save_config.dispatch(());
                                 }
                             >
-                                <span class="sm:hidden text-base">{icon}</span>
-                                <span class="hidden sm:inline">{full}</span>
+                                // 1. SMALL SCREENS: Show only the text ("전체")
+                                <span class="sm:hidden">{full}</span>
+
+                                // 2. LARGE SCREENS: Show text + sign ("전체 ♾️")
+                                <span class="hidden sm:inline">{full} " " {icon}</span>
                             </button>
                         }
                     }).collect_view()
@@ -70,7 +73,7 @@ pub fn NavBar() -> impl IntoView {
             </div>
 
             // --- RIGHT: Control Icons & Dictionary ---
-            <div class="flex items-center gap-1" data-tauri-no-drag>
+            <div class="flex items-center gap-1 ml-auto" data-tauri-no-drag>
 
                 // ==========================================
                 // NEW: EXPANDING SEARCH BAR

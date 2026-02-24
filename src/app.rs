@@ -355,7 +355,13 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
-        <main id="main-app-container" class=move || if compact_mode.get() { "chat-app compact flex flex-col h-screen" } else { "chat-app flex flex-col h-screen" }>
+        <main id="main-app-container"
+            class=move || if compact_mode.get() {
+                "chat-app compact flex flex-col h-screen overflow-hidden"
+            } else {
+                "chat-app flex flex-col h-screen overflow-hidden"
+            }
+        >
             <Show when=move || active_menu_id.get().is_some()>
                 <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
             </Show>

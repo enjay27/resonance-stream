@@ -35,6 +35,23 @@ pub async fn setup_event_listeners(signals: AppSignals) {
                     log!("New Message! Unread count is {:?}", signals.unread_count.get_untracked());
                 }
 
+                let pid = packet.pid;
+                let nickname = packet.nickname.clone();
+
+                // NICKNAME STRATEGY: Check Cache -> Request if Missing
+                let cached_nickname = signals.name_cache.with(|cache| cache.get(&nickname).cloned());
+
+                if let Some(romaji) = cached_nickname {
+                    packet.nickname_romaji = Some(romaji);
+                } else if is_japanese(&nickname) {
+                    // Request nickname-only romanization
+                    spawn_local(async move {
+                        let _ = invoke("translate_nickname", serde_wasm_bindgen::to_value(&serde_json::json!({
+                                    "pid": pid, "nickname": nickname
+                                })).unwrap()).await;
+                    });
+                }
+
                 // Auto-Translate Logic
                 if is_japanese(&packet.message) && signals.use_translation.get_untracked() {
                     let pid = packet.pid;

@@ -162,20 +162,6 @@ pub fn Settings() -> impl IntoView {
                                 />
                             </div>
 
-                            // Show System Tab
-                            <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
-                                <label class="label cursor-pointer p-0">
-                                    <span class="label-text text-xs font-bold text-base-content/80">"시스템 탭 표시 (System Tab)"</span>
-                                    <input type="checkbox" class="toggle toggle-success toggle-sm"
-                                        prop:checked=move || signals.show_system_tab.get()
-                                        on:change=move |ev| {
-                                            signals.set_show_system_tab.set(event_target_checked(&ev));
-                                            actions.save_config.dispatch(());
-                                        }
-                                    />
-                                </label>
-                            </div>
-
                             <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
                                 <label class="label cursor-pointer p-0">
                                     <span class="label-text text-xs font-bold text-base-content/80">"컴팩트 모드: 번역 시 원문 숨기기"</span>
@@ -267,6 +253,21 @@ pub fn Settings() -> impl IntoView {
                                 </div>
 
                                 <div class="divider m-0 opacity-10"></div>
+
+                                // Show System Tab
+                                <div class="flex items-center justify-between">
+                                    <div class="flex flex-col">
+                                        <span class="text-xs font-bold text-base-content/80">"시스템 탭 표시 (System Tab)"</span>
+                                        <span class="text-[9px] opacity-60">"시스템 탭 숨김 해제"</span>
+                                    </div>
+                                    <input type="checkbox" class="toggle toggle-warning toggle-sm"
+                                        prop:checked=move || signals.show_system_tab.get()
+                                        on:change=move |ev| {
+                                            signals.set_show_system_tab.set(event_target_checked(&ev));
+                                            actions.save_config.dispatch(());
+                                        }
+                                    />
+                                </div>
 
                                 // [RESTORED] Enable Debug Logs
                                 <div class="flex items-center justify-between">

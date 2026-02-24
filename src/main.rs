@@ -4,6 +4,7 @@ pub mod components;
 pub mod hooks;
 pub mod utils;
 pub mod store;
+pub mod tauri_bridge;
 
 use app::*;
 use leptos::prelude::*;

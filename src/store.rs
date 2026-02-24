@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use indexmap::IndexMap;
-use leptos::prelude::{ReadSignal, RwSignal, WriteSignal};
+use leptos::prelude::{Action, ReadSignal, RwSignal, WriteSignal};
 use crate::types::{ChatMessage, SystemMessage};
 
 #[derive(Copy, Clone, Debug)]
-pub struct GlobalStore {
+pub struct AppSignals {
     // Add other global controls here
     pub init_done: ReadSignal<bool>,
     pub set_init_done: WriteSignal<bool>,
@@ -74,4 +74,10 @@ pub struct GlobalStore {
     pub set_active_menu_id: WriteSignal<Option<u64>>,
     pub archive_chat: ReadSignal<bool>,
     pub set_archive_chat: WriteSignal<bool>,
+}
+
+#[derive(Copy, Clone)]
+pub struct AppActions {
+    pub save_config: Action<(), ()>,
+    pub clear_history: Action<(), ()>,
 }

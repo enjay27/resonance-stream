@@ -1,18 +1,16 @@
+use crate::store::AppSignals;
+use crate::types::ChatMessage;
 use crate::use_context;
-use leptos::prelude::{CustomAttribute, ReadSignal, Set, StyleAttribute};
-use leptos::prelude::{ElementChild, GetUntracked, OnAttribute};
-use leptos::{component, view, IntoView};
+use crate::utils::{copy_to_clipboard, format_time, is_japanese};
 use leptos::control_flow::Show;
 use leptos::prelude::{ClassAttribute, Get, RwSignal};
-use leptos::task::spawn_local;
-use crate::app;
-use crate::store::GlobalStore;
-use crate::types::ChatMessage;
-use crate::utils::{copy_to_clipboard, format_time, is_japanese};
+use leptos::prelude::{CustomAttribute, Set, StyleAttribute};
+use leptos::prelude::{ElementChild, GetUntracked, OnAttribute};
+use leptos::{component, view, IntoView};
 
 #[component]
 pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
-    let store = use_context::<GlobalStore>()
+    let store = use_context::<AppSignals>()
         .expect("GlobalStore context missing");
 
     let msg = sig.get();

@@ -1,3 +1,6 @@
+use crate::tauri_bridge::invoke;
+use leptos::prelude::GetUntracked;
+use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 
 pub fn format_time(ts: u64) -> String {
@@ -14,4 +17,18 @@ pub fn copy_to_clipboard(text: &str) {
     if let Some(window) = web_sys::window() {
         let _ = window.navigator().clipboard().write_text(text);
     }
+}
+
+pub fn add_system_log(level: &str, source: &str, message: &str) {
+    let msg_json = serde_json::json!({
+        "level": level,
+        "source": source,
+        "message": message
+    });
+
+    spawn_local(async move {
+        // This triggers the backend which emits 'system-event'
+        // that your existing listener already handles
+        let _ = invoke("inject_system_message", serde_wasm_bindgen::to_value(&msg_json).unwrap()).await;
+    });
 }

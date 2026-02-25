@@ -16,6 +16,7 @@ use socket2::{Socket, Domain, Type, Protocol};
 use std::net::Ipv4Addr;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
+use etherparse::{PacketHeaders, TransportHeader, NetHeaders};
 use local_ip_address::{list_afinet_netifas, local_ip};
 use log::log;
 use crate::config::AppConfig;
@@ -50,6 +51,9 @@ static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
 
 // Generation Counter: Allows us to "soft kill" old threads safely
 static SNIFFER_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+const RULE_NAME: &str = "BPSR Translator (Game Data)";
 
 // Helper to "Kick" or "Feed" the Watchdog
 fn feed_watchdog() {
@@ -218,47 +222,40 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     });
 }
 
-fn ensure_firewall_rule(app_handle: &AppHandle) {
-    // 1. Get the exact path of where the user is currently running the app
+pub fn ensure_firewall_rule() {
     if let Ok(exe_path) = env::current_exe() {
         if let Some(path_str) = exe_path.to_str() {
 
-            inject_system_message(app_handle, SystemLogLevel::Info, "Sniffer", "Configuring Windows Firewall for Raw Sockets...");
-
-            // 2. CREATE_NO_WINDOW flag (0x08000000) prevents the black CMD box from flashing!
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-            // 3. Run the netsh command silently
-            let result = Command::new("netsh")
-                .args([
-                    "advfirewall", "firewall", "add", "rule",
-                    "name=BPSR Translator (Inbound)",
-                    "dir=in",
-                    "action=allow",
-                    &format!("program={}", path_str),
-                    "enable=yes",
-                    "profile=any"
-                ])
+            // 1. Delete any existing rule from previous crashes/runs
+            let _ = Command::new("netsh")
+                .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}", RULE_NAME)])
                 .creation_flags(CREATE_NO_WINDOW)
                 .status();
 
-            match result {
-                Ok(status) if status.success() => {
-                    inject_system_message(app_handle, SystemLogLevel::Success, "Sniffer", "Firewall configured successfully.");
-                }
-                _ => {
-                    inject_system_message(app_handle, SystemLogLevel::Warning, "Sniffer", "Failed to auto-configure firewall. Inbound chat may be blocked.");
-                }
-            }
+            // 2. Add the highly-restricted rule (TCP 5003 only)
+            let _ = Command::new("netsh")
+                .args([
+                    "advfirewall", "firewall", "add", "rule",
+                    &format!("name={}", RULE_NAME),
+                    "dir=in",
+                    "action=allow",
+                    "protocol=TCP",
+                    "localport=5003",
+                    &format!("program={}", path_str),
+                    "enable=yes",
+                    "profile=any" // Applies to Public/Private networks
+                ])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
         }
     }
 }
 
 fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandle) {
-    ensure_firewall_rule(app);
+    ensure_firewall_rule(); // We will manage the lifecycle in lib.rs
 
-    let local_ip = find_game_interface_ip();
-    let socket = setup_raw_socket(local_ip.unwrap());
+    let local_ip = find_game_interface_ip().expect("Could not find local IP");
+    let socket = setup_raw_socket(local_ip);
 
     let mut buf = [0u8; 65535];
     let uninit_buf = unsafe {
@@ -273,125 +270,57 @@ fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandl
             Err(_) => continue,
         };
 
+        // 1. Let etherparse handle all the dangerous network parsing!
         let packet = &buf[..n];
+        let headers = match PacketHeaders::from_ip_slice(packet) {
+            Ok(h) => h,
+            Err(_) => continue, // Drop malformed IP packets safely
+        };
 
-        // Basic sanity checks
-        if n < 40 || packet[9] != 6 { continue; }
+        // 2. Validate TCP and get ports
+        if let Some(TransportHeader::Tcp(tcp)) = headers.transport {
+            let src_port = tcp.source_port;
+            let dst_port = tcp.destination_port;
 
-        let ip_hl = ((packet[0] & 0x0f) * 4) as usize;
-        let tcp_start = ip_hl;
-        if packet.len() < tcp_start + 20 { continue; }
+            if src_port == 5003 || dst_port == 5003 {
+                let payload = headers.payload.slice();
 
-        let src_port = u16::from_be_bytes([packet[tcp_start], packet[tcp_start + 1]]);
-        let dst_port = u16::from_be_bytes([packet[tcp_start + 2], packet[tcp_start + 3]]);
+                // Ignore empty ACK packets
+                if payload.is_empty() { continue; }
 
-        if src_port == 5003 || dst_port == 5003 {
-            log::trace!("--- [PORT 5003 PACKET DETECTED] ---");
-
-            if src_port == 5003 {
-                log::trace!("🌐 DIRECTION: INBOUND (Server -> You)");
-            } else {
-                log::trace!("💻 DIRECTION: OUTBOUND (You -> Server)");
-            }
-
-            let ip_total_length = u16::from_be_bytes([packet[2], packet[3]]) as usize;
-
-            if ip_total_length > n || ip_total_length < 40 {
-                log::trace!("❌ DROPPED: Packet length mismatch. Read: {}, Expected: {}", n, ip_total_length);
-                continue;
-            }
-
-            let exact_packet = &packet[..ip_total_length];
-            let tcp_hl = ((exact_packet[tcp_start + 12] >> 4) * 4) as usize;
-            let payload_offset = tcp_start + tcp_hl;
-
-            if exact_packet.len() > payload_offset {
-                log::debug!("✅ PASSED: Extracted game data, sending to parse_star_resonance...");
-                feed_watchdog();
-                parse_star_resonance(&app, &mut streams, Cow::from(exact_packet));
-            } else {
-                log::debug!("⚠️ IGNORED: No TCP Payload (Empty ACK packet)");
-            }
-        }
-    }
-}
-
-fn start_windivert_parser(config: AppConfig, my_generation: u64, app_handle: &AppHandle) -> bool {
-    let filter = "tcp.PayloadLength > 0 and (tcp.SrcPort == 5003 or tcp.DstPort == 5003)";
-    let flags = WinDivertFlags::new().set_sniff();
-
-    let wd = match WinDivert::network(filter, 0, flags) {
-        Ok(w) => w,
-        Err(e) => {
-            // [NEW] Map common WinDivert error codes for the user
-            let err_str = format!("{:?}", e);
-            let diagnostic = if err_str.contains("Code 5") {
-                "ACCESS_DENIED: Please Run as Administrator."
-            } else if err_str.contains("Code 577") {
-                "INVALID_IMAGE_HASH: Driver signature blocked. Check Secure Boot or Windows Update."
-            } else {
-                "DRIVER_INIT_FAILED: Ensure WinDivert64.sys is in the app folder."
-            };
-
-            inject_system_message(&app_handle, SystemLogLevel::Error, "Sniffer", format!("FATAL: {}", diagnostic));
-            IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
-            return true;
-        }
-    };
-
-    let mut streams: HashMap<[u8; 6], PacketBuffer> = HashMap::new();
-    let mut buffer = [0u8; 65535];
-
-    loop {
-        // [CRITICAL] COOPERATIVE SHUTDOWN
-        if SNIFFER_GENERATION.load(Ordering::Relaxed) != my_generation {
-            inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", format!("Sniffer Gen {} Shutdown signal received. Exiting.", my_generation));
-            break; // This drops 'wd', closing the handle cleanly.
-        }
-
-        if let Ok(packet) = wd.recv(Some(&mut buffer)) {
-            if config.is_debug && LAST_TRAFFIC_TIME.load(Ordering::Relaxed) == 0 {
-                inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "First Packet Captured! Network link established.");
-            }
-            feed_watchdog();
-
-            let raw_data = packet.data;
-            log::trace!("Raw Data: {:?}", raw_data);
-            parse_star_resonance(&app_handle, &mut streams, raw_data);
-        }
-    }
-    false
-}
-
-fn parse_star_resonance(app_handle: &&AppHandle, streams: &mut HashMap<[u8; 6], PacketBuffer>, raw_data: Cow<[u8]>) {
-    // 1. Safely extract BOTH ports directly from the IP/TCP headers
-    if raw_data.len() < 40 { return; }
-    let ip_hl = ((raw_data[0] & 0x0f) * 4) as usize;
-    if raw_data.len() < ip_hl + 4 { return; }
-
-    let src_port = u16::from_be_bytes([raw_data[ip_hl], raw_data[ip_hl + 1]]);
-    let dst_port = u16::from_be_bytes([raw_data[ip_hl + 2], raw_data[ip_hl + 3]]);
-
-    log::trace!("[Parse] raw_data {:?}", raw_data);
-
-    if let Some(stream_key) = parser::extract_stream_key(&*raw_data) {
-        log::trace!("[Parse] stream_key {:?}", stream_key);
-        if let Some(payload) = parser::extract_tcp_payload(&*raw_data) {
-            log::trace!("[Parse] payload {:?}", payload);
-            // 2. We already know it's a game packet from the loops, so hardcode 5003 for the application stripper
-            if let Some(game_data) = parser::strip_application_header(payload, 5003) {
-                log::trace!("[Parse] game_data {:?}", game_data);
-                let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
-                p_buf.add(game_data);
-
-                while let Some(full_packet) = p_buf.next() {
-                    // 3. Process the packet if EITHER the source or destination is 5003
-                    log::trace!("[Parse] full_packet {:?}", full_packet);
-                    if src_port == 5003 || dst_port == 5003 {
-                        log::trace!("[Parse] inside port check {:?}", full_packet);
-                        parse_and_emit_5003(&full_packet, &app_handle);
-                    }
+                // 3. Extract the Stream Key (Source IP + Source Port)
+                // to handle split messages cleanly across different players
+                let mut stream_key = [0u8; 6];
+                if let Some(NetHeaders::Ipv4(ipv4, _extensions)) = headers.net {
+                    stream_key[0..4].copy_from_slice(&ipv4.source);
                 }
+                stream_key[4..6].copy_from_slice(&src_port.to_be_bytes());
+
+                log::debug!("✅ PASSED: Extracted {} bytes of game data", payload.len());
+                feed_watchdog();
+
+                // Pass clean data to the game parser
+                process_game_stream(app, &mut streams, stream_key, payload, src_port, dst_port);
+            }
+        }
+    }
+}
+
+fn process_game_stream(
+    app_handle: &AppHandle,
+    streams: &mut HashMap<[u8; 6], PacketBuffer>,
+    stream_key: [u8; 6],
+    payload: &[u8],
+    src_port: u16,
+    dst_port: u16
+) {
+    if let Some(game_data) = parser::strip_application_header(payload, 5003) {
+        let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
+        p_buf.add(game_data);
+
+        while let Some(full_packet) = p_buf.next() {
+            if src_port == 5003 || dst_port == 5003 {
+                parse_and_emit_5003(&full_packet, app_handle);
             }
         }
     }
@@ -487,4 +416,11 @@ fn split_port_5003_fields(data: &[u8]) -> HashMap<u32, Vec<u8>> {
         }
     }
     fields
+}
+
+pub fn remove_firewall_rule() {
+    let _ = Command::new("netsh")
+        .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}", RULE_NAME)])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
 }

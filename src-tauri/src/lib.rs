@@ -54,7 +54,7 @@ pub fn run() {
         .filter_module("resonance_stream_lib", log::LevelFilter::Trace) // Show your debugs
         .init();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(|app| {
             let handle = app.handle();
             inject_system_message(handle, SystemLogLevel::Info, "Backend", "Initializing Resonance Stream...");
@@ -94,8 +94,15 @@ pub fn run() {
             open_app_data_folder,
             export_chat_log
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    app.run(|_app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+            log::info!("Application closing. Cleaning up Firewall Rules...");
+            services::sniffer::remove_firewall_rule();
+        }
+    });
 }
 
 pub fn inject_system_message<S: Into<String>>(

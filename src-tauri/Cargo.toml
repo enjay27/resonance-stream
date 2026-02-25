@@ -1,6 +1,6 @@
 [package]
 name = "resonance-stream"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Enjay27 <kdkm2002@gmail.com>"]
 description = "Blue Protocol: Star Resonance Real-time Translator"
 edition = "2021"

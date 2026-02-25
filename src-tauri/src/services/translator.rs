@@ -3,6 +3,7 @@ use llama_cpp_2::context::LlamaContext;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::thread;
+use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 use llama_cpp_2::context::params::LlamaContextParams;
@@ -14,6 +15,7 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 
 use crate::protocol::types::{ChatMessage, SystemLogLevel};
 use crate::{inject_system_message, store_and_emit};
+use crate::io::save_to_data_factory;
 
 pub struct TranslationJob {
     pub chat: ChatMessage,
@@ -99,17 +101,43 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             }
         };
 
-        // Fix 2 applied: NonZeroU32
         let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(1024));
         let mut ctx = model.new_context(&backend, ctx_params).expect("Failed to create context");
 
         inject_system_message(&app, SystemLogLevel::Success, "Translator", "Native Model loaded! Ready for translation.");
 
-        while let Ok(job) = rx.recv() {
-            let mut chat = job.chat;
-            // Just call the extracted function!
-            chat.translated = Some(translate_text(&model, &mut ctx, &chat.message));
-            store_and_emit(&app, chat);
+        // 0. The Background Loop
+        while let Ok(first_job) = rx.recv() { // Blocks until the FIRST message arrives
+
+            let mut batch = vec![first_job.chat];
+            let start_time = Instant::now();
+            let timeout = Duration::from_millis(1000); // 1000ms Watchdog
+
+            // 1. Watchdog Collection Phase (Keep this! It's great for network efficiency)
+            while batch.len() < 5 {
+                let elapsed = start_time.elapsed();
+                if elapsed >= timeout { break; }
+
+                match rx.recv_timeout(timeout - elapsed) {
+                    Ok(job) => batch.push(job.chat),
+                    Err(_) => break,
+                }
+            }
+
+            // 2. High-Quality Iterative Translation Phase
+            inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("Translating batch of {} messages sequentially...", batch.len()));
+
+            for mut chat in batch {
+                // A. Translate one-by-one using the pure, high-focus function
+                let translated_str = translate_text(&model, &mut ctx, &chat.message);
+                chat.translated = Some(translated_str.clone());
+
+                // B. Save to Data Factory
+                let _ = save_to_data_factory(&app, chat.pid, &chat.message, &translated_str);
+
+                // C. Emit to Frontend instantly as each finish!
+                store_and_emit(&app, chat);
+            }
         }
     });
 
@@ -140,7 +168,6 @@ mod tests {
         let appdata = std::env::var("APPDATA").expect("Could not find APPDATA environment variable");
         let mut model_path = PathBuf::from(appdata);
         model_path.push("com.enjay.bpsr.resonance-stream");
-
         model_path.push("models");
         model_path.push("model_q6_k.gguf");
 

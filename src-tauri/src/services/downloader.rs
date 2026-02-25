@@ -33,39 +33,44 @@ struct ModelManifest {
 }
 
 fn load_manifest(app: &tauri::AppHandle) -> Result<ModelManifest, String> {
+    // currently translation model is in progress
+    Ok(ModelManifest {
+        model_id: "".to_string(),
+        files: vec![],
+    })
     // 1. DEVELOPMENT: Embed the file directly into the binary during 'cargo tauri dev'
-    #[cfg(debug_assertions)]
-    {
-        // This path is relative to 'src-tauri/src/model_manager.rs'
-        let json_data = include_str!("../../resources/models.json");
-        serde_json::from_str(json_data).map_err(|e| format!("Dev JSON parse error: {}", e))
-    }
-
-    // 2. PRODUCTION: Use the dynamic PathResolver for the bundled resource
-    #[cfg(not(debug_assertions))]
-    {
-        use tauri::path::BaseDirectory;
-
-        // Fix: Match the structure in tauri.conf.json ("resources/models.json")
-        let resource_path = app.path()
-            .resolve("resources/models.json", BaseDirectory::Resource)
-            .map_err(|e| format!("Resource resolution failed: {}", e))?;
-
-        if !resource_path.exists() {
-            // Fallback: Check the same directory as the EXE (useful for local builds)
-            let exe_path = std::env::current_exe().unwrap().parent().unwrap().join("models.json");
-            if exe_path.exists() {
-                let json_data = std::fs::read_to_string(&exe_path).map_err(|e| e.to_string())?;
-                return serde_json::from_str(&json_data).map_err(|e| e.to_string());
-            }
-            return Err(format!("models.json not found. Checked: {:?}", resource_path));
-        }
-
-        let json_data = std::fs::read_to_string(&resource_path)
-            .map_err(|e| format!("Failed to read models.json: {}", e))?;
-
-        serde_json::from_str(&json_data).map_err(|e| format!("Prod JSON parse error: {}", e))
-    }
+    // #[cfg(debug_assertions)]
+    // {
+    //     // This path is relative to 'src-tauri/src/model_manager.rs'
+    //     let json_data = include_str!("../../resources/models.json");
+    //     serde_json::from_str(json_data).map_err(|e| format!("Dev JSON parse error: {}", e))
+    // }
+    // 
+    // // 2. PRODUCTION: Use the dynamic PathResolver for the bundled resource
+    // #[cfg(not(debug_assertions))]
+    // {
+    //     use tauri::path::BaseDirectory;
+    // 
+    //     // Fix: Match the structure in tauri.conf.json ("resources/models.json")
+    //     let resource_path = app.path()
+    //         .resolve("resources/models.json", BaseDirectory::Resource)
+    //         .map_err(|e| format!("Resource resolution failed: {}", e))?;
+    // 
+    //     if !resource_path.exists() {
+    //         // Fallback: Check the same directory as the EXE (useful for local builds)
+    //         let exe_path = std::env::current_exe().unwrap().parent().unwrap().join("models.json");
+    //         if exe_path.exists() {
+    //             let json_data = std::fs::read_to_string(&exe_path).map_err(|e| e.to_string())?;
+    //             return serde_json::from_str(&json_data).map_err(|e| e.to_string());
+    //         }
+    //         return Err(format!("models.json not found. Checked: {:?}", resource_path));
+    //     }
+    // 
+    //     let json_data = std::fs::read_to_string(&resource_path)
+    //         .map_err(|e| format!("Failed to read models.json: {}", e))?;
+    // 
+    //     serde_json::from_str(&json_data).map_err(|e| format!("Prod JSON parse error: {}", e))
+    // }
 }
 
 #[tauri::command]

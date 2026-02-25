@@ -10,14 +10,11 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
         recruit_asset_blocks: Vec::new(),
     };
 
-    log::trace!("[Stage 1] data length check {:?}", data.len());
     if data.len() < 3 || data[0] != 0x0A { return None; }
 
     let (total_len, header_read) = read_varint(&data[1..]);
     let mut i = 1 + header_read;
     let safe_end = (i + total_len as usize).min(data.len());
-
-    log::trace!("[Stage 1] safe end {:?}", safe_end);
 
     let mut is_valid_chat_packet = false;
 
@@ -25,10 +22,7 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
         let tag = data[i];
         let wire_type = tag & 0x07;
         let field_num = (tag >> 3) as u32;
-        i += 1; // Move past the tag byte
-
-        log::trace!("[Stage 1] wire type {:?}", wire_type);
-        log::trace!("[Stage 1] field num {:?}", field_num);
+        i += 1;
 
         if wire_type == 2 {
             let (len, read) = read_varint(&data[i..safe_end]);
@@ -37,29 +31,34 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
 
             if let Some(sub_data) = data.get(i..block_end) {
                 match field_num {
-                    2 | 3 | 4 => payload.chat_blocks.push((field_num, sub_data.to_vec())),
-                    18 => payload.recruit_asset_blocks.push(sub_data.to_vec()),
+                    2 | 3 | 4 => {
+                        payload.chat_blocks.push((field_num, sub_data.to_vec()));
+                        // 1. If it has a chat block, it is ALWAYS valid!
+                        is_valid_chat_packet = true;
+                    },
+                    18 => {
+                        payload.recruit_asset_blocks.push(sub_data.to_vec());
+                        is_valid_chat_packet = true;
+                    },
                     _ => {}
                 }
             }
-            i = block_end; // Advance the pointer past this block
+            i = block_end;
         } else if wire_type == 0 {
             let (val, read) = read_varint(&data[i..safe_end]);
-            if field_num == 1 {
-                // Real Chat/Recruit packets ALWAYS have a Channel ID varint here.
-                is_valid_chat_packet = true;
+
+            // 2. Allow BOTH Field 1 and Field 2 to dictate the Channel!
+            if field_num == 1 || field_num == 2 {
                 payload.channel = match val {
                     2 => "LOCAL".into(), 3 => "PARTY".into(), 4 => "GUILD".into(), _ => "WORLD".into(),
                 };
             }
             i += read;
         } else {
-            // Safely skip any other data types
             i += skip_field(wire_type, &data[i..safe_end]);
         }
     }
 
-    // Filter out Server/Metadata packets immediately
     if is_valid_chat_packet {
         Some(payload)
     } else {
@@ -101,7 +100,13 @@ pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
         if !chat.nickname.is_empty() { ctx_nickname = chat.nickname.clone(); }
         if chat.timestamp > 0 { ctx_timestamp = chat.timestamp; }
 
-        if !chat.message.is_empty() && chat.uid > 0 {
+        if !chat.message.is_empty() {
+
+            // If we have no UID/Nickname, it's a server echo of the local player's chat
+            if chat.uid == 0 && chat.nickname.is_empty() {
+                chat.nickname = "Me".to_string();
+            }
+
             events.push(Port5003Event::Chat(chat));
         }
     }

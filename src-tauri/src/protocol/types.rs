@@ -40,6 +40,7 @@ pub enum SystemLogLevel {
     Error,   // Driver init failed, Sidecar crashed
     Success, // Dictionary updated, Model ready
     Debug,   // high-frequency, technical events
+    Trace,   // extremely-frequency
 }
 
 pub struct AppState {

@@ -18,7 +18,6 @@ use std::os::windows::process::CommandExt;
 use std::process::Command;
 use etherparse::{PacketHeaders, TransportHeader, NetHeaders};
 use local_ip_address::{list_afinet_netifas, local_ip};
-use log::log;
 use crate::config::AppConfig;
 use crate::protocol::types::{
     ChatMessage, AppState, SystemLogLevel, MessageRequest,
@@ -80,7 +79,7 @@ fn get_active_ip() -> Option<std::net::Ipv4Addr> {
     }
 }
 
-fn setup_raw_socket(local_ip: Ipv4Addr) -> Socket {
+fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Socket {
     // 1. Create a Raw IPv4 Socket using the raw integer 0 (IPPROTO_IP)
     // This avoids the 'No associated item' error and is the standard for sniffing
     let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::from(0)))
@@ -90,7 +89,7 @@ fn setup_raw_socket(local_ip: Ipv4Addr) -> Socket {
     let address = std::net::SocketAddr::from((local_ip, 0));
 
     socket.bind(&address.into()).map_err(|e| {
-        log::trace!("Bind Error: {:?}. IP used: {:?}", e, local_ip);
+        inject_system_message(&app, SystemLogLevel::Error, "Sniffer", format!("Bind Error: {:?}. IP used: {:?}", e, local_ip));
         e
     }).expect("Failed to bind to interface");
 
@@ -255,7 +254,7 @@ fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandl
     ensure_firewall_rule(); // We will manage the lifecycle in lib.rs
 
     let local_ip = find_game_interface_ip().expect("Could not find local IP");
-    let socket = setup_raw_socket(local_ip);
+    let socket = setup_raw_socket(local_ip, app);
 
     let mut buf = [0u8; 65535];
     let uninit_buf = unsafe {
@@ -296,7 +295,7 @@ fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandl
                 }
                 stream_key[4..6].copy_from_slice(&src_port.to_be_bytes());
 
-                log::debug!("✅ PASSED: Extracted {} bytes of game data", payload.len());
+                inject_system_message(&app, SystemLogLevel::Debug, "Sniffer", format!("✅ PASSED: Extracted {} bytes of game data", payload.len()));
                 feed_watchdog();
 
                 // Pass clean data to the game parser
@@ -315,8 +314,9 @@ fn process_game_stream(
     dst_port: u16
 ) {
     // 1. Strip the 5003 application header
+    inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("process game stream {:?}", payload));
     if let Some(game_data) = parser::strip_application_header(payload, 5003) {
-
+        inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("game data {:?}", game_data));
         // 2. Append the bytes to the correct player/server stream buffer
         let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
         p_buf.add(game_data);
@@ -324,7 +324,9 @@ fn process_game_stream(
         // 3. Extract fully assembled Protobuf packets
         while let Some(full_packet) = p_buf.next() {
             // We double-check the port to ensure we only emit 5003 data
+            inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("full packet {:?}", full_packet));
             if src_port == 5003 || dst_port == 5003 {
+                inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", "request parse for 5003 port packet");
                 parse_and_emit_5003(&full_packet, app_handle);
             }
         }
@@ -340,11 +342,11 @@ pub fn parse_and_emit_5003(data: &[u8], app: &AppHandle) {
         None => return,
     };
 
-    log::trace!("[5003] raw_payload {:?}", raw_payload);
+    inject_system_message(&app, SystemLogLevel::Debug, "Sniffer", format!("[5003] stage 1 completed {:?}", raw_payload));
 
     let events = crate::protocol::parser::stage2_process(raw_payload);
 
-    log::trace!("[5003] events {:?}", events);
+    inject_system_message(&app, SystemLogLevel::Debug, "Sniffer", format!("[5003] stage 2 completed {:?}", events));
 
     for event in events {
         if should_emit(&event) {

@@ -123,6 +123,7 @@ pub fn inject_system_message<S: Into<String>>(
             SystemLogLevel::Error => "error",
             SystemLogLevel::Success => "success",
             SystemLogLevel::Debug => "debug",
+            SystemLogLevel::Trace => "trace",
         };
 
         println!("[{}] [{}] [{:?}] {}", current_pid, source, level, msg);

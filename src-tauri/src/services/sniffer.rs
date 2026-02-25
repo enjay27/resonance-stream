@@ -314,11 +314,16 @@ fn process_game_stream(
     src_port: u16,
     dst_port: u16
 ) {
+    // 1. Strip the 5003 application header
     if let Some(game_data) = parser::strip_application_header(payload, 5003) {
+
+        // 2. Append the bytes to the correct player/server stream buffer
         let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
         p_buf.add(game_data);
 
+        // 3. Extract fully assembled Protobuf packets
         while let Some(full_packet) = p_buf.next() {
+            // We double-check the port to ensure we only emit 5003 data
             if src_port == 5003 || dst_port == 5003 {
                 parse_and_emit_5003(&full_packet, app_handle);
             }

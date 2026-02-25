@@ -310,35 +310,3 @@ pub(crate) fn skip_field(wire_type: u8, data: &[u8]) -> usize {
         _ => 1,
     }
 }
-
-pub(crate) fn extract_stream_key(data: &[u8]) -> Option<[u8; 6]> {
-    if data.len() < 20 || (data[0] >> 4) != 4 || data[9] != 6 { return None; } // Must be IPv4 + TCP
-    let ihl = (data[0] & 0x0F) as usize * 4;
-    if data.len() < ihl + 20 { return None; }
-
-    let mut key = [0u8; 6];
-    key[0..4].copy_from_slice(&data[12..16]); // Source IP
-    key[4..6].copy_from_slice(&data[ihl..ihl + 2]); // Source Port
-    Some(key)
-}
-
-pub(crate) fn extract_tcp_payload(data: &[u8]) -> Option<&[u8]> {
-    // Basic IPv4 check
-    if data.len() < 20 || (data[0] >> 4) != 4 || data[9] != 6 { return None; }
-
-    // IP Header Length (usually 20 bytes, but can be more)
-    let ip_header_len = (data[0] & 0x0F) as usize * 4;
-    if data.len() < ip_header_len + 20 { return None; }
-
-    // TCP Header Length (Offset is at byte 12 of the TCP header)
-    let tcp_header_len = ((data[ip_header_len + 12] >> 4) as usize) * 4;
-
-    // The actual game data starts after both headers
-    let payload_offset = ip_header_len + tcp_header_len;
-
-    if payload_offset <= data.len() {
-        Some(&data[payload_offset..])
-    } else {
-        None
-    }
-}

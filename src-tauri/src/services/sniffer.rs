@@ -1,30 +1,27 @@
-use std::borrow::Cow;
 use crate::packet_buffer::PacketBuffer;
 use crate::{inject_system_message, store_and_emit};
 use lazy_static::lazy_static;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::{env, thread};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, State, Window};
-use windivert::prelude::*;
+use std::{env, thread};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
 
-use socket2::{Socket, Domain, Type, Protocol};
+use crate::config::AppConfig;
+use crate::protocol::parser::{self, Port5003Event};
+use crate::protocol::types::{
+    AppState, SystemLogLevel
+};
+use crate::services::translator::{contains_japanese, TranslationJob};
+use crossbeam_channel::Sender;
+use etherparse::{NetHeaders, PacketHeaders, TransportHeader};
+use local_ip_address::{list_afinet_netifas, local_ip};
+use socket2::{Domain, Protocol, Socket, Type};
 use std::net::Ipv4Addr;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
-use etherparse::{PacketHeaders, TransportHeader, NetHeaders};
-use local_ip_address::{list_afinet_netifas, local_ip};
-use crate::config::AppConfig;
-use crate::protocol::types::{
-    ChatMessage, AppState, SystemLogLevel, MessageRequest,
-    SystemMessage, LobbyRecruitment, ProfileAsset
-};
-use crate::protocol::parser::{self, Port5003Event, SplitPayload};
-
 // --- DATA STRUCTURES ---
 // 1. Standard Chat: Focuses on player communication
 
@@ -172,6 +169,14 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     // Reset watchdog on start
     feed_watchdog();
 
+    // 1. Resolve the path to your GGUF model (Adjust this to match where your downloader saves it!)
+    let mut model_path = app.path().app_data_dir().expect("Failed to get app data dir");
+    model_path.push("models");
+    model_path.push("model_q6_k.gguf"); // <-- Change to your actual filename
+
+    // 2. Spawn the background GGUF thread and get the transmitter queue
+    let translator_tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
+
     // --- WATCHDOG THREAD (Red Dot Logic) ---
     let app_handle_watchdog = app.clone();
     thread::spawn(move || {
@@ -222,7 +227,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     thread::spawn(move || {
         inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", format!("Engine Active (Gen {})", my_generation));
 
-        start_rawsocket_parser(config, my_generation, &app);
+        start_rawsocket_parser(config, my_generation, &app, translator_tx);
 
         inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", "Old Sniffer Thread Terminated.");
     });
@@ -266,7 +271,7 @@ pub fn ensure_firewall_rule(app: &AppHandle) {
     }
 }
 
-fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandle) {
+fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandle, translator_tx: Sender<TranslationJob>) {
     ensure_firewall_rule(app);
 
     // 1. Gracefully handle missing IP
@@ -341,7 +346,7 @@ fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandl
                 feed_watchdog();
 
                 // Pass clean data to the game parser
-                process_game_stream(app, &mut streams, stream_key, payload, src_port);
+                process_game_stream(app, &mut streams, stream_key, payload, src_port, &translator_tx);
             }
         }
     }
@@ -352,7 +357,8 @@ fn process_game_stream(
     streams: &mut HashMap<[u8; 6], PacketBuffer>,
     stream_key: [u8; 6],
     payload: &[u8],
-    src_port: u16
+    src_port: u16,
+    translator_tx: &Sender<TranslationJob>,
 ) {
     // 1. Strip the 5003 application header
     inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("process game stream {:?}", payload));
@@ -368,7 +374,7 @@ fn process_game_stream(
             inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("full packet {:?}", full_packet));
             if src_port == 5003 {
                 inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", "request parse for 5003 port packet");
-                parse_and_emit_5003(&full_packet, app_handle);
+                parse_and_emit_5003(&full_packet, app_handle, translator_tx);
             }
         }
     }
@@ -376,7 +382,7 @@ fn process_game_stream(
 
 // --- STAGE 3: EMIT ---
 // Filters out duplicates and dispatches the final events to Tauri.
-pub fn parse_and_emit_5003(data: &[u8], app: &AppHandle) {
+pub fn parse_and_emit_5003(data: &[u8], app: &AppHandle, translator_tx: &Sender<TranslationJob>) {
     // If it's a server packet, this safely returns without spamming logs
     let raw_payload = match crate::protocol::parser::stage1_split(data) {
         Some(p) => p,
@@ -392,7 +398,16 @@ pub fn parse_and_emit_5003(data: &[u8], app: &AppHandle) {
     for event in events {
         if should_emit(&event) {
             match event {
-                Port5003Event::Chat(c) => store_and_emit(app, c),
+                Port5003Event::Chat(mut c) => {
+                    // 1. Instantly store and emit the original Japanese text to the UI
+                    store_and_emit(app, c.clone()); // Emits "packet-event"
+
+                    // 2. Check if it needs translation
+                    if crate::config::load_config(app.clone()).use_translation && contains_japanese(&c.message) {
+                        // 3. Send to the background GGUF thread!
+                        let _ = translator_tx.send(crate::services::translator::TranslationJob { chat: c });
+                    }
+                }
                 Port5003Event::Recruit(l) => { let _ = app.emit("lobby-update", l); },
                 Port5003Event::Asset(a) => { let _ = app.emit("profile-asset-update", a); },
             }

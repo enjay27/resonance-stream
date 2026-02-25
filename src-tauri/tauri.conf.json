@@ -35,8 +35,6 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "bin/WinDivert.dll",
-      "bin/WinDivert64.sys"
     ]
   }
 }

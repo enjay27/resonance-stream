@@ -79,22 +79,27 @@ fn get_active_ip() -> Option<std::net::Ipv4Addr> {
     }
 }
 
-fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Socket {
-    // 1. Create a Raw IPv4 Socket using the raw integer 0 (IPPROTO_IP)
-    // This avoids the 'No associated item' error and is the standard for sniffing
-    let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::from(0)))
-        .expect("Failed to create raw socket. Ensure you are running as Administrator.");
+fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, String> {
+    // 1. Create socket safely
+    let socket = match Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::from(0))) {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = format!("ACCESS_DENIED: Failed to create socket. Please run as Administrator. ({:?})", e);
+            inject_system_message(app, SystemLogLevel::Error, "Sniffer", &msg);
+            return Err(msg);
+        }
+    };
 
-    // 2. Bind to local interface
+    // 2. Bind safely
     let address = std::net::SocketAddr::from((local_ip, 0));
+    if let Err(e) = socket.bind(&address.into()) {
+        let msg = format!("BIND_FAILED: Could not bind to interface {:?}. ({:?})", local_ip, e);
+        inject_system_message(app, SystemLogLevel::Error, "Sniffer", &msg);
+        return Err(msg);
+    }
 
-    socket.bind(&address.into()).map_err(|e| {
-        inject_system_message(&app, SystemLogLevel::Error, "Sniffer", format!("Bind Error: {:?}. IP used: {:?}", e, local_ip));
-        e
-    }).expect("Failed to bind to interface");
-
-    // 3. Enable SIO_RCVALL (Windows Promiscuous Mode)
-    let rcval: u32 = 1; // RCVALL_ON
+    // 3. Enable Promiscuous Mode safely
+    let rcval: u32 = 1;
     let mut out_buffer = [0u8; 4];
     unsafe {
         use windows_sys::Win32::Networking::WinSock::SIO_RCVALL;
@@ -112,11 +117,13 @@ fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Socket {
             None,
         );
         if result != 0 {
-            panic!("WSAIoctl SIO_RCVALL failed. Admin rights are mandatory.");
+            let msg = "PROMISCUOUS_MODE_FAILED: Network adapter rejected SIO_RCVALL. Admin rights required.".to_string();
+            inject_system_message(app, SystemLogLevel::Error, "Sniffer", &msg);
+            return Err(msg);
         }
     }
 
-    socket
+    Ok(socket)
 }
 
 pub fn find_game_interface_ip() -> Option<std::net::Ipv4Addr> {
@@ -221,40 +228,70 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     });
 }
 
-pub fn ensure_firewall_rule() {
+pub fn ensure_firewall_rule(app: &AppHandle) {
     if let Ok(exe_path) = env::current_exe() {
         if let Some(path_str) = exe_path.to_str() {
+            inject_system_message(app, SystemLogLevel::Info, "Sniffer", "Configuring Windows Firewall...");
 
-            // 1. Delete any existing rule from previous crashes/runs
             let _ = Command::new("netsh")
                 .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}", RULE_NAME)])
                 .creation_flags(CREATE_NO_WINDOW)
                 .status();
 
-            // 2. Add the highly-restricted rule (TCP 5003 only)
-            let _ = Command::new("netsh")
+            let result = Command::new("netsh")
                 .args([
                     "advfirewall", "firewall", "add", "rule",
                     &format!("name={}", RULE_NAME),
                     "dir=in",
                     "action=allow",
                     "protocol=TCP",
-                    "localport=5003",
+                    "remoteport=5003",
+                    "remoteip=172.65.0.0/16",
                     &format!("program={}", path_str),
                     "enable=yes",
-                    "profile=any" // Applies to Public/Private networks
+                    "profile=any"
                 ])
                 .creation_flags(CREATE_NO_WINDOW)
                 .status();
+
+            match result {
+                Ok(status) if status.success() => {
+                    inject_system_message(app, SystemLogLevel::Success, "Sniffer", "Firewall configured successfully.");
+                }
+                _ => {
+                    inject_system_message(app, SystemLogLevel::Error, "Sniffer", "Failed to configure firewall. Inbound chat may be blocked.");
+                }
+            }
         }
     }
 }
 
 fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandle) {
-    ensure_firewall_rule(); // We will manage the lifecycle in lib.rs
+    ensure_firewall_rule(app);
 
-    let local_ip = find_game_interface_ip().expect("Could not find local IP");
-    let socket = setup_raw_socket(local_ip, app);
+    // 1. Gracefully handle missing IP
+    let local_ip = match find_game_interface_ip() {
+        Some(ip) => {
+            inject_system_message(app, SystemLogLevel::Info, "Sniffer", format!("Targeting Network Interface: {}", ip));
+            ip
+        },
+        None => {
+            inject_system_message(app, SystemLogLevel::Error, "Sniffer", "NETWORK_ERROR: Could not find a valid local IPv4 network interface.");
+            IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
+            return;
+        }
+    };
+
+    // 2. Gracefully handle socket setup
+    let socket = match setup_raw_socket(local_ip, app) {
+        Ok(s) => s,
+        Err(_) => {
+            IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
+            return; // Exit thread cleanly
+        }
+    };
+
+    inject_system_message(app, SystemLogLevel::Success, "Sniffer", "Raw Socket active. Listening for game traffic...");
 
     let mut buf = [0u8; 65535];
     let uninit_buf = unsafe {
@@ -264,6 +301,12 @@ fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandl
     let mut streams: HashMap<[u8; 6], PacketBuffer> = HashMap::new();
 
     loop {
+        // [CRITICAL] COOPERATIVE SHUTDOWN
+        // If the user restarts the sniffer, the generation changes, and this thread will exit!
+        if SNIFFER_GENERATION.load(Ordering::Relaxed) != generation {
+            break;
+        }
+
         let n = match socket.recv(uninit_buf) {
             Ok(n) => n,
             Err(_) => continue,
@@ -279,9 +322,8 @@ fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandl
         // 2. Validate TCP and get ports
         if let Some(TransportHeader::Tcp(tcp)) = headers.transport {
             let src_port = tcp.source_port;
-            let dst_port = tcp.destination_port;
 
-            if src_port == 5003 || dst_port == 5003 {
+            if src_port == 5003 {
                 let payload = headers.payload.slice();
 
                 // Ignore empty ACK packets
@@ -299,7 +341,7 @@ fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandl
                 feed_watchdog();
 
                 // Pass clean data to the game parser
-                process_game_stream(app, &mut streams, stream_key, payload, src_port, dst_port);
+                process_game_stream(app, &mut streams, stream_key, payload, src_port);
             }
         }
     }
@@ -310,8 +352,7 @@ fn process_game_stream(
     streams: &mut HashMap<[u8; 6], PacketBuffer>,
     stream_key: [u8; 6],
     payload: &[u8],
-    src_port: u16,
-    dst_port: u16
+    src_port: u16
 ) {
     // 1. Strip the 5003 application header
     inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("process game stream {:?}", payload));
@@ -325,7 +366,7 @@ fn process_game_stream(
         while let Some(full_packet) = p_buf.next() {
             // We double-check the port to ensure we only emit 5003 data
             inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("full packet {:?}", full_packet));
-            if src_port == 5003 || dst_port == 5003 {
+            if src_port == 5003 {
                 inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", "request parse for 5003 port packet");
                 parse_and_emit_5003(&full_packet, app_handle);
             }

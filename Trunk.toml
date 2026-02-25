@@ -7,3 +7,15 @@ ignore = ["./src-tauri"]
 [serve]
 port = 1420
 open = false
+
+[[hooks]]
+stage = "pre_build"
+command = "cmd"
+command_arguments = [
+    "/c",
+    "npx @tailwindcss/cli -i ./style/input.css -o ./style/output.css"
+]
+
+[[assets]]
+path = "style/output.css"
+rel = "css"

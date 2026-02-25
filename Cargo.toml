@@ -1,6 +1,6 @@
 [package]
 name = "resonance-stream-ui"
-version = "0.0.1"
+version = "0.2.0"
 authors = ["Enjay27 <kdkm2002@gmail.com>"]
 description = "Blue Protocol: Star Resonance Real-time Translator"
 edition = "2021"
@@ -19,6 +19,7 @@ serde_json = "1.0.149"
 web-sys = { version = "0.3.85", features = ["Window", "Navigator", "Clipboard"] }
 indexmap = { version = "2.0", features = ["serde"] }
 gloo-timers = { version = "0.3.0", features = ["futures"] }
+tailwind-css = "0.13.0"
 
 [workspace]
 members = ["src-tauri"]

@@ -1,11 +1,12 @@
-use std::fs;
+use crate::{inject_system_message, ExportMessage};
+use crate::protocol::types::{AppState, SystemLogLevel};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::io::Write;
+use chrono::{Local, TimeZone};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri::path::BaseDirectory;
-use crate::inject_system_message;
-use crate::sniffer::{AppState, SystemLogLevel};
+use tauri_plugin_shell::ShellExt;
 
 #[derive(Serialize, Clone)]
 pub struct ModelStatus {
@@ -33,39 +34,44 @@ struct ModelManifest {
 }
 
 fn load_manifest(app: &tauri::AppHandle) -> Result<ModelManifest, String> {
+    // currently translation model is in progress
+    Ok(ModelManifest {
+        model_id: "".to_string(),
+        files: vec![],
+    })
     // 1. DEVELOPMENT: Embed the file directly into the binary during 'cargo tauri dev'
-    #[cfg(debug_assertions)]
-    {
-        // This path is relative to 'src-tauri/src/model_manager.rs'
-        let json_data = include_str!("../resources/models.json");
-        serde_json::from_str(json_data).map_err(|e| format!("Dev JSON parse error: {}", e))
-    }
-
-    // 2. PRODUCTION: Use the dynamic PathResolver for the bundled resource
-    #[cfg(not(debug_assertions))]
-    {
-        use tauri::path::BaseDirectory;
-
-        // Fix: Match the structure in tauri.conf.json ("resources/models.json")
-        let resource_path = app.path()
-            .resolve("resources/models.json", BaseDirectory::Resource)
-            .map_err(|e| format!("Resource resolution failed: {}", e))?;
-
-        if !resource_path.exists() {
-            // Fallback: Check the same directory as the EXE (useful for local builds)
-            let exe_path = std::env::current_exe().unwrap().parent().unwrap().join("models.json");
-            if exe_path.exists() {
-                let json_data = std::fs::read_to_string(&exe_path).map_err(|e| e.to_string())?;
-                return serde_json::from_str(&json_data).map_err(|e| e.to_string());
-            }
-            return Err(format!("models.json not found. Checked: {:?}", resource_path));
-        }
-
-        let json_data = std::fs::read_to_string(&resource_path)
-            .map_err(|e| format!("Failed to read models.json: {}", e))?;
-
-        serde_json::from_str(&json_data).map_err(|e| format!("Prod JSON parse error: {}", e))
-    }
+    // #[cfg(debug_assertions)]
+    // {
+    //     // This path is relative to 'src-tauri/src/model_manager.rs'
+    //     let json_data = include_str!("../../resources/models.json");
+    //     serde_json::from_str(json_data).map_err(|e| format!("Dev JSON parse error: {}", e))
+    // }
+    // 
+    // // 2. PRODUCTION: Use the dynamic PathResolver for the bundled resource
+    // #[cfg(not(debug_assertions))]
+    // {
+    //     use tauri::path::BaseDirectory;
+    // 
+    //     // Fix: Match the structure in tauri.conf.json ("resources/models.json")
+    //     let resource_path = app.path()
+    //         .resolve("resources/models.json", BaseDirectory::Resource)
+    //         .map_err(|e| format!("Resource resolution failed: {}", e))?;
+    // 
+    //     if !resource_path.exists() {
+    //         // Fallback: Check the same directory as the EXE (useful for local builds)
+    //         let exe_path = std::env::current_exe().unwrap().parent().unwrap().join("models.json");
+    //         if exe_path.exists() {
+    //             let json_data = std::fs::read_to_string(&exe_path).map_err(|e| e.to_string())?;
+    //             return serde_json::from_str(&json_data).map_err(|e| e.to_string());
+    //         }
+    //         return Err(format!("models.json not found. Checked: {:?}", resource_path));
+    //     }
+    // 
+    //     let json_data = std::fs::read_to_string(&resource_path)
+    //         .map_err(|e| format!("Failed to read models.json: {}", e))?;
+    // 
+    //     serde_json::from_str(&json_data).map_err(|e| format!("Prod JSON parse error: {}", e))
+    // }
 }
 
 #[tauri::command]
@@ -200,25 +206,13 @@ pub async fn sync_dictionary(app: tauri::AppHandle, state: tauri::State<'_, AppS
 
     inject_system_message(&app, SystemLogLevel::Success, "ModelManager", "Dictionary saved to AppData.");
 
-    // 5. Notify Python Sidecar via Stdin
-    let mut tx_guard = state.tx.lock().unwrap();
-    if let Some(child) = tx_guard.as_mut() {
-        let msg = serde_json::json!({ "cmd": "reload" }).to_string() + "\n";
-
-        // Use the child's write method
-        child.write(msg.as_bytes()).map_err(|e| e.to_string())?;
-        inject_system_message(&app, SystemLogLevel::Info, "Sidecar", "Sent reload command via Stdin.");
-    } else {
-        return Err("Translator is not running".into());
-    }
-
     inject_system_message(&app, SystemLogLevel::Success, "Translator", "Dictionary successfully synchronized.");
 
     Ok("Dictionary updated and reloaded!".to_string())
 }
 
 #[tauri::command]
-pub async fn open_model_folder(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn open_app_data_folder(app: tauri::AppHandle) -> Result<(), String> {
     // 1. Resolve the specific AppData/Roaming folder for this app
     let app_dir = app.path()
         .app_data_dir()
@@ -227,7 +221,7 @@ pub async fn open_model_folder(app: tauri::AppHandle) -> Result<(), String> {
     // 2. CRITICAL: Ensure the directory exists.
     // If Explorer is called on a non-existent path, it defaults to 'Documents'.
     if !app_dir.exists() {
-        std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
     }
 
     // 3. Open the folder using the system file explorer
@@ -248,4 +242,53 @@ pub async fn open_model_folder(app: tauri::AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn export_chat_log(app: tauri::AppHandle, logs: Vec<ExportMessage>) -> Result<String, String> {
+    // 1. Get the AppData directory
+    let app_dir = app.path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+
+    if !app_dir.exists() {
+        fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
+    }
+
+    // 2. Create a unique filename based on the current time
+    let timestamp_now = Local::now().format("%Y%m%d_%H%M%S");
+    let file_path = app_dir.join(format!("chat_export_{}.txt", timestamp_now));
+
+    // 3. Open the file for writing
+    let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
+
+    // 4. Write the header
+    writeln!(file, "=== BPSR Translator Chat Export ({}) ===", Local::now().format("%Y-%m-%d %H:%M:%S"))
+        .map_err(|e| e.to_string())?;
+    writeln!(file, "--------------------------------------------------").map_err(|e| e.to_string())?;
+
+    // 5. Format and write each message
+    for log in logs {
+        // Convert Unix timestamp to readable date/time
+        let dt = Local.timestamp_opt(log.timestamp as i64, 0).unwrap();
+        let time_str = dt.format("%Y-%m-%d %H:%M:%S");
+
+        // Format translation (if it exists)
+        let trans_str = match &log.translated {
+            Some(t) => format!(" -> {}", t),
+            None => "".to_string(),
+        };
+
+        let line = format!("[{}] [{}] {}: {}{}", time_str, log.channel, log.nickname, log.message, trans_str);
+        writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+    }
+
+    // Return the path so we could theoretically show it to the user
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    // This tells Windows/macOS to open the URL in Chrome/Edge/Safari
+    app.shell().open(url, None).map_err(|e| e.to_string())
 }

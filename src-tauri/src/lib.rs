@@ -1,42 +1,62 @@
-use crate::model_manager::*;
-use crate::python_translator::*;
-use crate::sniffer::*;
+use std::io::Write;
 use crate::config::*;
+use indexmap::IndexMap;
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
-use std::sync::Mutex;
-use indexmap::IndexMap;
+use std::sync::{Arc, Mutex};
+use env_logger::fmt::style::{AnsiColor, Color, Style};
 use tauri::{Emitter, Manager};
-use windows::core::{HSTRING, PCWSTR};
-use windows::Win32::System::LibraryLoader::SetDllDirectoryW;
+use tauri_plugin_shell::ShellExt;
 
-mod model_manager;
-mod python_translator;
-mod sniffer_logic_test;
-mod sniffer;
-mod packet_buffer;
-mod config;
+pub mod config;
+pub mod io;
+pub mod packet_buffer;
 
+pub mod protocol;
+pub mod services;
+
+pub use protocol::parser::*;
+pub use protocol::types::*;
+pub use services::downloader::*;
+pub use services::sniffer::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    env_logger::builder()
+        .format(|buf, record| {
+            let target = record.target();
+            let short_target = target
+                .strip_prefix("resonance_stream_lib::")
+                .unwrap_or(target);
+
+            // 1. Get the default ANSI style for the log level (Info=Green, Warn=Yellow, etc.)
+            let level_style = buf.default_level_style(record.level());
+
+            // 2. Create a custom style for the target name using the new API
+            let target_style = Style::new()
+                .fg_color(Some(AnsiColor::Cyan.into())) // Set text to Cyan
+                .dimmed();                              // Make it slightly darker
+
+            // 3. Apply the styles using the 0.11 `{style}text{style:#}` pattern
+            writeln!(
+                buf,
+                "[{timestamp} {level_style}{level}{level_style:#} {target_style}{target}{target_style:#}] {message}",
+                timestamp = buf.timestamp(),
+                level_style = level_style,   // Turns level color ON
+                level = record.level(),
+                // {level_style:#} magically turns the color OFF
+                target_style = target_style, // Turns target color ON
+                target = short_target,
+                // {target_style:#} turns target color OFF
+                message = record.args()
+            )
+        })
+        .filter_level(log::LevelFilter::Warn) // Keep other crates quiet
+        .filter_module("resonance_stream_lib", log::LevelFilter::Trace) // Show your debugs
+        .init();
+
+    let app = tauri::Builder::default()
         .setup(|app| {
-            // 1. Resolve the absolute path to your bundled 'bin' folder
-            let resource_path = app.path().resource_dir()?
-                .join("bin");
-
-            // 2. Add this path to the DLL search order
-            if resource_path.exists() {
-                let path_str = resource_path.to_str().ok_or("Invalid path")?;
-                let path_hstring = HSTRING::from(path_str);
-
-                unsafe {
-                    // SetDllDirectoryW expects a PCWSTR
-                    let _ = SetDllDirectoryW(PCWSTR(path_hstring.as_ptr()));
-                }
-            }
-
             let handle = app.handle();
             inject_system_message(handle, SystemLogLevel::Info, "Backend", "Initializing Resonance Stream...");
 
@@ -50,7 +70,7 @@ pub fn run() {
             Ok(())
         })
         .manage(AppState {
-            tx: Mutex::new(None),
+            batch_data: Arc::new((Mutex::new((vec![], 0)), Default::default())),
             chat_history: Mutex::new(IndexMap::new()),
             system_history: Mutex::new(VecDeque::with_capacity(200)),
             next_pid: 1.into(),
@@ -61,10 +81,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             check_model_status,
             download_model,
-            is_translator_running,
-            start_translator_sidecar,
-            translate_message,
-            translate_nickname,
             start_sniffer_command,
             get_chat_history,
             get_system_history,
@@ -76,10 +92,19 @@ pub fn run() {
             save_config,
             minimize_window,
             close_window,
-            open_model_folder,
+            open_app_data_folder,
+            export_chat_log,
+            open_browser
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    app.run(|_app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+            log::info!("Application closing. Cleaning up Firewall Rules...");
+            services::sniffer::remove_firewall_rule();
+        }
+    });
 }
 
 pub fn inject_system_message<S: Into<String>>(
@@ -100,6 +125,7 @@ pub fn inject_system_message<S: Into<String>>(
             SystemLogLevel::Error => "error",
             SystemLogLevel::Success => "success",
             SystemLogLevel::Debug => "debug",
+            SystemLogLevel::Trace => "trace",
         };
 
         println!("[{}] [{}] [{:?}] {}", current_pid, source, level, msg);
@@ -125,7 +151,7 @@ pub fn inject_system_message<S: Into<String>>(
     }
 }
 
-pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatPacket) {
+pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
     if let Some(state) = app.try_state::<AppState>() {
         let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
         packet.pid = current_pid;
@@ -179,4 +205,18 @@ fn minimize_window(window: tauri::Window) {
 #[tauri::command]
 fn close_window(window: tauri::Window) {
     let _ = window.close();
+}
+
+#[tauri::command]
+fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatMessage> {
+    // Returns ONLY Game Chat
+    let history = state.chat_history.lock().unwrap();
+    history.values().cloned().collect()
+}
+
+#[tauri::command]
+fn get_system_history(state: tauri::State<AppState>) -> Vec<SystemMessage> {
+    // Change: Returns specialized SystemMessages
+    let history = state.system_history.lock().unwrap();
+    history.iter().cloned().collect()
 }

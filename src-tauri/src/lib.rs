@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use env_logger::fmt::style::{AnsiColor, Color, Style};
 use tauri::{Emitter, Manager};
+use tauri_plugin_shell::ShellExt;
 
 pub mod config;
 pub mod io;
@@ -92,7 +93,8 @@ pub fn run() {
             minimize_window,
             close_window,
             open_app_data_folder,
-            export_chat_log
+            export_chat_log,
+            open_browser
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

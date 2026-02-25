@@ -6,6 +6,7 @@ use std::fs;
 use std::io::Write;
 use chrono::{Local, TimeZone};
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_shell::ShellExt;
 
 #[derive(Serialize, Clone)]
 pub struct ModelStatus {
@@ -284,4 +285,10 @@ pub async fn export_chat_log(app: tauri::AppHandle, logs: Vec<ExportMessage>) ->
 
     // Return the path so we could theoretically show it to the user
     Ok(file_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    // This tells Windows/macOS to open the URL in Chrome/Edge/Safari
+    app.shell().open(url, None).map_err(|e| e.to_string())
 }

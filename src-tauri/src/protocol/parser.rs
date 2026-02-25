@@ -10,11 +10,14 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
         recruit_asset_blocks: Vec::new(),
     };
 
+    log::trace!("[Stage 1] data length check {:?}", data.len());
     if data.len() < 3 || data[0] != 0x0A { return None; }
 
     let (total_len, header_read) = read_varint(&data[1..]);
     let mut i = 1 + header_read;
     let safe_end = (i + total_len as usize).min(data.len());
+
+    log::trace!("[Stage 1] safe end {:?}", safe_end);
 
     let mut is_valid_chat_packet = false;
 
@@ -23,6 +26,9 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
         let wire_type = tag & 0x07;
         let field_num = (tag >> 3) as u32;
         i += 1; // Move past the tag byte
+
+        log::trace!("[Stage 1] wire type {:?}", wire_type);
+        log::trace!("[Stage 1] field num {:?}", field_num);
 
         if wire_type == 2 {
             let (len, read) = read_varint(&data[i..safe_end]);

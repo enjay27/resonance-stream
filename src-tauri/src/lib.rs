@@ -1,9 +1,10 @@
+use std::io::Write;
 use crate::config::*;
-
 use indexmap::IndexMap;
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
+use env_logger::fmt::style::{AnsiColor, Color, Style};
 use tauri::{Emitter, Manager};
 
 pub mod config;
@@ -20,6 +21,39 @@ pub use services::sniffer::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    env_logger::builder()
+        .format(|buf, record| {
+            let target = record.target();
+            let short_target = target
+                .strip_prefix("resonance_stream_lib::")
+                .unwrap_or(target);
+
+            // 1. Get the default ANSI style for the log level (Info=Green, Warn=Yellow, etc.)
+            let level_style = buf.default_level_style(record.level());
+
+            // 2. Create a custom style for the target name using the new API
+            let target_style = Style::new()
+                .fg_color(Some(AnsiColor::Cyan.into())) // Set text to Cyan
+                .dimmed();                              // Make it slightly darker
+
+            // 3. Apply the styles using the 0.11 `{style}text{style:#}` pattern
+            writeln!(
+                buf,
+                "[{timestamp} {level_style}{level}{level_style:#} {target_style}{target}{target_style:#}] {message}",
+                timestamp = buf.timestamp(),
+                level_style = level_style,   // Turns level color ON
+                level = record.level(),
+                // {level_style:#} magically turns the color OFF
+                target_style = target_style, // Turns target color ON
+                target = short_target,
+                // {target_style:#} turns target color OFF
+                message = record.args()
+            )
+        })
+        .filter_level(log::LevelFilter::Warn) // Keep other crates quiet
+        .filter_module("resonance_stream_lib", log::LevelFilter::Trace) // Show your debugs
+        .init();
+
     tauri::Builder::default()
         .setup(|app| {
             let handle = app.handle();

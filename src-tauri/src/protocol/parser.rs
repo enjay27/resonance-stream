@@ -31,9 +31,8 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
 
             if let Some(sub_data) = data.get(i..block_end) {
                 match field_num {
-                    2 | 3 | 4 => {
+                    2 | 4 => {
                         payload.chat_blocks.push((field_num, sub_data.to_vec()));
-                        // 1. If it has a chat block, it is ALWAYS valid!
                         is_valid_chat_packet = true;
                     },
                     18 => {
@@ -81,8 +80,8 @@ pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
         let mut chat = ChatMessage { channel: raw.channel.clone(), ..Default::default() };
 
         match field_num {
-            2 | 3 => {
-                parse_user_container(&block, &mut chat); // Strict parsing
+            2 => {
+                parse_user_container(&block, &mut chat);
             }
             4 => {
                 if let Some(msg) = find_string_by_tag(&block, 0x1A) {

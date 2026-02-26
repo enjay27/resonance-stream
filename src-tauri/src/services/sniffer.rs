@@ -1,5 +1,5 @@
 use crate::packet_buffer::PacketBuffer;
-use crate::{inject_system_message, store_and_emit};
+use crate::{get_model_path, inject_system_message, store_and_emit};
 use lazy_static::lazy_static;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -156,12 +156,12 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     let config = crate::config::load_config(app.clone()); //
     let my_generation = SNIFFER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
 
-    if config.is_debug {
+    if config.log_level.to_lowercase() == "debug" || config.log_level.to_lowercase() == "info" {
         use local_ip_address::list_afinet_netifas;
 
         if let Ok(network_interfaces) = list_afinet_netifas() {
             for (name, ip) in network_interfaces {
-                inject_system_message(&app, SystemLogLevel::Info, "Sniffer", format!("Active Interface: {} ({:?})", name, ip));
+                inject_system_message(&app, SystemLogLevel::Debug, "Sniffer", format!("Active Interface: {} ({:?})", name, ip));
             }
         }
     }
@@ -170,9 +170,7 @@ fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
     feed_watchdog();
 
     // 1. Resolve the path to your GGUF model (Adjust this to match where your downloader saves it!)
-    let mut model_path = app.path().app_data_dir().expect("Failed to get app data dir");
-    model_path.push("models");
-    model_path.push("model_q6_k.gguf"); // <-- Change to your actual filename
+    let model_path = get_model_path(&app);
 
     // 2. Spawn the background GGUF thread and get the transmitter queue
     let translator_tx = crate::services::translator::start_translator_worker(app.clone(), model_path);

@@ -4,6 +4,7 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use chrono::{Local, TimeZone};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::ShellExt;
@@ -45,11 +46,7 @@ pub async fn check_model_status(app: tauri::AppHandle) -> Result<ModelStatus, St
 
 #[tauri::command]
 pub async fn download_model(app: AppHandle) -> Result<(), String> {
-    let model_dir = app.path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("models")
-        .join(MODEL_FOLDER);
+    let model_dir = get_model_dir(&app)?;
 
     fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
 
@@ -92,15 +89,21 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub fn get_model_path(app: &tauri::AppHandle) -> String {
+fn get_model_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("models")
+        .join(MODEL_FOLDER))
+}
+
+pub fn get_model_path(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
         .expect("Failed to resolve AppData directory")
         .join("models")
         .join(MODEL_FOLDER)
         .join(MODEL_FILENAME)
-        .to_string_lossy()
-        .into_owned()
 }
 
 #[tauri::command]

@@ -4,7 +4,7 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -16,6 +16,7 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use crate::protocol::types::{ChatMessage, SystemLogLevel};
 use crate::{inject_system_message, store_and_emit};
 use crate::io::save_to_data_factory;
+use crate::services::processor::{load_dictionary, postprocess_text, preprocess_text};
 
 pub struct TranslationJob {
     pub chat: ChatMessage,
@@ -104,6 +105,10 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(1024));
         let mut ctx = model.new_context(&backend, ctx_params).expect("Failed to create context");
 
+        // Load Dictionary once into memory
+        let dict_path = app.path().app_data_dir().unwrap().join("custom_dict.json");
+        let custom_dict = load_dictionary(&dict_path); // You'll need a quick helper function to read your JSON file into a HashMap<String, String>
+
         inject_system_message(&app, SystemLogLevel::Success, "Translator", "Native Model loaded! Ready for translation.");
 
         // 0. The Background Loop
@@ -128,14 +133,20 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("Translating batch of {} messages sequentially...", batch.len()));
 
             for mut chat in batch {
-                // A. Translate one-by-one using the pure, high-focus function
-                let translated_str = translate_text(&model, &mut ctx, &chat.message);
-                chat.translated = Some(translated_str.clone());
+                // 1. PREPROCESS (Mask the terms)
+                // Pass the romaji nickname if you have it available in your chat struct
+                let shield = preprocess_text(&chat.message, &custom_dict, chat.nickname_romaji.as_deref(), Some(&chat.nickname));
 
-                // B. Save to Data Factory
-                let _ = save_to_data_factory(&app, chat.pid, &chat.message, &translated_str);
+                // 2. TRANSLATE (Give the LLM the masked text)
+                let raw_translation = translate_text(&model, &mut ctx, &shield.masked_text);
 
-                // C. Emit to Frontend instantly as each finish!
+                // 3. POSTPROCESS (Restore terms & fix Josa)
+                let final_str = postprocess_text(&raw_translation, &shield);
+
+                chat.translated = Some(final_str.clone());
+
+                // Save to Data Factory & Emit
+                let _ = save_to_data_factory(&app, chat.pid, &chat.message, &final_str);
                 store_and_emit(&app, chat);
             }
         }
@@ -161,6 +172,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::time::Instant;
+    use crate::{MODEL_FILENAME, MODEL_FOLDER};
 
     #[test]
     fn evaluate_translation() {
@@ -169,7 +181,8 @@ mod tests {
         let mut model_path = PathBuf::from(appdata);
         model_path.push("com.enjay.bpsr.resonance-stream");
         model_path.push("models");
-        model_path.push("model_q6_k.gguf");
+        model_path.push(MODEL_FOLDER);
+        model_path.push(MODEL_FILENAME);
 
         println!("Looking for model at: {:?}", model_path);
 

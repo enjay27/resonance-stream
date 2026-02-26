@@ -8,6 +8,12 @@ use chrono::{Local, TimeZone};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::ShellExt;
 
+// --- 1. Define Constants for your GGUF Model ---
+pub const MODEL_FOLDER: &str = "Qwen3-Blue-Protocol-Translator-JA-KO";
+pub const MODEL_FILENAME: &str = "qwen3-1.7b-blueprotocol-ja2ko-q4_k_m.gguf";
+// Hugging Face direct download link (using /resolve/main/)
+pub const MODEL_URL: &str = "https://huggingface.co/enjay27/Qwen3-Blue-Protocol-Translator-JA-KO/resolve/main/qwen3-1.7b-blueprotocol-ja2ko-q4_k_m.gguf";
+
 #[derive(Serialize, Clone)]
 pub struct ModelStatus {
     pub exists: bool,
@@ -21,117 +27,59 @@ struct ProgressPayload {
     pub total_percent: u8,
 }
 
-#[derive(Deserialize, Serialize, Clone)]
-struct ModelFile {
-    name: String,
-    url: String,
-}
-
-#[derive(Deserialize, Clone)]
-struct ModelManifest {
-    model_id: String,
-    files: Vec<ModelFile>,
-}
-
-fn load_manifest(app: &tauri::AppHandle) -> Result<ModelManifest, String> {
-    // currently translation model is in progress
-    Ok(ModelManifest {
-        model_id: "".to_string(),
-        files: vec![],
-    })
-    // 1. DEVELOPMENT: Embed the file directly into the binary during 'cargo tauri dev'
-    // #[cfg(debug_assertions)]
-    // {
-    //     // This path is relative to 'src-tauri/src/model_manager.rs'
-    //     let json_data = include_str!("../../resources/models.json");
-    //     serde_json::from_str(json_data).map_err(|e| format!("Dev JSON parse error: {}", e))
-    // }
-    // 
-    // // 2. PRODUCTION: Use the dynamic PathResolver for the bundled resource
-    // #[cfg(not(debug_assertions))]
-    // {
-    //     use tauri::path::BaseDirectory;
-    // 
-    //     // Fix: Match the structure in tauri.conf.json ("resources/models.json")
-    //     let resource_path = app.path()
-    //         .resolve("resources/models.json", BaseDirectory::Resource)
-    //         .map_err(|e| format!("Resource resolution failed: {}", e))?;
-    // 
-    //     if !resource_path.exists() {
-    //         // Fallback: Check the same directory as the EXE (useful for local builds)
-    //         let exe_path = std::env::current_exe().unwrap().parent().unwrap().join("models.json");
-    //         if exe_path.exists() {
-    //             let json_data = std::fs::read_to_string(&exe_path).map_err(|e| e.to_string())?;
-    //             return serde_json::from_str(&json_data).map_err(|e| e.to_string());
-    //         }
-    //         return Err(format!("models.json not found. Checked: {:?}", resource_path));
-    //     }
-    // 
-    //     let json_data = std::fs::read_to_string(&resource_path)
-    //         .map_err(|e| format!("Failed to read models.json: {}", e))?;
-    // 
-    //     serde_json::from_str(&json_data).map_err(|e| format!("Prod JSON parse error: {}", e))
-    // }
-}
-
 #[tauri::command]
 pub async fn check_model_status(app: tauri::AppHandle) -> Result<ModelStatus, String> {
-    // 1. Load the manifest using the same hybrid logic as load_manifest
-    let manifest = load_manifest(&app)?;
-
-    // 2. Resolve the model directory based on the manifest's model_id
-    let model_dir = app.path()
+    // Check exactly one path for the .gguf file
+    let model_path = app.path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
-        .join(format!("models/{}", manifest.model_id));
-
-    // 3. Verify if all required files exist in that directory
-    let all_exist = manifest.files.iter().all(|f| model_dir.join(&f.name).exists());
+        .join("models")
+        .join(MODEL_FOLDER)
+        .join(MODEL_FILENAME);
 
     Ok(ModelStatus {
-        exists: all_exist,
-        path: model_dir.to_string_lossy().into_owned(),
+        exists: model_path.exists(),
+        path: model_path.to_string_lossy().into_owned(),
     })
 }
 
 #[tauri::command]
 pub async fn download_model(app: AppHandle) -> Result<(), String> {
-    let manifest = load_manifest(&app)?;
     let model_dir = app.path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
-        .join(format!("models/{}", manifest.model_id));
+        .join("models")
+        .join(MODEL_FOLDER);
 
     fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
 
+    let dest_path = model_dir.join(MODEL_FILENAME);
+
+    // Skip if already downloaded
+    if dest_path.exists() {
+        return Ok(());
+    }
+
     let client = reqwest::Client::new();
+    let res = client.get(MODEL_URL).send().await.map_err(|e| e.to_string())?;
+    let total_size = res.content_length().unwrap_or(0);
 
-    for (idx, file_info) in manifest.files.iter().enumerate() {
-        let dest_path = model_dir.join(&file_info.name);
-        if dest_path.exists() {
-            continue;
-        }
+    let mut file = fs::File::create(&dest_path).map_err(|e| e.to_string())?;
+    let mut downloaded: u64 = 0;
+    let mut stream = res.bytes_stream();
 
-        let res = client.get(&file_info.url).send().await.map_err(|e| e.to_string())?;
-        let total_size = res.content_length().unwrap_or(0);
+    while let Some(item) = stream.next().await {
+        let chunk = item.map_err(|e| e.to_string())?;
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
+        downloaded += chunk.len() as u64;
 
-        let mut file = fs::File::create(&dest_path).map_err(|e| e.to_string())?;
-        let mut downloaded: u64 = 0;
-        let mut stream = res.bytes_stream();
-
-        while let Some(item) = stream.next().await {
-            let chunk = item.map_err(|e| e.to_string())?;
-            file.write_all(&chunk).map_err(|e| e.to_string())?;
-            downloaded += chunk.len() as u64;
-
-            if file_info.name == "model.bin" && total_size > 0 {
-                let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
-                let _ = app.emit("download-progress", ProgressPayload {
-                    current_file: file_info.name.clone(),
-                    percent, // Local file percent
-                    total_percent: percent, // We use this as the primary UI driver
-                });
-            }
+        if total_size > 0 {
+            let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
+            let _ = app.emit("download-progress", ProgressPayload {
+                current_file: MODEL_FILENAME.to_string(),
+                percent,
+                total_percent: percent,
+            });
         }
     }
 
@@ -145,13 +93,12 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
 }
 
 pub fn get_model_path(app: &tauri::AppHandle) -> String {
-    // We can unwrap safely here if we know load_manifest is solid
-    let manifest = load_manifest(app).expect("Failed to load manifest for path resolution");
-
     app.path()
         .app_data_dir()
         .expect("Failed to resolve AppData directory")
-        .join(format!("models/{}", manifest.model_id))
+        .join("models")
+        .join(MODEL_FOLDER)
+        .join(MODEL_FILENAME)
         .to_string_lossy()
         .into_owned()
 }

@@ -4,6 +4,7 @@ use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
 use crate::tauri_bridge::invoke;
+use crate::types::ModelStatus;
 
 #[derive(serde::Serialize)]
 struct OpenBrowserArgs {
@@ -64,16 +65,46 @@ pub fn Settings() -> impl IntoView {
                             <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"AI Translation Features"</h3>
 
                             <div class="form-control">
-                                <label class="label cursor-pointer bg-base-100 rounded-lg px-4 py-3 border border-base-content/5 hover:border-success/30 transition-all"
-                                     on:click=move |_| {
-                                         let current = signals.use_translation.get();
-                                         signals.set_use_translation.set(!current);
-                                         actions.save_config.dispatch(());
-                                     }>
+                                <label class="label cursor-pointer bg-base-100 rounded-lg px-4 py-3 border border-base-content/5 hover:border-success/30 transition-all">
                                     <span class="label-text font-bold text-base-content">"실시간 번역 기능 사용"</span>
                                     <input type="checkbox" class="toggle toggle-success toggle-sm"
                                         prop:checked=move || signals.use_translation.get()
-                                        on:change=move |_| {} // Handled by label click
+                                        on:click=move |ev| {
+                                            // Prevent the browser from automatically flipping the switch
+                                            ev.prevent_default();
+
+                                            let current = signals.use_translation.get_untracked();
+
+                                            if !current {
+                                                // User is trying to turn it ON
+                                                spawn_local(async move {
+                                                    if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
+                                                        if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
+                                                            if status.exists {
+                                                                // Model exists -> Turn it on normally
+                                                                signals.set_use_translation.set(true);
+                                                                actions.save_config.dispatch(());
+                                                            } else {
+                                                                // Model missing -> Prompt user
+                                                                if let Some(w) = web_sys::window() {
+                                                                    if w.confirm_with_message("AI 모델 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
+                                                                        // Redirect to Setup Wizard
+                                                                        signals.set_use_translation.set(true);
+                                                                        signals.set_wizard_step.set(2);
+                                                                        signals.set_show_settings.set(false); // Close modal
+                                                                        signals.set_init_done.set(false);     // Trigger Wizard UI
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                });
+                                            } else {
+                                                // User is trying to turn it OFF
+                                                signals.set_use_translation.set(false);
+                                                actions.save_config.dispatch(());
+                                            }
+                                        }
                                     />
                                 </label>
                             </div>

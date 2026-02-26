@@ -49,7 +49,7 @@ pub struct AppConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ModelStatus { 
+pub struct FolderStatus {
     pub exists: bool, 
     pub path: String 
 }

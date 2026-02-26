@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
 use crate::tauri_bridge::invoke;
-use crate::types::ModelStatus;
+use crate::types::FolderStatus;
 
 #[derive(serde::Serialize)]
 struct OpenBrowserArgs {
@@ -79,7 +79,7 @@ pub fn Settings() -> impl IntoView {
                                                 // User is trying to turn it ON
                                                 spawn_local(async move {
                                                     if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
-                                                        if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
+                                                        if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
                                                             if status.exists {
                                                                 // Model exists -> Turn it on normally
                                                                 signals.set_use_translation.set(true);
@@ -88,6 +88,26 @@ pub fn Settings() -> impl IntoView {
                                                                 // Model missing -> Prompt user
                                                                 if let Some(w) = web_sys::window() {
                                                                     if w.confirm_with_message("AI 모델 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
+                                                                        // Redirect to Setup Wizard
+                                                                        signals.set_use_translation.set(true);
+                                                                        signals.set_wizard_step.set(2);
+                                                                        signals.set_show_settings.set(false); // Close modal
+                                                                        signals.set_init_done.set(false);     // Trigger Wizard UI
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    if let Ok(st) = invoke("check_ai_server_status", JsValue::NULL).await {
+                                                        if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
+                                                            if status.exists {
+                                                                // Model exists -> Turn it on normally
+                                                                signals.set_use_translation.set(true);
+                                                                actions.save_config.dispatch(());
+                                                            } else {
+                                                                // Model missing -> Prompt user
+                                                                if let Some(w) = web_sys::window() {
+                                                                    if w.confirm_with_message("AI 실행 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
                                                                         // Redirect to Setup Wizard
                                                                         signals.set_use_translation.set(true);
                                                                         signals.set_wizard_step.set(2);

@@ -14,7 +14,7 @@ use crate::hooks::use_events::setup_event_listeners;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::{invoke, listen};
 use crate::types::{
-    ChatMessage, SystemMessage, AppConfig, ModelStatus, ProgressPayload, TauriEvent
+    ChatMessage, SystemMessage, AppConfig, FolderStatus, ProgressPayload, TauriEvent
 };
 use crate::utils::{add_system_log, copy_to_clipboard, format_time, is_japanese};
 
@@ -180,19 +180,6 @@ pub fn App() -> impl IntoView {
             setup_event_listeners(signals).await;
             set_is_sniffer_active.set(true);
             let _ = invoke("start_sniffer_command", JsValue::NULL).await;
-
-            if use_translation.get_untracked() {
-                add_system_log("info", "UI", "Starting AI translation engine...");
-                // Check model one last time before launching AI
-                if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
-                    if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
-                        if status.exists {
-                            let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
-                            set_status_text.set("AI Engine Starting...".to_string());
-                        }
-                    }
-                }
-            }
         });
     };
 
@@ -309,7 +296,20 @@ pub fn App() -> impl IntoView {
 
                             if config.use_translation {
                                 if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
-                                    if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
+                                    if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
+                                        if status.exists {
+                                            add_system_log("info", "UI", "Starting AI translation engine...");
+                                            set_model_ready.set(true);
+                                            set_status_text.set("AI Engine Starting...".to_string());
+                                        } else {
+                                            add_system_log("warn", "Sidecar", "Model missing. AI is disabled.");
+                                            set_model_ready.set(false);
+                                        }
+                                    }
+                                }
+
+                                if let Ok(st) = invoke("check_ai_server_status", JsValue::NULL).await {
+                                    if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
                                         if status.exists {
                                             add_system_log("info", "UI", "Starting AI translation engine...");
                                             let _ = invoke("start_translator_sidecar", JsValue::NULL).await;

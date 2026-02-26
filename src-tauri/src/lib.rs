@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use env_logger::fmt::style::{AnsiColor, Color, Style};
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::ShellExt;
 
 pub mod config;
@@ -81,6 +81,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             check_model_status,
             download_model,
+            check_ai_server_status,
+            download_ai_server,
             start_sniffer_command,
             get_chat_history,
             get_system_history,

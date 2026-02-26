@@ -40,7 +40,8 @@ pub fn App() -> impl IntoView {
     let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
 
     let (is_system_at_bottom, set_system_at_bottom) = signal(true);
-    let (show_system_tab, set_show_system_tab) = signal(false);
+    let (debug_mode, set_debug_mode) = signal(false);
+    let (log_level, set_log_level) = signal("info".to_string());
     let (system_level_filter, set_system_level_filter) = signal(None::<String>);
     let (system_source_filter, set_system_source_filter) = signal(None::<String>);
 
@@ -51,7 +52,6 @@ pub fn App() -> impl IntoView {
     let (custom_filters, set_custom_filters) = signal(vec!["WORLD".to_string(), "GUILD".to_string(), "PARTY".to_string(), "LOCAL".to_string()]);
     let (theme, set_theme) = signal("dark".to_string());
     let (opacity, set_opacity) = signal(0.85f32);
-    let (is_debug, set_is_debug) = signal(false);
     let (tier, set_tier) = signal("middle".to_string());
     let (restart_required, set_restart_required) = signal(false);
     let (dict_update_available, set_dict_update_available) = signal(false);
@@ -78,7 +78,8 @@ pub fn App() -> impl IntoView {
         chat_log, set_chat_log,
         system_log, set_system_log,
         is_system_at_bottom, set_system_at_bottom,
-        show_system_tab, set_show_system_tab,
+        debug_mode, set_debug_mode,
+        log_level, set_log_level,
         system_level_filter, set_system_level_filter,
         system_source_filter, set_system_source_filter,
         compact_mode, set_compact_mode,
@@ -88,7 +89,6 @@ pub fn App() -> impl IntoView {
         custom_filters, set_custom_filters,
         theme, set_theme,
         opacity, set_opacity,
-        is_debug, set_is_debug,
         tier, set_tier,
         restart_required, set_restart_required,
         dict_update_available, set_dict_update_available,
@@ -145,8 +145,8 @@ pub fn App() -> impl IntoView {
             custom_tab_filters: custom_filters.get_untracked(),
             theme: theme.get_untracked(),
             overlay_opacity: opacity.get_untracked(),
-            show_system_tab: show_system_tab.get_untracked(),
-            is_debug: is_debug.get_untracked(),
+            debug_mode: debug_mode.get_untracked(),
+            log_level: log_level.get_untracked(),
             tier: tier.get_untracked(),
             archive_chat: archive_chat.get_untracked(),
             hide_original_in_compact: hide_original_in_compact.get_untracked(),
@@ -270,8 +270,8 @@ pub fn App() -> impl IntoView {
                         set_custom_filters.set(config.custom_tab_filters);
                         set_theme.set(config.theme);
                         set_opacity.set(config.overlay_opacity);
-                        set_show_system_tab.set(config.show_system_tab);
-                        set_is_debug.set(config.is_debug);
+                        set_debug_mode.set(config.debug_mode);
+                        set_log_level.set(config.log_level);
                         set_tier.set(config.tier);
                         set_archive_chat.set(config.archive_chat);
                         set_hide_original_in_compact.set(config.hide_original_in_compact);

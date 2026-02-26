@@ -70,11 +70,34 @@ pub fn ChatContainer() -> impl IntoView {
         let level_f = signals.system_level_filter.get();
         let source_f = signals.system_source_filter.get();
         let search = signals.search_term.get().to_lowercase();
-        let debug_enabled = signals.is_debug.get();
+        let current_log_level = signals.log_level.get();
 
         logs.into_iter().filter(|sig| {
             let m = sig.get();
-            if !debug_enabled && m.level == "debug" { return false; }
+
+            // 1. Assign numeric values to create a hierarchy
+            let msg_val = match m.level.as_str() {
+                "trace" => 0,
+                "debug" => 1,
+                "info" | "success" => 2,
+                "warn" => 3,
+                "error" => 4,
+                _ => 2, // default unknown to info
+            };
+
+            let filter_val = match current_log_level.as_str() {
+                "trace" => 0,
+                "debug" => 1,
+                "info" => 2,
+                "warn" => 3,
+                "error" => 4,
+                _ => 2,
+            };
+
+            // 2. Hide messages that are beneath the chosen log level
+            if msg_val < filter_val { return false; }
+
+            // 3. Apply standard UI filters
             let matches_level = level_f.as_ref().map_or(true, |f| &m.level == f);
             let matches_source = source_f.as_ref().map_or(true, |f| &m.source == f);
             matches_level && matches_source && (search.is_empty() || m.message.to_lowercase().contains(&search))

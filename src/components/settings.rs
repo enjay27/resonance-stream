@@ -351,56 +351,63 @@ pub fn Settings() -> impl IntoView {
 
                                 <div class="divider m-0 opacity-10"></div>
 
-                                // Show System Tab
                                 <div class="flex items-center justify-between">
                                     <div class="flex flex-col">
-                                        <span class="text-xs font-bold text-base-content/80">"시스템 탭 표시 (System Tab)"</span>
-                                        <span class="text-[9px] opacity-60">"시스템 탭 숨김 해제"</span>
+                                        <span class="text-xs font-bold text-warning">"디버그 모드 (Debug Mode)"</span>
+                                        <span class="text-[9px] opacity-60">"시스템 탭 및 개발자 도구 활성화"</span>
                                     </div>
                                     <input type="checkbox" class="toggle toggle-warning toggle-sm"
-                                        prop:checked=move || signals.show_system_tab.get()
+                                        prop:checked=move || signals.debug_mode.get()
                                         on:change=move |ev| {
-                                            signals.set_show_system_tab.set(event_target_checked(&ev));
+                                            signals.set_debug_mode.set(event_target_checked(&ev));
                                             actions.save_config.dispatch(());
                                         }
                                     />
                                 </div>
 
-                                // [RESTORED] Enable Debug Logs
-                                <div class="flex items-center justify-between">
-                                    <div class="flex flex-col">
-                                        <span class="text-xs font-bold text-base-content/80">"디버그 로그 (Debug)"</span>
-                                        <span class="text-[9px] opacity-60">"시스템 탭에 상세 로그 표시"</span>
+                                // --- REVEALED ONLY IN DEBUG MODE ---
+                                <Show when=move || signals.debug_mode.get()>
+                                    <div class="p-3 bg-warning/5 border border-warning/20 rounded-lg space-y-3 mt-2 animate-in fade-in slide-in-from-top-2 duration-200">
+
+                                        // 1. Log Level Select
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex flex-col">
+                                                <span class="text-[11px] font-bold text-base-content/80">"로그 레벨 (Log Level)"</span>
+                                            </div>
+                                            <select class="select select-bordered select-xs w-24 text-xs font-bold bg-base-100"
+                                                prop:value=move || signals.log_level.get()
+                                                on:change=move |ev| {
+                                                    signals.set_log_level.set(event_target_value(&ev));
+                                                    actions.save_config.dispatch(());
+                                                }>
+                                                <option value="trace">"TRACE"</option>
+                                                <option value="debug">"DEBUG"</option>
+                                                <option value="info">"INFO"</option>
+                                                <option value="warn">"WARN"</option>
+                                                <option value="error">"ERROR"</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="divider m-0 opacity-10"></div>
+
+                                        // 2. Data Factory (Save Chatting Log)
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex flex-col">
+                                                <span class="text-[11px] font-black text-warning uppercase">"Data Factory"</span>
+                                                <span class="text-[9px] text-base-content/60 italic">"채팅 로그 원본 저장 (dataset_raw.jsonl)"</span>
+                                            </div>
+                                            <input type="checkbox" class="checkbox checkbox-warning checkbox-xs"
+                                                prop:checked=move || signals.archive_chat.get()
+                                                on:change=move |ev| {
+                                                    signals.set_archive_chat.set(event_target_checked(&ev));
+                                                    actions.save_config.dispatch(());
+                                                }
+                                            />
+                                        </div>
                                     </div>
-                                    <input type="checkbox" class="toggle toggle-warning toggle-sm"
-                                        prop:checked=move || signals.is_debug.get()
-                                        on:change=move |ev| {
-                                            signals.set_is_debug.set(event_target_checked(&ev));
-                                            actions.save_config.dispatch(());
-                                        }
-                                    />
-                                </div>
+                                </Show>
                             </div>
                         </section>
-
-                        // [RESTORED] Data Factory (Fine-Tuning)
-                        <Show when=move || signals.is_debug.get()>
-                            <section class="p-3 bg-warning/5 border border-warning/20 rounded-lg space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex flex-col">
-                                        <span class="text-[11px] font-black text-warning uppercase">"Data Factory"</span>
-                                        <span class="text-[9px] text-base-content/60 italic">"채팅 로그 및 번역본 저장 (dataset_raw.jsonl)"</span>
-                                    </div>
-                                    <input type="checkbox" class="checkbox checkbox-warning checkbox-xs"
-                                        prop:checked=move || signals.archive_chat.get()
-                                        on:change=move |ev| {
-                                            signals.set_archive_chat.set(event_target_checked(&ev));
-                                            actions.save_config.dispatch(());
-                                        }
-                                    />
-                                </div>
-                            </section>
-                        </Show>
                     </div>
 
                     // --- FOOTER: GitHub Link ---

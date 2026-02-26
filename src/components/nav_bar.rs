@@ -71,7 +71,7 @@ pub fn NavBar() -> impl IntoView {
                         ("전체", "♾️"), ("커스텀", "⭐"), ("월드", "🌐"),
                         ("길드", "🛡️"), ("파티", "⚔️"), ("로컬", "📍"),
                     ];
-                    if signals.show_system_tab.get() { tabs.push(("시스템", "⚙️")); }
+                    if signals.debug_mode.get() { tabs.push(("시스템", "⚙️")); }
 
                     tabs.into_iter().map(|(full, icon)| {
                         let t_full = full.to_string();

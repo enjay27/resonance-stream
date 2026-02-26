@@ -168,9 +168,11 @@ pub fn ChatContainer() -> impl IntoView {
                                         <span class=move || format!("cursor-pointer hover:brightness-125 font-black mr-1 transition-all {}",
                                                 match level_badge.as_str() {
                                                     "error" => "text-error",
-                                                    "warning" => "text-warning",
+                                                    "warning" | "warn" => "text-warning",
                                                     "success" => "text-success",
-                                                    _ => "text-info"
+                                                    "trace" => "text-base-content/40", // Make trace very faded
+                                                    "debug" => "text-base-content/70", // Make debug slightly faded
+                                                    _ => "text-info" // Default info color
                                                 }
                                             )
                                             on:click=move |_| signals.set_system_level_filter.set(Some(level_filter.clone()))
@@ -186,11 +188,12 @@ pub fn ChatContainer() -> impl IntoView {
                                         </span>
 
                                         // --- MESSAGE TEXT ---
-                                        <span class=move || match level_match.clone().as_str() {
+                                        <span class=move || match level_match.to_lowercase().as_str() {
                                             "error" => "text-error",
-                                            "warning" => "text-warning",
+                                            "warning" | "warn" => "text-warning",
                                             "success" => "text-success",
-                                            _ => "text-base-content/80"
+                                            "trace" => "text-base-content/50", // Dimmer text for trace
+                                            _ => "text-base-content/90"
                                         }>
                                             {move || sig.get().message.clone()}
                                         </span>

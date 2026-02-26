@@ -94,8 +94,23 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
     thread::spawn(move || {
         inject_system_message(&app, SystemLogLevel::Info, "Translator", "Initializing GGUF Backend...");
 
+        // 1. Load the user's configuration
+        let config = crate::config::load_config(app.clone());
+
+        // 2. Apply COMPUTE MODE (CPU vs CUDA)
+        let mut model_params = LlamaModelParams::default();
+        if config.compute_mode.to_lowercase() == "cuda" {
+            // Offload all layers to the GPU.
+            // (Setting a high number like 100 ensures all layers of a 1.7B model fit)
+            model_params = model_params.with_n_gpu_layers(100);
+            inject_system_message(&app, SystemLogLevel::Info, "Translator", "Compute Mode: CUDA (GPU Offloading Enabled)");
+        } else {
+            // Strictly use CPU
+            model_params = model_params.with_n_gpu_layers(0);
+            inject_system_message(&app, SystemLogLevel::Info, "Translator", "Compute Mode: CPU (System RAM)");
+        }
+
         let backend = LlamaBackend::init().expect("Failed to initialize Llama backend");
-        let model_params = LlamaModelParams::default();
 
         let model = match LlamaModel::load_from_file(&backend, &model_path, &model_params) {
             Ok(m) => m,
@@ -105,12 +120,25 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             }
         };
 
-        let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(1024));
+        // 3. Apply TIER (Performance & Context Window)
+        let n_ctx_size = match config.tier.to_lowercase().as_str() {
+            "low" => 512,      // Very fast, uses minimal VRAM, but might clip long instructions
+            "middle" => 1024,  // Sweet spot for 1-2 sentence game chat translation
+            "high" => 2048,    // Good for heavy context / large custom dictionaries
+            "extreme" => 4096, // Max quality, heavy VRAM usage
+            _ => 1024,
+        };
+
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(NonZeroU32::new(n_ctx_size));
+
+        inject_system_message(&app, SystemLogLevel::Info, "Translator", format!("Performance Tier: {} (Context: {})", config.tier.to_uppercase(), n_ctx_size));
+
         let mut ctx = model.new_context(&backend, ctx_params).expect("Failed to create context");
 
         // Load Dictionary once into memory
         let dict_path = app.path().app_data_dir().unwrap().join("custom_dict.json");
-        let custom_dict = load_dictionary(&dict_path); // You'll need a quick helper function to read your JSON file into a HashMap<String, String>
+        let custom_dict = load_dictionary(&dict_path);
 
         inject_system_message(&app, SystemLogLevel::Success, "Translator", "Native Model loaded! Ready for translation.");
 

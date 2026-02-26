@@ -31,8 +31,11 @@ struct TranslationUpdate {
 pub fn translate_text(model: &LlamaModel, ctx: &mut LlamaContext, jp_text: &str) -> String {
     let prompt = format!(
         "<|im_start|>system\n\
-        다음 Blue Protocol (스타레조) 채팅 로그를 일본어에서 중립적인 한국어로 번역하세요. \
-        명사를 임의로 추가하지 말고, 게임 용어(T, H, D, 狂, 響, NM, EH, M16)는 유지하십시오.<|im_end|>\n\
+        Blue Protocol Star Resonance 일본어 채팅 로그를 자연스러운 한국어 구어체로 번역하세요.
+        직역을 피하고, 원본에 없는 주어/목적어를 임의로 추가하지 마십시오.
+        클래스 및 파티 모집 약어(T, H, D, 狂, 響, NM, EH, M16 등)는 일본 서버 컨텍스트에 맞게 그대로 유지하십시오.
+        특히 게임 고유 용어 및 은어(예: ファスト -> 속공, 器用 -> 숙련, 完凸 -> 풀돌, 消化 -> 숙제)는
+        한국 유저들이 실제 사용하는 로컬라이징 용어로 엄격하게 번역하십시오 <|im_end|>\n\
         <|im_start|>user\n\
         {}<|im_end|>\n\
         <|im_start|>assistant\n",

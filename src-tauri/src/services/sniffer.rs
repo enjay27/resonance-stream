@@ -22,6 +22,7 @@ use socket2::{Domain, Protocol, Socket, Type};
 use std::net::Ipv4Addr;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
+use crate::services::processor::convert_to_romaji;
 // --- DATA STRUCTURES ---
 // 1. Standard Chat: Focuses on player communication
 
@@ -387,22 +388,40 @@ pub fn parse_and_emit_5003(data: &[u8], app: &AppHandle, translator_tx: &Sender<
         None => return,
     };
 
-    inject_system_message(&app, SystemLogLevel::Debug, "Sniffer", format!("[5003] stage 1 completed {:?}", raw_payload));
+    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 1 completed {:?}", raw_payload));
 
     let events = crate::protocol::parser::stage2_process(raw_payload);
 
-    inject_system_message(&app, SystemLogLevel::Debug, "Sniffer", format!("[5003] stage 2 completed {:?}", events));
+    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 2 completed {:?}", events));
 
     for event in events {
         if should_emit(&event) {
             match event {
                 Port5003Event::Chat(mut c) => {
-                    // 1. Instantly store and emit the original Japanese text to the UI
-                    store_and_emit(app, c.clone()); // Emits "packet-event"
+                    // --- 1. NICKNAME CACHE & ROMAJI SWAP ---
+                    if contains_japanese(&c.nickname) {
+                        // Access the AppState from Tauri
+                        let state = app.state::<AppState>();
+                        let mut cache = state.nickname_cache.lock().unwrap();
+                        inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] check nickname cache included {:?}", c.nickname));
 
-                    // 2. Check if it needs translation
+                        // Check cache. If miss, ask the processor to convert it!
+                        let romaji = cache.entry(c.nickname.clone()).or_insert_with(|| {
+                            inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] nickname not included in cache. convert from Japanese {:?}", c.nickname));
+                            convert_to_romaji(&c.nickname)
+                        }).clone();
+
+                        inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] nickname romaji {:?}", romaji));
+
+                        // Attach it to the struct so the UI and Preprocessor can see it
+                        c.nickname_romaji = Some(romaji);
+                    }
+
+                    // --- 2. EMIT TO UI ---
+                    store_and_emit(app, c.clone());
+
+                    // --- 3. TRANSLATE ---
                     if crate::config::load_config(app.clone()).use_translation && contains_japanese(&c.message) {
-                        // 3. Send to the background GGUF thread!
                         let _ = translator_tx.send(crate::services::translator::TranslationJob { chat: c });
                     }
                 }

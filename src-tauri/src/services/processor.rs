@@ -15,7 +15,8 @@ lazy_static! {
     static ref NUM_PATTERN_2: Regex = Regex::new(r"(\d+)人").unwrap();
     static ref NUM_PATTERN_3: Regex = Regex::new(r"(\d+)周").unwrap();
     static ref NUM_PATTERN_4: Regex = Regex::new(r"(\d+)回").unwrap();
-    static ref JOSA_PATTERN: Regex = Regex::new(r"([가-힣a-zA-Z0-9\)])(을|를|이|가|은|는|와|과)(?![가-힣])").unwrap();
+    static ref JOSA_PATTERN: Regex = Regex::new(r"([가-힣a-zA-Z0-9\)])(을|를|이|가|은|는|와|과)([^가-힣]|$)").unwrap();
+    static ref THINK_PATTERN: Regex = Regex::new(r"(?s)<think>.*?</think>\s*").unwrap();
 }
 
 // --- PREPROCESSOR ---
@@ -94,21 +95,22 @@ pub fn preprocess_text(
 
 // --- POSTPROCESSOR ---
 pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
-    let mut final_text = translated.to_string();
+    // Strip out the think tags first!
+    let mut final_text = THINK_PATTERN.replace_all(translated, "").to_string();
 
-    // 1. Restore shielded words
+    // Restore shielded words
     for (placeholder, replacement) in &shield.replacements {
         final_text = final_text.replace(placeholder, replacement);
     }
 
-    // 2. Clean up weird LLM spacing around punctuation
+    // Clean up weird LLM spacing around punctuation
     let space_punct = Regex::new(r"\s+([.!?,~])").unwrap();
     final_text = space_punct.replace_all(&final_text, "$1").to_string();
 
-    // 3. Fix Korean Josa (Particles)
+    // Fix Korean Josa (Particles)
     final_text = fix_korean_josa(&final_text);
 
-    // 4. Collapse extra spaces
+    // Collapse extra spaces
     let extra_spaces = Regex::new(r"\s+").unwrap();
     extra_spaces.replace_all(&final_text, " ").trim().to_string()
 }
@@ -130,6 +132,7 @@ fn fix_korean_josa(text: &str) -> String {
     JOSA_PATTERN.replace_all(text, |caps: &Captures| {
         let word = &caps[1];
         let particle = &caps[2];
+        let trailing = &caps[3]; // Crucial: Capture the space or punctuation!
 
         // Get the last character of the word
         let last_char = word.chars().last().unwrap_or(' ');
@@ -143,7 +146,8 @@ fn fix_korean_josa(text: &str) -> String {
             _ => particle,
         };
 
-        format!("{}{}", word, fixed_particle)
+        // Recombine: Word + Corrected Particle + Trailing character
+        format!("{}{}{}", word, fixed_particle, trailing)
     }).to_string()
 }
 
@@ -192,4 +196,22 @@ pub fn load_dictionary(path: &Path) -> HashMap<String, String> {
     }
 
     custom_dict
+}
+
+pub fn convert_to_romaji(ja_name: &str) -> String {
+    // 1. kakasi를 이용해 한 번에 Romaji로 변환합니다. (예: "azururu")
+    let romaji_str = kakasi::convert(ja_name).romaji;
+
+    // 2. 띄어쓰기가 있다면 단어별로 쪼개서 앞글자만 대문자로 포맷팅합니다.
+    romaji_str
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<String>>()
+        .join(" ")
 }

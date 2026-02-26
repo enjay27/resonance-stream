@@ -1,3 +1,4 @@
+use std::io::{BufRead, BufReader};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use reqwest::blocking::Client;
 use serde_json::json;
@@ -12,6 +13,8 @@ use crate::io::save_to_data_factory;
 use crate::protocol::types::{ChatMessage, SystemLogLevel};
 use crate::services::processor::{load_dictionary, postprocess_text, preprocess_text};
 use crate::{inject_system_message, store_and_emit};
+
+pub const AI_SERVER_URL: &str = "http://127.0.0.1:8080";
 
 pub struct TranslationJob {
     pub chat: ChatMessage,
@@ -43,25 +46,40 @@ pub fn translate_text(client: &Client, jp_text: &str) -> String {
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": jp_text}
         ],
-        "temperature": 0.1,
-        "max_tokens": 256
+        "stream": true, // Enable SSE
+        "temperature": 0.1
     });
 
-    match client.post("http://127.0.0.1:8080/v1/chat/completions")
+    // 1. Send the request and get a streaming response
+    let response = match client.post("http://127.0.0.1:8080/v1/chat/completions")
         .json(&payload)
         .send()
     {
-        Ok(response) => {
-            println!("Response {:?}", response);
-            if let Ok(json) = response.json::<serde_json::Value>() {
-                if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
-                    return content.trim().to_string();
+        Ok(res) => res,
+        Err(_) => return "[AI Server Connection Error]".to_string(),
+    };
+
+    let mut full_translated_text = String::new();
+    let reader = BufReader::new(response);
+
+    // 2. Parse the stream line-by-line
+    for line in reader.lines() {
+        if let Ok(l) = line {
+            if l.starts_with("data: ") {
+                let json_str = &l[6..];
+                if json_str.trim() == "[DONE]" { break; }
+
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    // Extract the "delta" (the new piece of text)
+                    if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
+                        full_translated_text.push_str(content);
+                    }
                 }
             }
-            "[Translation Parse Error]".to_string()
         }
-        Err(_) => "[AI Server Not Responding]".to_string(),
     }
+
+    full_translated_text.trim().to_string()
 }
 
 pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<TranslationJob> {
@@ -115,8 +133,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
         let _server_guard = ServerGuard(server_process);
 
-        inject_system_message(&app, SystemLogLevel::Info, "Translator", "Loading model into memory... (This takes a few seconds)");
-        thread::sleep(Duration::from_secs(5));
+        if server_health_check(&app) { return; }
 
         let client = Client::new();
         let dict_path = app.path().app_data_dir().unwrap().join("custom_dict.json");
@@ -156,6 +173,31 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
     tx
 }
 
+fn server_health_check(app: &AppHandle) -> bool {
+    let client = Client::new();
+    let mut is_ready = false;
+    let start_wait = Instant::now();
+
+    inject_system_message(&app, SystemLogLevel::Info, "Translator", "Waiting for AI Engine to warm up...");
+
+    // Poll the health endpoint for up to 30 seconds
+    while start_wait.elapsed().as_secs() < 30 {
+        if let Ok(res) = client.get("http://127.0.0.1:8080/health").send() {
+            if res.status().is_success() {
+                is_ready = true;
+                break;
+            }
+        }
+        thread::sleep(Duration::from_millis(1000));
+    }
+
+    if !is_ready {
+        inject_system_message(&app, SystemLogLevel::Error, "Translator", "AI Engine failed to initialize within 30s.");
+        return true;
+    }
+    false
+}
+
 pub fn contains_japanese(text: &str) -> bool {
     text.chars().any(|c| {
         let u = c as u32;
@@ -171,67 +213,73 @@ pub fn contains_japanese(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::downloader::{MODEL_FILENAME, MODEL_FOLDER};
-    use crate::{AI_SERVER_FILENAME, AI_SERVER_FOLDER};
-    use reqwest::blocking::Client;
     use std::path::PathBuf;
+    use std::time::{Instant, Duration};
     use std::process::Command;
-    use std::time::Instant;
+    use reqwest::blocking::Client;
+    use crate::{AI_SERVER_FILENAME, AI_SERVER_FOLDER};
+    use crate::services::downloader::{MODEL_FILENAME, MODEL_FOLDER};
 
     #[test]
     fn evaluate_translation() {
-        // 1. Resolve model path (using the exact same logic from your old test)
+        // 1. Resolve paths (pointing to your AppData/bin folder)
         let appdata = std::env::var("APPDATA").expect("Could not find APPDATA environment variable");
-        let mut model_path = PathBuf::from(appdata.clone());
-        // Replace this with your actual Tauri bundle identifier if it changed
-        model_path.push("com.enjay.bpsr.resonance-stream");
-        model_path.push("models");
-        model_path.push(MODEL_FOLDER);
-        model_path.push(MODEL_FILENAME);
+        let base_path = PathBuf::from(appdata).join("com.enjay.bpsr.resonance-stream");
+
+        let model_path = base_path.join("models").join(MODEL_FOLDER).join(MODEL_FILENAME);
+        let server_path = base_path.join("bin").join(AI_SERVER_FOLDER).join(AI_SERVER_FILENAME);
 
         println!("Looking for model at: {:?}", model_path);
+        println!("Looking for server at: {:?}", server_path);
 
-        let mut ai_server_path = PathBuf::from(appdata.clone());
-        // Replace this with your actual Tauri bundle identifier if it changed
-        ai_server_path.push("com.enjay.bpsr.resonance-stream");
-        ai_server_path.push("bin");
-        ai_server_path.push(AI_SERVER_FOLDER);
-        ai_server_path.push(AI_SERVER_FILENAME);
-
-        println!("Looking for ai server at: {:?}", ai_server_path);
-
-        // 2. Start the AI Server in the background for the test
+        // 2. Start the AI Server
         println!("Starting llama-server.exe...");
-        let mut server_process = Command::new(&ai_server_path)
+        let mut server_process = Command::new(server_path)
             .arg("-m").arg(&model_path)
             .arg("--port").arg("8080")
             .arg("-ngl").arg("99") // Force GPU for the test
             .arg("--log-disable")
             .spawn()
-            .expect("Failed to start llama-server.exe. Is it in the src-tauri folder?");
+            .expect("Failed to start llama-server.exe. Is it downloaded to AppData/bin?");
 
-        // Give the server time to load the 1.8GB model into VRAM
-        println!("Waiting 5 seconds for model to load into VRAM...");
-        std::thread::sleep(std::time::Duration::from_secs(5));
-
+        // 3. Smart Health Check (Polled every 500ms)
         let client = Client::new();
+        let mut is_ready = false;
+        let start_wait = Instant::now();
 
-        // 3. The Japanese text you want to test
-        let test_jp = "NM出ました！TとH募集します。よろしくお願いします！";
+        println!("Waiting for AI Engine to warm up...");
+        while start_wait.elapsed().as_secs() < 30 {
+            if let Ok(res) = client.get("http://127.0.0.1:8080/health").send() {
+                if res.status().is_success() {
+                    is_ready = true;
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(1000));
+        }
 
+        if !is_ready {
+            let _ = server_process.kill();
+            panic!("AI Engine failed to initialize within 30s (Model too large or GPU OOM?)");
+        }
+
+        // 4. Run the test translation using SSE logic
+        let test_jp = "今貯めてた週クエストやってて忙しい";
         println!("-----------------------------------");
         println!("[Input JA]: {}", test_jp);
 
-        // 4. Run and time the translation
         let start_time = Instant::now();
+
+        // This now calls the updated translate_text that uses SSE streaming
         let result_ko = translate_text(&client, test_jp);
+
         let elapsed = start_time.elapsed();
 
         println!("[Output KO]: {}", result_ko);
         println!("[Time]: {:.2?}", elapsed);
         println!("-----------------------------------");
 
-        // 5. Cleanup: Kill the server so it doesn't stay running in the background
+        // 5. Cleanup
         let _ = server_process.kill();
     }
 }

@@ -76,6 +76,8 @@ pub struct AppSignals {
     pub set_archive_chat: WriteSignal<bool>,
     pub hide_original_in_compact: ReadSignal<bool>,
     pub set_hide_original_in_compact: WriteSignal<bool>,
+    pub network_interface: ReadSignal<String>,
+    pub set_network_interface: WriteSignal<String>,
 }
 
 #[derive(Copy, Clone)]

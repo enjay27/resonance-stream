@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
 use crate::tauri_bridge::invoke;
-use crate::types::FolderStatus;
+use crate::types::{FolderStatus, NetworkInterface};
 
 #[derive(serde::Serialize)]
 struct OpenBrowserArgs {
@@ -15,6 +15,20 @@ struct OpenBrowserArgs {
 pub fn Settings() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
     let actions = use_context::<AppActions>().expect("AppActions missing");
+
+    let (interfaces, set_interfaces) = signal(Vec::<NetworkInterface>::new());
+
+    Effect::new(move |_| {
+        if signals.show_settings.get() {
+            spawn_local(async move {
+                if let Ok(res) = invoke("get_network_interfaces", JsValue::NULL).await {
+                    if let Ok(list) = serde_wasm_bindgen::from_value::<Vec<NetworkInterface>>(res) {
+                        set_interfaces.set(list);
+                    }
+                }
+            });
+        }
+    });
 
     let sync_dict_action = Action::new_local(|_: &()| async move {
         match invoke("sync_dictionary", JsValue::NULL).await {
@@ -409,7 +423,35 @@ pub fn Settings() -> impl IntoView {
 
                                         <div class="divider m-0 opacity-10"></div>
 
-                                        // 2. Data Factory (Save Chatting Log)
+                                        // 2. Network Interface Manual Selection
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex flex-col">
+                                                <span class="text-[11px] font-bold text-base-content/80">"네트워크 어댑터 (Network Interface)"</span>
+                                                <span class="text-[9px] text-warning/80 italic">"VPN 사용 시 패킷 캡처 실패 해결용"</span>
+                                            </div>
+                                            <select class="select select-bordered select-xs w-36 text-[10px] font-bold bg-base-100"
+                                                prop:value=move || signals.network_interface.get()
+                                                on:change=move |ev| {
+                                                    signals.set_network_interface.set(event_target_value(&ev));
+                                                    actions.save_config.dispatch(());
+                                                    signals.set_restart_required.set(true); // Requires sniffer restart
+                                                }>
+                                                <option value="">"Auto-Detect (권장)"</option>
+                                                <For
+                                                    each=move || interfaces.get()
+                                                    key=|iface| iface.ip.clone()
+                                                    children=move |iface| {
+                                                        view! {
+                                                            <option value=iface.ip.clone()>
+                                                                {format!("{} ({})", iface.name, iface.ip)}
+                                                            </option>
+                                                        }
+                                                    }
+                                                />
+                                            </select>
+                                        </div>
+
+                                        // 3. Data Factory (Save Chatting Log)
                                         <div class="flex items-center justify-between">
                                             <div class="flex flex-col">
                                                 <span class="text-[11px] font-black text-warning uppercase">"Data Factory"</span>

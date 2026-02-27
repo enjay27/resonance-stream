@@ -22,6 +22,7 @@ pub struct AppConfig {
     pub tier: String,
     pub archive_chat: bool,
     pub hide_original_in_compact: bool,
+    pub network_interface: String,
 }
 
 impl Default for AppConfig {
@@ -42,6 +43,7 @@ impl Default for AppConfig {
             tier: "middle".to_string(),
             archive_chat: false,
             hide_original_in_compact: false,
+            network_interface: "".to_string(),
         }
     }
 }

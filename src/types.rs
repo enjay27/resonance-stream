@@ -46,6 +46,8 @@ pub struct AppConfig {
     pub tier: String,
     pub archive_chat: bool,
     pub hide_original_in_compact: bool,
+    #[serde(default)]
+    pub network_interface: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -66,4 +68,10 @@ pub struct ProgressPayload {
     pub percent: u8,
     #[serde(rename = "total_percent")] // Match backend field name
     pub total_percent: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct NetworkInterface {
+    pub name: String,
+    pub ip: String,
 }

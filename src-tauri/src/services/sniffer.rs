@@ -1,5 +1,5 @@
 use crate::packet_buffer::PacketBuffer;
-use crate::{get_model_path, inject_system_message, store_and_emit};
+use crate::{get_model_path, inject_system_message, store_and_emit, NetworkInterface};
 use lazy_static::lazy_static;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -127,9 +127,18 @@ fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, Strin
 pub fn find_game_interface_ip() -> Option<std::net::Ipv4Addr> {
     let network_interfaces = list_afinet_netifas().ok()?;
 
+    // Aggressive blocklist for common Virtual Adapters and VPNs
+    let ignore_list = [
+        "Loopback", "vEthernet", "TAP", "Tailscale", "WireGuard",
+        "OpenVPN", "Radmin", "Hamachi", "ZeroTier", "VMware",
+        "VirtualBox", "WSL", "Npcap"
+    ];
+
     for (name, ip) in network_interfaces {
-        // Ignore loopback and virtual adapter common names
-        if name.contains("Loopback") || name.contains("vEthernet") {
+        let name_lower = name.to_lowercase();
+
+        // Skip if the adapter name contains any of the blocked keywords
+        if ignore_list.iter().any(|&keyword| name_lower.contains(&keyword.to_lowercase())) {
             continue;
         }
 
@@ -267,16 +276,31 @@ pub fn ensure_firewall_rule(app: &AppHandle) {
 fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandle) {
     ensure_firewall_rule(app);
 
-    // 1. Gracefully handle missing IP
-    let local_ip = match find_game_interface_ip() {
-        Some(ip) => {
-            inject_system_message(app, SystemLogLevel::Info, "Sniffer", format!("Targeting Network Interface: {}", ip));
-            ip
-        },
-        None => {
-            inject_system_message(app, SystemLogLevel::Error, "Sniffer", "NETWORK_ERROR: Could not find a valid local IPv4 network interface.");
-            IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
-            return;
+    // 1. Determine the IP to bind to
+    let local_ip = if !app_config.network_interface.is_empty() {
+        // User manually selected an interface in settings
+        match app_config.network_interface.parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => {
+                inject_system_message(app, SystemLogLevel::Info, "Sniffer", format!("Using manually selected Interface: {}", ip));
+                ip
+            },
+            Err(_) => {
+                inject_system_message(app, SystemLogLevel::Error, "Sniffer", "Invalid manual IP format. Falling back to Auto-Detect.");
+                find_game_interface_ip().unwrap_or(std::net::Ipv4Addr::new(127, 0, 0, 1))
+            }
+        }
+    } else {
+        // Default Auto-Detection logic
+        match find_game_interface_ip() {
+            Some(ip) => {
+                inject_system_message(app, SystemLogLevel::Info, "Sniffer", format!("Auto-Targeting Network Interface: {}", ip));
+                ip
+            },
+            None => {
+                inject_system_message(app, SystemLogLevel::Error, "Sniffer", "NETWORK_ERROR: Could not find a valid local IPv4 network interface.");
+                IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
+                return;
+            }
         }
     };
 
@@ -513,4 +537,21 @@ pub fn remove_firewall_rule() {
         .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}", RULE_NAME)])
         .creation_flags(CREATE_NO_WINDOW)
         .status();
+}
+
+#[tauri::command]
+pub fn get_network_interfaces() -> Vec<NetworkInterface> {
+    let mut interfaces = Vec::new();
+    // Assuming you have `local_ip_address` crate from your sniffer
+    if let Ok(netifas) = local_ip_address::list_afinet_netifas() {
+        for (name, ip) in netifas {
+            if let std::net::IpAddr::V4(ipv4) = ip {
+                interfaces.push(NetworkInterface {
+                    name,
+                    ip: ipv4.to_string(),
+                });
+            }
+        }
+    }
+    interfaces
 }

@@ -116,7 +116,8 @@ pub fn run() {
             close_window,
             open_app_data_folder,
             export_chat_log,
-            open_browser
+            open_browser,
+            get_network_interfaces
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

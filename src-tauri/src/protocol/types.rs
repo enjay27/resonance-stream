@@ -149,3 +149,9 @@ pub struct ExportMessage {
     pub translated: Option<String>,
     pub timestamp: u64,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct NetworkInterface {
+    pub name: String,
+    pub ip: String,
+}

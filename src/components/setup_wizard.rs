@@ -50,8 +50,8 @@ pub fn SetupWizard(finalize: Callback<()>, start_download: Callback<web_sys::Mou
                                                 class:btn-success=move || signals.compute_mode.get() == "cpu"
                                                 on:click=move |_| signals.set_compute_mode.set("cpu".into())>"CPU"</button>
                                             <button class="join-item btn btn-sm flex-1"
-                                                class:btn-success=move || signals.compute_mode.get() == "cuda"
-                                                on:click=move |_| signals.set_compute_mode.set("cuda".into())>"CUDA (GPU)"</button>
+                                                class:btn-success=move || signals.compute_mode.get() == "gpu"
+                                                on:click=move |_| signals.set_compute_mode.set("gpu".into())>"GPU"</button>
                                         </div>
                                     </div>
                                 </Show>

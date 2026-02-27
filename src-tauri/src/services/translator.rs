@@ -110,36 +110,43 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         let mut server_cmd = Command::new(server_path);
         server_cmd.arg("-m").arg(&model_path);
         server_cmd.arg("--port").arg("8080");
-        server_cmd.arg("--log-disable"); // Prevents terminal spam
+        server_cmd.arg("--log-disable");
 
-        if config.compute_mode.to_lowercase() == "vulkan" || config.compute_mode.to_lowercase() == "cuda" {
-            server_cmd.arg("-ngl").arg("99");
-            inject_system_message(&app, SystemLogLevel::Info, "Translator", format!("Compute Mode: {} (GPU Offloading Enabled)", config.compute_mode.to_uppercase()));
+        if config.compute_mode.to_lowercase() == "gpu" {
+            // For a GTX 1060, 10 to 15 layers is usually the sweet spot to leave VRAM for the game.
+            // Ideally, tie this to your config.tier!
+            let gpu_layers = match config.tier.to_lowercase().as_str() {
+                "low" => "10",      // Safe for 3GB 1060
+                "middle" => "15",   // Safe for 6GB 1060
+                "high" => "25",
+                "extreme" => "99",
+                _ => "15",
+            };
+            server_cmd.arg("-ngl").arg(gpu_layers);
+            inject_system_message(&app, SystemLogLevel::Info, "Translator", format!("GPU Offloading: {} Layers", gpu_layers));
         } else {
             server_cmd.arg("-ngl").arg("0");
-            inject_system_message(&app, SystemLogLevel::Info, "Translator", "Compute Mode: CPU (System RAM)");
+            inject_system_message(&app, SystemLogLevel::Info, "Translator", "Compute Mode: CPU");
         }
 
-        let n_ctx_size = match config.tier.to_lowercase().as_str() {
-            "low" => "512",
-            "middle" => "1024",
-            "high" => "2048",
-            "extreme" => "4096",
-            _ => "1024",
-        };
-        server_cmd.arg("-c").arg(n_ctx_size);
-        server_cmd.arg("--parallel").arg("1");  // Prevents terminal spam
-        server_cmd.arg("--cont-batching");  // Prevents terminal spam
-        server_cmd.arg("--no-mmap");        // Prevents terminal spam
-        // server_cmd.arg("--embedding-off"); // You don't need embeddings for simple translation
-        // server_cmd.arg("--flash-attn");    // Use Flash Attention (huge boost for RTX 4080 Super)
-        server_cmd.arg("--mlock");         // Pins the model in RAM/VRAM to prevent stuttering in-game
+        // --- Extreme Low-End Memory Optimizations ---
 
-        // --- Batching for speed ---
-        server_cmd.arg("-b").arg("512");   // Batch size
-        server_cmd.arg("-ub").arg("512");  // Physical batch size
+        // 1. Minimum context for 140 char limits
+        server_cmd.arg("-c").arg("512");
 
-        inject_system_message(&app, SystemLogLevel::Info, "Translator", format!("Performance Tier: {} (Context: {})", config.tier.to_uppercase(), n_ctx_size));
+        // 2. Tiny batches
+        server_cmd.arg("-b").arg("16");
+        server_cmd.arg("-ub").arg("16");
+
+        // 3. CPU Thread limiting (Crucial when GPU offload is partial)
+        server_cmd.arg("-t").arg("4"); // Prevents the translation from freezing the game
+
+        // 4. Safe memory handling (REMOVED --mlock)
+        server_cmd.arg("--parallel").arg("1");
+        server_cmd.arg("--cont-batching");
+        server_cmd.arg("--no-mmap");
+
+        inject_system_message(&app, SystemLogLevel::Info, "Translator", format!("Performance Tier: {}", config.tier.to_uppercase()));
 
         // 0x08000000 = CREATE_NO_WINDOW (Hides the server terminal from the user)
         server_cmd.creation_flags(0x08000000);

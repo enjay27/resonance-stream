@@ -134,7 +134,7 @@ pub fn Settings() -> impl IntoView {
                                 <div class="p-3 bg-base-200 rounded-lg space-y-3 border border-base-content/5">
                                     <span class="text-[11px] font-bold text-base-content/50 uppercase">"연산 장치 (Compute Mode)"</span>
                                     <div class="join w-full">
-                                        {vec!["cpu", "cuda"].into_iter().map(|m| {
+                                        {vec!["cpu", "gpu"].into_iter().map(|m| {
                                             let m_val = m.to_string();
                                             let m_line = m.to_string();
                                             let m_click = m.to_string();
@@ -154,7 +154,6 @@ pub fn Settings() -> impl IntoView {
                                             }
                                         }).collect_view()}
                                     </div>
-                                    <div class="text-[9px] opacity-50">"GPU 사용은 NVIDIA 그래픽카드와 CUDA Toolkit이 필요합니다."</div>
 
                                     // [RESTORED] Performance Tier
                                     <span class="text-[11px] font-bold text-base-content/50 uppercase block mt-3">"성능 (Performance Tier)"</span>

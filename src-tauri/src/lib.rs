@@ -76,6 +76,13 @@ pub fn run() {
                 None
             };
 
+            // --- CHECK CONFIG AND START DATA LOGGING IF NEEDED ---
+            let initial_df_tx = if config.archive_chat {
+                Some(crate::io::start_data_factory_worker(handle.clone()))
+            } else {
+                None
+            };
+
             // Initialize State INSIDE setup so we have access to the App context
             app.manage(AppState {
                 batch_data: Arc::new((Mutex::new((vec![], 0)), Default::default())),
@@ -83,7 +90,8 @@ pub fn run() {
                 system_history: Mutex::new(VecDeque::with_capacity(200)),
                 next_pid: 1.into(),
                 nickname_cache: Mutex::new(std::collections::HashMap::new()),
-                translator_tx: Mutex::new(initial_tx), // <-- Store the Thread Sender here
+                translator_tx: Mutex::new(initial_tx),
+                data_factory_tx: Mutex::new(initial_df_tx),
             });
 
             Ok(())

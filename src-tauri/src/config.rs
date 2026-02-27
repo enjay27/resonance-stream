@@ -101,4 +101,16 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
         *state.translator_tx.lock().unwrap() = None;
         inject_system_message(&app, SystemLogLevel::Info, "Translator", "AI Translation Disabled. Server stopped and VRAM cleared.");
     }
+
+    // --- MANAGE THE DATA FACTORY THREAD ---
+    if !old_config.archive_chat && config.archive_chat {
+        // Turned ON: Spawn the I/O thread
+        let tx = crate::io::start_data_factory_worker(app.clone());
+        *state.data_factory_tx.lock().unwrap() = Some(tx);
+        inject_system_message(&app, SystemLogLevel::Info, "DataFactory", "Dataset logging enabled.");
+    } else if old_config.archive_chat && !config.archive_chat {
+        // Turned OFF: Drop the Sender (Kills the thread)
+        *state.data_factory_tx.lock().unwrap() = None;
+        inject_system_message(&app, SystemLogLevel::Info, "DataFactory", "Dataset logging disabled.");
+    }
 }

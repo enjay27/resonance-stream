@@ -51,6 +51,7 @@ pub struct AppState {
     pub next_pid: AtomicU64,
     pub nickname_cache: Mutex<HashMap<String, String>>,
     pub translator_tx: Mutex<Option<Sender<crate::services::translator::TranslationJob>>>,
+    pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
 }
 
 #[derive(Serialize)]

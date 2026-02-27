@@ -49,7 +49,8 @@ pub fn translate_text(client: &Client, jp_text: &str) -> String {
         4. **번역 스타일**:
            - 문어체가 아닌 자연스러운 한국어 구어체(채팅 스타일)를 사용하십시오.
            - 원문에 없는 주어/목적어를 임의로 추측하여 추가하지 마십시오.
-           - 직역보다는 게임 내 상황에 맞는 의역을 우선하되, 원문의 의도를 해치지 마십시오.";
+           - 직역보다는 게임 내 상황에 맞는 의역을 우선하되, 원문의 의도를 해치지 마십시오.
+        5. **완전성 (매우 중요)**: 원문이 아무리 길거나 복잡한 이모티콘이 포함되어 있어도, 절대 중간에 번역을 끊지 말고 끝까지 빠짐없이 번역하십시오.";
 
     let payload = json!({
         "messages": [
@@ -57,7 +58,8 @@ pub fn translate_text(client: &Client, jp_text: &str) -> String {
             {"role": "user", "content": jp_text}
         ],
         "stream": true, // Enable SSE
-        "temperature": 0.1
+        "temperature": 0.1,
+        "max_tokens": 512
     });
 
     // 1. Send the request and get a streaming response
@@ -132,11 +134,11 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         // --- Extreme Low-End Memory Optimizations ---
 
         // 1. Minimum context for 140 char limits
-        server_cmd.arg("-c").arg("512");
+        server_cmd.arg("-c").arg("1024");
 
         // 2. Tiny batches
-        server_cmd.arg("-b").arg("16");
-        server_cmd.arg("-ub").arg("16");
+        server_cmd.arg("-b").arg("64");
+        server_cmd.arg("-ub").arg("64");
 
         // 3. CPU Thread limiting (Crucial when GPU offload is partial)
         server_cmd.arg("-t").arg("4"); // Prevents the translation from freezing the game
@@ -192,7 +194,18 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 let final_str = postprocess_text(&raw_translation, &shield);
 
                 chat.translated = Some(final_str.clone());
-                let _ = save_to_data_factory(&app, chat.pid, &chat.message, &final_str);
+
+                // --- DATA LOGGER DISPATCH ---
+                let state = app.state::<crate::AppState>();
+                if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
+                    let _ = df_tx.send(crate::io::DataFactoryJob {
+                        pid: chat.pid,
+                        original: chat.message.clone(),
+                        translated: Some(final_str.clone()), // <--- Wrapped in Some()
+                    });
+                }
+                // --------------------------------
+
                 store_and_emit(&app, chat);
             }
         }

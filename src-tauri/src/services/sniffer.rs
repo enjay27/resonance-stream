@@ -413,12 +413,25 @@ pub fn parse_and_emit_5003(data: &[u8], app: &AppHandle) {
                     // --- 2. EMIT TO UI ---
                     store_and_emit(app, c.clone());
 
-                    // --- 3. TRANSLATE ---
-                    if crate::config::load_config(app.clone()).use_translation && contains_japanese(&c.message) {
-                        // Look up the AppState to see if the translator is running
+                    // --- 3. TRANSLATE & ARCHIVE ROUTING ---
+                    let config = crate::config::load_config(app.clone());
+                    let requires_translation = config.use_translation && contains_japanese(&c.message);
+
+                    if requires_translation {
+                        // Route to Translator: The translator will archive it AFTER finishing the translation.
                         let state = app.state::<AppState>();
                         if let Some(tx) = state.translator_tx.lock().unwrap().as_ref() {
-                            let _ = tx.send(TranslationJob { chat: c.clone() });
+                            let _ = tx.send(crate::services::translator::TranslationJob { chat: c.clone() });
+                        };
+                    } else if config.archive_chat {
+                        // Route directly to Archive: Translation is OFF (or text isn't Japanese), but archiving is ON.
+                        let state = app.state::<AppState>();
+                        if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
+                            let _ = df_tx.send(crate::io::DataFactoryJob {
+                                pid: c.pid,
+                                original: c.message.clone(),
+                                translated: None, // Explicitly no translation
+                            });
                         };
                     }
                 }

@@ -92,6 +92,7 @@ pub fn run() {
                 nickname_cache: Mutex::new(std::collections::HashMap::new()),
                 translator_tx: Mutex::new(initial_tx),
                 data_factory_tx: Mutex::new(initial_df_tx),
+                sniffer_tx: Mutex::new(None),
             });
 
             Ok(())

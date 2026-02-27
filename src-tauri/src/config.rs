@@ -91,6 +91,19 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
         let _ = fs::write(path, json);
     }
 
+    // --- MANAGE THE SNIFFER THREAD (NETWORK ADAPTER CHANGE) ---
+    if old_config.network_interface != config.network_interface {
+        // Drop the old Sender (Instantly kills the socket and watchdog threads)
+        *state.sniffer_tx.lock().unwrap() = None;
+
+        // Restart the sniffer bound to the newly selected interface
+        if config.init_done {
+            inject_system_message(&app, SystemLogLevel::Info, "Sniffer", "Network adapter changed. Restarting sniffer...");
+            let tx = crate::services::sniffer::start_sniffer_worker(app.clone());
+            *state.sniffer_tx.lock().unwrap() = Some(tx);
+        }
+    }
+
     // --- MANAGE THE AI WORKER THREAD ---
     if !old_config.use_translation && config.use_translation {
         // Turned ON: Start the server and store the Sender

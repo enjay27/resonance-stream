@@ -61,20 +61,161 @@ fn feed_watchdog() {
 
 #[tauri::command]
 pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State<'_, AppState>) {
-    start_sniffer(window, app, state);
+    let mut tx_lock = state.sniffer_tx.lock().unwrap();
+    if tx_lock.is_some() {
+        inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Sniffer restart blocked: already active.");
+        return;
+    }
+    let tx = start_sniffer_worker(app.clone());
+    *tx_lock = Some(tx);
 }
 
-fn get_active_ip() -> Option<std::net::Ipv4Addr> {
-    match local_ip() {
-        Ok(ip) => {
-            if let std::net::IpAddr::V4(ipv4) = ip {
-                Some(ipv4)
-            } else {
-                None // Skip IPv6 for Raw Socket SIO_RCVALL
+pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
+    // We use a blank channel just for its lifecycle dropping properties
+    let (tx, rx) = crossbeam_channel::unbounded::<()>();
+
+    let config = crate::config::load_config(app.clone());
+    feed_watchdog();
+
+    // --- WATCHDOG THREAD ---
+    let app_handle_watchdog = app.clone();
+    let rx_watchdog = rx.clone();
+    thread::spawn(move || {
+        let mut last_cleanup = Instant::now();
+        loop {
+            // Wait 5 seconds. If the sender drops during this sleep, it breaks immediately!
+            match rx_watchdog.recv_timeout(Duration::from_secs(5)) {
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                _ => {} // Continue running on Timeout or Empty
             }
-        },
-        Err(_) => None,
-    }
+
+            let last = LAST_TRAFFIC_TIME.load(Ordering::Relaxed);
+            if last == 0 { continue; }
+
+            let start = SystemTime::now();
+            let now = start.duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+            if now.saturating_sub(last) > 15 {
+                inject_system_message(&app_handle_watchdog, SystemLogLevel::Warning, "Sniffer", "Watchdog: No game traffic for 15s.");
+                let _ = app_handle_watchdog.emit("sniffer-status", "warning");
+                feed_watchdog();
+            }
+
+            if last_cleanup.elapsed().as_secs() >= 60 {
+                let mut cache = EMISSION_CACHE.lock().unwrap();
+                let now = Instant::now();
+                cache.retain(|key, (_, last_seen)| {
+                    if now.duration_since(*last_seen) > Duration::from_secs(300) {
+                        let _ = app_handle_watchdog.emit("remove-entity", key);
+                        false
+                    } else { true }
+                });
+                last_cleanup = Instant::now();
+            }
+        }
+    });
+
+    // --- MAIN SNIFFER THREAD ---
+    let app_handle = app.clone();
+    let rx_main = rx.clone();
+
+    thread::spawn(move || {
+        inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "Engine Active");
+
+        if config.log_level.to_lowercase() == "debug" || config.log_level.to_lowercase() == "info" {
+            if let Ok(network_interfaces) = list_afinet_netifas() {
+                for (name, ip) in network_interfaces {
+                    inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("Active Interface: {} ({:?})", name, ip));
+                }
+            }
+        }
+
+        ensure_firewall_rule(&app_handle);
+
+        let local_ip = if !config.network_interface.is_empty() {
+            match config.network_interface.parse::<std::net::Ipv4Addr>() {
+                Ok(ip) => {
+                    inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", format!("Using manually selected Interface: {}", ip));
+                    ip
+                },
+                Err(_) => {
+                    inject_system_message(&app_handle, SystemLogLevel::Error, "Sniffer", "Invalid manual IP format. Falling back to Auto-Detect.");
+                    find_game_interface_ip().unwrap_or(std::net::Ipv4Addr::new(127, 0, 0, 1))
+                }
+            }
+        } else {
+            match find_game_interface_ip() {
+                Some(ip) => {
+                    inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", format!("Auto-Targeting Network Interface: {}", ip));
+                    ip
+                },
+                None => {
+                    inject_system_message(&app_handle, SystemLogLevel::Error, "Sniffer", "NETWORK_ERROR: Could not find a valid local IPv4 network interface.");
+                    return;
+                }
+            }
+        };
+
+        let socket = match setup_raw_socket(local_ip, &app_handle) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        // [CRITICAL] Set a timeout so socket.recv doesn't permanently block thread shutdown!
+        if let Err(e) = socket.set_read_timeout(Some(Duration::from_millis(500))) {
+            inject_system_message(&app_handle, SystemLogLevel::Error, "Sniffer", &format!("Failed to set socket timeout: {:?}", e));
+            return;
+        }
+
+        inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "Raw Socket active. Listening for game traffic...");
+
+        let mut buf = [0u8; 65535];
+        let uninit_buf = unsafe {
+            std::mem::transmute::<&mut [u8], &mut [std::mem::MaybeUninit<u8>]>(buf.as_mut_slice())
+        };
+
+        let mut streams: HashMap<[u8; 6], PacketBuffer> = HashMap::new();
+
+        loop {
+            // Check if the Config changed and the thread should commit suicide
+            if let Err(crossbeam_channel::TryRecvError::Disconnected) = rx_main.try_recv() {
+                inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", "Sniffer thread shutting down.");
+                break;
+            }
+
+            let n = match socket.recv(uninit_buf) {
+                Ok(n) => n,
+                // Loop back to check the channel if the 500ms timeout occurs
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => continue,
+                Err(_) => continue,
+            };
+
+            let packet = &buf[..n];
+            let headers = match PacketHeaders::from_ip_slice(packet) {
+                Ok(h) => h,
+                Err(_) => continue,
+            };
+
+            if let Some(TransportHeader::Tcp(tcp)) = headers.transport {
+                let src_port = tcp.source_port;
+                if src_port == 5003 {
+                    let payload = headers.payload.slice();
+                    if payload.is_empty() { continue; }
+
+                    let mut stream_key = [0u8; 6];
+                    if let Some(NetHeaders::Ipv4(ipv4, _extensions)) = headers.net {
+                        stream_key[0..4].copy_from_slice(&ipv4.source);
+                    }
+                    stream_key[4..6].copy_from_slice(&src_port.to_be_bytes());
+
+                    feed_watchdog();
+                    process_game_stream(&app_handle, &mut streams, stream_key, payload, src_port);
+                }
+            }
+        }
+    });
+
+    tx // Return the Sender to AppState!
 }
 
 fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, String> {
@@ -152,89 +293,6 @@ pub fn find_game_interface_ip() -> Option<std::net::Ipv4Addr> {
     None
 }
 
-fn start_sniffer(window: Window, app: AppHandle, state: State<'_, AppState>) {
-    // 1. Check if we are "officially" running
-    if IS_SNIFFER_RUNNING.load(Ordering::SeqCst) {
-        inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Sniffer restart blocked: already active.");
-        return;
-    }
-
-    IS_SNIFFER_RUNNING.store(true, Ordering::SeqCst);
-    state.next_pid.store(1, Ordering::SeqCst);
-
-    // 2. Increment Generation (This kills the old thread logically)
-    let config = crate::config::load_config(app.clone()); //
-    let my_generation = SNIFFER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-
-    if config.log_level.to_lowercase() == "debug" || config.log_level.to_lowercase() == "info" {
-        use local_ip_address::list_afinet_netifas;
-
-        if let Ok(network_interfaces) = list_afinet_netifas() {
-            for (name, ip) in network_interfaces {
-                inject_system_message(&app, SystemLogLevel::Debug, "Sniffer", format!("Active Interface: {} ({:?})", name, ip));
-            }
-        }
-    }
-
-    // Reset watchdog on start
-    feed_watchdog();
-
-    // --- WATCHDOG THREAD (Red Dot Logic) ---
-    let app_handle_watchdog = app.clone();
-    thread::spawn(move || {
-        let mut last_cleanup = Instant::now();
-        loop {
-            thread::sleep(std::time::Duration::from_secs(5));
-
-            // [CHECK] If I am an old watchdog for a dead sniffer, I must retire.
-            if SNIFFER_GENERATION.load(Ordering::Relaxed) != my_generation {
-                break;
-            }
-
-            let last = LAST_TRAFFIC_TIME.load(Ordering::Relaxed);
-            if last == 0 { continue; }
-
-            let start = SystemTime::now();
-            let now = start.duration_since(UNIX_EPOCH).unwrap().as_secs();
-
-            // TRIGGER: No packets for 15 seconds
-            if now.saturating_sub(last) > 15 {
-                inject_system_message(&app_handle_watchdog, SystemLogLevel::Warning, "Sniffer", "Watchdog: No game traffic for 15s.");
-
-                // Emit event to Frontend (Red Dot)
-                let _ = app_handle_watchdog.emit("sniffer-status", "warning");
-
-                // Feed it to prevent spamming the warning every 5 seconds
-                feed_watchdog();
-            }
-
-            if last_cleanup.elapsed().as_secs() >= 60 {
-                let mut cache = EMISSION_CACHE.lock().unwrap();
-                let now = Instant::now();
-
-                // Retain only fresh items, emit removal for expired ones
-                cache.retain(|key, (_, last_seen)| {
-                    if now.duration_since(*last_seen) > Duration::from_secs(300) {
-                        let _ = app_handle_watchdog.emit("remove-entity", key);
-                        false
-                    } else { true }
-                });
-                last_cleanup = Instant::now();
-            }
-        }
-    });
-
-    // --- MAIN SNIFFER THREAD ---
-    let app_handle = app.clone();
-    thread::spawn(move || {
-        inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", format!("Engine Active (Gen {})", my_generation));
-
-        start_rawsocket_parser(config, my_generation, &app);
-
-        inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", "Old Sniffer Thread Terminated.");
-    });
-}
-
 pub fn ensure_firewall_rule(app: &AppHandle) {
     if let Ok(exe_path) = env::current_exe() {
         if let Some(path_str) = exe_path.to_str() {
@@ -268,102 +326,6 @@ pub fn ensure_firewall_rule(app: &AppHandle) {
                 _ => {
                     inject_system_message(app, SystemLogLevel::Error, "Sniffer", "Failed to configure firewall. Inbound chat may be blocked.");
                 }
-            }
-        }
-    }
-}
-
-fn start_rawsocket_parser(app_config: AppConfig, generation: u64, app: &AppHandle) {
-    ensure_firewall_rule(app);
-
-    // 1. Determine the IP to bind to
-    let local_ip = if !app_config.network_interface.is_empty() {
-        // User manually selected an interface in settings
-        match app_config.network_interface.parse::<std::net::Ipv4Addr>() {
-            Ok(ip) => {
-                inject_system_message(app, SystemLogLevel::Info, "Sniffer", format!("Using manually selected Interface: {}", ip));
-                ip
-            },
-            Err(_) => {
-                inject_system_message(app, SystemLogLevel::Error, "Sniffer", "Invalid manual IP format. Falling back to Auto-Detect.");
-                find_game_interface_ip().unwrap_or(std::net::Ipv4Addr::new(127, 0, 0, 1))
-            }
-        }
-    } else {
-        // Default Auto-Detection logic
-        match find_game_interface_ip() {
-            Some(ip) => {
-                inject_system_message(app, SystemLogLevel::Info, "Sniffer", format!("Auto-Targeting Network Interface: {}", ip));
-                ip
-            },
-            None => {
-                inject_system_message(app, SystemLogLevel::Error, "Sniffer", "NETWORK_ERROR: Could not find a valid local IPv4 network interface.");
-                IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
-                return;
-            }
-        }
-    };
-
-    // 2. Gracefully handle socket setup
-    let socket = match setup_raw_socket(local_ip, app) {
-        Ok(s) => s,
-        Err(_) => {
-            IS_SNIFFER_RUNNING.store(false, Ordering::SeqCst);
-            return; // Exit thread cleanly
-        }
-    };
-
-    inject_system_message(app, SystemLogLevel::Success, "Sniffer", "Raw Socket active. Listening for game traffic...");
-
-    let mut buf = [0u8; 65535];
-    let uninit_buf = unsafe {
-        std::mem::transmute::<&mut [u8], &mut [std::mem::MaybeUninit<u8>]>(buf.as_mut_slice())
-    };
-
-    let mut streams: HashMap<[u8; 6], PacketBuffer> = HashMap::new();
-
-    loop {
-        // [CRITICAL] COOPERATIVE SHUTDOWN
-        // If the user restarts the sniffer, the generation changes, and this thread will exit!
-        if SNIFFER_GENERATION.load(Ordering::Relaxed) != generation {
-            break;
-        }
-
-        let n = match socket.recv(uninit_buf) {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-
-        // 1. Let etherparse handle all the dangerous network parsing!
-        let packet = &buf[..n];
-        let headers = match PacketHeaders::from_ip_slice(packet) {
-            Ok(h) => h,
-            Err(_) => continue, // Drop malformed IP packets safely
-        };
-
-        // 2. Validate TCP and get ports
-        if let Some(TransportHeader::Tcp(tcp)) = headers.transport {
-            let src_port = tcp.source_port;
-
-            if src_port == 5003 {
-                let payload = headers.payload.slice();
-
-                // Ignore empty ACK packets
-                if payload.is_empty() { continue; }
-
-                // 3. Extract the Stream Key (Source IP + Source Port)
-                // to handle split messages cleanly across different players
-                let mut stream_key = [0u8; 6];
-                if let Some(NetHeaders::Ipv4(ipv4, _extensions)) = headers.net {
-                    stream_key[0..4].copy_from_slice(&ipv4.source);
-                }
-                stream_key[4..6].copy_from_slice(&src_port.to_be_bytes());
-
-                inject_system_message(&app, SystemLogLevel::Debug, "Sniffer", format!("✅ PASSED: Extracted {} bytes of game data", payload.len()));
-                feed_watchdog();
-
-                // Pass clean data to the game parser
-                process_game_stream(app, &mut streams, stream_key, payload, src_port);
             }
         }
     }

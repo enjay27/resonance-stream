@@ -5,6 +5,17 @@ use crossbeam_channel::Sender;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+pub struct AppState {
+    pub batch_data: Arc<(Mutex<(Vec<MessageRequest>, u64)>, Condvar)>,
+    pub chat_history: Mutex<IndexMap<u64, ChatMessage>>,
+    pub system_history: Mutex<VecDeque<SystemMessage>>,
+    pub next_pid: AtomicU64,
+    pub nickname_cache: Mutex<HashMap<String, String>>,
+    pub translator_tx: Mutex<Option<Sender<crate::services::translator::TranslationJob>>>,
+    pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
+    pub sniffer_tx: Mutex<Option<Sender<()>>>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
@@ -42,16 +53,6 @@ pub enum SystemLogLevel {
     Success, // Dictionary updated, Model ready
     Debug,   // high-frequency, technical events
     Trace,   // extremely-frequency
-}
-
-pub struct AppState {
-    pub batch_data: Arc<(Mutex<(Vec<MessageRequest>, u64)>, Condvar)>,
-    pub chat_history: Mutex<IndexMap<u64, ChatMessage>>,
-    pub system_history: Mutex<VecDeque<SystemMessage>>,
-    pub next_pid: AtomicU64,
-    pub nickname_cache: Mutex<HashMap<String, String>>,
-    pub translator_tx: Mutex<Option<Sender<crate::services::translator::TranslationJob>>>,
-    pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
 }
 
 #[derive(Serialize)]

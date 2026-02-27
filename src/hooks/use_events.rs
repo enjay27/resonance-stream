@@ -17,7 +17,14 @@ pub async fn setup_event_listeners(signals: AppSignals) {
         if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
             if let Ok(mut packet) = serde_json::from_value::<ChatMessage>(ev["payload"].clone()) {
                 // Handle Stickers/Emojis
-                if packet.message.starts_with("emojiPic=") { packet.message = "스티커 전송".to_string(); }
+                if packet.message.starts_with("emojiPic=") {
+                    packet.message = "스티커 전송".to_string();
+                    packet.translated = None;
+                }
+                if packet.message.starts_with("<sprite=") {
+                    packet.message = "이모지 전송".to_string();
+                    packet.translated = None;
+                }
 
                 signals.set_chat_log.update(|log| {
                     let limit = signals.chat_limit.get_untracked();

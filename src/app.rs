@@ -277,10 +277,15 @@ pub fn App() -> impl IntoView {
                             // Hydrate GAME History
                             if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
                                 if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatMessage>>(res) {
-                                    let sanitized_vec: Vec<(u64, RwSignal<ChatMessage>)> = vec.into_iter().map(|mut p| {
+                                    let sanitized_vec: Vec<(u64, RwSignal<ChatMessage>)> = vec.clone().into_iter().map(|mut p| {
                                         if p.message.starts_with("emojiPic=") { p.message = "스티커 전송".to_string(); } else if p.message.contains("<sprite=") { p.message = "이모지 전송".to_string(); }
                                         (p.pid, RwSignal::new(p))
                                     }).collect();
+                                    let sanitized_vec: Vec<(u64, RwSignal<ChatMessage>)> = vec.clone().into_iter().map(|mut p| {
+                                        if p.message.starts_with("emojiPic=") { p.message = "이모지 전송".to_string(); } else if p.message.contains("<sprite=") { p.message = "이모지 전송".to_string(); }
+                                        (p.pid, RwSignal::new(p))
+                                    }).collect();
+
                                     set_chat_log.set(sanitized_vec.into_iter().collect());
                                 }
                             }

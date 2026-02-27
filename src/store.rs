@@ -78,6 +78,10 @@ pub struct AppSignals {
     pub set_hide_original_in_compact: WriteSignal<bool>,
     pub network_interface: ReadSignal<String>,
     pub set_network_interface: WriteSignal<String>,
+    pub sniffer_state: ReadSignal<String>,
+    pub set_sniffer_state: WriteSignal<String>,
+    pub sniffer_error: ReadSignal<String>,
+    pub set_sniffer_error: WriteSignal<String>,
 }
 
 #[derive(Copy, Clone)]

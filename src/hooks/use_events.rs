@@ -1,7 +1,7 @@
 use leptos::logging::log;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
-use crate::types::{ChatMessage, SystemMessage};
+use crate::types::{ChatMessage, SnifferStatePayload, SystemMessage};
 use crate::utils::is_japanese;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -12,10 +12,29 @@ pub async fn clear_backend_history() {
 }
 
 pub async fn setup_event_listeners(signals: AppSignals) {
-    // PACKET LISTENER: Handles incoming Blue Protocol chat
-    let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+    // 1. Create the closures using our new helper functions
+    let packet_closure = create_packet_handler(signals);
+    let system_closure = create_system_handler(signals);
+    let sniffer_state_closure = create_sniffer_state_handler(signals);
+
+    // 2. Register all listeners
+    listen("packet-event", &packet_closure).await;
+    listen("system-event", &system_closure).await;
+    listen("sniffer-state", &sniffer_state_closure).await;
+
+    // 3. Prevent memory leaks / keep closures alive
+    packet_closure.forget();
+    system_closure.forget();
+    sniffer_state_closure.forget();
+}
+
+// --- EXTRACTED HANDLER FUNCTIONS ---
+
+fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
         if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
             if let Ok(mut packet) = serde_json::from_value::<ChatMessage>(ev["payload"].clone()) {
+
                 // Handle Stickers/Emojis
                 if packet.message.starts_with("emojiPic=") {
                     packet.message = "스티커 전송".to_string();
@@ -64,8 +83,8 @@ pub async fn setup_event_listeners(signals: AppSignals) {
                     // Request nickname-only romanization
                     spawn_local(async move {
                         let _ = invoke("translate_nickname", serde_wasm_bindgen::to_value(&serde_json::json!({
-                                    "pid": pid, "nickname": nickname
-                                })).unwrap()).await;
+                            "pid": pid, "nickname": nickname
+                        })).unwrap()).await;
                     });
                 }
 
@@ -81,10 +100,11 @@ pub async fn setup_event_listeners(signals: AppSignals) {
                 }
             }
         }
-    }) as Box<dyn FnMut(JsValue)>);
+    }) as Box<dyn FnMut(JsValue)>)
+}
 
-    // SYSTEM LISTENER: Handles app logs
-    let system_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
         if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
             if let Ok(packet) = serde_json::from_value::<SystemMessage>(ev["payload"].clone()) {
                 signals.set_system_log.update(|log| {
@@ -95,11 +115,20 @@ pub async fn setup_event_listeners(signals: AppSignals) {
                 });
             }
         }
-    }) as Box<dyn FnMut(JsValue)>);
+    }) as Box<dyn FnMut(JsValue)>)
+}
 
-    listen("packet-event", &packet_closure).await;
-    listen("system-event", &system_closure).await;
+fn create_sniffer_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
+        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+            if let Ok(payload) = serde_json::from_value::<SnifferStatePayload>(ev["payload"].clone()) {
+                signals.set_sniffer_state.set(payload.state.clone());
 
-    packet_closure.forget();
-    system_closure.forget();
+                // If it's an error, save the message so the user can click the badge to read it
+                if payload.state == "Error" {
+                    signals.set_sniffer_error.set(payload.message);
+                }
+            }
+        }
+    }) as Box<dyn FnMut(JsValue)>)
 }

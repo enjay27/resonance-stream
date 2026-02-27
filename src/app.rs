@@ -62,6 +62,9 @@ pub fn App() -> impl IntoView {
     let (hide_original_in_compact, set_hide_original_in_compact) = signal(false);
     let (network_interface, set_network_interface) = signal("".to_string());
 
+    let (sniffer_state, set_sniffer_state) = signal("Off".to_string());
+    let (sniffer_error, set_sniffer_error) = signal("".to_string());
+
     let signals = AppSignals {
         init_done, set_init_done,
         use_translation, set_use_translation,
@@ -100,6 +103,8 @@ pub fn App() -> impl IntoView {
         hide_original_in_compact,
         set_hide_original_in_compact,
         network_interface, set_network_interface,
+        sniffer_state, set_sniffer_state,
+        sniffer_error, set_sniffer_error,
     };
 
     provide_context(signals);

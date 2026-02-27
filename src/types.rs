@@ -75,3 +75,9 @@ pub struct NetworkInterface {
     pub name: String,
     pub ip: String,
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SnifferStatePayload {
+    pub state: String,   // "Starting", "Firewall", "Binding", "Active", "Error", "Off"
+    pub message: String, // Context or Error message
+}

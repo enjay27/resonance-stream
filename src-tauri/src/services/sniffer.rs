@@ -1,5 +1,5 @@
 use crate::packet_buffer::PacketBuffer;
-use crate::{get_model_path, inject_system_message, store_and_emit, NetworkInterface};
+use crate::{get_model_path, inject_system_message, store_and_emit, NetworkInterface, SnifferStatePayload};
 use lazy_static::lazy_static;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -41,8 +41,6 @@ lazy_static! {
 }
 
 // --- GLOBAL STATE ---
-static IS_SNIFFER_RUNNING: AtomicBool = AtomicBool::new(false);
-
 // Watchdog Timer (Last time we saw a packet)
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
 
@@ -121,6 +119,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
 
     thread::spawn(move || {
         inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "Engine Active");
+        emit_sniffer_state(&app_handle, "Starting", "Engine Active");
 
         if config.log_level.to_lowercase() == "debug" || config.log_level.to_lowercase() == "info" {
             if let Ok(network_interfaces) = list_afinet_netifas() {
@@ -147,6 +146,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
             match find_game_interface_ip() {
                 Some(ip) => {
                     inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", format!("Auto-Targeting Network Interface: {}", ip));
+                    emit_sniffer_state(&app_handle, "Binding", &format!("Auto-Targeting Network Interface: {}", ip));
                     ip
                 },
                 None => {
@@ -168,6 +168,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
         }
 
         inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "Raw Socket active. Listening for game traffic...");
+        emit_sniffer_state(&app_handle, "Active", "Listening for game traffic...");
 
         let mut buf = [0u8; 65535];
         let uninit_buf = unsafe {
@@ -234,6 +235,7 @@ fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, Strin
     if let Err(e) = socket.bind(&address.into()) {
         let msg = format!("BIND_FAILED: Could not bind to interface {:?}. ({:?})", local_ip, e);
         inject_system_message(app, SystemLogLevel::Error, "Sniffer", &msg);
+        emit_sniffer_state(app, "Error", &msg);
         return Err(msg);
     }
 
@@ -297,6 +299,7 @@ pub fn ensure_firewall_rule(app: &AppHandle) {
     if let Ok(exe_path) = env::current_exe() {
         if let Some(path_str) = exe_path.to_str() {
             inject_system_message(app, SystemLogLevel::Info, "Sniffer", "Configuring Windows Firewall...");
+            emit_sniffer_state(app, "Firewall", "Configuring Windows Firewall...");
 
             let _ = Command::new("netsh")
                 .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}", RULE_NAME)])
@@ -516,4 +519,11 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
         }
     }
     interfaces
+}
+
+pub fn emit_sniffer_state(app: &tauri::AppHandle, state: &str, message: &str) {
+    let _ = app.emit("sniffer-state", SnifferStatePayload {
+        state: state.to_string(),
+        message: message.to_string(),
+    });
 }

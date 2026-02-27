@@ -11,7 +11,7 @@ use tauri_plugin_shell::ShellExt;
 
 // --- 1. Define Constants for your GGUF Model ---
 pub const MODEL_FOLDER: &str = "Qwen3-Blue-Protocol-Translator-JA-KO";
-pub const MODEL_FILENAME: &str = "qwen3-1.7b-blueprotocol-ja2ko-q4_k_m.gguf";
+pub const MODEL_FILENAME: &str = "qwen3-4b-blueprotocol-ja2ko-q4_k_m.gguf";
 // Hugging Face direct download link (using /resolve/main/)
 pub const MODEL_URL: &str = "https://huggingface.co/enjay27/Qwen3-Blue-Protocol-Translator-JA-KO/resolve/main/qwen3-1.7b-blueprotocol-ja2ko-q4_k_m.gguf";
 pub const AI_SERVER_FOLDER: &str = "ai-server";

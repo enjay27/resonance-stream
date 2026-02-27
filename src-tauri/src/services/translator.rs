@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 use crate::io::save_to_data_factory;
 use crate::protocol::types::{ChatMessage, SystemLogLevel};
 use crate::services::processor::{load_dictionary, postprocess_text, preprocess_text};
-use crate::{inject_system_message, store_and_emit};
+use crate::{inject_system_message, store_and_emit, AI_SERVER_FILENAME, AI_SERVER_FOLDER};
 
 pub const AI_SERVER_URL: &str = "http://127.0.0.1:8080";
 
@@ -35,11 +35,21 @@ struct TranslationUpdate {
 }
 
 pub fn translate_text(client: &Client, jp_text: &str) -> String {
-    let system_prompt = "Blue Protocol Star Resonance 일본어 채팅 로그를 자연스러운 한국어 구어체로 번역하세요.\n\
-        직역을 피하고, 원본에 없는 주어/목적어를 임의로 추가하지 마십시오.\n\
-        클래스 및 파티 모집 약어(T, H, D, 狂, 響, NM, EH, M16 등)는 일본 서버 컨텍스트에 맞게 그대로 유지하십시오.\n\
-        특히 게임 고유 용어 및 은어(예: ファスト -> 속공, 器用 -> 숙련, 完凸 -> 풀돌, 消化 -> 숙제)는\n\
-        한국 유저들이 실제 사용하는 로컬라이징 용어로 엄격하게 번역하십시오.";
+    let system_prompt =
+        "당신은 '블루 프로토콜: 스타 레조넌스' 일본 서버 전문 번역 엔진입니다.
+        사용자가 입력하는 일본어 채팅 로그를 다음 규칙에 따라 한국어 구어체로 번역하십시오.
+
+        1. **출력 형식**: 번역 결과만 출력하십시오. 설명, 인사, 따옴표 등 부가적인 텍스트는 절대 포함하지 마십시오.
+        2. **로컬라이징 용어**: 한국 유저들의 실제 게임 용어를 엄격히 사용하십시오.
+           - 火力 -> 딜러 / ファスト -> 속공 / 器用 -> 숙련 / リキャスト -> 쿨타임
+           - 完凸 -> 풀돌 / 消化 -> 숙제 / 寄生 -> 버스
+        3. **약어 유지**: 다음 약어는 일본 서버 컨텍스트 유지를 위해 번역하지 않고 그대로 둡니다.
+           - 클래스 및 역할: T, H, D, DPS
+           - 콘텐츠 및 모집: NM, EH, M16, EX, k
+        4. **번역 스타일**:
+           - 문어체가 아닌 자연스러운 한국어 구어체(채팅 스타일)를 사용하십시오.
+           - 원문에 없는 주어/목적어를 임의로 추측하여 추가하지 마십시오.
+           - 직역보다는 게임 내 상황에 맞는 의역을 우선하되, 원문의 의도를 해치지 마십시오.";
 
     let payload = json!({
         "messages": [
@@ -93,7 +103,8 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             .app_data_dir()
             .unwrap()
             .join("bin")
-            .join("llama-server.exe");
+            .join(AI_SERVER_FOLDER)
+            .join(AI_SERVER_FILENAME);
 
         // Launch the Vulkan Server Process
         let mut server_cmd = Command::new(server_path);
@@ -117,6 +128,16 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             _ => "1024",
         };
         server_cmd.arg("-c").arg(n_ctx_size);
+        server_cmd.arg("--parallel").arg("1");  // Prevents terminal spam
+        server_cmd.arg("--cont-batching");  // Prevents terminal spam
+        server_cmd.arg("--no-mmap");        // Prevents terminal spam
+        // server_cmd.arg("--embedding-off"); // You don't need embeddings for simple translation
+        // server_cmd.arg("--flash-attn");    // Use Flash Attention (huge boost for RTX 4080 Super)
+        server_cmd.arg("--mlock");         // Pins the model in RAM/VRAM to prevent stuttering in-game
+
+        // --- Batching for speed ---
+        server_cmd.arg("-b").arg("512");   // Batch size
+        server_cmd.arg("-ub").arg("512");  // Physical batch size
 
         inject_system_message(&app, SystemLogLevel::Info, "Translator", format!("Performance Tier: {} (Context: {})", config.tier.to_uppercase(), n_ctx_size));
 
@@ -264,7 +285,7 @@ mod tests {
         }
 
         // 4. Run the test translation using SSE logic
-        let test_jp = "今貯めてた週クエストやってて忙しい";
+        let test_jp = "116　偵察右　銀なぽ";
         println!("-----------------------------------");
         println!("[Input JA]: {}", test_jp);
 

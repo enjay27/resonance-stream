@@ -1,4 +1,4 @@
 pub mod sniffer;
 pub mod downloader;
-mod translator;
+pub(crate) mod translator;
 mod processor;

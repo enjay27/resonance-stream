@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager}; // Import Manager trait
+use tauri::{AppHandle, Manager, State};
+use crate::{inject_system_message, AppState, SystemLogLevel};
+// Import Manager trait
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AppConfig {
@@ -78,9 +80,25 @@ pub fn load_config(app: AppHandle) -> AppConfig {
 }
 
 #[tauri::command]
-pub fn save_config(app: AppHandle, config: AppConfig) {
+pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) {
+    let old_config = load_config(app.clone());
+
     let path = get_config_path(&app);
+
     if let Ok(json) = serde_json::to_string_pretty(&config) {
         let _ = fs::write(path, json);
+    }
+
+    // --- MANAGE THE AI WORKER THREAD ---
+    if !old_config.use_translation && config.use_translation {
+        // Turned ON: Start the server and store the Sender
+        let model_path = crate::get_model_path(&app);
+        let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
+        *state.translator_tx.lock().unwrap() = Some(tx);
+
+    } else if old_config.use_translation && !config.use_translation {
+        // Turned OFF: Drop the Sender (Kills the thread and frees VRAM)
+        *state.translator_tx.lock().unwrap() = None;
+        inject_system_message(&app, SystemLogLevel::Info, "Translator", "AI Translation Disabled. Server stopped and VRAM cleared.");
     }
 }

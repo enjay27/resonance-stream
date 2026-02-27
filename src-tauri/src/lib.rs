@@ -57,24 +57,36 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .setup(|app| {
-            let handle = app.handle();
-            inject_system_message(handle, SystemLogLevel::Info, "Backend", "Initializing Resonance Stream...");
+            let handle = app.handle().clone();
+            inject_system_message(&handle, SystemLogLevel::Info, "Backend", "Initializing Resonance Stream...");
 
             let is_admin = is_elevated::is_elevated();
-            inject_system_message(handle, SystemLogLevel::Info, "Backend", format!("Admin Privileges: {}", is_admin));
+            inject_system_message(&handle, SystemLogLevel::Info, "Backend", format!("Admin Privileges: {}", is_admin));
 
             if !is_admin {
-                inject_system_message(handle, SystemLogLevel::Warning, "Backend", "Sniffer may fail without Admin rights.");
+                inject_system_message(&handle, SystemLogLevel::Warning, "Backend", "Sniffer may fail without Admin rights.");
             }
 
+            // --- CHECK CONFIG AND START AI IF NEEDED ---
+            let config = load_config(handle.clone());
+            let initial_tx = if config.use_translation {
+                let model_path = crate::get_model_path(&handle);
+                Some(crate::services::translator::start_translator_worker(handle.clone(), model_path))
+            } else {
+                None
+            };
+
+            // Initialize State INSIDE setup so we have access to the App context
+            app.manage(AppState {
+                batch_data: Arc::new((Mutex::new((vec![], 0)), Default::default())),
+                chat_history: Mutex::new(IndexMap::new()),
+                system_history: Mutex::new(VecDeque::with_capacity(200)),
+                next_pid: 1.into(),
+                nickname_cache: Mutex::new(std::collections::HashMap::new()),
+                translator_tx: Mutex::new(initial_tx), // <-- Store the Thread Sender here
+            });
+
             Ok(())
-        })
-        .manage(AppState {
-            batch_data: Arc::new((Mutex::new((vec![], 0)), Default::default())),
-            chat_history: Mutex::new(IndexMap::new()),
-            system_history: Mutex::new(VecDeque::with_capacity(200)),
-            next_pid: 1.into(),
-            nickname_cache: Mutex::new(std::collections::HashMap::new()),
         })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())

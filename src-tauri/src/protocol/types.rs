@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::AtomicU64;
+use crossbeam_channel::Sender;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +50,7 @@ pub struct AppState {
     pub system_history: Mutex<VecDeque<SystemMessage>>,
     pub next_pid: AtomicU64,
     pub nickname_cache: Mutex<HashMap<String, String>>,
+    pub translator_tx: Mutex<Option<Sender<crate::services::translator::TranslationJob>>>,
 }
 
 #[derive(Serialize)]

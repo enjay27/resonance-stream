@@ -65,7 +65,7 @@ pub fn SetupWizard(finalize: Callback<()>, start_download: Callback<web_sys::Mou
                         2 => view! {
                             <div class="space-y-4 text-center">
                                 <h2 class="text-lg font-bold">"AI 모델 설치"</h2>
-                                <p class="text-xs opacity-60">"번역을 위해 약 1GB의 AI 모델 파일 다운로드가 필요합니다."</p>
+                                <p class="text-xs opacity-60">"번역을 위해 약 2GB의 AI 모델 파일 다운로드가 필요합니다."</p>
                                 <Show when=move || signals.downloading.get() fallback=move || view! {
                                     <button class="btn btn-success btn-block" on:click=move |ev| start_download.run(ev)>"다운로드 시작"</button>
                                 }>

@@ -84,6 +84,8 @@ pub struct AppSignals {
     pub set_sniffer_error: WriteSignal<String>,
     pub click_through: ReadSignal<bool>,
     pub set_click_through: WriteSignal<bool>,
+    pub drag_to_scroll: ReadSignal<bool>,
+    pub set_drag_to_scroll: WriteSignal<bool>,
 }
 
 #[derive(Copy, Clone)]

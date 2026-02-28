@@ -62,6 +62,7 @@ pub fn App() -> impl IntoView {
     let (hide_original_in_compact, set_hide_original_in_compact) = signal(false);
     let (network_interface, set_network_interface) = signal("".to_string());
     let (click_through, set_click_through) = signal(false);
+    let (drag_to_scroll, set_drag_to_scroll) = signal(false);
 
     let (sniffer_state, set_sniffer_state) = signal("Off".to_string());
     let (sniffer_error, set_sniffer_error) = signal("".to_string());
@@ -105,6 +106,7 @@ pub fn App() -> impl IntoView {
         set_hide_original_in_compact,
         network_interface, set_network_interface,
         click_through, set_click_through,
+        drag_to_scroll, set_drag_to_scroll,
         sniffer_state, set_sniffer_state,
         sniffer_error, set_sniffer_error,
     };
@@ -161,6 +163,7 @@ pub fn App() -> impl IntoView {
             hide_original_in_compact: hide_original_in_compact.get_untracked(),
             network_interface: network_interface.get_untracked(),
             click_through: click_through.get_untracked(),
+            drag_to_scroll: drag_to_scroll.get_untracked(),
         };
 
         async move {

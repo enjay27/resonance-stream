@@ -271,6 +271,7 @@ pub fn Settings() -> impl IntoView {
                         <section class="space-y-4">
                             <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"Appearance"</h3>
 
+                            // Click Through Mode
                             <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
                                 <label class="label cursor-pointer p-0">
                                     <div class="flex flex-col">
@@ -288,6 +289,24 @@ pub fn Settings() -> impl IntoView {
                                             spawn_local(async move {
                                                 let _ = invoke("set_click_through", serde_wasm_bindgen::to_value(&serde_json::json!({ "enabled": enabled })).unwrap()).await;
                                             });
+                                        }
+                                    />
+                                </label>
+                            </div>
+
+                            // --- DRAG TO SCROLL TOGGLE ---
+                            <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
+                                <label class="label cursor-pointer p-0">
+                                    <div class="flex flex-col">
+                                        <span class="label-text text-xs font-bold text-base-content/80">"드래그 스크롤 (Drag to Scroll)"</span>
+                                        <span class="text-[9px] text-base-content/60 mt-1">"마우스로 채팅창 배경을 드래그하여 위아래로 스크롤합니다."</span>
+                                    </div>
+                                    <input type="checkbox" class="toggle toggle-success toggle-sm"
+                                        prop:checked=move || signals.drag_to_scroll.get()
+                                        on:change=move |ev| {
+                                            let enabled = event_target_checked(&ev);
+                                            signals.set_drag_to_scroll.set(enabled);
+                                            actions.save_config.dispatch(());
                                         }
                                     />
                                 </label>

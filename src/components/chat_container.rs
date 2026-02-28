@@ -5,7 +5,7 @@ use crate::utils::format_time;
 use leptos::html;
 use leptos::leptos_dom::log;
 use leptos::prelude::*;
-use web_sys::HtmlDivElement;
+use web_sys::{HtmlDivElement, MouseEvent};
 
 #[component]
 pub fn ChatContainer() -> impl IntoView {
@@ -14,6 +14,11 @@ pub fn ChatContainer() -> impl IntoView {
 
     // Start by only rendering the last 50 messages to keep the DOM blazing fast
     let (display_limit, set_display_limit) = signal(50);
+
+    // DRAG TO SCROLL STATE ---
+    let (is_dragging, set_is_dragging) = signal(false);
+    let (start_y, set_start_y) = signal(0);
+    let (saved_scroll_top, set_saved_scroll_top) = signal(0);
 
     Effect::new(move |_| {
         signals.active_tab.track();
@@ -53,7 +58,7 @@ pub fn ChatContainer() -> impl IntoView {
             }).collect()
         };
 
-        // --- NEW: SLICE THE LIST (PAGING) ---
+        // --- SLICE THE LIST (PAGING) ---
         let current_limit = display_limit.get();
         let total = full_list.len();
 
@@ -116,17 +121,72 @@ pub fn ChatContainer() -> impl IntoView {
         }
     });
 
+    // --- DRAG EVENT HANDLERS ---
+    let on_mouse_down = move |ev: MouseEvent| {
+        if !signals.drag_to_scroll.get() { return; }
+        if let Some(el) = chat_container_ref.get() {
+            set_is_dragging.set(true);
+            set_start_y.set(ev.client_y());
+            set_saved_scroll_top.set(el.scroll_top());
+
+            // Instantly clear any text selection that might have accidentally started
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(selection)) = window.get_selection() {
+                    let _ = selection.remove_all_ranges();
+                }
+            }
+        }
+    };
+
+    let on_mouse_move = move |ev: MouseEvent| {
+        if is_dragging.get() && signals.drag_to_scroll.get() {
+            // STOP the browser's native text selection and boundary-scroll physics!
+            ev.prevent_default();
+
+            if let Some(el) = chat_container_ref.get() {
+                let dy = ev.client_y() - start_y.get();
+                el.set_scroll_top(saved_scroll_top.get() - dy);
+            }
+        }
+    };
+
+    let on_mouse_up_or_leave = move |_| {
+        set_is_dragging.set(false);
+    };
+
     view! {
         <div class="relative flex-1 min-h-0 flex flex-col transition-colors duration-300">
-            <div class="flex-1 overflow-y-auto custom-scrollbar p-2 min-h-0"
+            <div
+                class=move || {
+                    let base = "flex-1 overflow-y-auto custom-scrollbar p-2 min-h-0";
+
+                    // If drag-to-scroll is off, return normal classes
+                    if !signals.drag_to_scroll.get() {
+                        return base.to_string();
+                    }
+
+                    // If drag-to-scroll is ON, ALWAYS apply 'select-none'
+                    // so the browser never attempts to highlight text
+                    if is_dragging.get() {
+                        format!("{} cursor-grabbing select-none", base)
+                    } else {
+                        format!("{} cursor-grab select-none", base)
+                    }
+                }
                 style="overflow-anchor: auto;"
                 node_ref=chat_container_ref
+
+                on:mousedown=on_mouse_down
+                on:mousemove=on_mouse_move
+                on:mouseup=on_mouse_up_or_leave
+                on:mouseleave=on_mouse_up_or_leave
+
                 on:scroll=move |ev| {
                     let el = event_target::<HtmlDivElement>(&ev);
                     let scroll_top = el.scroll_top();
                     let at_bottom = el.scroll_height() - scroll_top - el.client_height() < 15;
 
-                    // --- NEW: LOAD OLDER MESSAGES IF SCROLLED TO TOP ---
+                    // --- LOAD OLDER MESSAGES IF SCROLLED TO TOP ---
                     if scroll_top < 50 {
                         set_display_limit.update(|limit| *limit += 50);
                     }

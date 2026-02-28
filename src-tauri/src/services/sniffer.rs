@@ -62,6 +62,7 @@ pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State
     let mut tx_lock = state.sniffer_tx.lock().unwrap();
     if tx_lock.is_some() {
         inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Sniffer restart blocked: already active.");
+        emit_sniffer_state(&app, "Active", "Listening for game traffic...");
         return;
     }
     let tx = start_sniffer_worker(app.clone());

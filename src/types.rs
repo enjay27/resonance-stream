@@ -50,6 +50,8 @@ pub struct AppConfig {
     pub network_interface: String,
     #[serde(default)]
     pub click_through: bool,
+    #[serde(default)]
+    pub drag_to_scroll: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

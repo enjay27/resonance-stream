@@ -63,6 +63,12 @@ pub struct TauriEvent {
     pub payload: ProgressPayload 
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TranslationResult {
+    pub pid: u64,
+    pub translated: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProgressPayload {
     #[serde(rename = "current_file")] // Match backend field name

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::io::save_to_data_factory;
 use crate::protocol::types::{ChatMessage, SystemLogLevel};
@@ -201,12 +201,26 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                     let _ = df_tx.send(crate::io::DataFactoryJob {
                         pid: chat.pid,
                         original: chat.message.clone(),
-                        translated: Some(final_str.clone()), // <--- Wrapped in Some()
+                        translated: Some(final_str.clone()),
                     });
                 }
                 // --------------------------------
 
-                store_and_emit(&app, chat);
+                // 1. Update Backend History so it's correct if the UI reloads
+                {
+                    let state = app.state::<crate::AppState>();
+                    let mut history = state.chat_history.lock().unwrap();
+                    if let Some(existing_chat) = history.get_mut(&chat.pid) {
+                        existing_chat.translated = Some(final_str.clone());
+                    }
+                }
+
+                // 2. Emit only the translated result back to the UI
+                let result = crate::protocol::types::TranslationResult {
+                    pid: chat.pid,
+                    translated: final_str.clone(),
+                };
+                let _ = app.emit("translation-event", &result);
             }
         }
     });

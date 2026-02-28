@@ -1,7 +1,7 @@
 use leptos::logging::log;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
-use crate::types::{ChatMessage, SnifferStatePayload, SystemMessage};
+use crate::types::{ChatMessage, SnifferStatePayload, SystemMessage, TranslationResult};
 use crate::utils::is_japanese;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -16,16 +16,19 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     let packet_closure = create_packet_handler(signals);
     let system_closure = create_system_handler(signals);
     let sniffer_state_closure = create_sniffer_state_handler(signals);
+    let translation_closure = create_translation_handler(signals);
 
     // 2. Register all listeners
     listen("packet-event", &packet_closure).await;
     listen("system-event", &system_closure).await;
     listen("sniffer-state", &sniffer_state_closure).await;
+    listen("translation-event", &translation_closure).await;
 
     // 3. Prevent memory leaks / keep closures alive
     packet_closure.forget();
     system_closure.forget();
     sniffer_state_closure.forget();
+    translation_closure.forget();
 }
 
 // --- EXTRACTED HANDLER FUNCTIONS ---
@@ -70,34 +73,26 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
                 if is_visible && !signals.is_at_bottom.get_untracked() {
                     signals.set_unread_count.update(|c| *c += 1);
                 }
+            }
+        }
+    }) as Box<dyn FnMut(JsValue)>)
+}
 
-                let pid = packet.pid;
-                let nickname = packet.nickname.clone();
+fn create_translation_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
+        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+            if let Ok(payload) = serde_json::from_value::<TranslationResult>(ev["payload"].clone()) {
 
-                // NICKNAME STRATEGY: Check Cache -> Request if Missing
-                let cached_nickname = signals.name_cache.with(|cache| cache.get(&nickname).cloned());
+                // Find the existing message by PID and update its signal
+                // Leptos will instantly re-render ONLY this specific ChatRow!
+                signals.set_chat_log.update(|log| {
+                    if let Some(chat_rw) = log.get(&payload.pid) {
+                        chat_rw.update(|c| {
+                            c.translated = Some(payload.translated);
+                        });
+                    }
+                });
 
-                if let Some(romaji) = cached_nickname {
-                    packet.nickname_romaji = Some(romaji);
-                } else if is_japanese(&nickname) {
-                    // Request nickname-only romanization
-                    spawn_local(async move {
-                        let _ = invoke("translate_nickname", serde_wasm_bindgen::to_value(&serde_json::json!({
-                            "pid": pid, "nickname": nickname
-                        })).unwrap()).await;
-                    });
-                }
-
-                // Auto-Translate Logic
-                if is_japanese(&packet.message) && signals.use_translation.get_untracked() {
-                    let pid = packet.pid;
-                    let msg = packet.message.clone();
-                    spawn_local(async move {
-                        let _ = invoke("translate_message", serde_wasm_bindgen::to_value(&serde_json::json!({
-                            "text": msg, "pid": pid, "nickname": None::<String>
-                        })).unwrap()).await;
-                    });
-                }
             }
         }
     }) as Box<dyn FnMut(JsValue)>)

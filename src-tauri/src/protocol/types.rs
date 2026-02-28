@@ -164,3 +164,8 @@ pub struct SnifferStatePayload {
     pub state: String,   // "Starting", "Firewall", "Binding", "Active", "Error", "Off"
     pub message: String, // Context or Error message
 }
+
+pub struct TrayMenuState {
+    pub click_through: tauri::menu::MenuItem<tauri::Wry>,
+    pub always_on_top: tauri::menu::MenuItem<tauri::Wry>,
+}

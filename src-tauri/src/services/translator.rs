@@ -115,11 +115,9 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         server_cmd.arg("--log-disable");
 
         if config.compute_mode.to_lowercase() == "gpu" {
-            // For a GTX 1060, 10 to 15 layers is usually the sweet spot to leave VRAM for the game.
-            // Ideally, tie this to your config.tier!
             let gpu_layers = match config.tier.to_lowercase().as_str() {
-                "low" => "10",      // Safe for 3GB 1060
-                "middle" => "15",   // Safe for 6GB 1060
+                "low" => "10",
+                "middle" => "15",
                 "high" => "25",
                 "extreme" => "99",
                 _ => "15",
@@ -131,30 +129,26 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             inject_system_message(&app, SystemLogLevel::Info, "Translator", "Compute Mode: CPU");
         }
 
-        // --- Extreme Low-End Memory Optimizations ---
-
-        // 1. Minimum context for 140 char limits
         server_cmd.arg("-c").arg("1024");
-
-        // 2. Tiny batches
         server_cmd.arg("-b").arg("64");
         server_cmd.arg("-ub").arg("64");
-
-        // 3. CPU Thread limiting (Crucial when GPU offload is partial)
-        server_cmd.arg("-t").arg("4"); // Prevents the translation from freezing the game
-
-        // 4. Safe memory handling (REMOVED --mlock)
+        server_cmd.arg("-t").arg("4");
         server_cmd.arg("--parallel").arg("1");
         server_cmd.arg("--cont-batching");
         server_cmd.arg("--no-mmap");
 
         inject_system_message(&app, SystemLogLevel::Info, "Translator", format!("Performance Tier: {}", config.tier.to_uppercase()));
 
-        // 0x08000000 = CREATE_NO_WINDOW (Hides the server terminal from the user)
+        // Log the final command construction for deep debugging
+        inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("Server Launch Command: {:?}", server_cmd));
+
         server_cmd.creation_flags(0x08000000);
 
         let server_process = match server_cmd.spawn() {
-            Ok(child) => child,
+            Ok(child) => {
+                inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("Server process successfully spawned with OS PID: {}", child.id()));
+                child
+            },
             Err(e) => {
                 inject_system_message(&app, SystemLogLevel::Error, "Translator", format!("Failed to start llama-server.exe. Is it in the root folder? ({})", e));
                 return;
@@ -171,8 +165,10 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
         inject_system_message(&app, SystemLogLevel::Success, "Translator", "AI Server running! Ready for translation.");
 
-        // The exact same Watchdog Batching loop as before!
+        // Watchdog Batching loop
         while let Ok(first_job) = rx.recv() {
+            inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("Dequeued translation job for PID {}", first_job.chat.pid));
+
             let mut batch = vec![first_job.chat];
             let start_time = Instant::now();
             let timeout = Duration::from_millis(1000);
@@ -181,7 +177,10 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 let elapsed = start_time.elapsed();
                 if elapsed >= timeout { break; }
                 match rx.recv_timeout(timeout - elapsed) {
-                    Ok(job) => batch.push(job.chat),
+                    Ok(job) => {
+                        inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("Batched additional job PID {}", job.chat.pid));
+                        batch.push(job.chat);
+                    },
                     Err(_) => break,
                 }
             }
@@ -189,9 +188,24 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("Translating batch of {} messages sequentially...", batch.len()));
 
             for mut chat in batch {
+                // Log 1: The original message
+                inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("[PID {}] Input JA: {}", chat.pid, chat.message));
+
                 let shield = preprocess_text(&chat.message, &custom_dict, chat.nickname_romaji.as_deref(), Some(&chat.nickname));
+
+                // Log 2: The masked dictionary replacements
+                inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("[PID {}] Preprocessed (Masked): {}", chat.pid, shield.masked_text));
+
+                let req_start = Instant::now();
                 let raw_translation = translate_text(&client, &shield.masked_text);
+
+                // Log 3: The raw, un-postprocessed response from the AI and exactly how long it took
+                inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("[PID {}] Raw AI Response ({}ms): {}", chat.pid, req_start.elapsed().as_millis(), raw_translation));
+
                 let final_str = postprocess_text(&raw_translation, &shield);
+
+                // Log 4: The final Korean text
+                inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("[PID {}] Final Output KO: {}", chat.pid, final_str));
 
                 chat.translated = Some(final_str.clone());
 
@@ -206,7 +220,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 }
                 // --------------------------------
 
-                // 1. Update Backend History so it's correct if the UI reloads
+                // 1. Update Backend History
                 {
                     let state = app.state::<crate::AppState>();
                     let mut history = state.chat_history.lock().unwrap();
@@ -215,9 +229,9 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                     }
                 }
 
-                // 2. Emit only the translated result back to the UI
+                // 2. Emit the updated result back to the UI
                 let result = crate::protocol::types::TranslationResult {
-                    pid: chat.pid,
+                    pid: chat.pid.clone(),
                     translated: final_str.clone(),
                 };
                 let _ = app.emit("translation-event", &result);
@@ -233,21 +247,26 @@ fn server_health_check(app: &AppHandle) -> bool {
     let mut is_ready = false;
     let start_wait = Instant::now();
 
-    inject_system_message(&app, SystemLogLevel::Info, "Translator", "Waiting for AI Engine to warm up...");
+    inject_system_message(app, SystemLogLevel::Info, "Translator", "Waiting for AI Engine to warm up...");
 
     // Poll the health endpoint for up to 30 seconds
     while start_wait.elapsed().as_secs() < 30 {
+        inject_system_message(app, SystemLogLevel::Trace, "Translator", "Polling http://127.0.0.1:8080/health...");
+
         if let Ok(res) = client.get("http://127.0.0.1:8080/health").send() {
             if res.status().is_success() {
+                inject_system_message(app, SystemLogLevel::Trace, "Translator", format!("Health check passed after {}ms", start_wait.elapsed().as_millis()));
                 is_ready = true;
                 break;
+            } else {
+                inject_system_message(app, SystemLogLevel::Trace, "Translator", format!("Health check returned status: {}", res.status()));
             }
         }
         thread::sleep(Duration::from_millis(1000));
     }
 
     if !is_ready {
-        inject_system_message(&app, SystemLogLevel::Error, "Translator", "AI Engine failed to initialize within 30s.");
+        inject_system_message(app, SystemLogLevel::Error, "Translator", "AI Engine failed to initialize within 30s.");
         return true;
     }
     false

@@ -253,7 +253,7 @@ pub fn Settings() -> impl IntoView {
 
                             <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
                                 <label class="label cursor-pointer p-0">
-                                    <span class="label-text text-xs font-bold text-base-content/80">"컴팩트 모드: 번역 시 원문 숨기기"</span>
+                                    <span class="label-text text-xs font-bold text-base-content/80">"컴팩트 모드에서 번역 시 원문 숨기기"</span>
                                     <input type="checkbox" class="toggle toggle-success toggle-sm"
                                         prop:checked=move || signals.hide_original_in_compact.get()
                                         on:change=move |ev| {
@@ -270,6 +270,28 @@ pub fn Settings() -> impl IntoView {
                         // ==========================================
                         <section class="space-y-4">
                             <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"Appearance"</h3>
+
+                            <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
+                                <label class="label cursor-pointer p-0">
+                                    <div class="flex flex-col">
+                                        <span class="label-text text-xs font-bold text-base-content/80">"클릭 관통 모드 (Click-Through)"</span>
+                                        <span class="text-[9px] text-warning mt-1">"주의: 비활성화 하려면 시스템 트레이(우측 하단 아이콘)를 사용하세요."</span>
+                                    </div>
+                                    <input type="checkbox" class="toggle toggle-success toggle-sm"
+                                        prop:checked=move || signals.click_through.get()
+                                        on:change=move |ev| {
+                                            let enabled = event_target_checked(&ev);
+                                            signals.set_click_through.set(enabled);
+                                            actions.save_config.dispatch(());
+                                            signals.set_show_settings.set(false);
+
+                                            spawn_local(async move {
+                                                let _ = invoke("set_click_through", serde_wasm_bindgen::to_value(&serde_json::json!({ "enabled": enabled })).unwrap()).await;
+                                            });
+                                        }
+                                    />
+                                </label>
+                            </div>
 
                             // Opacity Slider
                             <div class="space-y-2 px-1">

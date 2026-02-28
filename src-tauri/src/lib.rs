@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 use env_logger::fmt::style::{AnsiColor, Color, Style};
 use lazy_static::lazy_static;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri_plugin_shell::ShellExt;
 
 lazy_static! {
@@ -91,6 +93,35 @@ pub fn run() {
                 None
             };
 
+            let toggle_i = MenuItem::with_id(app, "toggle_click_through", "클릭 관통 토글 (Toggle Click-Through)", true, None::<&str>)?;
+            let show_i = MenuItem::with_id(app, "show", "앱 보이기 (Show App)", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "종료 (Quit)", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&toggle_i, &show_i, &quit_i])?;
+
+            let _tray = TrayIconBuilder::new()
+                .tooltip("Resonance Stream")
+                .icon(app.default_window_icon().unwrap().clone()) // Uses icon from tauri.conf.json
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "toggle_click_through" => {
+                            // Tell the frontend to flip the toggle and update the window
+                            let _ = app.emit("tray-toggle-click-through", ());
+                        }
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .build(app)?;
+
             // Initialize State INSIDE setup so we have access to the App context
             app.manage(AppState {
                 batch_data: Arc::new((Mutex::new((vec![], 0)), Default::default())),
@@ -126,7 +157,8 @@ pub fn run() {
             open_app_data_folder,
             export_chat_log,
             open_browser,
-            get_network_interfaces
+            get_network_interfaces,
+            set_click_through
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -289,4 +321,9 @@ fn get_system_history(state: tauri::State<AppState>) -> Vec<SystemMessage> {
     // Change: Returns specialized SystemMessages
     let history = state.system_history.lock().unwrap();
     history.iter().cloned().collect()
+}
+
+#[tauri::command]
+fn set_click_through(window: tauri::Window, enabled: bool) {
+    let _ = window.set_ignore_cursor_events(enabled);
 }

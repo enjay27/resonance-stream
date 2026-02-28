@@ -48,6 +48,8 @@ pub struct AppConfig {
     pub hide_original_in_compact: bool,
     #[serde(default)]
     pub network_interface: String,
+    #[serde(default)]
+    pub click_through: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

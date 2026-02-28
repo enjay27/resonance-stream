@@ -61,6 +61,7 @@ pub fn App() -> impl IntoView {
     let (archive_chat, set_archive_chat) = signal(false);
     let (hide_original_in_compact, set_hide_original_in_compact) = signal(false);
     let (network_interface, set_network_interface) = signal("".to_string());
+    let (click_through, set_click_through) = signal(false);
 
     let (sniffer_state, set_sniffer_state) = signal("Off".to_string());
     let (sniffer_error, set_sniffer_error) = signal("".to_string());
@@ -103,6 +104,7 @@ pub fn App() -> impl IntoView {
         hide_original_in_compact,
         set_hide_original_in_compact,
         network_interface, set_network_interface,
+        click_through, set_click_through,
         sniffer_state, set_sniffer_state,
         sniffer_error, set_sniffer_error,
     };
@@ -158,6 +160,7 @@ pub fn App() -> impl IntoView {
             archive_chat: archive_chat.get_untracked(),
             hide_original_in_compact: hide_original_in_compact.get_untracked(),
             network_interface: network_interface.get_untracked(),
+            click_through: click_through.get_untracked(),
         };
 
         async move {
@@ -226,6 +229,22 @@ pub fn App() -> impl IntoView {
 
     provide_context(actions);
 
+    // --- TRAY ICON LISTENER ---
+    spawn_local(async move {
+        let tray_closure = Closure::wrap(Box::new(move |_: JsValue| {
+            let current = click_through.get_untracked();
+            set_click_through.set(!current);
+            actions.save_config.dispatch(());
+
+            spawn_local(async move {
+                let _ = invoke("set_click_through", serde_wasm_bindgen::to_value(&serde_json::json!({ "enabled": !current })).unwrap()).await;
+            });
+        }) as Box<dyn FnMut(JsValue)>);
+
+        let _ = listen("tray-toggle-click-through", &tray_closure).await;
+        tray_closure.forget();
+    });
+
     // Apply theme to the root element whenever it changes
     Effect::new(move |_| {
         if let Some(window) = web_sys::window() {
@@ -271,6 +290,14 @@ pub fn App() -> impl IntoView {
                         set_archive_chat.set(config.archive_chat);
                         set_hide_original_in_compact.set(config.hide_original_in_compact);
                         set_network_interface.set(config.network_interface);
+                        set_click_through.set(config.click_through);
+
+                        // --- APPLY CLICK THROUGH ON BOOT ---
+                        if config.click_through {
+                            spawn_local(async {
+                                let _ = invoke("set_click_through", serde_wasm_bindgen::to_value(&serde_json::json!({ "enabled": true })).unwrap()).await;
+                            });
+                        }
 
                         let mut safe_op = config.overlay_opacity;
                         if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85

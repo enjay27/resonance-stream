@@ -2,11 +2,19 @@ use std::io::Write;
 use crate::config::*;
 use indexmap::IndexMap;
 use std::collections::VecDeque;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use env_logger::fmt::style::{AnsiColor, Color, Style};
+use lazy_static::lazy_static;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::ShellExt;
+
+lazy_static! {
+    // Stores: (Message Fingerprint, Arrival Time)
+    static ref CHAT_DEDUPE_CACHE: Mutex<VecDeque<(u64, Instant)>> = Mutex::new(VecDeque::new());
+}
 
 pub mod config;
 pub mod io;
@@ -176,6 +184,31 @@ pub fn inject_system_message<S: Into<String>>(
 }
 
 pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
+    let fingerprint = generate_message_fingerprint(&packet);
+    let now = Instant::now();
+
+    {
+        let mut cache = CHAT_DEDUPE_CACHE.lock().unwrap();
+
+        // 1. Prune old messages from the sliding window (e.g., older than 2 seconds)
+        while let Some(&(_, time)) = cache.front() {
+            if now.duration_since(time) > Duration::from_secs(2) {
+                cache.pop_front();
+            } else {
+                break; // VecDeque is ordered by time, so we can stop here
+            }
+        }
+
+        // 2. Check if this exact message was already processed
+        if cache.iter().any(|(hash, _)| *hash == fingerprint) {
+            // Silently drop the duplicate packet from the second client
+            return;
+        }
+
+        // 3. Not a duplicate, add it to the cache
+        cache.push_back((fingerprint, now));
+    }
+
     if let Some(state) = app.try_state::<AppState>() {
         let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
         packet.pid = current_pid;
@@ -202,6 +235,19 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
         // Emit "packet-event" for Game Chat
         let _ = app.emit("packet-event", &packet);
     }
+}
+
+// Helper to generate a unique fingerprint for the chat message
+fn generate_message_fingerprint(packet: &ChatMessage) -> u64 {
+    let mut hasher = DefaultHasher::new();
+
+    // If your server provides a truly unique sequence_id for every message,
+    // you only need to hash that. Otherwise, hash the combination of sender, text, and time:
+    packet.uid.hash(&mut hasher);
+    packet.message.hash(&mut hasher);
+    packet.timestamp.hash(&mut hasher);
+
+    hasher.finish()
 }
 
 #[tauri::command]

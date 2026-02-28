@@ -106,7 +106,10 @@ pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
                 chat.nickname = "Me".to_string();
             }
 
-            events.push(Port5003Event::Chat(chat));
+            // Drop the packet entirely if it's from a blocked user!
+            if !chat.is_blocked {
+                events.push(Port5003Event::Chat(chat));
+            }
         }
     }
 
@@ -248,6 +251,13 @@ fn parse_profile_block(data: &[u8], chat: &mut ChatMessage) {
             40 => { // Tag 40 = Field 5, Wire 0 (Level)
                 let (val, read) = read_varint(&data[i..]);
                 chat.level = val;
+                i += read;
+            }
+            64 => { // Tag 64 = Field 8, Wire 0 (Blocked User Flag)
+                let (val, read) = read_varint(&data[i..]);
+                if val == 1 {
+                    chat.is_blocked = true;
+                }
                 i += read;
             }
             _ => i += skip_field(wire_type, &data[i..]),

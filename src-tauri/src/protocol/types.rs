@@ -28,6 +28,8 @@ pub struct ChatMessage {
     pub class_id: u64,
     pub level: u64,
     pub sequence_id: u64,
+    #[serde(default)]
+    pub is_blocked: bool,
     // --- Translation Support ---
     #[serde(default)]
     pub translated: Option<String>,

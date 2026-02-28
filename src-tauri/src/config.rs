@@ -23,7 +23,6 @@ pub struct AppConfig {
     pub archive_chat: bool,
     pub hide_original_in_compact: bool,
     pub network_interface: String,
-    pub click_through: bool,
     pub drag_to_scroll: bool,
 }
 
@@ -46,7 +45,6 @@ impl Default for AppConfig {
             archive_chat: false,
             hide_original_in_compact: false,
             network_interface: "".to_string(),
-            click_through: false,
             drag_to_scroll: false,
         }
     }

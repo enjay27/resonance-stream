@@ -162,7 +162,6 @@ pub fn App() -> impl IntoView {
             archive_chat: archive_chat.get_untracked(),
             hide_original_in_compact: hide_original_in_compact.get_untracked(),
             network_interface: network_interface.get_untracked(),
-            click_through: click_through.get_untracked(),
             drag_to_scroll: drag_to_scroll.get_untracked(),
         };
 
@@ -310,15 +309,7 @@ pub fn App() -> impl IntoView {
                         set_archive_chat.set(config.archive_chat);
                         set_hide_original_in_compact.set(config.hide_original_in_compact);
                         set_network_interface.set(config.network_interface);
-                        set_click_through.set(config.click_through);
                         set_drag_to_scroll.set(config.drag_to_scroll);
-
-                        // --- APPLY CLICK THROUGH ON BOOT ---
-                        if config.click_through {
-                            spawn_local(async {
-                                let _ = invoke("set_click_through", serde_wasm_bindgen::to_value(&serde_json::json!({ "enabled": true })).unwrap()).await;
-                            });
-                        }
 
                         let mut safe_op = config.overlay_opacity;
                         if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85

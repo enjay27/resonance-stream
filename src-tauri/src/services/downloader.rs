@@ -13,7 +13,7 @@ use tauri_plugin_shell::ShellExt;
 pub const MODEL_FOLDER: &str = "Qwen3-Blue-Protocol-Translator-JA-KO";
 pub const MODEL_FILENAME: &str = "qwen3-4b-blueprotocol-ja2ko-q4_k_m.gguf";
 // Hugging Face direct download link (using /resolve/main/)
-pub const MODEL_URL: &str = "https://huggingface.co/enjay27/Qwen3-Blue-Protocol-Translator-JA-KO/resolve/main/qwen3-1.7b-blueprotocol-ja2ko-q4_k_m.gguf";
+pub const MODEL_URL: &str = "https://huggingface.co/enjay27/Qwen3-Blue-Protocol-Translator-JA-KO/resolve/main/qwen3-4b-blueprotocol-ja2ko-q4_k_m.gguf";
 pub const AI_SERVER_FOLDER: &str = "ai-server";
 pub const AI_SERVER_ZIP_URL: &str = "https://github.com/enjay27/resonance-stream/releases/download/v0.2.0/llama-b8157-bin-win-vulkan-x64.zip";
 pub const AI_SERVER_FILENAME: &str = "llama-server.exe";
@@ -78,6 +78,12 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
 
     let client = reqwest::Client::new();
     let res = client.get(MODEL_URL).send().await.map_err(|e| e.to_string())?;
+
+    // ADD THIS CHECK: Ensure we actually got the file, not an HTML error page
+    if !res.status().is_success() {
+        return Err(format!("Failed to download model. Server returned: {}", res.status()));
+    }
+
     let total_size = res.content_length().unwrap_or(0);
 
     let mut file = fs::File::create(&dest_path).map_err(|e| e.to_string())?;
@@ -259,21 +265,29 @@ pub async fn export_chat_log(app: tauri::AppHandle, logs: Vec<ExportMessage>) ->
 // Add this command anywhere in downloader.rs
 #[tauri::command]
 pub async fn download_ai_server(app: AppHandle) -> Result<(), String> {
-    let bin_dir = app.path().app_data_dir().unwrap().join("bin");
-    fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
+    let ai_server_dir = app.path().app_data_dir().unwrap()
+        .join("bin")
+        .join(AI_SERVER_FOLDER);
+    fs::create_dir_all(&ai_server_dir).map_err(|e| e.to_string())?;
 
-    let server_exe = bin_dir.join("llama-server.exe");
+    let server_exe = ai_server_dir.join("llama-server.exe");
 
     // Skip if already downloaded and extracted
     if server_exe.exists() {
         return Ok(());
     }
 
-    let zip_path = bin_dir.join("server_temp.zip");
+    let zip_path = ai_server_dir.join("server_temp.zip");
 
     // 1. Download the ZIP file (Streaming)
     let client = reqwest::Client::new();
     let res = client.get(AI_SERVER_ZIP_URL).send().await.map_err(|e| e.to_string())?;
+
+    // ADD THIS CHECK: Ensure we didn't hit a 404 on GitHub
+    if !res.status().is_success() {
+        return Err(format!("Failed to download AI server. Server returned: {}", res.status()));
+    }
+
     let total_size = res.content_length().unwrap_or(0);
 
     let mut file = fs::File::create(&zip_path).map_err(|e| e.to_string())?;
@@ -308,7 +322,7 @@ pub async fn download_ai_server(app: AppHandle) -> Result<(), String> {
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let outpath = match file.enclosed_name() {
-            Some(path) => bin_dir.join(path.file_name().unwrap_or(path.as_os_str())), // Flattens the folder structure
+            Some(path) => ai_server_dir.join(path.file_name().unwrap_or(path.as_os_str())), // Flattens the folder structure
             None => continue,
         };
 

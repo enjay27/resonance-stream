@@ -201,28 +201,46 @@ pub fn App() -> impl IntoView {
         ev.prevent_default();
 
         set_downloading.set(true);
-        set_status_text.set("Starting Download...".to_string());
+        set_status_text.set("Starting Downloads...".to_string());
+
         spawn_local(async move {
+            // 1. Setup the progress listener
             let closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(wrapper) = serde_wasm_bindgen::from_value::<TauriEvent>(event_obj) {
                     set_progress.set(wrapper.payload.total_percent);
-                    set_status_text.set(format!("Downloading AI Model {}%", wrapper.payload.total_percent));
+                    // Optional: Update status text to show what is currently downloading
+                    // using the `current_file` field we defined in downloader.rs
+                    set_status_text.set(format!("{} ({}%)", wrapper.payload.current_file, wrapper.payload.total_percent));
                 }
             }) as Box<dyn FnMut(JsValue)>);
             let _ = listen("download-progress", &closure).await;
-            match invoke("download_model", JsValue::NULL).await {
-                Ok(_) => {
-                    set_downloading.set(false);
-                    set_model_ready.set(true);
-                    set_status_text.set("Ready".to_string());
-                    finalize_setup(());
-                }
-                Err(e) => {
-                    set_downloading.set(false);
-                    set_status_text.set(format!("Error: {:?}", e));
-                    add_system_log("error", "ModelManager", &format!("Download failed: {:?}", e));
-                }
+
+            // 2. Download the AI Model (.gguf)
+            let model_result = invoke("download_model", JsValue::NULL).await;
+            if let Err(e) = model_result {
+                set_downloading.set(false);
+                set_status_text.set(format!("Model Error: {:?}", e));
+                add_system_log("error", "ModelManager", &format!("Model download failed: {:?}", e));
+                closure.forget();
+                return;
             }
+
+            // 3. Download the AI Server (llama-server.exe via zip)
+            let server_result = invoke("download_ai_server", JsValue::NULL).await;
+            if let Err(e) = server_result {
+                set_downloading.set(false);
+                set_status_text.set(format!("Server Error: {:?}", e));
+                add_system_log("error", "ModelManager", &format!("Server download failed: {:?}", e));
+                closure.forget();
+                return;
+            }
+
+            // 4. Both downloads succeeded
+            set_downloading.set(false);
+            set_model_ready.set(true);
+            set_status_text.set("Ready".to_string());
+            finalize_setup(());
+
             closure.forget();
         });
     };

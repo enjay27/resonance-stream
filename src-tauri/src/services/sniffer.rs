@@ -77,7 +77,6 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
     let app_handle_watchdog = app.clone();
     let rx_watchdog = rx.clone();
     thread::spawn(move || {
-        let mut last_cleanup = Instant::now();
         loop {
             // Wait 5 seconds. If the sender drops during this sleep, it breaks immediately!
             match rx_watchdog.recv_timeout(Duration::from_secs(5)) {
@@ -353,6 +352,8 @@ pub fn emit_parsed_message(data: &[u8], app: &AppHandle) {
     // If it's a server packet, this safely returns without spamming logs
     let events = parsing_pipeline(data, app);
 
+    println!("[Emit] Events {:?}", events);
+
     for event in events {
         match event {
             Port5003Event::Chat(mut c) => {
@@ -376,6 +377,8 @@ pub fn emit_parsed_message(data: &[u8], app: &AppHandle) {
                 }
 
                 // --- 2. EMIT TO UI ---
+                let current_pid = app.state::<AppState>().next_pid.fetch_add(1, Ordering::SeqCst);
+                c.pid = current_pid;
                 store_and_emit(app, c.clone());
 
                 // --- 3. TRANSLATE & ARCHIVE ROUTING ---
@@ -393,7 +396,7 @@ pub fn emit_parsed_message(data: &[u8], app: &AppHandle) {
                     let state = app.state::<AppState>();
                     if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
                         let _ = df_tx.send(crate::io::DataFactoryJob {
-                            pid: c.pid,
+                            pid: current_pid,
                             original: c.message.clone(),
                             translated: None, // Explicitly no translation
                         });

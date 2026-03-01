@@ -267,8 +267,6 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
     }
 
     if let Some(state) = app.try_state::<AppState>() {
-        let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
-        packet.pid = current_pid;
 
         // Auto-populate from Backend Cache
         {

@@ -40,11 +40,33 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
 
                 // Handle Stickers/Emojis
                 if packet.message.starts_with("emojiPic=") {
-                    packet.message = "스티커 전송".to_string();
+                    packet.message = "[스티커]".to_string();
                     packet.translated = None;
                 }
-                if packet.message.starts_with("<sprite=") {
-                    packet.message = "이모지 전송".to_string();
+                if packet.message.contains("<sprite=") {
+                    let mut output = String::with_capacity(packet.message.len());
+                    let mut current = packet.message.as_str();
+
+                    while let Some(start) = current.find("<sprite=") {
+                        // Push the text *before* the sprite tag
+                        output.push_str(&current[..start]);
+
+                        // Find the closing '>'
+                        if let Some(end) = current[start..].find('>') {
+                            // Insert our clean UI placeholder
+                            output.push_str("[이모지]");
+                            // Move the cursor past the '>'
+                            current = &current[start + end + 1..];
+                        } else {
+                            // If the tag is somehow broken/malformed, stop parsing
+                            output.push_str(&current[start..]);
+                            current = "";
+                            break;
+                        }
+                    }
+                    // Push any remaining text *after* the last sprite tag
+                    output.push_str(current);
+                    packet.message = output;
                     packet.translated = None;
                 }
 

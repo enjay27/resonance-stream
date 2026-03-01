@@ -183,10 +183,98 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
+
                 if let Some(sub_data) = data.get(i..block_end) {
-                    // Dive into the message block to extract the actual string (Tag 26)
-                    if let Some(msg) = find_string_by_tag(sub_data, 0x1A) {
-                        payload.message = msg;
+                    // Parse ALL fields inside the message block
+                    let mut j = 0;
+                    while j < sub_data.len() {
+                        let sub_tag = sub_data[j];
+                        let sub_wire = sub_tag & 0x07;
+                        j += 1;
+
+                        match sub_tag {
+                            26 => { // Normal Chat Text (Field 3)
+                                let (slen, r) = read_varint(&sub_data[j..]);
+                                j += r;
+                                let s_end = (j + slen as usize).min(sub_data.len());
+                                if j < s_end {
+                                    let text_msg = String::from_utf8_lossy(&sub_data[j..s_end]).into_owned();
+                                    payload.message.push_str(&text_msg);
+                                }
+                                j = s_end;
+                            }
+                            58 => { // Rich Content Array (Field 7) - Used for Item Links, Personal Space, & Fishing!
+                                let (rlen, rr) = read_varint(&sub_data[j..]);
+                                j += rr;
+                                let r_end = (j + rlen as usize).min(sub_data.len());
+                                let rich_data = &sub_data[j..r_end];
+
+                                let mut k = 0;
+                                while k < rich_data.len() {
+                                    let r_tag = rich_data[k];
+                                    let r_wire = r_tag & 0x07;
+                                    k += 1;
+
+                                    if r_tag == 18 { // Chunk Block (Field 2)
+                                        let (clen, cr) = read_varint(&rich_data[k..]);
+                                        k += cr;
+                                        let c_end = (k + clen as usize).min(rich_data.len());
+                                        let chunk = &rich_data[k..c_end];
+
+                                        let mut chunk_type = 0;
+                                        let mut chunk_text = String::new();
+
+                                        let mut l = 0;
+                                        while l < chunk.len() {
+                                            let c_tag = chunk[l];
+                                            let c_wire = c_tag & 0x07;
+                                            l += 1;
+
+                                            if c_tag == 8 { // Chunk Type
+                                                let (val, vr) = read_varint(&chunk[l..]);
+                                                chunk_type = val;
+                                                l += vr;
+                                            } else if c_tag == 18 { // Chunk Payload
+                                                let (plen, pr) = read_varint(&chunk[l..]);
+                                                l += pr;
+                                                let p_end = (l + plen as usize).min(chunk.len());
+
+                                                // Type 7 = Text Chunk. We must dig one layer deeper to Tag 10 for the string!
+                                                if chunk_type == 7 {
+                                                    if let Some(txt) = find_string_by_tag(&chunk[l..p_end], 10) {
+                                                        chunk_text = txt;
+                                                    }
+                                                }
+                                                l = p_end;
+                                            } else {
+                                                l += skip_field(c_wire, &chunk[l..]);
+                                            }
+                                        }
+
+                                        // Append the parsed chunk to the final message!
+                                        if chunk_type == 7 {
+                                            payload.message.push_str(&chunk_text);
+                                        } else if chunk_type == 3 {
+                                            payload.message.push_str("[아이템 링크]");
+                                        } else if chunk_type == 2 {
+                                            payload.message.push_str("[개인 공간]");
+                                        } else if chunk_type == 9 {
+                                            payload.message.push_str("[물고기 자랑]");
+                                        } else if chunk_type == 12 {
+                                            payload.message.push_str("[마스터 점수]");
+                                        }
+
+                                        k = c_end;
+                                    } else {
+                                        k += skip_field(r_wire, &rich_data[k..]);
+                                    }
+                                }
+                                j = r_end;
+                            }
+                            _ => { // Safely skip Tag 8 (Msg Type) and anything else
+                                j += skip_field(sub_wire, &sub_data[j..]);
+                            }
+                        }
                     }
                 }
                 i = block_end;

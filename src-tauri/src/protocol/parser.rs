@@ -1,5 +1,23 @@
+use tauri::AppHandle;
 use crate::packet_buffer::read_varint_safe;
 pub(crate) use crate::{AppState, ChatMessage, LobbyRecruitment, ProfileAsset, SplitPayload, SystemMessage};
+use crate::{inject_system_message, ChatPayload, SenderInfo, SystemLogLevel};
+
+pub fn parsing_pipeline(data: &[u8], app: &AppHandle) -> Vec<Port5003Event>{
+    // If it's a server packet, this safely returns without spamming logs
+    let raw_payload = match stage1_split(data) {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+
+    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 1 completed {:?}", raw_payload));
+
+    let events = stage2_process(raw_payload);
+
+    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 2 completed {:?}", events));
+    
+    events
+}
 
 // --- STAGE 1: SPLIT ---
 // Separates the raw Protobuf packet into categorized byte blocks.
@@ -7,7 +25,6 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
     let mut payload = SplitPayload {
         channel: "WORLD".to_string(),
         chat_blocks: Vec::new(),
-        recruit_asset_blocks: Vec::new(),
     };
 
     if data.len() < 3 || data[0] != 0x0A { return None; }
@@ -33,10 +50,6 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
                 match field_num {
                     2 | 4 => {
                         payload.chat_blocks.push((field_num, sub_data.to_vec()));
-                        is_valid_chat_packet = true;
-                    },
-                    18 => {
-                        payload.recruit_asset_blocks.push(sub_data.to_vec());
                         is_valid_chat_packet = true;
                     },
                     _ => {}
@@ -70,18 +83,26 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
 pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
     let mut events = Vec::new();
 
-    // Context memory for Field 18 (which relies on Field 2 for names/IDs)
-    let mut ctx_uid = 0;
-    let mut ctx_nickname = String::new();
-    let mut ctx_timestamp = 0;
-
     // 1. Process Chat Blocks
     for (field_num, block) in raw.chat_blocks {
         let mut chat = ChatMessage { channel: raw.channel.clone(), ..Default::default() };
 
         match field_num {
             2 => {
-                parse_user_container(&block, &mut chat);
+                // Parse the bytes into our clean, intermediate nested structs
+                let parsed_payload = parse_chat_payload(&block);
+
+                // Map the intermediate struct values to the global UI struct
+                chat.sequence_id = parsed_payload.session_id; // <-- Fixes the PID bug!
+                chat.timestamp = parsed_payload.timestamp;
+                chat.message = parsed_payload.message;
+
+                // Flatten the SenderInfo block
+                chat.uid = parsed_payload.sender.uid;
+                chat.nickname = parsed_payload.sender.nickname;
+                chat.class_id = parsed_payload.sender.class_id;
+                chat.level = parsed_payload.sender.level;
+                chat.is_blocked = parsed_payload.sender.is_blocked;
             }
             4 => {
                 if let Some(msg) = find_string_by_tag(&block, 0x1A) {
@@ -94,13 +115,7 @@ pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
             _ => {}
         }
 
-        // Save context if we found player identity
-        if chat.uid > 0 { ctx_uid = chat.uid; }
-        if !chat.nickname.is_empty() { ctx_nickname = chat.nickname.clone(); }
-        if chat.timestamp > 0 { ctx_timestamp = chat.timestamp; }
-
         if !chat.message.is_empty() {
-
             // If we have no UID/Nickname, it's a server echo of the local player's chat
             if chat.uid == 0 && chat.nickname.is_empty() {
                 chat.nickname = "Me".to_string();
@@ -113,27 +128,104 @@ pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
         }
     }
 
-    // 2. Process Recruit & Asset Blocks
-    for block in raw.recruit_asset_blocks {
-        let text = String::from_utf8_lossy(&block).into_owned();
+    events
+}
 
-        if text.contains("ID:") {
-            events.push(Port5003Event::Recruit(LobbyRecruitment {
-                recruit_id: text.split("ID:").nth(1).unwrap_or("").to_string(),
-                leader_nickname: ctx_nickname.clone(),
-                description: text,
-                timestamp: ctx_timestamp,
-                ..Default::default()
-            }));
-        } else if text.contains("https://") {
-            let mut asset = ProfileAsset { uid: ctx_uid, timestamp: ctx_timestamp, ..Default::default() };
-            if text.contains("snapshot") { asset.snapshot_url = text; }
-            else { asset.halflength_url = text; }
-            events.push(Port5003Event::Asset(asset));
+// --- STRICT MAPPED PARSERS ---
+
+fn parse_chat_payload(data: &[u8]) -> ChatPayload {
+    let mut payload = ChatPayload::default();
+    let mut i = 0;
+    while i < data.len() {
+        let tag = data[i];
+        let wire_type = tag & 0x07;
+        i += 1; // Advance past the tag
+
+        match tag {
+            8 => { // Tag 8 = Field 1, Wire 0 (Session ID / Sequence ID)
+                let (val, read) = read_varint(&data[i..]);
+                payload.session_id = val;
+                i += read;
+            }
+            18 => { // Tag 18 = Field 2, Wire 2 (SenderInfo Block)
+                let (len, read) = read_varint(&data[i..]);
+                i += read;
+                let block_end = (i + len as usize).min(data.len());
+                if let Some(sub_data) = data.get(i..block_end) {
+                    payload.sender = parse_sender_info(sub_data);
+                }
+                i = block_end;
+            }
+            24 => { // Tag 24 = Field 3, Wire 0 (Timestamp)
+                let (val, read) = read_varint(&data[i..]);
+                payload.timestamp = val;
+                i += read;
+            }
+            34 => { // Tag 34 = Field 4, Wire 2 (Message Block)
+                let (len, read) = read_varint(&data[i..]);
+                i += read;
+                let block_end = (i + len as usize).min(data.len());
+                if let Some(sub_data) = data.get(i..block_end) {
+                    // Dive into the message block to extract the actual string (Tag 26)
+                    if let Some(msg) = find_string_by_tag(sub_data, 0x1A) {
+                        payload.message = msg;
+                    }
+                }
+                i = block_end;
+            }
+            _ => i += skip_field(wire_type, &data[i..]),
         }
     }
+    payload
+}
 
-    events
+fn parse_sender_info(data: &[u8]) -> SenderInfo {
+    let mut sender = SenderInfo::default();
+    let mut i = 0;
+    while i < data.len() {
+        let tag = data[i];
+        let wire_type = tag & 0x07;
+        i += 1;
+
+        match tag {
+            8 => { // Tag 8 = Field 1, Wire 0 (Permanent UID)
+                let (val, read) = read_varint(&data[i..]);
+                sender.uid = val;
+                i += read;
+            }
+            18 => { // Tag 18 = Field 2, Wire 2 (Nickname)
+                let (len, read) = read_varint(&data[i..]);
+                i += read;
+                let block_end = (i + len as usize).min(data.len());
+                if let Some(sub_data) = data.get(i..block_end) {
+                    sender.nickname = String::from_utf8_lossy(sub_data).into_owned();
+                }
+                i = block_end;
+            }
+            24 => { // Tag 24 = Field 3, Wire 0 (Class ID)
+                let (val, read) = read_varint(&data[i..]);
+                sender.class_id = val;
+                i += read;
+            }
+            32 => { // Tag 32 = Field 4, Wire 0 (Status Flag)
+                let (val, read) = read_varint(&data[i..]);
+                sender.status = val;
+                i += read;
+            }
+            40 => { // Tag 40 = Field 5, Wire 0 (Level)
+                let (val, read) = read_varint(&data[i..]);
+                sender.level = val;
+                i += read;
+            }
+            64 => { // Tag 64 = Field 8, Wire 0 (Blocked Flag)
+                let (val, read) = read_varint(&data[i..]);
+                sender.is_blocked = val == 1; // Convert integer flag to boolean safely
+                i += read;
+            }
+            _ => i += skip_field(wire_type, &data[i..]),
+        }
+    }
+    sender
 }
 
 // ==========================================
@@ -166,8 +258,6 @@ pub(crate) fn strip_application_header(payload: &[u8], port: u16) -> Option<&[u8
 #[derive(Debug)]
 pub enum Port5003Event {
     Chat(ChatMessage),
-    Recruit(LobbyRecruitment),
-    Asset(ProfileAsset),
 }
 
 // --- STRICT MAPPED PARSERS (From previous_sniffer.rs) ---

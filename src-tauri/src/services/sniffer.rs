@@ -1,5 +1,5 @@
 use crate::packet_buffer::PacketBuffer;
-use crate::{get_model_path, inject_system_message, store_and_emit, NetworkInterface, SnifferStatePayload};
+use crate::{get_model_path, inject_system_message, parsing_pipeline, store_and_emit, NetworkInterface, SnifferStatePayload};
 use lazy_static::lazy_static;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -35,9 +35,6 @@ lazy_static! {
     static ref DISCOVERED_FIELDS_5003: Mutex<HashSet<u32>> = Mutex::new(HashSet::from([
         0, 1, 2, 3, 4, 5, 6, 7, 12, 16, 17, 18, 21, 22, 23, 24, 25, 26, 29, 30, 31
     ]));
-
-    // Stores (Hash, Last_Seen_Instant) per ID/UID
-    static ref EMISSION_CACHE: Mutex<HashMap<String, (u64, Instant)>> = Mutex::new(HashMap::new());
 }
 
 // --- GLOBAL STATE ---
@@ -98,18 +95,6 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
                 inject_system_message(&app_handle_watchdog, SystemLogLevel::Warning, "Sniffer", "Watchdog: No game traffic for 15s.");
                 let _ = app_handle_watchdog.emit("sniffer-status", "warning");
                 feed_watchdog();
-            }
-
-            if last_cleanup.elapsed().as_secs() >= 60 {
-                let mut cache = EMISSION_CACHE.lock().unwrap();
-                let now = Instant::now();
-                cache.retain(|key, (_, last_seen)| {
-                    if now.duration_since(*last_seen) > Duration::from_secs(300) {
-                        let _ = app_handle_watchdog.emit("remove-entity", key);
-                        false
-                    } else { true }
-                });
-                last_cleanup = Instant::now();
             }
         }
     });
@@ -356,7 +341,7 @@ fn process_game_stream(
             inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("full packet {:?}", full_packet));
             if src_port == 5003 {
                 inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", "request parse for 5003 port packet");
-                parse_and_emit_5003(&full_packet, app_handle);
+                emit_parsed_message(&full_packet, app_handle);
             }
         }
     }
@@ -364,98 +349,59 @@ fn process_game_stream(
 
 // --- STAGE 3: EMIT ---
 // Filters out duplicates and dispatches the final events to Tauri.
-pub fn parse_and_emit_5003(data: &[u8], app: &AppHandle) {
+pub fn emit_parsed_message(data: &[u8], app: &AppHandle) {
     // If it's a server packet, this safely returns without spamming logs
-    let raw_payload = match crate::protocol::parser::stage1_split(data) {
-        Some(p) => p,
-        None => return,
-    };
-
-    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 1 completed {:?}", raw_payload));
-
-    let events = crate::protocol::parser::stage2_process(raw_payload);
-
-    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 2 completed {:?}", events));
+    let events = parsing_pipeline(data, app);
 
     for event in events {
-        if should_emit(&event) {
-            match event {
-                Port5003Event::Chat(mut c) => {
-                    // --- 1. NICKNAME CACHE & ROMAJI SWAP ---
-                    if contains_japanese(&c.nickname) {
-                        // Access the AppState from Tauri
-                        let state = app.state::<AppState>();
-                        let mut cache = state.nickname_cache.lock().unwrap();
-                        inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] check nickname cache included {:?}", c.nickname));
+        match event {
+            Port5003Event::Chat(mut c) => {
+                // --- 1. NICKNAME CACHE & ROMAJI SWAP ---
+                if contains_japanese(&c.nickname) {
+                    // Access the AppState from Tauri
+                    let state = app.state::<AppState>();
+                    let mut cache = state.nickname_cache.lock().unwrap();
+                    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] check nickname cache included {:?}", c.nickname));
 
-                        // Check cache. If miss, ask the processor to convert it!
-                        let romaji = cache.entry(c.nickname.clone()).or_insert_with(|| {
-                            inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] nickname not included in cache. convert from Japanese {:?}", c.nickname));
-                            convert_to_romaji(&c.nickname)
-                        }).clone();
+                    // Check cache. If miss, ask the processor to convert it!
+                    let romaji = cache.entry(c.nickname.clone()).or_insert_with(|| {
+                        inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] nickname not included in cache. convert from Japanese {:?}", c.nickname));
+                        convert_to_romaji(&c.nickname)
+                    }).clone();
 
-                        inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] nickname romaji {:?}", romaji));
+                    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] nickname romaji {:?}", romaji));
 
-                        // Attach it to the struct so the UI and Preprocessor can see it
-                        c.nickname_romaji = Some(romaji);
-                    }
-
-                    // --- 2. EMIT TO UI ---
-                    store_and_emit(app, c.clone());
-
-                    // --- 3. TRANSLATE & ARCHIVE ROUTING ---
-                    let config = crate::config::load_config(app.clone());
-                    let requires_translation = config.use_translation && contains_japanese(&c.message);
-
-                    if requires_translation {
-                        // Route to Translator: The translator will archive it AFTER finishing the translation.
-                        let state = app.state::<AppState>();
-                        if let Some(tx) = state.translator_tx.lock().unwrap().as_ref() {
-                            let _ = tx.send(crate::services::translator::TranslationJob { chat: c.clone() });
-                        };
-                    } else if config.archive_chat {
-                        // Route directly to Archive: Translation is OFF (or text isn't Japanese), but archiving is ON.
-                        let state = app.state::<AppState>();
-                        if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
-                            let _ = df_tx.send(crate::io::DataFactoryJob {
-                                pid: c.pid,
-                                original: c.message.clone(),
-                                translated: None, // Explicitly no translation
-                            });
-                        };
-                    }
+                    // Attach it to the struct so the UI and Preprocessor can see it
+                    c.nickname_romaji = Some(romaji);
                 }
-                Port5003Event::Recruit(l) => { let _ = app.emit("lobby-update", l); },
-                Port5003Event::Asset(a) => { let _ = app.emit("profile-asset-update", a); },
+
+                // --- 2. EMIT TO UI ---
+                store_and_emit(app, c.clone());
+
+                // --- 3. TRANSLATE & ARCHIVE ROUTING ---
+                let config = crate::config::load_config(app.clone());
+                let requires_translation = config.use_translation && contains_japanese(&c.message);
+
+                if requires_translation {
+                    // Route to Translator: The translator will archive it AFTER finishing the translation.
+                    let state = app.state::<AppState>();
+                    if let Some(tx) = state.translator_tx.lock().unwrap().as_ref() {
+                        let _ = tx.send(crate::services::translator::TranslationJob { chat: c.clone() });
+                    };
+                } else if config.archive_chat {
+                    // Route directly to Archive: Translation is OFF (or text isn't Japanese), but archiving is ON.
+                    let state = app.state::<AppState>();
+                    if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
+                        let _ = df_tx.send(crate::io::DataFactoryJob {
+                            pid: c.pid,
+                            original: c.message.clone(),
+                            translated: None, // Explicitly no translation
+                        });
+                    };
+                }
             }
         }
     }
-}
-
-// --- DEDUPLICATION LOGIC ---
-fn should_emit(event: &Port5003Event) -> bool {
-    let mut cache = EMISSION_CACHE.lock().unwrap();
-    let now = Instant::now();
-
-    let (key, content_to_hash) = match event {
-        Port5003Event::Recruit(l) => (format!("recruit_{}", l.recruit_id), &l.description),
-        Port5003Event::Asset(a) => (format!("asset_{}", a.uid), &a.snapshot_url),
-        Port5003Event::Chat(_) => return true, // Chat bypasses dedupe
-    };
-
-    let mut hasher = DefaultHasher::new();
-    content_to_hash.hash(&mut hasher);
-    let new_hash = hasher.finish();
-
-    if let Some((old_hash, last_seen)) = cache.get_mut(&key) {
-        *last_seen = now;
-        if *old_hash == new_hash { return false; }
-        *old_hash = new_hash;
-        return true;
-    }
-
-    cache.insert(key, (new_hash, now));
-    true
 }
 
 /// Logs a warning with full packet data when a new protocol field is found

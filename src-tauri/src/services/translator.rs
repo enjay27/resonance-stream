@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::io::save_to_data_factory;
 use crate::protocol::types::{ChatMessage, SystemLogLevel};
 use crate::services::processor::{load_dictionary, postprocess_text, preprocess_text};
-use crate::{inject_system_message, store_and_emit, AI_SERVER_FILENAME, AI_SERVER_FOLDER};
+use crate::{inject_system_message, kill_orphaned_servers, store_and_emit, AI_SERVER_FILENAME, AI_SERVER_FOLDER};
 
 pub const AI_SERVER_URL: &str = "http://127.0.0.1:8080";
 
@@ -99,6 +99,8 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
     let config = crate::config::load_config(app.clone());
 
     thread::spawn(move || {
+        kill_orphaned_servers(&app);
+
         inject_system_message(&app, SystemLogLevel::Info, "Translator", "Initializing HTTP AI Backend...");
 
         let server_path = app.path()

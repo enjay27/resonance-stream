@@ -67,6 +67,9 @@ pub fn App() -> impl IntoView {
     let (sniffer_state, set_sniffer_state) = signal("Off".to_string());
     let (sniffer_error, set_sniffer_error) = signal("".to_string());
 
+    let (alert_keywords, set_alert_keywords) = signal(Vec::<String>::new());
+    let (alert_volume, set_alert_volume) = signal(0.5f32);
+
     let signals = AppSignals {
         init_done, set_init_done,
         use_translation, set_use_translation,
@@ -109,6 +112,8 @@ pub fn App() -> impl IntoView {
         drag_to_scroll, set_drag_to_scroll,
         sniffer_state, set_sniffer_state,
         sniffer_error, set_sniffer_error,
+        alert_keywords, set_alert_keywords,
+        alert_volume, set_alert_volume,
     };
 
     provide_context(signals);
@@ -163,6 +168,8 @@ pub fn App() -> impl IntoView {
             hide_original_in_compact: hide_original_in_compact.get_untracked(),
             network_interface: network_interface.get_untracked(),
             drag_to_scroll: drag_to_scroll.get_untracked(),
+            alert_keywords: alert_keywords.get_untracked(),
+            alert_volume: alert_volume.get_untracked(),
         };
 
         async move {
@@ -244,7 +251,7 @@ pub fn App() -> impl IntoView {
                 closure.forget();
                 return;
             }
-            
+
             let _ = invoke("launch_translator", JsValue::NULL).await;
 
             // 4. Both downloads succeeded
@@ -340,6 +347,7 @@ pub fn App() -> impl IntoView {
                         set_hide_original_in_compact.set(config.hide_original_in_compact);
                         set_network_interface.set(config.network_interface);
                         set_drag_to_scroll.set(config.drag_to_scroll);
+                        set_alert_keywords.set(config.alert_keywords);
 
                         let mut safe_op = config.overlay_opacity;
                         if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85

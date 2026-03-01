@@ -95,6 +95,21 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
                 if is_visible && !signals.is_at_bottom.get_untracked() {
                     signals.set_unread_count.update(|c| *c += 1);
                 }
+
+                let keywords = signals.alert_keywords.get_untracked();
+                let volume = signals.alert_volume.get_untracked();
+
+                if keywords.iter().any(|kw| packet.message.contains(kw)) {
+                    // Fire and forget the audio ping
+                    if volume > 0.0 {
+                        log!("audio ping by keyword {:?}", packet.message);
+                        if let Ok(audio) = web_sys::HtmlAudioElement::new_with_src("public/ping.mp3") {
+                            // Convert f32 to f64 for the Web Audio API
+                            audio.set_volume(volume as f64);
+                            let _ = audio.play();
+                        }
+                    }
+                }
             }
         }
     }) as Box<dyn FnMut(JsValue)>)

@@ -86,6 +86,10 @@ pub struct AppSignals {
     pub set_click_through: WriteSignal<bool>,
     pub drag_to_scroll: ReadSignal<bool>,
     pub set_drag_to_scroll: WriteSignal<bool>,
+    pub alert_keywords: ReadSignal<Vec<String>>,
+    pub set_alert_keywords: WriteSignal<Vec<String>>,
+    pub alert_volume: ReadSignal<f32>,
+    pub set_alert_volume: WriteSignal<f32>,
 }
 
 #[derive(Copy, Clone)]

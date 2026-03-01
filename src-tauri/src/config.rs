@@ -24,6 +24,8 @@ pub struct AppConfig {
     pub hide_original_in_compact: bool,
     pub network_interface: String,
     pub drag_to_scroll: bool,
+    pub alert_keywords: Vec<String>,
+    pub alert_volume: f32,
 }
 
 impl Default for AppConfig {
@@ -46,6 +48,8 @@ impl Default for AppConfig {
             hide_original_in_compact: false,
             network_interface: "".to_string(),
             drag_to_scroll: false,
+            alert_keywords: vec![],
+            alert_volume: 0.5,
         }
     }
 }

@@ -50,6 +50,8 @@ pub struct AppConfig {
     pub network_interface: String,
     #[serde(default)]
     pub drag_to_scroll: bool,
+    pub alert_keywords: Vec<String>,
+    pub alert_volume: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

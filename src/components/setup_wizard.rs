@@ -50,8 +50,8 @@ pub fn SetupWizard(finalize: Callback<()>, start_download: Callback<web_sys::Mou
                                                 class:btn-success=move || signals.compute_mode.get() == "cpu"
                                                 on:click=move |_| signals.set_compute_mode.set("cpu".into())>"CPU"</button>
                                             <button class="join-item btn btn-sm flex-1"
-                                                class:btn-success=move || signals.compute_mode.get() == "cuda"
-                                                on:click=move |_| signals.set_compute_mode.set("cuda".into())>"CUDA (GPU)"</button>
+                                                class:btn-success=move || signals.compute_mode.get() == "gpu"
+                                                on:click=move |_| signals.set_compute_mode.set("gpu".into())>"GPU"</button>
                                         </div>
                                     </div>
                                 </Show>
@@ -65,7 +65,7 @@ pub fn SetupWizard(finalize: Callback<()>, start_download: Callback<web_sys::Mou
                         2 => view! {
                             <div class="space-y-4 text-center">
                                 <h2 class="text-lg font-bold">"AI 모델 설치"</h2>
-                                <p class="text-xs opacity-60">"약 1.3GB의 AI 모델 파일 다운로드가 필요합니다."</p>
+                                <p class="text-xs opacity-60">"번역을 위해 약 2GB의 AI 모델 파일 다운로드가 필요합니다."</p>
                                 <Show when=move || signals.downloading.get() fallback=move || view! {
                                     <button class="btn btn-success btn-block" on:click=move |ev| start_download.run(ev)>"다운로드 시작"</button>
                                 }>

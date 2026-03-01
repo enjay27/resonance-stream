@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager}; // Import Manager trait
+use tauri::{AppHandle, Manager, State};
+use crate::{inject_system_message, AppState, SystemLogLevel};
+// Import Manager trait
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AppConfig {
@@ -15,11 +17,13 @@ pub struct AppConfig {
     pub custom_tab_filters: Vec<String>,
     pub theme: String,
     pub overlay_opacity: f32,
-    pub show_system_tab: bool,
-    pub is_debug: bool,
+    pub debug_mode: bool,
+    pub log_level: String,
     pub tier: String,
     pub archive_chat: bool,
     pub hide_original_in_compact: bool,
+    pub network_interface: String,
+    pub drag_to_scroll: bool,
 }
 
 impl Default for AppConfig {
@@ -35,11 +39,13 @@ impl Default for AppConfig {
             custom_tab_filters: vec!["WORLD".into(), "GUILD".into(), "PARTY".into(), "LOCAL".into()],
             theme: "dark".to_string(),
             overlay_opacity: 0.85,
-            show_system_tab: false,
-            is_debug: false,
+            debug_mode: false,
+            log_level: "info".to_string(),
             tier: "middle".to_string(),
             archive_chat: false,
             hide_original_in_compact: false,
+            network_interface: "".to_string(),
+            drag_to_scroll: false,
         }
     }
 }
@@ -78,9 +84,50 @@ pub fn load_config(app: AppHandle) -> AppConfig {
 }
 
 #[tauri::command]
-pub fn save_config(app: AppHandle, config: AppConfig) {
+pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) {
+    let old_config = load_config(app.clone());
+
     let path = get_config_path(&app);
+
     if let Ok(json) = serde_json::to_string_pretty(&config) {
         let _ = fs::write(path, json);
+    }
+
+    // --- MANAGE THE SNIFFER THREAD (NETWORK ADAPTER CHANGE) ---
+    if old_config.network_interface != config.network_interface {
+        // Drop the old Sender (Instantly kills the socket and watchdog threads)
+        *state.sniffer_tx.lock().unwrap() = None;
+
+        // Restart the sniffer bound to the newly selected interface
+        if config.init_done {
+            inject_system_message(&app, SystemLogLevel::Info, "Sniffer", "Network adapter changed. Restarting sniffer...");
+            let tx = crate::services::sniffer::start_sniffer_worker(app.clone());
+            *state.sniffer_tx.lock().unwrap() = Some(tx);
+        }
+    }
+
+    // --- MANAGE THE AI WORKER THREAD ---
+    if !old_config.use_translation && config.use_translation {
+        // Turned ON: Start the server and store the Sender
+        let model_path = crate::get_model_path(&app);
+        let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
+        *state.translator_tx.lock().unwrap() = Some(tx);
+
+    } else if old_config.use_translation && !config.use_translation {
+        // Turned OFF: Drop the Sender (Kills the thread and frees VRAM)
+        *state.translator_tx.lock().unwrap() = None;
+        inject_system_message(&app, SystemLogLevel::Info, "Translator", "AI Translation Disabled. Server stopped and VRAM cleared.");
+    }
+
+    // --- MANAGE THE DATA FACTORY THREAD ---
+    if !old_config.archive_chat && config.archive_chat {
+        // Turned ON: Spawn the I/O thread
+        let tx = crate::io::start_data_factory_worker(app.clone());
+        *state.data_factory_tx.lock().unwrap() = Some(tx);
+        inject_system_message(&app, SystemLogLevel::Info, "DataFactory", "Dataset logging enabled.");
+    } else if old_config.archive_chat && !config.archive_chat {
+        // Turned OFF: Drop the Sender (Kills the thread)
+        *state.data_factory_tx.lock().unwrap() = None;
+        inject_system_message(&app, SystemLogLevel::Info, "DataFactory", "Dataset logging disabled.");
     }
 }

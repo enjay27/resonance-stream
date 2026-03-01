@@ -41,15 +41,19 @@ pub struct AppConfig {
     pub custom_tab_filters: Vec<String>,
     pub theme: String,
     pub overlay_opacity: f32,
-    pub show_system_tab: bool,
-    pub is_debug: bool,
+    pub debug_mode: bool,
+    pub log_level: String,
     pub tier: String,
     pub archive_chat: bool,
     pub hide_original_in_compact: bool,
+    #[serde(default)]
+    pub network_interface: String,
+    #[serde(default)]
+    pub drag_to_scroll: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ModelStatus { 
+pub struct FolderStatus {
     pub exists: bool, 
     pub path: String 
 }
@@ -59,6 +63,12 @@ pub struct TauriEvent {
     pub payload: ProgressPayload 
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TranslationResult {
+    pub pid: u64,
+    pub translated: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProgressPayload {
     #[serde(rename = "current_file")] // Match backend field name
@@ -66,4 +76,16 @@ pub struct ProgressPayload {
     pub percent: u8,
     #[serde(rename = "total_percent")] // Match backend field name
     pub total_percent: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct NetworkInterface {
+    pub name: String,
+    pub ip: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SnifferStatePayload {
+    pub state: String,   // "Starting", "Firewall", "Binding", "Active", "Error", "Off"
+    pub message: String, // Context or Error message
 }

@@ -1,13 +1,53 @@
 use crate::packet_buffer::read_varint_safe;
-pub(crate) use crate::{AppState, ChatMessage, LobbyRecruitment, ProfileAsset, SplitPayload, SystemMessage};
+use crate::{inject_system_message, SystemLogLevel};
+pub(crate) use crate::{ChatMessage};
+use tauri::AppHandle;
+
+#[derive(Debug)]
+pub struct SplitPayload<'a> {
+    pub channel: String,
+    pub chat_blocks: Vec<(u32, &'a [u8])>,
+}
+
+#[derive(Debug, Default)]
+pub struct ChatPayload {
+    pub session_id: u64,        // Tag 8 (Field 1): 20
+    pub sender: SenderInfo,     // Tag 18 (Field 2): Player info block
+    pub timestamp: u64,         // Tag 24 (Field 3): 1772343736
+    pub message: String,        // Tag 34 (Field 4): Message string block
+}
+
+#[derive(Debug, Default)]
+pub struct SenderInfo {
+    pub uid: u64,             // Tag 8 (Field 1): 37276266
+    pub nickname: String,     // Tag 18 (Field 2): "あずるる"
+    pub class_id: u64,        // Tag 24 (Field 3): 2 (e.g., Twin Striker)
+    pub status: u64,          // Tag 32 (Field 4): 1 (Online/Normal flag)
+    pub level: u64,           // Tag 40 (Field 5): 60
+    pub is_blocked: bool,
+}
+
+pub fn parsing_pipeline(data: &[u8], app: &AppHandle) -> Vec<Port5003Event>{
+    let raw_payload = match stage1_split(data) {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+
+    inject_system_message(app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 1 completed {:?}", raw_payload));
+
+    let events = stage2_process(raw_payload);
+
+    inject_system_message(app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 2 completed {:?}", events));
+
+    events
+}
 
 // --- STAGE 1: SPLIT ---
 // Separates the raw Protobuf packet into categorized byte blocks.
-pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
+pub(crate) fn stage1_split<'a>(data: &'a [u8]) -> Option<SplitPayload<'a>> {
     let mut payload = SplitPayload {
         channel: "WORLD".to_string(),
         chat_blocks: Vec::new(),
-        recruit_asset_blocks: Vec::new(),
     };
 
     if data.len() < 3 || data[0] != 0x0A { return None; }
@@ -31,13 +71,8 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
 
             if let Some(sub_data) = data.get(i..block_end) {
                 match field_num {
-                    2 | 3 | 4 => {
-                        payload.chat_blocks.push((field_num, sub_data.to_vec()));
-                        // 1. If it has a chat block, it is ALWAYS valid!
-                        is_valid_chat_packet = true;
-                    },
-                    18 => {
-                        payload.recruit_asset_blocks.push(sub_data.to_vec());
+                    2 | 4 => {
+                        payload.chat_blocks.push((field_num, sub_data));
                         is_valid_chat_packet = true;
                     },
                     _ => {}
@@ -47,7 +82,6 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
         } else if wire_type == 0 {
             let (val, read) = read_varint(&data[i..safe_end]);
 
-            // 2. Allow BOTH Field 1 and Field 2 to dictate the Channel!
             if field_num == 1 || field_num == 2 {
                 payload.channel = match val {
                     2 => "LOCAL".into(), 3 => "PARTY".into(), 4 => "GUILD".into(), _ => "WORLD".into(),
@@ -68,26 +102,32 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
 
 // --- STAGE 2: PROCESS ---
 // Applies strict, field-mapped parsing logic to generate specific Events.
-pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
+pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
     let mut events = Vec::new();
-
-    // Context memory for Field 18 (which relies on Field 2 for names/IDs)
-    let mut ctx_uid = 0;
-    let mut ctx_nickname = String::new();
-    let mut ctx_timestamp = 0;
 
     // 1. Process Chat Blocks
     for (field_num, block) in raw.chat_blocks {
         let mut chat = ChatMessage { channel: raw.channel.clone(), ..Default::default() };
 
         match field_num {
-            2 | 3 => {
-                parse_user_container(&block, &mut chat); // Strict parsing
+            2 => {
+                // block is now exactly a &[u8], parsing effortlessly
+                let parsed_payload = parse_chat_payload(block);
+
+                chat.sequence_id = parsed_payload.session_id;
+                chat.timestamp = parsed_payload.timestamp;
+                chat.message = parsed_payload.message;
+
+                chat.uid = parsed_payload.sender.uid;
+                chat.nickname = parsed_payload.sender.nickname;
+                chat.class_id = parsed_payload.sender.class_id;
+                chat.level = parsed_payload.sender.level;
+                chat.is_blocked = parsed_payload.sender.is_blocked;
             }
             4 => {
-                if let Some(msg) = find_string_by_tag(&block, 0x1A) {
+                if let Some(msg) = find_string_by_tag(block, 0x1A) {
                     chat.message = msg;
-                    if let Some(chan_id) = find_int_by_tag(&block, 0x10) {
+                    if let Some(chan_id) = find_int_by_tag(block, 0x10) {
                         chat.channel = match chan_id { 3 => "PARTY".into(), 4 => "GUILD".into(), _ => chat.channel };
                     }
                 }
@@ -95,43 +135,203 @@ pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
             _ => {}
         }
 
-        // Save context if we found player identity
-        if chat.uid > 0 { ctx_uid = chat.uid; }
-        if !chat.nickname.is_empty() { ctx_nickname = chat.nickname.clone(); }
-        if chat.timestamp > 0 { ctx_timestamp = chat.timestamp; }
-
         if !chat.message.is_empty() {
-
-            // If we have no UID/Nickname, it's a server echo of the local player's chat
             if chat.uid == 0 && chat.nickname.is_empty() {
                 chat.nickname = "Me".to_string();
             }
 
-            events.push(Port5003Event::Chat(chat));
-        }
-    }
-
-    // 2. Process Recruit & Asset Blocks
-    for block in raw.recruit_asset_blocks {
-        let text = String::from_utf8_lossy(&block).into_owned();
-
-        if text.contains("ID:") {
-            events.push(Port5003Event::Recruit(LobbyRecruitment {
-                recruit_id: text.split("ID:").nth(1).unwrap_or("").to_string(),
-                leader_nickname: ctx_nickname.clone(),
-                description: text,
-                timestamp: ctx_timestamp,
-                ..Default::default()
-            }));
-        } else if text.contains("https://") {
-            let mut asset = ProfileAsset { uid: ctx_uid, timestamp: ctx_timestamp, ..Default::default() };
-            if text.contains("snapshot") { asset.snapshot_url = text; }
-            else { asset.halflength_url = text; }
-            events.push(Port5003Event::Asset(asset));
+            if !chat.is_blocked {
+                events.push(Port5003Event::Chat(chat));
+            }
         }
     }
 
     events
+}
+
+// --- STRICT MAPPED PARSERS ---
+
+fn parse_chat_payload(data: &[u8]) -> ChatPayload {
+    let mut payload = ChatPayload::default();
+    let mut i = 0;
+    while i < data.len() {
+        let tag = data[i];
+        let wire_type = tag & 0x07;
+        i += 1; // Advance past the tag
+
+        match tag {
+            8 => { // Tag 8 = Field 1, Wire 0 (Session ID / Sequence ID)
+                let (val, read) = read_varint(&data[i..]);
+                payload.session_id = val;
+                i += read;
+            }
+            18 => { // Tag 18 = Field 2, Wire 2 (SenderInfo Block)
+                let (len, read) = read_varint(&data[i..]);
+                i += read;
+                let block_end = (i + len as usize).min(data.len());
+                if let Some(sub_data) = data.get(i..block_end) {
+                    payload.sender = parse_sender_info(sub_data);
+                }
+                i = block_end;
+            }
+            24 => { // Tag 24 = Field 3, Wire 0 (Timestamp)
+                let (val, read) = read_varint(&data[i..]);
+                payload.timestamp = val;
+                i += read;
+            }
+            34 => { // Tag 34 = Field 4, Wire 2 (Message Block)
+                let (len, read) = read_varint(&data[i..]);
+                i += read;
+                let block_end = (i + len as usize).min(data.len());
+
+                if let Some(sub_data) = data.get(i..block_end) {
+                    // Parse ALL fields inside the message block
+                    let mut j = 0;
+                    while j < sub_data.len() {
+                        let sub_tag = sub_data[j];
+                        let sub_wire = sub_tag & 0x07;
+                        j += 1;
+
+                        match sub_tag {
+                            26 => { // Normal Chat Text (Field 3)
+                                let (slen, r) = read_varint(&sub_data[j..]);
+                                j += r;
+                                let s_end = (j + slen as usize).min(sub_data.len());
+                                if j < s_end {
+                                    let text_msg = String::from_utf8_lossy(&sub_data[j..s_end]).into_owned();
+                                    payload.message.push_str(&text_msg);
+                                }
+                                j = s_end;
+                            }
+                            58 => { // Rich Content Array (Field 7) - Used for Item Links, Personal Space, & Fishing!
+                                let (rlen, rr) = read_varint(&sub_data[j..]);
+                                j += rr;
+                                let r_end = (j + rlen as usize).min(sub_data.len());
+                                let rich_data = &sub_data[j..r_end];
+
+                                let mut k = 0;
+                                while k < rich_data.len() {
+                                    let r_tag = rich_data[k];
+                                    let r_wire = r_tag & 0x07;
+                                    k += 1;
+
+                                    if r_tag == 18 { // Chunk Block (Field 2)
+                                        let (clen, cr) = read_varint(&rich_data[k..]);
+                                        k += cr;
+                                        let c_end = (k + clen as usize).min(rich_data.len());
+                                        let chunk = &rich_data[k..c_end];
+
+                                        let mut chunk_type = 0;
+                                        let mut chunk_text = String::new();
+
+                                        let mut l = 0;
+                                        while l < chunk.len() {
+                                            let c_tag = chunk[l];
+                                            let c_wire = c_tag & 0x07;
+                                            l += 1;
+
+                                            if c_tag == 8 { // Chunk Type
+                                                let (val, vr) = read_varint(&chunk[l..]);
+                                                chunk_type = val;
+                                                l += vr;
+                                            } else if c_tag == 18 { // Chunk Payload
+                                                let (plen, pr) = read_varint(&chunk[l..]);
+                                                l += pr;
+                                                let p_end = (l + plen as usize).min(chunk.len());
+
+                                                // Type 7 = Text Chunk. We must dig one layer deeper to Tag 10 for the string!
+                                                if chunk_type == 7 {
+                                                    if let Some(txt) = find_string_by_tag(&chunk[l..p_end], 10) {
+                                                        chunk_text = txt;
+                                                    }
+                                                }
+                                                l = p_end;
+                                            } else {
+                                                l += skip_field(c_wire, &chunk[l..]);
+                                            }
+                                        }
+
+                                        // Append the parsed chunk to the final message!
+                                        if chunk_type == 7 {
+                                            payload.message.push_str(&chunk_text);
+                                        } else if chunk_type == 3 {
+                                            payload.message.push_str("[아이템 링크]");
+                                        } else if chunk_type == 2 {
+                                            payload.message.push_str("[개인 공간]");
+                                        } else if chunk_type == 9 {
+                                            payload.message.push_str("[물고기 자랑]");
+                                        } else if chunk_type == 12 {
+                                            payload.message.push_str("[마스터 점수]");
+                                        }
+
+                                        k = c_end;
+                                    } else {
+                                        k += skip_field(r_wire, &rich_data[k..]);
+                                    }
+                                }
+                                j = r_end;
+                            }
+                            _ => { // Safely skip Tag 8 (Msg Type) and anything else
+                                j += skip_field(sub_wire, &sub_data[j..]);
+                            }
+                        }
+                    }
+                }
+                i = block_end;
+            }
+            _ => i += skip_field(wire_type, &data[i..]),
+        }
+    }
+    payload
+}
+
+fn parse_sender_info(data: &[u8]) -> SenderInfo {
+    let mut sender = SenderInfo::default();
+    let mut i = 0;
+    while i < data.len() {
+        let tag = data[i];
+        let wire_type = tag & 0x07;
+        i += 1;
+
+        match tag {
+            8 => { // Tag 8 = Field 1, Wire 0 (Permanent UID)
+                let (val, read) = read_varint(&data[i..]);
+                sender.uid = val;
+                i += read;
+            }
+            18 => { // Tag 18 = Field 2, Wire 2 (Nickname)
+                let (len, read) = read_varint(&data[i..]);
+                i += read;
+                let block_end = (i + len as usize).min(data.len());
+                if let Some(sub_data) = data.get(i..block_end) {
+                    sender.nickname = String::from_utf8_lossy(sub_data).into_owned();
+                }
+                i = block_end;
+            }
+            24 => { // Tag 24 = Field 3, Wire 0 (Class ID)
+                let (val, read) = read_varint(&data[i..]);
+                sender.class_id = val;
+                i += read;
+            }
+            32 => { // Tag 32 = Field 4, Wire 0 (Status Flag)
+                let (val, read) = read_varint(&data[i..]);
+                sender.status = val;
+                i += read;
+            }
+            40 => { // Tag 40 = Field 5, Wire 0 (Level)
+                let (val, read) = read_varint(&data[i..]);
+                sender.level = val;
+                i += read;
+            }
+            64 => { // Tag 64 = Field 8, Wire 0 (Blocked Flag)
+                let (val, read) = read_varint(&data[i..]);
+                sender.is_blocked = val == 1; // Convert integer flag to boolean safely
+                i += read;
+            }
+            _ => i += skip_field(wire_type, &data[i..]),
+        }
+    }
+    sender
 }
 
 // ==========================================
@@ -164,8 +364,6 @@ pub(crate) fn strip_application_header(payload: &[u8], port: u16) -> Option<&[u8
 #[derive(Debug)]
 pub enum Port5003Event {
     Chat(ChatMessage),
-    Recruit(LobbyRecruitment),
-    Asset(ProfileAsset),
 }
 
 // --- STRICT MAPPED PARSERS (From previous_sniffer.rs) ---
@@ -249,6 +447,13 @@ fn parse_profile_block(data: &[u8], chat: &mut ChatMessage) {
             40 => { // Tag 40 = Field 5, Wire 0 (Level)
                 let (val, read) = read_varint(&data[i..]);
                 chat.level = val;
+                i += read;
+            }
+            64 => { // Tag 64 = Field 8, Wire 0 (Blocked User Flag)
+                let (val, read) = read_varint(&data[i..]);
+                if val == 1 {
+                    chat.is_blocked = true;
+                }
                 i += read;
             }
             _ => i += skip_field(wire_type, &data[i..]),

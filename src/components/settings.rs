@@ -4,6 +4,7 @@ use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
 use crate::tauri_bridge::invoke;
+use crate::types::{FolderStatus, NetworkInterface};
 
 #[derive(serde::Serialize)]
 struct OpenBrowserArgs {
@@ -14,6 +15,20 @@ struct OpenBrowserArgs {
 pub fn Settings() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
     let actions = use_context::<AppActions>().expect("AppActions missing");
+
+    let (interfaces, set_interfaces) = signal(Vec::<NetworkInterface>::new());
+
+    Effect::new(move |_| {
+        if signals.show_settings.get() {
+            spawn_local(async move {
+                if let Ok(res) = invoke("get_network_interfaces", JsValue::NULL).await {
+                    if let Ok(list) = serde_wasm_bindgen::from_value::<Vec<NetworkInterface>>(res) {
+                        set_interfaces.set(list);
+                    }
+                }
+            });
+        }
+    });
 
     let sync_dict_action = Action::new_local(|_: &()| async move {
         match invoke("sync_dictionary", JsValue::NULL).await {
@@ -64,16 +79,66 @@ pub fn Settings() -> impl IntoView {
                             <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"AI Translation Features"</h3>
 
                             <div class="form-control">
-                                <label class="label cursor-pointer bg-base-100 rounded-lg px-4 py-3 border border-base-content/5 hover:border-success/30 transition-all"
-                                     on:click=move |_| {
-                                         let current = signals.use_translation.get();
-                                         signals.set_use_translation.set(!current);
-                                         actions.save_config.dispatch(());
-                                     }>
+                                <label class="label cursor-pointer bg-base-100 rounded-lg px-4 py-3 border border-base-content/5 hover:border-success/30 transition-all">
                                     <span class="label-text font-bold text-base-content">"실시간 번역 기능 사용"</span>
                                     <input type="checkbox" class="toggle toggle-success toggle-sm"
                                         prop:checked=move || signals.use_translation.get()
-                                        on:change=move |_| {} // Handled by label click
+                                        on:click=move |ev| {
+                                            // Prevent the browser from automatically flipping the switch
+                                            ev.prevent_default();
+
+                                            let current = signals.use_translation.get_untracked();
+
+                                            if !current {
+                                                // User is trying to turn it ON
+                                                spawn_local(async move {
+                                                    if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
+                                                        if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
+                                                            if status.exists {
+                                                                // Model exists -> Turn it on normally
+                                                                signals.set_use_translation.set(true);
+                                                                actions.save_config.dispatch(());
+                                                            } else {
+                                                                // Model missing -> Prompt user
+                                                                if let Some(w) = web_sys::window() {
+                                                                    if w.confirm_with_message("AI 모델 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
+                                                                        // Redirect to Setup Wizard
+                                                                        signals.set_use_translation.set(true);
+                                                                        signals.set_wizard_step.set(2);
+                                                                        signals.set_show_settings.set(false); // Close modal
+                                                                        signals.set_init_done.set(false);     // Trigger Wizard UI
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    if let Ok(st) = invoke("check_ai_server_status", JsValue::NULL).await {
+                                                        if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
+                                                            if status.exists {
+                                                                // Model exists -> Turn it on normally
+                                                                signals.set_use_translation.set(true);
+                                                                actions.save_config.dispatch(());
+                                                            } else {
+                                                                // Model missing -> Prompt user
+                                                                if let Some(w) = web_sys::window() {
+                                                                    if w.confirm_with_message("AI 실행 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
+                                                                        // Redirect to Setup Wizard
+                                                                        signals.set_use_translation.set(true);
+                                                                        signals.set_wizard_step.set(2);
+                                                                        signals.set_show_settings.set(false); // Close modal
+                                                                        signals.set_init_done.set(false);     // Trigger Wizard UI
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                });
+                                            } else {
+                                                // User is trying to turn it OFF
+                                                signals.set_use_translation.set(false);
+                                                actions.save_config.dispatch(());
+                                            }
+                                        }
                                     />
                                 </label>
                             </div>
@@ -83,7 +148,7 @@ pub fn Settings() -> impl IntoView {
                                 <div class="p-3 bg-base-200 rounded-lg space-y-3 border border-base-content/5">
                                     <span class="text-[11px] font-bold text-base-content/50 uppercase">"연산 장치 (Compute Mode)"</span>
                                     <div class="join w-full">
-                                        {vec!["cpu", "cuda"].into_iter().map(|m| {
+                                        {vec!["cpu", "gpu"].into_iter().map(|m| {
                                             let m_val = m.to_string();
                                             let m_line = m.to_string();
                                             let m_click = m.to_string();
@@ -103,7 +168,6 @@ pub fn Settings() -> impl IntoView {
                                             }
                                         }).collect_view()}
                                     </div>
-                                    <div class="text-[9px] opacity-50">"GPU 사용은 NVIDIA 그래픽카드와 CUDA Toolkit이 필요합니다."</div>
 
                                     // [RESTORED] Performance Tier
                                     <span class="text-[11px] font-bold text-base-content/50 uppercase block mt-3">"성능 (Performance Tier)"</span>
@@ -189,7 +253,7 @@ pub fn Settings() -> impl IntoView {
 
                             <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
                                 <label class="label cursor-pointer p-0">
-                                    <span class="label-text text-xs font-bold text-base-content/80">"컴팩트 모드: 번역 시 원문 숨기기"</span>
+                                    <span class="label-text text-xs font-bold text-base-content/80">"컴팩트 모드에서 번역 시 원문 숨기기"</span>
                                     <input type="checkbox" class="toggle toggle-success toggle-sm"
                                         prop:checked=move || signals.hide_original_in_compact.get()
                                         on:change=move |ev| {
@@ -206,6 +270,47 @@ pub fn Settings() -> impl IntoView {
                         // ==========================================
                         <section class="space-y-4">
                             <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"Appearance"</h3>
+
+                            // Click Through Mode
+                            <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
+                                <label class="label cursor-pointer p-0">
+                                    <div class="flex flex-col">
+                                        <span class="label-text text-xs font-bold text-base-content/80">"클릭 관통 모드 (Click-Through)"</span>
+                                        <span class="text-[9px] text-warning mt-1">"주의: 비활성화 하려면 시스템 트레이(우측 하단 아이콘)를 사용하세요."</span>
+                                    </div>
+                                    <input type="checkbox" class="toggle toggle-success toggle-sm"
+                                        prop:checked=move || signals.click_through.get()
+                                        on:change=move |ev| {
+                                            let enabled = event_target_checked(&ev);
+                                            signals.set_click_through.set(enabled);
+                                            actions.save_config.dispatch(());
+                                            signals.set_show_settings.set(false);
+
+                                            spawn_local(async move {
+                                                let _ = invoke("set_click_through", serde_wasm_bindgen::to_value(&serde_json::json!({ "enabled": enabled })).unwrap()).await;
+                                            });
+                                        }
+                                    />
+                                </label>
+                            </div>
+
+                            // --- DRAG TO SCROLL TOGGLE ---
+                            <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
+                                <label class="label cursor-pointer p-0">
+                                    <div class="flex flex-col">
+                                        <span class="label-text text-xs font-bold text-base-content/80">"드래그 스크롤 (Drag to Scroll)"</span>
+                                        <span class="text-[9px] text-base-content/60 mt-1">"마우스로 채팅창 배경을 드래그하여 위아래로 스크롤합니다."</span>
+                                    </div>
+                                    <input type="checkbox" class="toggle toggle-success toggle-sm"
+                                        prop:checked=move || signals.drag_to_scroll.get()
+                                        on:change=move |ev| {
+                                            let enabled = event_target_checked(&ev);
+                                            signals.set_drag_to_scroll.set(enabled);
+                                            actions.save_config.dispatch(());
+                                        }
+                                    />
+                                </label>
+                            </div>
 
                             // Opacity Slider
                             <div class="space-y-2 px-1">
@@ -320,56 +425,91 @@ pub fn Settings() -> impl IntoView {
 
                                 <div class="divider m-0 opacity-10"></div>
 
-                                // Show System Tab
                                 <div class="flex items-center justify-between">
                                     <div class="flex flex-col">
-                                        <span class="text-xs font-bold text-base-content/80">"시스템 탭 표시 (System Tab)"</span>
-                                        <span class="text-[9px] opacity-60">"시스템 탭 숨김 해제"</span>
+                                        <span class="text-xs font-bold text-warning">"디버그 모드 (Debug Mode)"</span>
+                                        <span class="text-[9px] opacity-60">"시스템 탭 및 개발자 도구 활성화"</span>
                                     </div>
                                     <input type="checkbox" class="toggle toggle-warning toggle-sm"
-                                        prop:checked=move || signals.show_system_tab.get()
+                                        prop:checked=move || signals.debug_mode.get()
                                         on:change=move |ev| {
-                                            signals.set_show_system_tab.set(event_target_checked(&ev));
+                                            signals.set_debug_mode.set(event_target_checked(&ev));
                                             actions.save_config.dispatch(());
                                         }
                                     />
                                 </div>
 
-                                // [RESTORED] Enable Debug Logs
-                                <div class="flex items-center justify-between">
-                                    <div class="flex flex-col">
-                                        <span class="text-xs font-bold text-base-content/80">"디버그 로그 (Debug)"</span>
-                                        <span class="text-[9px] opacity-60">"시스템 탭에 상세 로그 표시"</span>
+                                // --- REVEALED ONLY IN DEBUG MODE ---
+                                <Show when=move || signals.debug_mode.get()>
+                                    <div class="p-3 bg-warning/5 border border-warning/20 rounded-lg space-y-3 mt-2 animate-in fade-in slide-in-from-top-2 duration-200">
+
+                                        // 1. Log Level Select
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex flex-col">
+                                                <span class="text-[11px] font-bold text-base-content/80">"로그 레벨 (Log Level)"</span>
+                                            </div>
+                                            <select class="select select-bordered select-xs w-24 text-xs font-bold bg-base-100"
+                                                prop:value=move || signals.log_level.get()
+                                                on:change=move |ev| {
+                                                    signals.set_log_level.set(event_target_value(&ev));
+                                                    actions.save_config.dispatch(());
+                                                }>
+                                                <option value="trace">"TRACE"</option>
+                                                <option value="debug">"DEBUG"</option>
+                                                <option value="info">"INFO"</option>
+                                                <option value="warn">"WARN"</option>
+                                                <option value="error">"ERROR"</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="divider m-0 opacity-10"></div>
+
+                                        // 2. Network Interface Manual Selection
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex flex-col">
+                                                <span class="text-[11px] font-bold text-base-content/80">"네트워크 어댑터 (Network Interface)"</span>
+                                                <span class="text-[9px] text-warning/80 italic">"VPN 사용 시 패킷 캡처 실패 해결용"</span>
+                                            </div>
+                                            <select class="select select-bordered select-xs w-36 text-[10px] font-bold bg-base-100"
+                                                prop:value=move || signals.network_interface.get()
+                                                on:change=move |ev| {
+                                                    signals.set_network_interface.set(event_target_value(&ev));
+                                                    actions.save_config.dispatch(());
+                                                    signals.set_restart_required.set(true); // Requires sniffer restart
+                                                }>
+                                                <option value="">"Auto-Detect (권장)"</option>
+                                                <For
+                                                    each=move || interfaces.get()
+                                                    key=|iface| iface.ip.clone()
+                                                    children=move |iface| {
+                                                        view! {
+                                                            <option value=iface.ip.clone()>
+                                                                {format!("{} ({})", iface.name, iface.ip)}
+                                                            </option>
+                                                        }
+                                                    }
+                                                />
+                                            </select>
+                                        </div>
+
+                                        // 3. Data Factory (Save Chatting Log)
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex flex-col">
+                                                <span class="text-[11px] font-black text-warning uppercase">"Data Factory"</span>
+                                                <span class="text-[9px] text-base-content/60 italic">"채팅 로그 원본 저장 (dataset_raw.jsonl)"</span>
+                                            </div>
+                                            <input type="checkbox" class="checkbox checkbox-warning checkbox-xs"
+                                                prop:checked=move || signals.archive_chat.get()
+                                                on:change=move |ev| {
+                                                    signals.set_archive_chat.set(event_target_checked(&ev));
+                                                    actions.save_config.dispatch(());
+                                                }
+                                            />
+                                        </div>
                                     </div>
-                                    <input type="checkbox" class="toggle toggle-warning toggle-sm"
-                                        prop:checked=move || signals.is_debug.get()
-                                        on:change=move |ev| {
-                                            signals.set_is_debug.set(event_target_checked(&ev));
-                                            actions.save_config.dispatch(());
-                                        }
-                                    />
-                                </div>
+                                </Show>
                             </div>
                         </section>
-
-                        // [RESTORED] Data Factory (Fine-Tuning)
-                        <Show when=move || signals.is_debug.get()>
-                            <section class="p-3 bg-warning/5 border border-warning/20 rounded-lg space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex flex-col">
-                                        <span class="text-[11px] font-black text-warning uppercase">"Data Factory"</span>
-                                        <span class="text-[9px] text-base-content/60 italic">"채팅 로그 및 번역본 저장 (dataset_raw.jsonl)"</span>
-                                    </div>
-                                    <input type="checkbox" class="checkbox checkbox-warning checkbox-xs"
-                                        prop:checked=move || signals.archive_chat.get()
-                                        on:change=move |ev| {
-                                            signals.set_archive_chat.set(event_target_checked(&ev));
-                                            actions.save_config.dispatch(());
-                                        }
-                                    />
-                                </div>
-                            </section>
-                        </Show>
                     </div>
 
                     // --- FOOTER: GitHub Link ---

@@ -1,7 +1,7 @@
 use leptos::logging::log;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
-use crate::types::{ChatMessage, SystemMessage};
+use crate::types::{ChatMessage, SnifferStatePayload, SystemMessage, TranslationResult};
 use crate::utils::is_japanese;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -12,12 +12,63 @@ pub async fn clear_backend_history() {
 }
 
 pub async fn setup_event_listeners(signals: AppSignals) {
-    // PACKET LISTENER: Handles incoming Blue Protocol chat
-    let packet_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+    // 1. Create the closures using our new helper functions
+    let packet_closure = create_packet_handler(signals);
+    let system_closure = create_system_handler(signals);
+    let sniffer_state_closure = create_sniffer_state_handler(signals);
+    let translation_closure = create_translation_handler(signals);
+
+    // 2. Register all listeners
+    listen("packet-event", &packet_closure).await;
+    listen("system-event", &system_closure).await;
+    listen("sniffer-state", &sniffer_state_closure).await;
+    listen("translation-event", &translation_closure).await;
+
+    // 3. Prevent memory leaks / keep closures alive
+    packet_closure.forget();
+    system_closure.forget();
+    sniffer_state_closure.forget();
+    translation_closure.forget();
+}
+
+// --- EXTRACTED HANDLER FUNCTIONS ---
+
+fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
         if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
             if let Ok(mut packet) = serde_json::from_value::<ChatMessage>(ev["payload"].clone()) {
+
                 // Handle Stickers/Emojis
-                if packet.message.starts_with("emojiPic=") { packet.message = "스티커 전송".to_string(); }
+                if packet.message.starts_with("emojiPic=") {
+                    packet.message = "[스티커]".to_string();
+                    packet.translated = None;
+                }
+                if packet.message.contains("<sprite=") {
+                    let mut output = String::with_capacity(packet.message.len());
+                    let mut current = packet.message.as_str();
+
+                    while let Some(start) = current.find("<sprite=") {
+                        // Push the text *before* the sprite tag
+                        output.push_str(&current[..start]);
+
+                        // Find the closing '>'
+                        if let Some(end) = current[start..].find('>') {
+                            // Insert our clean UI placeholder
+                            output.push_str("[이모지]");
+                            // Move the cursor past the '>'
+                            current = &current[start + end + 1..];
+                        } else {
+                            // If the tag is somehow broken/malformed, stop parsing
+                            output.push_str(&current[start..]);
+                            current = "";
+                            break;
+                        }
+                    }
+                    // Push any remaining text *after* the last sprite tag
+                    output.push_str(current);
+                    packet.message = output;
+                    packet.translated = None;
+                }
 
                 signals.set_chat_log.update(|log| {
                     let limit = signals.chat_limit.get_untracked();
@@ -44,40 +95,33 @@ pub async fn setup_event_listeners(signals: AppSignals) {
                 if is_visible && !signals.is_at_bottom.get_untracked() {
                     signals.set_unread_count.update(|c| *c += 1);
                 }
-
-                let pid = packet.pid;
-                let nickname = packet.nickname.clone();
-
-                // NICKNAME STRATEGY: Check Cache -> Request if Missing
-                let cached_nickname = signals.name_cache.with(|cache| cache.get(&nickname).cloned());
-
-                if let Some(romaji) = cached_nickname {
-                    packet.nickname_romaji = Some(romaji);
-                } else if is_japanese(&nickname) {
-                    // Request nickname-only romanization
-                    spawn_local(async move {
-                        let _ = invoke("translate_nickname", serde_wasm_bindgen::to_value(&serde_json::json!({
-                                    "pid": pid, "nickname": nickname
-                                })).unwrap()).await;
-                    });
-                }
-
-                // Auto-Translate Logic
-                if is_japanese(&packet.message) && signals.use_translation.get_untracked() {
-                    let pid = packet.pid;
-                    let msg = packet.message.clone();
-                    spawn_local(async move {
-                        let _ = invoke("translate_message", serde_wasm_bindgen::to_value(&serde_json::json!({
-                            "text": msg, "pid": pid, "nickname": None::<String>
-                        })).unwrap()).await;
-                    });
-                }
             }
         }
-    }) as Box<dyn FnMut(JsValue)>);
+    }) as Box<dyn FnMut(JsValue)>)
+}
 
-    // SYSTEM LISTENER: Handles app logs
-    let system_closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
+fn create_translation_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
+        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+            if let Ok(payload) = serde_json::from_value::<TranslationResult>(ev["payload"].clone()) {
+
+                // Find the existing message by PID and update its signal
+                // Leptos will instantly re-render ONLY this specific ChatRow!
+                signals.set_chat_log.update(|log| {
+                    if let Some(chat_rw) = log.get(&payload.pid) {
+                        chat_rw.update(|c| {
+                            c.translated = Some(payload.translated);
+                        });
+                    }
+                });
+
+            }
+        }
+    }) as Box<dyn FnMut(JsValue)>)
+}
+
+fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
         if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
             if let Ok(packet) = serde_json::from_value::<SystemMessage>(ev["payload"].clone()) {
                 signals.set_system_log.update(|log| {
@@ -88,11 +132,20 @@ pub async fn setup_event_listeners(signals: AppSignals) {
                 });
             }
         }
-    }) as Box<dyn FnMut(JsValue)>);
+    }) as Box<dyn FnMut(JsValue)>)
+}
 
-    listen("packet-event", &packet_closure).await;
-    listen("system-event", &system_closure).await;
+fn create_sniffer_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
+        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+            if let Ok(payload) = serde_json::from_value::<SnifferStatePayload>(ev["payload"].clone()) {
+                signals.set_sniffer_state.set(payload.state.clone());
 
-    packet_closure.forget();
-    system_closure.forget();
+                // If it's an error, save the message so the user can click the badge to read it
+                if payload.state == "Error" {
+                    signals.set_sniffer_error.set(payload.message);
+                }
+            }
+        }
+    }) as Box<dyn FnMut(JsValue)>)
 }

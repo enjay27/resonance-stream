@@ -14,7 +14,7 @@ use crate::hooks::use_events::setup_event_listeners;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::{invoke, listen};
 use crate::types::{
-    ChatMessage, SystemMessage, AppConfig, ModelStatus, ProgressPayload, TauriEvent
+    ChatMessage, SystemMessage, AppConfig, FolderStatus, ProgressPayload, TauriEvent
 };
 use crate::utils::{add_system_log, copy_to_clipboard, format_time, is_japanese};
 
@@ -40,7 +40,8 @@ pub fn App() -> impl IntoView {
     let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
 
     let (is_system_at_bottom, set_system_at_bottom) = signal(true);
-    let (show_system_tab, set_show_system_tab) = signal(false);
+    let (debug_mode, set_debug_mode) = signal(false);
+    let (log_level, set_log_level) = signal("info".to_string());
     let (system_level_filter, set_system_level_filter) = signal(None::<String>);
     let (system_source_filter, set_system_source_filter) = signal(None::<String>);
 
@@ -51,7 +52,6 @@ pub fn App() -> impl IntoView {
     let (custom_filters, set_custom_filters) = signal(vec!["WORLD".to_string(), "GUILD".to_string(), "PARTY".to_string(), "LOCAL".to_string()]);
     let (theme, set_theme) = signal("dark".to_string());
     let (opacity, set_opacity) = signal(0.85f32);
-    let (is_debug, set_is_debug) = signal(false);
     let (tier, set_tier) = signal("middle".to_string());
     let (restart_required, set_restart_required) = signal(false);
     let (dict_update_available, set_dict_update_available) = signal(false);
@@ -60,6 +60,12 @@ pub fn App() -> impl IntoView {
     let (active_menu_id, set_active_menu_id) = signal(None::<u64>);
     let (archive_chat, set_archive_chat) = signal(false);
     let (hide_original_in_compact, set_hide_original_in_compact) = signal(false);
+    let (network_interface, set_network_interface) = signal("".to_string());
+    let (click_through, set_click_through) = signal(false);
+    let (drag_to_scroll, set_drag_to_scroll) = signal(false);
+
+    let (sniffer_state, set_sniffer_state) = signal("Off".to_string());
+    let (sniffer_error, set_sniffer_error) = signal("".to_string());
 
     let signals = AppSignals {
         init_done, set_init_done,
@@ -78,7 +84,8 @@ pub fn App() -> impl IntoView {
         chat_log, set_chat_log,
         system_log, set_system_log,
         is_system_at_bottom, set_system_at_bottom,
-        show_system_tab, set_show_system_tab,
+        debug_mode, set_debug_mode,
+        log_level, set_log_level,
         system_level_filter, set_system_level_filter,
         system_source_filter, set_system_source_filter,
         compact_mode, set_compact_mode,
@@ -88,7 +95,6 @@ pub fn App() -> impl IntoView {
         custom_filters, set_custom_filters,
         theme, set_theme,
         opacity, set_opacity,
-        is_debug, set_is_debug,
         tier, set_tier,
         restart_required, set_restart_required,
         dict_update_available, set_dict_update_available,
@@ -98,6 +104,11 @@ pub fn App() -> impl IntoView {
         archive_chat, set_archive_chat,
         hide_original_in_compact,
         set_hide_original_in_compact,
+        network_interface, set_network_interface,
+        click_through, set_click_through,
+        drag_to_scroll, set_drag_to_scroll,
+        sniffer_state, set_sniffer_state,
+        sniffer_error, set_sniffer_error,
     };
 
     provide_context(signals);
@@ -145,11 +156,13 @@ pub fn App() -> impl IntoView {
             custom_tab_filters: custom_filters.get_untracked(),
             theme: theme.get_untracked(),
             overlay_opacity: opacity.get_untracked(),
-            show_system_tab: show_system_tab.get_untracked(),
-            is_debug: is_debug.get_untracked(),
+            debug_mode: debug_mode.get_untracked(),
+            log_level: log_level.get_untracked(),
             tier: tier.get_untracked(),
             archive_chat: archive_chat.get_untracked(),
             hide_original_in_compact: hide_original_in_compact.get_untracked(),
+            network_interface: network_interface.get_untracked(),
+            drag_to_scroll: drag_to_scroll.get_untracked(),
         };
 
         async move {
@@ -180,19 +193,6 @@ pub fn App() -> impl IntoView {
             setup_event_listeners(signals).await;
             set_is_sniffer_active.set(true);
             let _ = invoke("start_sniffer_command", JsValue::NULL).await;
-
-            if use_translation.get_untracked() {
-                add_system_log("info", "UI", "Starting AI translation engine...");
-                // Check model one last time before launching AI
-                if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
-                    if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
-                        if status.exists {
-                            let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
-                            set_status_text.set("AI Engine Starting...".to_string());
-                        }
-                    }
-                }
-            }
         });
     };
 
@@ -230,6 +230,39 @@ pub fn App() -> impl IntoView {
     let actions = AppActions { save_config, clear_history };
 
     provide_context(actions);
+
+    // --- TRAY ICON LISTENER ---
+    spawn_local(async move {
+        // 1. Click-Through Listener (Existing)
+        let tray_closure = Closure::wrap(Box::new(move |_: JsValue| {
+            let current = click_through.get_untracked();
+            set_click_through.set(!current);
+            actions.save_config.dispatch(());
+
+            spawn_local(async move {
+                let _ = invoke("set_click_through", serde_wasm_bindgen::to_value(&serde_json::json!({ "enabled": !current })).unwrap()).await;
+            });
+        }) as Box<dyn FnMut(JsValue)>);
+
+        let _ = listen("tray-toggle-click-through", &tray_closure).await;
+        tray_closure.forget();
+
+        // 2. Always on Top Listener (NEW)
+        let tray_top_closure = Closure::wrap(Box::new(move |_: JsValue| {
+            let current = is_pinned.get_untracked();
+            set_is_pinned.set(!current); // Flip the signal so the TitleBar icon updates!
+            actions.save_config.dispatch(()); // Save to config file
+
+            spawn_local(async move {
+                // Tauri command expects { "onTop": bool }
+                let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "onTop": !current })).unwrap();
+                let _ = invoke("set_always_on_top", args).await;
+            });
+        }) as Box<dyn FnMut(JsValue)>);
+
+        let _ = listen("tray-toggle-always-on-top", &tray_top_closure).await;
+        tray_top_closure.forget();
+    });
 
     // Apply theme to the root element whenever it changes
     Effect::new(move |_| {
@@ -270,11 +303,13 @@ pub fn App() -> impl IntoView {
                         set_custom_filters.set(config.custom_tab_filters);
                         set_theme.set(config.theme);
                         set_opacity.set(config.overlay_opacity);
-                        set_show_system_tab.set(config.show_system_tab);
-                        set_is_debug.set(config.is_debug);
+                        set_debug_mode.set(config.debug_mode);
+                        set_log_level.set(config.log_level);
                         set_tier.set(config.tier);
                         set_archive_chat.set(config.archive_chat);
                         set_hide_original_in_compact.set(config.hide_original_in_compact);
+                        set_network_interface.set(config.network_interface);
+                        set_drag_to_scroll.set(config.drag_to_scroll);
 
                         let mut safe_op = config.overlay_opacity;
                         if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85
@@ -290,10 +325,41 @@ pub fn App() -> impl IntoView {
                             // Hydrate GAME History
                             if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
                                 if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatMessage>>(res) {
-                                    let sanitized_vec: Vec<(u64, RwSignal<ChatMessage>)> = vec.into_iter().map(|mut p| {
-                                        if p.message.starts_with("emojiPic=") { p.message = "스티커 전송".to_string(); } else if p.message.contains("<sprite=") { p.message = "이모지 전송".to_string(); }
+                                    let sanitized_vec: Vec<(u64, RwSignal<ChatMessage>)> = vec.clone().into_iter().map(|mut p| {
+                                        // 1. Handle Standalone Stamps (emojiPic=...)
+                                        if p.message.starts_with("emojiPic=") {
+                                            p.message = "[스티커]".to_string();
+                                        }
+                                        // 2. Handle Inline Emojis (<sprite=...>)
+                                        else if p.message.contains("<sprite=") {
+                                            let mut output = String::with_capacity(p.message.len());
+                                            let mut current = p.message.as_str();
+
+                                            while let Some(start) = current.find("<sprite=") {
+                                                // Push the text *before* the sprite tag
+                                                output.push_str(&current[..start]);
+
+                                                // Find the closing '>'
+                                                if let Some(end) = current[start..].find('>') {
+                                                    // Insert our clean UI placeholder
+                                                    output.push_str("[이모지]");
+                                                    // Move the cursor past the '>'
+                                                    current = &current[start + end + 1..];
+                                                } else {
+                                                    // If the tag is somehow broken/malformed, stop parsing
+                                                    output.push_str(&current[start..]);
+                                                    current = "";
+                                                    break;
+                                                }
+                                            }
+                                            // Push any remaining text *after* the last sprite tag
+                                            output.push_str(current);
+                                            p.message = output;
+                                        }
+
                                         (p.pid, RwSignal::new(p))
                                     }).collect();
+
                                     set_chat_log.set(sanitized_vec.into_iter().collect());
                                 }
                             }
@@ -309,7 +375,20 @@ pub fn App() -> impl IntoView {
 
                             if config.use_translation {
                                 if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
-                                    if let Ok(status) = serde_wasm_bindgen::from_value::<ModelStatus>(st) {
+                                    if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
+                                        if status.exists {
+                                            add_system_log("info", "UI", "Starting AI translation engine...");
+                                            set_model_ready.set(true);
+                                            set_status_text.set("AI Engine Starting...".to_string());
+                                        } else {
+                                            add_system_log("warn", "Sidecar", "Model missing. AI is disabled.");
+                                            set_model_ready.set(false);
+                                        }
+                                    }
+                                }
+
+                                if let Ok(st) = invoke("check_ai_server_status", JsValue::NULL).await {
+                                    if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
                                         if status.exists {
                                             add_system_log("info", "UI", "Starting AI translation engine...");
                                             let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
@@ -345,6 +424,21 @@ pub fn App() -> impl IntoView {
                 },
                 Err(e) => log!("FATAL: Failed to load config: {:?}", e),
             }
+        });
+    });
+
+    // This automatically runs on startup, AND anytime either variable is changed from anywhere!
+    Effect::new(move |_| {
+        let ct = click_through.get();
+        let aot = is_pinned.get();
+
+        spawn_local(async move {
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                "clickThrough": ct,
+                "alwaysOnTop": aot
+            })).unwrap();
+
+            let _ = invoke("update_tray_menu", args).await;
         });
     });
 

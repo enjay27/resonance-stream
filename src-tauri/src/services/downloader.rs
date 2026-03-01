@@ -4,12 +4,22 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use chrono::{Local, TimeZone};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::ShellExt;
 
+// --- 1. Define Constants for your GGUF Model ---
+pub const MODEL_FOLDER: &str = "Qwen3-Blue-Protocol-Translator-JA-KO";
+pub const MODEL_FILENAME: &str = "qwen3-4b-blueprotocol-ja2ko-q4_k_m.gguf";
+// Hugging Face direct download link (using /resolve/main/)
+pub const MODEL_URL: &str = "https://huggingface.co/enjay27/Qwen3-Blue-Protocol-Translator-JA-KO/resolve/main/qwen3-1.7b-blueprotocol-ja2ko-q4_k_m.gguf";
+pub const AI_SERVER_FOLDER: &str = "ai-server";
+pub const AI_SERVER_ZIP_URL: &str = "https://github.com/enjay27/resonance-stream/releases/download/v0.2.0/llama-b8157-bin-win-vulkan-x64.zip";
+pub const AI_SERVER_FILENAME: &str = "llama-server.exe";
+
 #[derive(Serialize, Clone)]
-pub struct ModelStatus {
+pub struct FolderStatus {
     pub exists: bool,
     pub path: String,
 }
@@ -21,117 +31,71 @@ struct ProgressPayload {
     pub total_percent: u8,
 }
 
-#[derive(Deserialize, Serialize, Clone)]
-struct ModelFile {
-    name: String,
-    url: String,
-}
+#[tauri::command]
+pub async fn check_model_status(app: tauri::AppHandle) -> Result<FolderStatus, String> {
+    // Check exactly one path for the .gguf file
+    let model_path = app.path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("models")
+        .join(MODEL_FOLDER)
+        .join(MODEL_FILENAME);
 
-#[derive(Deserialize, Clone)]
-struct ModelManifest {
-    model_id: String,
-    files: Vec<ModelFile>,
-}
-
-fn load_manifest(app: &tauri::AppHandle) -> Result<ModelManifest, String> {
-    // currently translation model is in progress
-    Ok(ModelManifest {
-        model_id: "".to_string(),
-        files: vec![],
+    Ok(FolderStatus {
+        exists: model_path.exists(),
+        path: model_path.to_string_lossy().into_owned(),
     })
-    // 1. DEVELOPMENT: Embed the file directly into the binary during 'cargo tauri dev'
-    // #[cfg(debug_assertions)]
-    // {
-    //     // This path is relative to 'src-tauri/src/model_manager.rs'
-    //     let json_data = include_str!("../../resources/models.json");
-    //     serde_json::from_str(json_data).map_err(|e| format!("Dev JSON parse error: {}", e))
-    // }
-    // 
-    // // 2. PRODUCTION: Use the dynamic PathResolver for the bundled resource
-    // #[cfg(not(debug_assertions))]
-    // {
-    //     use tauri::path::BaseDirectory;
-    // 
-    //     // Fix: Match the structure in tauri.conf.json ("resources/models.json")
-    //     let resource_path = app.path()
-    //         .resolve("resources/models.json", BaseDirectory::Resource)
-    //         .map_err(|e| format!("Resource resolution failed: {}", e))?;
-    // 
-    //     if !resource_path.exists() {
-    //         // Fallback: Check the same directory as the EXE (useful for local builds)
-    //         let exe_path = std::env::current_exe().unwrap().parent().unwrap().join("models.json");
-    //         if exe_path.exists() {
-    //             let json_data = std::fs::read_to_string(&exe_path).map_err(|e| e.to_string())?;
-    //             return serde_json::from_str(&json_data).map_err(|e| e.to_string());
-    //         }
-    //         return Err(format!("models.json not found. Checked: {:?}", resource_path));
-    //     }
-    // 
-    //     let json_data = std::fs::read_to_string(&resource_path)
-    //         .map_err(|e| format!("Failed to read models.json: {}", e))?;
-    // 
-    //     serde_json::from_str(&json_data).map_err(|e| format!("Prod JSON parse error: {}", e))
-    // }
 }
 
 #[tauri::command]
-pub async fn check_model_status(app: tauri::AppHandle) -> Result<ModelStatus, String> {
-    // 1. Load the manifest using the same hybrid logic as load_manifest
-    let manifest = load_manifest(&app)?;
-
-    // 2. Resolve the model directory based on the manifest's model_id
-    let model_dir = app.path()
+pub async fn check_ai_server_status(app: tauri::AppHandle) -> Result<FolderStatus, String> {
+    // Check exactly one path for the .gguf file
+    let model_path = app.path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
-        .join(format!("models/{}", manifest.model_id));
+        .join("bin")
+        .join(AI_SERVER_FOLDER)
+        .join(AI_SERVER_FILENAME);
 
-    // 3. Verify if all required files exist in that directory
-    let all_exist = manifest.files.iter().all(|f| model_dir.join(&f.name).exists());
-
-    Ok(ModelStatus {
-        exists: all_exist,
-        path: model_dir.to_string_lossy().into_owned(),
+    Ok(FolderStatus {
+        exists: model_path.exists(),
+        path: model_path.to_string_lossy().into_owned(),
     })
 }
 
 #[tauri::command]
 pub async fn download_model(app: AppHandle) -> Result<(), String> {
-    let manifest = load_manifest(&app)?;
-    let model_dir = app.path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join(format!("models/{}", manifest.model_id));
+    let model_dir = get_model_dir(&app)?;
 
     fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
 
+    let dest_path = model_dir.join(MODEL_FILENAME);
+
+    // Skip if already downloaded
+    if dest_path.exists() {
+        return Ok(());
+    }
+
     let client = reqwest::Client::new();
+    let res = client.get(MODEL_URL).send().await.map_err(|e| e.to_string())?;
+    let total_size = res.content_length().unwrap_or(0);
 
-    for (idx, file_info) in manifest.files.iter().enumerate() {
-        let dest_path = model_dir.join(&file_info.name);
-        if dest_path.exists() {
-            continue;
-        }
+    let mut file = fs::File::create(&dest_path).map_err(|e| e.to_string())?;
+    let mut downloaded: u64 = 0;
+    let mut stream = res.bytes_stream();
 
-        let res = client.get(&file_info.url).send().await.map_err(|e| e.to_string())?;
-        let total_size = res.content_length().unwrap_or(0);
+    while let Some(item) = stream.next().await {
+        let chunk = item.map_err(|e| e.to_string())?;
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
+        downloaded += chunk.len() as u64;
 
-        let mut file = fs::File::create(&dest_path).map_err(|e| e.to_string())?;
-        let mut downloaded: u64 = 0;
-        let mut stream = res.bytes_stream();
-
-        while let Some(item) = stream.next().await {
-            let chunk = item.map_err(|e| e.to_string())?;
-            file.write_all(&chunk).map_err(|e| e.to_string())?;
-            downloaded += chunk.len() as u64;
-
-            if file_info.name == "model.bin" && total_size > 0 {
-                let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
-                let _ = app.emit("download-progress", ProgressPayload {
-                    current_file: file_info.name.clone(),
-                    percent, // Local file percent
-                    total_percent: percent, // We use this as the primary UI driver
-                });
-            }
+        if total_size > 0 {
+            let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
+            let _ = app.emit("download-progress", ProgressPayload {
+                current_file: MODEL_FILENAME.to_string(),
+                percent,
+                total_percent: percent,
+            });
         }
     }
 
@@ -144,16 +108,21 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub fn get_model_path(app: &tauri::AppHandle) -> String {
-    // We can unwrap safely here if we know load_manifest is solid
-    let manifest = load_manifest(app).expect("Failed to load manifest for path resolution");
+fn get_model_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("models")
+        .join(MODEL_FOLDER))
+}
 
+pub fn get_model_path(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
         .expect("Failed to resolve AppData directory")
-        .join(format!("models/{}", manifest.model_id))
-        .to_string_lossy()
-        .into_owned()
+        .join("models")
+        .join(MODEL_FOLDER)
+        .join(MODEL_FILENAME)
 }
 
 #[tauri::command]
@@ -285,6 +254,76 @@ pub async fn export_chat_log(app: tauri::AppHandle, logs: Vec<ExportMessage>) ->
 
     // Return the path so we could theoretically show it to the user
     Ok(file_path.to_string_lossy().to_string())
+}
+
+// Add this command anywhere in downloader.rs
+#[tauri::command]
+pub async fn download_ai_server(app: AppHandle) -> Result<(), String> {
+    let bin_dir = app.path().app_data_dir().unwrap().join("bin");
+    fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
+
+    let server_exe = bin_dir.join("llama-server.exe");
+
+    // Skip if already downloaded and extracted
+    if server_exe.exists() {
+        return Ok(());
+    }
+
+    let zip_path = bin_dir.join("server_temp.zip");
+
+    // 1. Download the ZIP file (Streaming)
+    let client = reqwest::Client::new();
+    let res = client.get(AI_SERVER_ZIP_URL).send().await.map_err(|e| e.to_string())?;
+    let total_size = res.content_length().unwrap_or(0);
+
+    let mut file = fs::File::create(&zip_path).map_err(|e| e.to_string())?;
+    let mut downloaded: u64 = 0;
+    let mut stream = res.bytes_stream();
+
+    while let Some(item) = stream.next().await {
+        let chunk = item.map_err(|e| e.to_string())?;
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
+        downloaded += chunk.len() as u64;
+
+        if total_size > 0 {
+            let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
+            let _ = app.emit("download-progress", ProgressPayload {
+                current_file: "AI 엔진 다운로드 중...".to_string(),
+                percent,
+                total_percent: percent,
+            });
+        }
+    }
+
+    // 2. Extract the ZIP file
+    let _ = app.emit("download-progress", ProgressPayload {
+        current_file: "압축 해제 중...".to_string(),
+        percent: 100,
+        total_percent: 100,
+    });
+
+    let zip_file = fs::File::open(&zip_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let outpath = match file.enclosed_name() {
+            Some(path) => bin_dir.join(path.file_name().unwrap_or(path.as_os_str())), // Flattens the folder structure
+            None => continue,
+        };
+
+        if file.name().ends_with('/') {
+            continue; // Skip directories
+        }
+
+        let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+        std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+    }
+
+    // 3. Clean up the temp zip file
+    let _ = fs::remove_file(zip_path);
+
+    Ok(())
 }
 
 #[tauri::command]

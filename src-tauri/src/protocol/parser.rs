@@ -1,27 +1,50 @@
-use tauri::AppHandle;
 use crate::packet_buffer::read_varint_safe;
-pub(crate) use crate::{AppState, ChatMessage, LobbyRecruitment, ProfileAsset, SplitPayload, SystemMessage};
-use crate::{inject_system_message, ChatPayload, SenderInfo, SystemLogLevel};
+use crate::{inject_system_message, SystemLogLevel};
+pub(crate) use crate::{ChatMessage};
+use tauri::AppHandle;
+
+#[derive(Debug)]
+pub struct SplitPayload<'a> {
+    pub channel: String,
+    pub chat_blocks: Vec<(u32, &'a [u8])>,
+}
+
+#[derive(Debug, Default)]
+pub struct ChatPayload {
+    pub session_id: u64,        // Tag 8 (Field 1): 20
+    pub sender: SenderInfo,     // Tag 18 (Field 2): Player info block
+    pub timestamp: u64,         // Tag 24 (Field 3): 1772343736
+    pub message: String,        // Tag 34 (Field 4): Message string block
+}
+
+#[derive(Debug, Default)]
+pub struct SenderInfo {
+    pub uid: u64,             // Tag 8 (Field 1): 37276266
+    pub nickname: String,     // Tag 18 (Field 2): "あずるる"
+    pub class_id: u64,        // Tag 24 (Field 3): 2 (e.g., Twin Striker)
+    pub status: u64,          // Tag 32 (Field 4): 1 (Online/Normal flag)
+    pub level: u64,           // Tag 40 (Field 5): 60
+    pub is_blocked: bool,
+}
 
 pub fn parsing_pipeline(data: &[u8], app: &AppHandle) -> Vec<Port5003Event>{
-    // If it's a server packet, this safely returns without spamming logs
     let raw_payload = match stage1_split(data) {
         Some(p) => p,
         None => return Vec::new(),
     };
 
-    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 1 completed {:?}", raw_payload));
+    inject_system_message(app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 1 completed {:?}", raw_payload));
 
     let events = stage2_process(raw_payload);
 
-    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 2 completed {:?}", events));
-    
+    inject_system_message(app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 2 completed {:?}", events));
+
     events
 }
 
 // --- STAGE 1: SPLIT ---
 // Separates the raw Protobuf packet into categorized byte blocks.
-pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
+pub(crate) fn stage1_split<'a>(data: &'a [u8]) -> Option<SplitPayload<'a>> {
     let mut payload = SplitPayload {
         channel: "WORLD".to_string(),
         chat_blocks: Vec::new(),
@@ -49,7 +72,7 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
             if let Some(sub_data) = data.get(i..block_end) {
                 match field_num {
                     2 | 4 => {
-                        payload.chat_blocks.push((field_num, sub_data.to_vec()));
+                        payload.chat_blocks.push((field_num, sub_data));
                         is_valid_chat_packet = true;
                     },
                     _ => {}
@@ -59,7 +82,6 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
         } else if wire_type == 0 {
             let (val, read) = read_varint(&data[i..safe_end]);
 
-            // 2. Allow BOTH Field 1 and Field 2 to dictate the Channel!
             if field_num == 1 || field_num == 2 {
                 payload.channel = match val {
                     2 => "LOCAL".into(), 3 => "PARTY".into(), 4 => "GUILD".into(), _ => "WORLD".into(),
@@ -80,7 +102,7 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
 
 // --- STAGE 2: PROCESS ---
 // Applies strict, field-mapped parsing logic to generate specific Events.
-pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
+pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
     let mut events = Vec::new();
 
     // 1. Process Chat Blocks
@@ -89,15 +111,13 @@ pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
 
         match field_num {
             2 => {
-                // Parse the bytes into our clean, intermediate nested structs
-                let parsed_payload = parse_chat_payload(&block);
+                // block is now exactly a &[u8], parsing effortlessly
+                let parsed_payload = parse_chat_payload(block);
 
-                // Map the intermediate struct values to the global UI struct
-                chat.sequence_id = parsed_payload.session_id; // <-- Fixes the PID bug!
+                chat.sequence_id = parsed_payload.session_id;
                 chat.timestamp = parsed_payload.timestamp;
                 chat.message = parsed_payload.message;
 
-                // Flatten the SenderInfo block
                 chat.uid = parsed_payload.sender.uid;
                 chat.nickname = parsed_payload.sender.nickname;
                 chat.class_id = parsed_payload.sender.class_id;
@@ -105,9 +125,9 @@ pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
                 chat.is_blocked = parsed_payload.sender.is_blocked;
             }
             4 => {
-                if let Some(msg) = find_string_by_tag(&block, 0x1A) {
+                if let Some(msg) = find_string_by_tag(block, 0x1A) {
                     chat.message = msg;
-                    if let Some(chan_id) = find_int_by_tag(&block, 0x10) {
+                    if let Some(chan_id) = find_int_by_tag(block, 0x10) {
                         chat.channel = match chan_id { 3 => "PARTY".into(), 4 => "GUILD".into(), _ => chat.channel };
                     }
                 }
@@ -116,12 +136,10 @@ pub(crate) fn stage2_process(raw: SplitPayload) -> Vec<Port5003Event> {
         }
 
         if !chat.message.is_empty() {
-            // If we have no UID/Nickname, it's a server echo of the local player's chat
             if chat.uid == 0 && chat.nickname.is_empty() {
                 chat.nickname = "Me".to_string();
             }
 
-            // Drop the packet entirely if it's from a blocked user!
             if !chat.is_blocked {
                 events.push(Port5003Event::Chat(chat));
             }

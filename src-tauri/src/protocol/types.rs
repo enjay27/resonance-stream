@@ -37,30 +37,6 @@ pub struct ChatMessage {
     pub nickname_romaji: Option<String>,
 }
 
-#[derive(Debug)]
-pub struct RawChatPacket {
-    pub chat_type: u64,       // Tag 8 (Field 1): 1 = WORLD, 2 = LOCAL, 3 = PARTY, 4 = GUILD
-    pub payload: ChatPayload, // Tag 18 (Field 2): The main chat block
-}
-
-#[derive(Debug, Default)]
-pub struct ChatPayload {
-    pub session_id: u64,        // Tag 8 (Field 1): 20
-    pub sender: SenderInfo,     // Tag 18 (Field 2): Player info block
-    pub timestamp: u64,         // Tag 24 (Field 3): 1772343736
-    pub message: String,        // Tag 34 (Field 4): Message string block
-}
-
-#[derive(Debug, Default)]
-pub struct SenderInfo {
-    pub uid: u64,             // Tag 8 (Field 1): 37276266
-    pub nickname: String,     // Tag 18 (Field 2): "あずるる"
-    pub class_id: u64,        // Tag 24 (Field 3): 2 (e.g., Twin Striker)
-    pub status: u64,          // Tag 32 (Field 4): 1 (Online/Normal flag)
-    pub level: u64,           // Tag 40 (Field 5): 60
-    pub is_blocked: bool,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemMessage {
@@ -88,83 +64,10 @@ pub struct MessageRequest {
     pub text: String,         // The Japanese message
 }
 
-// 2. Lobby Recruitment: Detailed recruitment board data
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct LobbyRecruitment {
-    pub party_id: u64,
-    pub leader_nickname: String,
-    pub description: String,      // The full Japanese description
-    pub recruit_id: String,       // "ID:XXXXX" extracted from description
-    pub member_count: u32,
-    pub max_members: u32,
-    pub timestamp: u64,
-    // --- Translation Support ---
-    #[serde(default)]
-    pub translated: Option<String>,      // Translated party description
-    #[serde(default)]
-    pub nickname_romaji: Option<String>, // Leader's name in Romaji
-}
-
-// 3. Profile Assets: Player thumbnails and full renders
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ProfileAsset {
-    pub uid: u64,
-    pub snapshot_url: String,   // Thumbnail URL
-    pub halflength_url: String, // Full render URL
-    pub status_text: String,    // Original Japanese status
-    pub timestamp: u64,
-    // --- Translation Support ---
-    #[serde(default)]
-    pub translated: Option<String>, // Translated status/title
-}
-
-#[derive(Debug)]
-pub struct SplitPayload {
-    pub channel: String,
-    pub chat_blocks: Vec<(u32, Vec<u8>)>,
-}
-
-#[derive(Serialize)]
-pub struct NicknameRequest {
-    pub cmd: String,          // Always "nickname_only"
-    pub pid: u64,
-    pub nickname: String,     // Required for this request type
-}
-
-// --- RESPONSE: Python -> Rust ---
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct NicknameResponse {
-    pub pid: u64,
-    pub nickname: String,
-    pub romaji: String, // Flat string, no object
-}
-
-// --- For Full translation requests ---
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MessageResponse {
-    pub pid: u64,
-    pub translated: String,
-}
-
-#[derive(Serialize)]
-pub struct BatchMessageRequest {
-    pub cmd: String, // "batch_translate" or "translate_and_save"
-    pub messages: Vec<MessageRequest>,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TranslationResult {
     pub pid: u64,
     pub translated: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BatchMessageResponse {
-    #[serde(rename = "type")]
-    pub msg_type: String,
-    pub results: Vec<TranslationResult>,
 }
 
 #[derive(Deserialize)]

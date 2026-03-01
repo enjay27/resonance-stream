@@ -116,14 +116,34 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         server_cmd.arg("--port").arg("8080");
         server_cmd.arg("--log-disable");
 
+        // Dynamically scale Layers, Parallel slots, and Context based on hardware tier
+        let (gpu_layers, parallel, context) = if config.compute_mode.to_lowercase() == "gpu" {
+            match config.tier.to_lowercase().as_str() {
+                // Target: GTX 1060 (3GB/6GB), RTX 2060 (6GB)
+                // VRAM is highly constrained. 1 request at a time to prevent game stutter/OOM.
+                "low" => ("12", "1", "1024"),
+
+                // Target: RTX 3060 (8GB), RTX 2070
+                // Enough VRAM to comfortably handle 2 simultaneous translations.
+                "middle" => ("24", "2", "2048"),
+
+                // Target: RTX 3060 (12GB), RTX 3070, RTX 4060
+                // Excellent VRAM overhead. Can handle 3 simultaneous translations easily.
+                "high" => ("32", "3", "3072"),
+
+                // Target: RTX 4080 Super, RTX 4090, RTX 3090
+                // Massive VRAM. Full offload and max parallelization.
+                "very high" => ("99", "5", "5120"),
+
+                _ => ("24", "2", "2048"),
+            }
+        } else {
+            // Target: CPU Mode / Integrated Graphics (Intel UHD / AMD Vega)
+            // iGPUs share system RAM. Parallelizing CPU inferencing will just freeze the PC.
+            ("0", "1", "1024")
+        };
+
         if config.compute_mode.to_lowercase() == "gpu" {
-            let gpu_layers = match config.tier.to_lowercase().as_str() {
-                "low" => "12",       // Offloads ~30% of the layers. Good for strict VRAM limits (under 2GB free).
-                "middle" => "24",    // Offloads ~60% of the layers. A solid balance.
-                "high" => "32",      // Offloads ~80% of the layers. Almost full speed, saves a tiny bit of VRAM.
-                "very high" => "99", // 100% offload. Catches all layers regardless of exact architecture.
-                _ => "24",           // Safe fallback
-            };
             server_cmd.arg("-ngl").arg(gpu_layers);
             inject_system_message(&app, SystemLogLevel::Info, "Translator", format!("GPU Offloading: {} Layers", gpu_layers));
         } else {
@@ -131,21 +151,16 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             inject_system_message(&app, SystemLogLevel::Info, "Translator", "Compute Mode: CPU");
         }
 
-        // The perfect tight fit for your prompt + max_tokens
-        server_cmd.arg("-c").arg("4096");
+        // Apply the dynamic context and parallel settings
+        server_cmd.arg("-c").arg(context);
+        server_cmd.arg("--parallel").arg(parallel);
 
-        // OPTIMIZATION: Process the ~350 token system prompt in one single step
+        // Optimizations that apply to everyone
         server_cmd.arg("-b").arg("512");
         server_cmd.arg("-ub").arg("512");
-
-        // OPTIMIZATION: Compress the context memory to save VRAM
         server_cmd.arg("-ctk").arg("q8_0");
         server_cmd.arg("-ctv").arg("q8_0");
-
         server_cmd.arg("-t").arg("4");
-
-        // CHANGED: Allow the server to process up to 5 requests at the exact same time
-        server_cmd.arg("--parallel").arg("5");
         server_cmd.arg("--cont-batching");
         server_cmd.arg("--no-mmap");
 
@@ -177,6 +192,9 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
         inject_system_message(&app, SystemLogLevel::Success, "Translator", "AI Server running! Ready for translation.");
 
+        // Convert the 'parallel' string into a number for our batch limit
+        let max_concurrent_jobs: usize = parallel.parse().unwrap_or(1);
+
         // Watchdog Batching loop
         while let Ok(first_job) = rx.recv() {
             inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("Dequeued translation job for PID {}", first_job.chat.pid));
@@ -185,7 +203,8 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             let start_time = Instant::now();
             let timeout = Duration::from_millis(1000);
 
-            while batch.len() < 5 {
+            // Dynamically cap the batch size based on hardware tier parallel limit
+            while batch.len() < max_concurrent_jobs {
                 let elapsed = start_time.elapsed();
                 if elapsed >= timeout { break; }
                 match rx.recv_timeout(timeout - elapsed) {
@@ -197,7 +216,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 }
             }
 
-            inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("Translating batch of {} messages in parallel...", batch.len()));
+            inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("Translating batch of {} messages in parallel (Max Capacity: {})...", batch.len(), max_concurrent_jobs));
 
             // Use structured concurrency to fire HTTP requests simultaneously
             std::thread::scope(|s| {
@@ -205,7 +224,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
                 for mut chat in batch {
                     // Clone references to move into the thread safely
-                    let client_clone = client.clone(); // reqwest handles connection pooling internally
+                    let client_clone = client.clone();
                     let app_clone = app.clone();
                     let dict_ref = &custom_dict;
 
@@ -222,8 +241,6 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
                         let final_str = postprocess_text(&raw_translation, &shield);
                         inject_system_message(&app_clone, SystemLogLevel::Debug, "Translator", format!("[PID {}] Final Output KO: {}", chat.pid, final_str));
-
-                        chat.translated = Some(final_str.clone());
 
                         // --- DATA LOGGER DISPATCH ---
                         let state = app_clone.state::<crate::AppState>();
@@ -254,7 +271,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                     handles.push(handle);
                 }
 
-                // Block the main watchdog loop until all 5 threads complete their translations
+                // Block the main watchdog loop until all threads complete their translations
                 for handle in handles {
                     let _ = handle.join();
                 }

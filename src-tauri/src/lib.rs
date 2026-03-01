@@ -172,7 +172,8 @@ pub fn run() {
             open_browser,
             get_network_interfaces,
             set_click_through,
-            update_tray_menu
+            update_tray_menu,
+            launch_translator
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -373,4 +374,12 @@ fn kill_orphaned_servers(app: &AppHandle) {
         .args(["/F", "/IM", "llama-server.exe"])
         .creation_flags(0x08000000) // CREATE_NO_WINDOW so it doesn't flash a cmd prompt
         .output(); // .output() waits for the command to finish
+}
+
+#[tauri::command]
+fn launch_translator(app: AppHandle, state: State<'_, AppState>) {
+    // Turned ON: Start the server and store the Sender
+    let model_path = crate::get_model_path(&app);
+    let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
+    *state.translator_tx.lock().unwrap() = Some(tx);
 }

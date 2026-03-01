@@ -235,6 +235,18 @@ pub fn App() -> impl IntoView {
                 return;
             }
 
+            // 3. Download the AI Server (llama-server.exe via zip)
+            let sync_dict = invoke("sync_dictionary", JsValue::NULL).await;
+            if let Err(e) = sync_dict {
+                set_downloading.set(false);
+                set_status_text.set(format!("Server Error: {:?}", e));
+                add_system_log("error", "ModelManager", &format!("Sync dictionary failed: {:?}", e));
+                closure.forget();
+                return;
+            }
+            
+            let _ = invoke("launch_translator", JsValue::NULL).await;
+
             // 4. Both downloads succeeded
             set_downloading.set(false);
             set_model_ready.set(true);

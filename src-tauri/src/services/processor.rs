@@ -10,7 +10,7 @@ pub struct ShieldData {
 }
 
 lazy_static! {
-    static ref RECRUIT_PATTERN: Regex = Regex::new(r"@[A-Za-z0-9\u3040-\u30ff\u4e00-\u9faf]+(?:[\s]+[A-Za-z0-9\u3040-\u30ff\u4e00-\u9faf]+)*").unwrap();
+    static ref RECRUIT_PATTERN: Regex = Regex::new(r"@[A-Za-z0-9]+").unwrap();
     static ref NUM_PATTERN_1: Regex = Regex::new(r"(\d+)種").unwrap();
     static ref NUM_PATTERN_2: Regex = Regex::new(r"(\d+)人").unwrap();
     static ref NUM_PATTERN_3: Regex = Regex::new(r"(\d+)周").unwrap();

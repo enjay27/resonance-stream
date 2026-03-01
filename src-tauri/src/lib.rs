@@ -177,8 +177,21 @@ pub fn run() {
 
     app.run(|_app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
-            log::info!("Application closing. Cleaning up Firewall Rules...");
+            log::info!("Application closing. Cleaning up Firewall Rules & AI Server...");
+
+            // 1. Remove the firewall rule
             services::sniffer::remove_firewall_rule();
+
+            // 2. Explicitly kill the llama-server to prevent zombie processes
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                // If you use a custom constant, you can replace "llama-server.exe" with crate::AI_SERVER_FILENAME
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/IM", "llama-server.exe"])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW (Prevents CMD popup)
+                    .status();
+            }
         }
     });
 }

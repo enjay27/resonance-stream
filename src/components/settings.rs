@@ -216,33 +216,6 @@ pub fn Settings() -> impl IntoView {
                         <section class="space-y-4">
                             <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"Chat Settings"</h3>
 
-                            // Custom Tab Configuration
-                            <div class="space-y-2 px-1">
-                                <span class="text-[11px] font-bold text-base-content/60 uppercase">"커스텀 탭 필터 (Custom Tab)"</span>
-                                <div class="grid grid-cols-2 gap-2">
-                                    {vec!["WORLD", "GUILD", "PARTY", "LOCAL"].into_iter().map(|channel| {
-                                        let ch = channel.to_string();
-                                        let ch_clone = ch.clone();
-                                        view! {
-                                            <label class="label cursor-pointer bg-base-200 rounded p-2 border border-base-content/5 hover:bg-base-content/5 transition-colors">
-                                                <span class="label-text text-xs font-bold">{channel}</span>
-                                                <input type="checkbox" class="checkbox checkbox-xs checkbox-success"
-                                                    checked=move || signals.custom_filters.get().contains(&ch_clone)
-                                                    on:change=move |ev| {
-                                                        let checked = event_target_checked(&ev);
-                                                        signals.set_custom_filters.update(|f| {
-                                                            if checked { f.push(ch.clone()); }
-                                                            else { f.retain(|x| x != &ch); }
-                                                        });
-                                                        actions.save_config.dispatch(());
-                                                    }
-                                                />
-                                            </label>
-                                        }
-                                    }).collect_view()}
-                                </div>
-                            </div>
-
                             // Message Limit
                             <div class="flex items-center justify-between bg-base-200 p-3 rounded-lg border border-base-content/5 px-3">
                                 <span class="text-xs font-bold text-base-content/80">"최대 메시지 유지 개수"</span>

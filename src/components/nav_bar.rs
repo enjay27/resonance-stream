@@ -60,7 +60,7 @@ pub fn NavBar() -> impl IntoView {
 
     view! {
         <nav
-            class="relative flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 py-1 bg-base-content/5 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300"
+            class="relative z-50 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 py-1 bg-base-content/5 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300"
             data-tauri-drag-region
         >
 
@@ -76,6 +76,7 @@ pub fn NavBar() -> impl IntoView {
                     tabs.into_iter().map(|(full, icon)| {
                         let t_full = full.to_string();
                         let t_click = t_full.clone();
+                        let is_custom = full == "커스텀";
                         let is_active = move || signals.active_tab.get() == t_full;
 
                         let (text_color, border_color) = match full {
@@ -90,27 +91,59 @@ pub fn NavBar() -> impl IntoView {
                         };
 
                         view! {
-                            <button
-                                class=move || format!(
-                                    "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] {} {}",
-                                    text_color,
-                                    if is_active() {
-                                        format!("{} bg-white/5 opacity-100", border_color)
-                                    } else {
-                                        "border-transparent bg-transparent opacity-40 hover:opacity-100".to_string()
+                            <div class="relative group flex items-center h-full">
+                                <button
+                                    class=move || format!(
+                                        "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] {} {}",
+                                        text_color,
+                                        if is_active() {
+                                            format!("{} bg-white/5 opacity-100", border_color)
+                                        } else {
+                                            "border-transparent bg-transparent opacity-40 hover:opacity-100".to_string()
+                                        }
+                                    )
+                                    on:click=move |_| {
+                                        signals.set_active_tab.set(t_click.clone());
+                                        signals.set_unread_count.set(0);
+                                        signals.set_is_at_bottom.set(true);
+                                        signals.set_system_at_bottom.set(true);
+                                        actions.save_config.dispatch(());
                                     }
-                                )
-                                on:click=move |_| {
-                                    signals.set_active_tab.set(t_click.clone());
-                                    signals.set_unread_count.set(0);
-                                    signals.set_is_at_bottom.set(true);
-                                    signals.set_system_at_bottom.set(true);
-                                    actions.save_config.dispatch(());
-                                }
-                            >
-                                <span class="sm:hidden">{full}</span>
-                                <span class="hidden sm:inline">{full} " " {icon}</span>
-                            </button>
+                                >
+                                    <span class="sm:hidden">{full}</span>
+                                    <span class="hidden sm:inline">{full} " " {icon}</span>
+                                </button>
+
+                                // NEW: Dropdown Menu that appears when hovering the '커스텀' tab
+                                <Show when=move || is_custom>
+                                    <div class="absolute top-full left-0 pt-2 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
+                                        <div class="bg-base-300 border border-base-content/10 rounded-lg shadow-2xl p-2 w-36 flex flex-col gap-1">
+                                            <span class="text-[9px] font-black text-success uppercase tracking-widest px-1 mb-1 opacity-80">"필터 설정"</span>
+
+                                            {vec!["WORLD", "GUILD", "PARTY", "LOCAL"].into_iter().map(|channel| {
+                                                let ch = channel.to_string();
+                                                let ch_clone = ch.clone();
+                                                view! {
+                                                    <label class="label cursor-pointer flex justify-between px-1.5 py-1 hover:bg-base-content/10 rounded">
+                                                        <span class="label-text text-[10px] font-bold">{channel}</span>
+                                                        <input type="checkbox" class="checkbox checkbox-xs checkbox-success"
+                                                            checked=move || signals.custom_filters.get().contains(&ch_clone)
+                                                            on:change=move |ev| {
+                                                                let checked = event_target_checked(&ev);
+                                                                signals.set_custom_filters.update(|f| {
+                                                                    if checked { f.push(ch.clone()); }
+                                                                    else { f.retain(|x| x != &ch); }
+                                                                });
+                                                                actions.save_config.dispatch(());
+                                                            }
+                                                        />
+                                                    </label>
+                                                }
+                                            }).collect_view()}
+                                        </div>
+                                    </div>
+                                </Show>
+                            </div>
                         }
                     }).collect_view()
                 }}

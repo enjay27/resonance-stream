@@ -169,32 +169,35 @@ pub fn Settings() -> impl IntoView {
                                         }).collect_view()}
                                     </div>
 
-                                    // [RESTORED] Performance Tier
-                                    <span class="text-[11px] font-bold text-base-content/50 uppercase block mt-3">"성능 (Performance Tier)"</span>
-                                    <div class="join w-full">
-                                        {vec!["low", "middle", "high", "extreme"].into_iter().map(|t| {
-                                            let t_val = t.to_string();
-                                            let t_click = t.to_string();
-                                            let t_line = t.to_string();
-                                            let t_tier = t.to_string();
-                                            view! {
-                                                <button
-                                                    class="join-item btn btn-xs flex-1 font-black border-base-content/10"
-                                                    class:btn-success=move || signals.tier.get() == t_val
-                                                    class:btn-outline=move || signals.tier.get() != t_line
-                                                    class:text-secondary=move || t_tier == "extreme" // Make Extreme slightly distinct
-                                                    on:click=move |_| {
-                                                        signals.set_tier.set(t_click.clone());
-                                                        actions.save_config.dispatch(());
-                                                        signals.set_restart_required.set(true);
-                                                    }
-                                                >
-                                                    {t.to_uppercase()}
-                                                </button>
-                                            }
-                                        }).collect_view()}
-                                    </div>
-                                    <div class="text-[9px] opacity-50">"성능이 높을수록 번역 품질이 좋아지지만 VRAM을 더 소모합니다."</div>
+                                    // Hide VRAM settings if CPU is selected
+                                    <Show when=move || signals.compute_mode.get() == "gpu">
+                                        <span class="text-[11px] font-bold text-base-content/50 uppercase block mt-3">"VRAM 사용량 (GPU Offload)"</span>
+                                        <div class="join w-full">
+                                            {vec!["low", "middle", "high", "very high"].into_iter().map(|t| {
+                                                let t_val = t.to_string();
+                                                let t_click = t.to_string();
+                                                let t_line = t.to_string();
+                                                let t_tier = t.to_string();
+                                                view! {
+                                                    <button
+                                                        class="join-item btn btn-xs flex-1 font-black border-base-content/10"
+                                                        class:btn-success=move || signals.tier.get() == t_val
+                                                        class:btn-outline=move || signals.tier.get() != t_line
+                                                        class:text-secondary=move || t_tier == "extreme"
+                                                        on:click=move |_| {
+                                                            signals.set_tier.set(t_click.clone());
+                                                            actions.save_config.dispatch(());
+                                                            signals.set_restart_required.set(true);
+                                                        }
+                                                    >
+                                                        {t.to_uppercase()}
+                                                    </button>
+                                                }
+                                            }).collect_view()}
+                                        </div>
+                                        // Updated the description to accurately reflect that it improves speed, not quality
+                                        <div class="text-[9px] opacity-50">"할당량이 높을수록 번역 속도가 빨라지지만 VRAM을 더 많이 소모합니다."</div>
+                                    </Show>
 
                                     <Show when=move || signals.restart_required.get()>
                                         <div class="text-[10px] text-warning font-bold animate-pulse mt-2 p-2 bg-warning/10 rounded">

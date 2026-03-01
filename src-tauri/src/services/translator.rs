@@ -118,11 +118,11 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
         if config.compute_mode.to_lowercase() == "gpu" {
             let gpu_layers = match config.tier.to_lowercase().as_str() {
-                "low" => "10",
-                "middle" => "15",
-                "high" => "25",
-                "extreme" => "99",
-                _ => "15",
+                "low" => "12",       // Offloads ~30% of the layers. Good for strict VRAM limits (under 2GB free).
+                "middle" => "24",    // Offloads ~60% of the layers. A solid balance.
+                "high" => "32",      // Offloads ~80% of the layers. Almost full speed, saves a tiny bit of VRAM.
+                "very high" => "99", // 100% offload. Catches all layers regardless of exact architecture.
+                _ => "24",           // Safe fallback
             };
             server_cmd.arg("-ngl").arg(gpu_layers);
             inject_system_message(&app, SystemLogLevel::Info, "Translator", format!("GPU Offloading: {} Layers", gpu_layers));
@@ -131,11 +131,21 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             inject_system_message(&app, SystemLogLevel::Info, "Translator", "Compute Mode: CPU");
         }
 
-        server_cmd.arg("-c").arg("1024");
-        server_cmd.arg("-b").arg("64");
-        server_cmd.arg("-ub").arg("64");
+        // The perfect tight fit for your prompt + max_tokens
+        server_cmd.arg("-c").arg("4096");
+
+        // OPTIMIZATION: Process the ~350 token system prompt in one single step
+        server_cmd.arg("-b").arg("512");
+        server_cmd.arg("-ub").arg("512");
+
+        // OPTIMIZATION: Compress the context memory to save VRAM
+        server_cmd.arg("-ctk").arg("q8_0");
+        server_cmd.arg("-ctv").arg("q8_0");
+
         server_cmd.arg("-t").arg("4");
-        server_cmd.arg("--parallel").arg("1");
+
+        // CHANGED: Allow the server to process up to 5 requests at the exact same time
+        server_cmd.arg("--parallel").arg("5");
         server_cmd.arg("--cont-batching");
         server_cmd.arg("--no-mmap");
 
@@ -187,57 +197,68 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 }
             }
 
-            inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("Translating batch of {} messages sequentially...", batch.len()));
+            inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("Translating batch of {} messages in parallel...", batch.len()));
 
-            for mut chat in batch {
-                // Log 1: The original message
-                inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("[PID {}] Input JA: {}", chat.pid, chat.message));
+            // Use structured concurrency to fire HTTP requests simultaneously
+            std::thread::scope(|s| {
+                let mut handles = Vec::new();
 
-                let shield = preprocess_text(&chat.message, &custom_dict, chat.nickname_romaji.as_deref(), Some(&chat.nickname));
+                for mut chat in batch {
+                    // Clone references to move into the thread safely
+                    let client_clone = client.clone(); // reqwest handles connection pooling internally
+                    let app_clone = app.clone();
+                    let dict_ref = &custom_dict;
 
-                // Log 2: The masked dictionary replacements
-                inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("[PID {}] Preprocessed (Masked): {}", chat.pid, shield.masked_text));
+                    let handle = s.spawn(move || {
+                        inject_system_message(&app_clone, SystemLogLevel::Debug, "Translator", format!("[PID {}] Input JA: {}", chat.pid, chat.message));
 
-                let req_start = Instant::now();
-                let raw_translation = translate_text(&client, &shield.masked_text);
+                        let shield = preprocess_text(&chat.message, dict_ref, chat.nickname_romaji.as_deref(), Some(&chat.nickname));
+                        inject_system_message(&app_clone, SystemLogLevel::Trace, "Translator", format!("[PID {}] Preprocessed (Masked): {}", chat.pid, shield.masked_text));
 
-                // Log 3: The raw, un-postprocessed response from the AI and exactly how long it took
-                inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("[PID {}] Raw AI Response ({}ms): {}", chat.pid, req_start.elapsed().as_millis(), raw_translation));
+                        let req_start = Instant::now();
+                        let raw_translation = translate_text(&client_clone, &shield.masked_text);
 
-                let final_str = postprocess_text(&raw_translation, &shield);
+                        inject_system_message(&app_clone, SystemLogLevel::Trace, "Translator", format!("[PID {}] Raw AI Response ({}ms): {}", chat.pid, req_start.elapsed().as_millis(), raw_translation));
 
-                // Log 4: The final Korean text
-                inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("[PID {}] Final Output KO: {}", chat.pid, final_str));
+                        let final_str = postprocess_text(&raw_translation, &shield);
+                        inject_system_message(&app_clone, SystemLogLevel::Debug, "Translator", format!("[PID {}] Final Output KO: {}", chat.pid, final_str));
 
-                chat.translated = Some(final_str.clone());
+                        chat.translated = Some(final_str.clone());
 
-                // --- DATA LOGGER DISPATCH ---
-                let state = app.state::<crate::AppState>();
-                if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
-                    let _ = df_tx.send(crate::io::DataFactoryJob {
-                        pid: chat.pid,
-                        original: chat.message.clone(),
-                        translated: Some(final_str.clone()),
+                        // --- DATA LOGGER DISPATCH ---
+                        let state = app_clone.state::<crate::AppState>();
+                        if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
+                            let _ = df_tx.send(crate::io::DataFactoryJob {
+                                pid: chat.pid,
+                                original: chat.message.clone(),
+                                translated: Some(final_str.clone()),
+                            });
+                        }
+
+                        // 1. Update Backend History
+                        {
+                            let mut history = state.chat_history.lock().unwrap();
+                            if let Some(existing_chat) = history.get_mut(&chat.pid) {
+                                existing_chat.translated = Some(final_str.clone());
+                            }
+                        }
+
+                        // 2. Emit the updated result back to the UI
+                        let result = crate::protocol::types::TranslationResult {
+                            pid: chat.pid,
+                            translated: final_str,
+                        };
+                        let _ = app_clone.emit("translation-event", &result);
                     });
-                }
-                // --------------------------------
 
-                // 1. Update Backend History
-                {
-                    let state = app.state::<crate::AppState>();
-                    let mut history = state.chat_history.lock().unwrap();
-                    if let Some(existing_chat) = history.get_mut(&chat.pid) {
-                        existing_chat.translated = Some(final_str.clone());
-                    }
+                    handles.push(handle);
                 }
 
-                // 2. Emit the updated result back to the UI
-                let result = crate::protocol::types::TranslationResult {
-                    pid: chat.pid.clone(),
-                    translated: final_str.clone(),
-                };
-                let _ = app.emit("translation-event", &result);
-            }
+                // Block the main watchdog loop until all 5 threads complete their translations
+                for handle in handles {
+                    let _ = handle.join();
+                }
+            });
         }
     });
 

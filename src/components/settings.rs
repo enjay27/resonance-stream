@@ -268,13 +268,84 @@ pub fn Settings() -> impl IntoView {
                                     />
                                 </label>
                             </div>
+
+                            // Relative Time Toggle
+                            <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
+                                <label class="label cursor-pointer p-0">
+                                    <div class="flex flex-col">
+                                        <span class="label-text text-xs font-bold text-base-content/80">"상대적 시간 표시 (Relative Time)"</span>
+                                        <span class="text-[9px] text-base-content/60 mt-1">"시간을 'now', '4m' 형식으로 표시합니다."</span>
+                                    </div>
+                                    <input type="checkbox" class="toggle toggle-success toggle-sm"
+                                        prop:checked=move || signals.use_relative_time.get()
+                                        on:change=move |ev| {
+                                            signals.set_use_relative_time.set(event_target_checked(&ev));
+                                            actions.save_config.dispatch(());
+                                        }
+                                    />
+                                </label>
+                            </div>
                         </section>
 
                         // ==========================================
-                        // SECTION: KEYWORD ALERTS
+                        // SECTION: KEYWORD
                         // ==========================================
                         <section class="space-y-4">
-                            <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"키워드 알림 (Keyword Alerts)"</h3>
+
+                            <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"키워드 설정 (Keyword Settings)"</h3>
+
+                            // Emphasis Keywords
+                            <div class="bg-base-200 p-3 rounded-lg border border-base-content/5 space-y-3 mt-4">
+                                <span class="text-[11px] font-bold text-base-content/60">"강조 키워드 (Emphasis Keywords) - 채팅창에서 다른 색상으로 굵게 표시됩니다."</span>
+
+                                <div class="flex gap-2">
+                                    <input type="text" class="input input-xs input-bordered flex-1 font-bold" placeholder="강조할 단어 입력..."
+                                        prop:value=move || new_emphasis.get()
+                                        on:input=move |ev| set_new_emphasis.set(event_target_value(&ev))
+                                        on:keydown=move |ev| {
+                                            if ev.key() == "Enter" && !new_emphasis.get_untracked().trim().is_empty() {
+                                                let kw = new_emphasis.get_untracked().trim().to_string();
+                                                signals.set_emphasis_keywords.update(|list| {
+                                                    if !list.contains(&kw) { list.push(kw); }
+                                                });
+                                                set_new_emphasis.set("".to_string());
+                                                actions.save_config.dispatch(());
+                                            }
+                                        }
+                                    />
+                                    <button class="btn btn-xs btn-warning font-black"
+                                        on:click=move |_| {
+                                            let kw = new_emphasis.get_untracked().trim().to_string();
+                                            if !kw.is_empty() {
+                                                signals.set_emphasis_keywords.update(|list| {
+                                                    if !list.contains(&kw) { list.push(kw); }
+                                                });
+                                                set_new_emphasis.set("".to_string());
+                                                actions.save_config.dispatch(());
+                                            }
+                                        }>
+                                        "추가"
+                                    </button>
+                                </div>
+
+                                <div class="flex flex-wrap gap-1 mt-2">
+                                    <For each=move || signals.emphasis_keywords.get() key=|k| k.clone() children=move |kw| {
+                                        let kw_clone = kw.clone();
+                                        view! {
+                                            <div class="badge badge-warning badge-sm gap-1 pl-2 font-bold shadow-sm">
+                                                {kw.clone()}
+                                                <button class="btn btn-ghost btn-xs btn-circle h-4 w-4 min-h-0 text-[10px] hover:bg-black/20"
+                                                    on:click=move |_| {
+                                                        signals.set_emphasis_keywords.update(|list| list.retain(|x| x != &kw_clone));
+                                                        actions.save_config.dispatch(());
+                                                    }>
+                                                    "✕"
+                                                </button>
+                                            </div>
+                                        }
+                                    } />
+                                </div>
+                            </div>
 
                             <div class="bg-base-200 p-3 rounded-lg border border-base-content/5 space-y-3">
                                 <span class="text-[11px] font-bold text-base-content/60">"등록된 단어가 채팅에 등장하면 알림을 보냅니다."</span>
@@ -357,59 +428,6 @@ pub fn Settings() -> impl IntoView {
                                         }
                                     />
                                     <div class="text-[9px] text-base-content/50">"볼륨을 0%로 설정하면 알림음이 음소거됩니다."</div>
-                                </div>
-                            </div>
-
-                            // --- NEW: Emphasis Keywords ---
-                            <div class="bg-base-200 p-3 rounded-lg border border-base-content/5 space-y-3 mt-4">
-                                <span class="text-[11px] font-bold text-base-content/60">"강조 키워드 (Emphasis Keywords) - 채팅창에서 다른 색상으로 굵게 표시됩니다."</span>
-
-                                <div class="flex gap-2">
-                                    <input type="text" class="input input-xs input-bordered flex-1 font-bold" placeholder="강조할 단어 입력..."
-                                        prop:value=move || new_emphasis.get()
-                                        on:input=move |ev| set_new_emphasis.set(event_target_value(&ev))
-                                        on:keydown=move |ev| {
-                                            if ev.key() == "Enter" && !new_emphasis.get_untracked().trim().is_empty() {
-                                                let kw = new_emphasis.get_untracked().trim().to_string();
-                                                signals.set_emphasis_keywords.update(|list| {
-                                                    if !list.contains(&kw) { list.push(kw); }
-                                                });
-                                                set_new_emphasis.set("".to_string());
-                                                actions.save_config.dispatch(());
-                                            }
-                                        }
-                                    />
-                                    <button class="btn btn-xs btn-warning font-black"
-                                        on:click=move |_| {
-                                            let kw = new_emphasis.get_untracked().trim().to_string();
-                                            if !kw.is_empty() {
-                                                signals.set_emphasis_keywords.update(|list| {
-                                                    if !list.contains(&kw) { list.push(kw); }
-                                                });
-                                                set_new_emphasis.set("".to_string());
-                                                actions.save_config.dispatch(());
-                                            }
-                                        }>
-                                        "추가"
-                                    </button>
-                                </div>
-
-                                <div class="flex flex-wrap gap-1 mt-2">
-                                    <For each=move || signals.emphasis_keywords.get() key=|k| k.clone() children=move |kw| {
-                                        let kw_clone = kw.clone();
-                                        view! {
-                                            <div class="badge badge-warning badge-sm gap-1 pl-2 font-bold shadow-sm">
-                                                {kw.clone()}
-                                                <button class="btn btn-ghost btn-xs btn-circle h-4 w-4 min-h-0 text-[10px] hover:bg-black/20"
-                                                    on:click=move |_| {
-                                                        signals.set_emphasis_keywords.update(|list| list.retain(|x| x != &kw_clone));
-                                                        actions.save_config.dispatch(());
-                                                    }>
-                                                    "✕"
-                                                </button>
-                                            </div>
-                                        }
-                                    } />
                                 </div>
                             </div>
 

@@ -92,6 +92,10 @@ pub struct AppSignals {
     pub set_alert_volume: WriteSignal<f32>,
     pub emphasis_keywords: ReadSignal<Vec<String>>,
     pub set_emphasis_keywords: WriteSignal<Vec<String>>,
+    pub use_relative_time: ReadSignal<bool>,
+    pub set_use_relative_time: WriteSignal<bool>,
+    pub current_time: ReadSignal<u64>,
+    pub set_current_time: WriteSignal<u64>,
 }
 
 #[derive(Copy, Clone)]

@@ -27,6 +27,7 @@ pub struct AppConfig {
     pub alert_keywords: Vec<String>,
     pub alert_volume: f32,
     pub emphasis_keywords: Vec<String>,
+    pub use_relative_time: bool,
 }
 
 impl Default for AppConfig {
@@ -52,6 +53,7 @@ impl Default for AppConfig {
             alert_keywords: vec![],
             alert_volume: 0.5,
             emphasis_keywords: vec![],
+            use_relative_time: false,
         }
     }
 }

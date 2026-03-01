@@ -53,6 +53,7 @@ pub struct AppConfig {
     pub alert_keywords: Vec<String>,
     pub alert_volume: f32,
     pub emphasis_keywords: Vec<String>,
+    pub use_relative_time: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

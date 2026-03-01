@@ -70,6 +70,8 @@ pub fn App() -> impl IntoView {
     let (alert_keywords, set_alert_keywords) = signal(Vec::<String>::new());
     let (alert_volume, set_alert_volume) = signal(0.5f32);
     let (emphasis_keywords, set_emphasis_keywords) = signal(Vec::<String>::new());
+    let (use_relative_time, set_use_relative_time) = signal(false);
+    let (current_time, set_current_time) = signal(chrono::Local::now().timestamp_millis() as u64);
 
     let signals = AppSignals {
         init_done, set_init_done,
@@ -116,6 +118,8 @@ pub fn App() -> impl IntoView {
         alert_keywords, set_alert_keywords,
         alert_volume, set_alert_volume,
         emphasis_keywords, set_emphasis_keywords,
+        use_relative_time, set_use_relative_time,
+        current_time, set_current_time,
     };
 
     provide_context(signals);
@@ -173,6 +177,7 @@ pub fn App() -> impl IntoView {
             alert_keywords: alert_keywords.get_untracked(),
             alert_volume: alert_volume.get_untracked(),
             emphasis_keywords: emphasis_keywords.get_untracked(),
+            use_relative_time: use_relative_time.get_untracked(),
         };
 
         async move {
@@ -353,6 +358,7 @@ pub fn App() -> impl IntoView {
                         set_alert_keywords.set(config.alert_keywords);
                         set_alert_volume.set(config.alert_volume);
                         set_emphasis_keywords.set(config.emphasis_keywords);
+                        set_use_relative_time.set(config.use_relative_time);
 
                         let mut safe_op = config.overlay_opacity;
                         if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85
@@ -483,6 +489,15 @@ pub fn App() -> impl IntoView {
 
             let _ = invoke("update_tray_menu", args).await;
         });
+    });
+
+    // --- TICKER FOR RELATIVE TIME ---
+    // Updates the global current_time signal every 10 seconds
+    spawn_local(async move {
+        loop {
+            set_current_time.set(chrono::Local::now().timestamp_millis() as u64);
+            gloo_timers::future::TimeoutFuture::new(10_000).await;
+        }
     });
 
     view! {

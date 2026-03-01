@@ -22,6 +22,46 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
         _ => ("text-base-content", "border-l-base-content"),
     };
 
+    // --- DYNAMIC TIME FORMATTER ---
+    let display_time = move || {
+        let raw_ts = sig.get().timestamp;
+
+        // 1. Auto-detect Unit Mismatch
+        // If the timestamp is > 10 billion (13 digits), it is in milliseconds.
+        // Otherwise (10 digits), it is already in seconds.
+        let msg_secs = if raw_ts > 10_000_000_000 { raw_ts / 1000 } else { raw_ts };
+
+        if signals.use_relative_time.get() {
+            let current_raw = signals.current_time.get();
+            let current_secs = if current_raw > 10_000_000_000 { current_raw / 1000 } else { current_raw };
+
+            // 2. Calculate difference safely
+            let diff_secs = if current_secs > msg_secs { current_secs - msg_secs } else { 0 };
+
+            if diff_secs < 10 {
+                "now".to_string()
+            } else if diff_secs < 60 {
+                format!("{}s", diff_secs)
+            } else if diff_secs < 3600 {
+                format!("{}m", diff_secs / 60)
+            } else if diff_secs < 86400 {
+                let hours = diff_secs / 3600;
+                let mins = (diff_secs % 3600) / 60;
+                if mins > 0 {
+                    format!("{}h {}m", hours, mins)
+                } else {
+                    format!("{}h", hours)
+                }
+            } else {
+                // If the message is incredibly old, show days
+                format!("{}d", diff_secs / 86400)
+            }
+        } else {
+            // Fallback to absolute mm:ss format
+            format_time(raw_ts)
+        }
+    };
+
     view! {
         <Show
             when=move || signals.compact_mode.get()
@@ -96,8 +136,9 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                         <span class="text-base-content/50 font-bold text-[10px]">
                             "Lv." {move || sig.get().level}
                         </span>
+                        // 1. Time string replaced here
                         <time class="ml-2 text-base-content/50 opacity-70 text-[10px]">
-                            {move || format_time(sig.get().timestamp)}
+                            {display_time}
                         </time>
                     </div>
 
@@ -231,8 +272,9 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
                     // 3. Time / Copy Action Swapper (Inline with text)
                     <div class="inline-flex items-center self-center flex-shrink-0 ml-1">
+                        // 2. Time string replaced here
                         <time class="text-[10px] text-base-content/40 whitespace-nowrap block group-hover:hidden">
-                            {move || format_time(sig.get().timestamp)}
+                            {display_time}
                         </time>
 
                         <button class="hidden group-hover:flex btn btn-ghost btn-xs text-[10px] font-bold text-base-content/50 h-5 min-h-0 px-1.5 py-0 hover:bg-base-content/10 hover:text-base-content leading-none"
@@ -248,7 +290,6 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
 fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
     if keywords.is_empty() || text.is_empty() {
-        // Path 1 returns: AnyView
         return view! { <span>{text.to_string()}</span> }.into_any();
     }
 
@@ -272,7 +313,6 @@ fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
                 if !before.is_empty() {
                     views.push(view! { <span>{before.to_string()}</span> }.into_any());
                 }
-                // Highlighted keyword format
                 views.push(view! { <span class="text-warning font-black drop-shadow-md mx-0.5">{kw.to_string()}</span> }.into_any());
                 current_text = &current_text[idx + kw.len()..];
             },

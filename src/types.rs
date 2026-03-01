@@ -52,6 +52,7 @@ pub struct AppConfig {
     pub drag_to_scroll: bool,
     pub alert_keywords: Vec<String>,
     pub alert_volume: f32,
+    pub emphasis_keywords: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

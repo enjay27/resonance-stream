@@ -18,6 +18,7 @@ pub fn Settings() -> impl IntoView {
 
     let (interfaces, set_interfaces) = signal(Vec::<NetworkInterface>::new());
     let (new_keyword, set_new_keyword) = signal(String::new());
+    let (new_emphasis, set_new_emphasis) = signal(String::new());
 
     Effect::new(move |_| {
         if signals.show_settings.get() {
@@ -358,6 +359,60 @@ pub fn Settings() -> impl IntoView {
                                     <div class="text-[9px] text-base-content/50">"볼륨을 0%로 설정하면 알림음이 음소거됩니다."</div>
                                 </div>
                             </div>
+
+                            // --- NEW: Emphasis Keywords ---
+                            <div class="bg-base-200 p-3 rounded-lg border border-base-content/5 space-y-3 mt-4">
+                                <span class="text-[11px] font-bold text-base-content/60">"강조 키워드 (Emphasis Keywords) - 채팅창에서 다른 색상으로 굵게 표시됩니다."</span>
+
+                                <div class="flex gap-2">
+                                    <input type="text" class="input input-xs input-bordered flex-1 font-bold" placeholder="강조할 단어 입력..."
+                                        prop:value=move || new_emphasis.get()
+                                        on:input=move |ev| set_new_emphasis.set(event_target_value(&ev))
+                                        on:keydown=move |ev| {
+                                            if ev.key() == "Enter" && !new_emphasis.get_untracked().trim().is_empty() {
+                                                let kw = new_emphasis.get_untracked().trim().to_string();
+                                                signals.set_emphasis_keywords.update(|list| {
+                                                    if !list.contains(&kw) { list.push(kw); }
+                                                });
+                                                set_new_emphasis.set("".to_string());
+                                                actions.save_config.dispatch(());
+                                            }
+                                        }
+                                    />
+                                    <button class="btn btn-xs btn-warning font-black"
+                                        on:click=move |_| {
+                                            let kw = new_emphasis.get_untracked().trim().to_string();
+                                            if !kw.is_empty() {
+                                                signals.set_emphasis_keywords.update(|list| {
+                                                    if !list.contains(&kw) { list.push(kw); }
+                                                });
+                                                set_new_emphasis.set("".to_string());
+                                                actions.save_config.dispatch(());
+                                            }
+                                        }>
+                                        "추가"
+                                    </button>
+                                </div>
+
+                                <div class="flex flex-wrap gap-1 mt-2">
+                                    <For each=move || signals.emphasis_keywords.get() key=|k| k.clone() children=move |kw| {
+                                        let kw_clone = kw.clone();
+                                        view! {
+                                            <div class="badge badge-warning badge-sm gap-1 pl-2 font-bold shadow-sm">
+                                                {kw.clone()}
+                                                <button class="btn btn-ghost btn-xs btn-circle h-4 w-4 min-h-0 text-[10px] hover:bg-black/20"
+                                                    on:click=move |_| {
+                                                        signals.set_emphasis_keywords.update(|list| list.retain(|x| x != &kw_clone));
+                                                        actions.save_config.dispatch(());
+                                                    }>
+                                                    "✕"
+                                                </button>
+                                            </div>
+                                        }
+                                    } />
+                                </div>
+                            </div>
+
                         </section>
 
                         // ==========================================

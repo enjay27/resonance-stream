@@ -26,6 +26,7 @@ pub struct AppConfig {
     pub drag_to_scroll: bool,
     pub alert_keywords: Vec<String>,
     pub alert_volume: f32,
+    pub emphasis_keywords: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -50,6 +51,7 @@ impl Default for AppConfig {
             drag_to_scroll: false,
             alert_keywords: vec![],
             alert_volume: 0.5,
+            emphasis_keywords: vec![],
         }
     }
 }

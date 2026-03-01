@@ -115,13 +115,13 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                         view! {}.into_any()
                                     }
                                 }}
-                                {move || sig.get().message.clone()}
+                                {move || render_emphasized(&sig.get().message, &signals.emphasis_keywords.get())}
                             </div>
 
                             {move || sig.get().translated.clone().map(|text| view! {
                                 <div class="mt-1.5 pt-1.5 border-t border-base-content/10 text-success font-bold text-[14px] animate-in slide-in-from-top-1 duration-200">
                                      <span class="opacity-70 mr-1.5 font-bold">[번역]</span>
-                                     {text}
+                                     {render_emphasized(&text, &signals.emphasis_keywords.get())}
                                 </div>
                             })}
                         </div>
@@ -218,14 +218,14 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                     view! {}.into_any()
                                 }
                             }}
-                            {move || sig.get().message.clone()}
+                            {move || render_emphasized(&sig.get().message, &signals.emphasis_keywords.get())}
                         </span>
                     </Show>
 
                     {move || sig.get().translated.clone().map(|text| view! {
                         <span class="text-[12px] text-success font-bold leading-snug break-words">
                             <span class="opacity-70 mr-1 font-bold">[번역]</span>
-                            {text}
+                            {render_emphasized(&text, &signals.emphasis_keywords.get())}
                         </span>
                     })}
 
@@ -244,4 +244,44 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
             </div>
         </Show>
     }
+}
+
+fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
+    if keywords.is_empty() || text.is_empty() {
+        // Path 1 returns: AnyView
+        return view! { <span>{text.to_string()}</span> }.into_any();
+    }
+
+    let mut views = Vec::new();
+    let mut current_text = text;
+
+    while !current_text.is_empty() {
+        let mut earliest_find = None;
+        for kw in keywords {
+            if kw.is_empty() { continue; }
+            if let Some(idx) = current_text.find(kw) {
+                if earliest_find.map_or(true, |(e_idx, _)| idx < e_idx) {
+                    earliest_find = Some((idx, kw));
+                }
+            }
+        }
+
+        match earliest_find {
+            Some((idx, kw)) => {
+                let before = &current_text[..idx];
+                if !before.is_empty() {
+                    views.push(view! { <span>{before.to_string()}</span> }.into_any());
+                }
+                // Highlighted keyword format
+                views.push(view! { <span class="text-warning font-black drop-shadow-md mx-0.5">{kw.to_string()}</span> }.into_any());
+                current_text = &current_text[idx + kw.len()..];
+            },
+            None => {
+                views.push(view! { <span>{current_text.to_string()}</span> }.into_any());
+                break;
+            }
+        }
+    }
+
+    views.into_view().into_any()
 }

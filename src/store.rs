@@ -90,6 +90,8 @@ pub struct AppSignals {
     pub set_alert_keywords: WriteSignal<Vec<String>>,
     pub alert_volume: ReadSignal<f32>,
     pub set_alert_volume: WriteSignal<f32>,
+    pub emphasis_keywords: ReadSignal<Vec<String>>,
+    pub set_emphasis_keywords: WriteSignal<Vec<String>>,
 }
 
 #[derive(Copy, Clone)]

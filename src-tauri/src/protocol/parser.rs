@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::packet_buffer::read_varint_safe;
 use crate::{inject_system_message, SystemLogLevel};
 pub(crate) use crate::{ChatMessage};
@@ -15,6 +16,7 @@ pub struct ChatPayload {
     pub sender: SenderInfo,     // Tag 18 (Field 2): Player info block
     pub timestamp: u64,         // Tag 24 (Field 3): 1772343736
     pub message: String,        // Tag 34 (Field 4): Message string block
+    pub unknown_fields: HashMap<String, Vec<u8>>,
 }
 
 #[derive(Debug, Default)]
@@ -25,6 +27,7 @@ pub struct SenderInfo {
     pub status: u64,          // Tag 32 (Field 4): 1 (Online/Normal flag)
     pub level: u64,           // Tag 40 (Field 5): 60
     pub is_blocked: bool,
+    pub unknown_fields: HashMap<String, Vec<u8>>,
 }
 
 pub fn parsing_pipeline(data: &[u8], app: &AppHandle) -> Vec<Port5003Event>{
@@ -123,6 +126,9 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
                 chat.class_id = parsed_payload.sender.class_id;
                 chat.level = parsed_payload.sender.level;
                 chat.is_blocked = parsed_payload.sender.is_blocked;
+
+                chat.unknown_fields = parsed_payload.unknown_fields;
+                chat.unknown_fields.extend(parsed_payload.sender.unknown_fields);
             }
             4 => {
                 if let Some(msg) = find_string_by_tag(block, 0x1A) {
@@ -247,7 +253,10 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
                                                 }
                                                 l = p_end;
                                             } else {
-                                                l += skip_field(c_wire, &chunk[l..]);
+                                                let skipped = skip_field(c_wire, &chunk[l..]);
+                                                let safe_end = (l + skipped).min(chunk.len());
+                                                payload.unknown_fields.insert(format!("chunk_{}", c_tag), chunk[l..safe_end].to_vec());
+                                                l += skipped;
                                             }
                                         }
 
@@ -266,20 +275,31 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
 
                                         k = c_end;
                                     } else {
-                                        k += skip_field(r_wire, &rich_data[k..]);
+                                        let skipped = skip_field(r_wire, &rich_data[k..]);
+                                        let safe_end = (k + skipped).min(rich_data.len());
+                                        payload.unknown_fields.insert(format!("rich_{}", r_tag), rich_data[k..safe_end].to_vec());
+                                        k += skipped;
                                     }
                                 }
                                 j = r_end;
                             }
                             _ => { // Safely skip Tag 8 (Msg Type) and anything else
-                                j += skip_field(sub_wire, &sub_data[j..]);
+                                let skipped = skip_field(sub_wire, &sub_data[j..]);
+                                let safe_end = (j + skipped).min(sub_data.len());
+                                payload.unknown_fields.insert(format!("msg_{}", sub_tag), sub_data[j..safe_end].to_vec());
+                                j += skipped;
                             }
                         }
                     }
                 }
                 i = block_end;
             }
-            _ => i += skip_field(wire_type, &data[i..]),
+            _ => {
+                let skipped = skip_field(wire_type, &data[i..]);
+                let safe_end = (i + skipped).min(data.len());
+                payload.unknown_fields.insert(format!("chat_{}", tag), data[i..safe_end].to_vec());
+                i += skipped;
+            }
         }
     }
     payload
@@ -294,12 +314,12 @@ fn parse_sender_info(data: &[u8]) -> SenderInfo {
         i += 1;
 
         match tag {
-            8 => { // Tag 8 = Field 1, Wire 0 (Permanent UID)
+            8 => { // Tag 8 = Field 1 (UID)
                 let (val, read) = read_varint(&data[i..]);
                 sender.uid = val;
                 i += read;
             }
-            18 => { // Tag 18 = Field 2, Wire 2 (Nickname)
+            18 => { // Tag 18 = Field 2 (Nickname)
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
@@ -308,27 +328,24 @@ fn parse_sender_info(data: &[u8]) -> SenderInfo {
                 }
                 i = block_end;
             }
-            24 => { // Tag 24 = Field 3, Wire 0 (Class ID)
-                let (val, read) = read_varint(&data[i..]);
-                sender.class_id = val;
-                i += read;
-            }
-            32 => { // Tag 32 = Field 4, Wire 0 (Status Flag)
+            32 => { // Tag 32 = Field 4 (Status Flag)
                 let (val, read) = read_varint(&data[i..]);
                 sender.status = val;
                 i += read;
             }
-            40 => { // Tag 40 = Field 5, Wire 0 (Level)
+            40 => { // Tag 40 = Field 5 (Level)
                 let (val, read) = read_varint(&data[i..]);
                 sender.level = val;
                 i += read;
             }
-            64 => { // Tag 64 = Field 8, Wire 0 (Blocked Flag)
-                let (val, read) = read_varint(&data[i..]);
-                sender.is_blocked = val == 1; // Convert integer flag to boolean safely
-                i += read;
+            // Tags 24 (Platform?), 56 (Rank?), and 64 (Badge?)
+            // will now safely fall into the skip_field wildcard!
+            _ => {
+                let skipped = skip_field(wire_type, &data[i..]);
+                let safe_end = (i + skipped).min(data.len());
+                sender.unknown_fields.insert(format!("sender_{}", tag), data[i..safe_end].to_vec());
+                i += skipped;
             }
-            _ => i += skip_field(wire_type, &data[i..]),
         }
     }
     sender

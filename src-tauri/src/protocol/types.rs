@@ -35,6 +35,8 @@ pub struct ChatMessage {
     pub translated: Option<String>,
     #[serde(default)]
     pub nickname_romaji: Option<String>,
+    #[serde(default)]
+    pub unknown_fields: HashMap<String, Vec<u8>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]

@@ -246,33 +246,55 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                 </Show>
 
                 // 2. Message Body & Actions
-                <div class="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5">
-                    <Show when=move || {
-                        !(signals.hide_original_in_compact.get() && sig.get().translated.is_some())
-                    }>
-                        <span class="text-[12px] text-base-content leading-snug break-words opacity-90">
-                            {move || {
-                                let show_original_prefix = is_japanese(&sig.get().message) && signals.use_translation.get();
-                                if show_original_prefix {
-                                    view! { <span class="text-base-content/50 mr-1 font-bold">[원문]</span> }.into_any()
-                                } else {
-                                    view! {}.into_any()
-                                }
-                            }}
-                            {move || render_emphasized(&sig.get().message, &signals.emphasis_keywords.get())}
-                        </span>
-                    </Show>
+                <div class="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5 group/msg">
+                    {move || {
+                        let msg = sig.get();
+                        let emphasized_msg = msg.clone();
+                        let has_translation = msg.translated.is_some();
+                        let hide_orig_pref = signals.hide_original_in_compact.get();
 
-                    {move || sig.get().translated.clone().map(|text| view! {
-                        <span class="text-[12px] text-success font-bold leading-snug break-words">
-                            <span class="opacity-70 mr-1 font-bold">[번역]</span>
-                            {render_emphasized(&text, &signals.emphasis_keywords.get())}
-                        </span>
-                    })}
+                        // Define the original message view
+                        let original_view = view! {
+                            <span class=move || format!(
+                                "text-[12px] text-base-content leading-snug break-words opacity-90 {}",
+                                if hide_orig_pref && has_translation { "hidden group-hover/msg:inline" } else { "inline" }
+                            )>
+                                {move || {
+                                    // Only show the [원문] badge if we are NOT in the "Hide Original" mode
+                                    if !hide_orig_pref && is_japanese(&msg.message) && signals.use_translation.get() {
+                                        view! { <span class="text-base-content/50 mr-1 font-bold">[원문]</span> }.into_any()
+                                    } else {
+                                        view! {}.into_any()
+                                    }
+                                }}
+                                {render_emphasized(&emphasized_msg.message, &signals.emphasis_keywords.get())}
+                            </span>
+                        };
+
+                        // Define the translated message view
+                        let translated_view = msg.translated.clone().map(|text| {
+                            view! {
+                                <span class=move || format!(
+                                    "text-[12px] text-success font-bold leading-snug break-words {}",
+                                    if hide_orig_pref { "inline group-hover/msg:hidden" } else { "inline" }
+                                )>
+                                    // Only show the [번역] badge if we are NOT in the "Hide Original" mode
+                                    <Show when=move || !hide_orig_pref>
+                                        <span class="opacity-70 mr-1 font-bold">[번역]</span>
+                                    </Show>
+                                    {render_emphasized(&text, &signals.emphasis_keywords.get())}
+                                </span>
+                            }
+                        });
+
+                        view! {
+                            {original_view}
+                            {translated_view}
+                        }
+                    }}
 
                     // 3. Time / Copy Action Swapper (Inline with text)
                     <div class="inline-flex items-center self-center flex-shrink-0 ml-1">
-                        // 2. Time string replaced here
                         <time class="text-[10px] text-base-content/40 whitespace-nowrap block group-hover:hidden">
                             {display_time}
                         </time>

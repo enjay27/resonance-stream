@@ -78,9 +78,12 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                 } else {
                                     channel_colors().0
                                 };
-                                format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide text-[13px] {}", color_class)
+                                format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide {}", color_class)
                             }
-                            style="text-shadow: -1px -1px 0 oklch(var(--b3)), 1px -1px 0 oklch(var(--b3)), -1px 1px 0 oklch(var(--b3)), 1px 1px 0 oklch(var(--b3)), 0px 2px 3px rgba(0,0,0,0.5);"
+                            style=move || format!(
+                                "font-size: {}px; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;",
+                                signals.font_size.get().saturating_sub(1).max(10)
+                            )
                             on:click=move |ev| {
                                 ev.stop_propagation();
                                 if is_active.get() {
@@ -147,7 +150,8 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                             "px-3 py-2 w-fit max-w-[85%] bg-base-200 border-y border-r border-base-content/5 border-l-[3px] rounded-md text-base-content shadow-sm transition-all {}",
                             channel_colors().1
                         )>
-                            <div class="text-[14px] leading-relaxed font-bold">
+                            <div class="leading-relaxed font-bold"
+                                style=move || format!("font-size: {}px;", signals.font_size.get())>
                                 {move || {
                                     let show_original_prefix = is_japanese(&sig.get().message) && signals.use_translation.get();
                                     if show_original_prefix {
@@ -160,7 +164,8 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                             </div>
 
                             {move || sig.get().translated.clone().map(|text| view! {
-                                <div class="mt-1.5 pt-1.5 border-t border-base-content/10 text-success font-bold text-[14px] animate-in slide-in-from-top-1 duration-200">
+                                <div class="mt-1.5 pt-1.5 border-t border-base-content/10 text-success font-bold animate-in slide-in-from-top-1 duration-200"
+                                    style=move || format!("font-size: {}px;", signals.font_size.get())>
                                      <span class="opacity-70 mr-1.5 font-bold">[번역]</span>
                                      {render_emphasized(&text, &signals.emphasis_keywords.get())}
                                 </div>
@@ -190,9 +195,12 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                         } else {
                             channel_colors().0
                         };
-                        format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide text-[12px] flex-shrink-0 {}", color_class)
+                        format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide flex-shrink-0 {}", color_class)
                     }
-                    style="text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;"
+                    style=move || format!(
+                        "font-size: {}px; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;",
+                        signals.font_size.get().saturating_sub(2).max(10)
+                    )
                     on:click=move |ev| {
                         ev.stop_propagation();
                         if is_active.get() {
@@ -258,7 +266,8 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                             <span class=move || format!(
                                 "text-[12px] text-base-content font-bold leading-snug break-words opacity-90 {}",
                                 if hide_orig_pref && has_translation { "hidden group-hover/msg:inline" } else { "inline" }
-                            )>
+                            )
+                            style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
                                 {move || {
                                     // Only show the [원문] badge if we are NOT in the "Hide Original" mode
                                     if !hide_orig_pref && is_japanese(&msg.message) && signals.use_translation.get() {
@@ -277,7 +286,8 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                 <span class=move || format!(
                                     "text-[12px] text-success font-bold leading-snug break-words {}",
                                     if hide_orig_pref { "inline group-hover/msg:hidden" } else { "inline" }
-                                )>
+                                )
+                                style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
                                     // Only show the [번역] badge if we are NOT in the "Hide Original" mode
                                     <Show when=move || !hide_orig_pref>
                                         <span class="opacity-70 mr-1 font-bold">[번역]</span>

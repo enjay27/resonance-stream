@@ -96,6 +96,8 @@ pub struct AppSignals {
     pub set_use_relative_time: WriteSignal<bool>,
     pub current_time: ReadSignal<u64>,
     pub set_current_time: WriteSignal<u64>,
+    pub font_size: ReadSignal<u32>,
+    pub set_font_size: WriteSignal<u32>,
 }
 
 #[derive(Copy, Clone)]

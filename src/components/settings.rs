@@ -215,6 +215,29 @@ pub fn Settings() -> impl IntoView {
                         // ==========================================
                         <section class="space-y-4">
                             <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"Chat Settings"</h3>
+                            
+                            // Font Size Slider
+                            <div class="space-y-2 mt-4 pt-4 border-t border-base-content/10">
+                                <div class="flex justify-between text-[11px] font-bold">
+                                    <span class="text-base-content/80">"채팅 글꼴 크기 (Font Size)"</span>
+                                    <span class="text-success">{move || format!("{}px", signals.font_size.get())}</span>
+                                </div>
+                                <input type="range" min="10" max="24" step="1"
+                                    class="range range-xs range-success"
+                                    prop:value=move || signals.font_size.get().to_string()
+                                    on:input=move |ev| {
+                                        // 1. Update UI live while dragging
+                                        let val = event_target_value(&ev).parse::<u32>().unwrap_or(14);
+                                        signals.set_font_size.set(val);
+                                    }
+                                    on:change=move |ev| {
+                                        // 2. Save to file when mouse is released
+                                        let val = event_target_value(&ev).parse::<u32>().unwrap_or(14);
+                                        actions.save_config.dispatch(());
+                                    }
+                                />
+                                <div class="text-[9px] text-base-content/50">"기본 크기는 14px 입니다."</div>
+                            </div>
 
                             // Message Limit
                             <div class="flex items-center justify-between bg-base-200 p-3 rounded-lg border border-base-content/5 px-3">

@@ -72,6 +72,7 @@ pub fn App() -> impl IntoView {
     let (emphasis_keywords, set_emphasis_keywords) = signal(Vec::<String>::new());
     let (use_relative_time, set_use_relative_time) = signal(false);
     let (current_time, set_current_time) = signal(chrono::Local::now().timestamp_millis() as u64);
+    let (font_size, set_font_size) = signal(14u32);
 
     let signals = AppSignals {
         init_done, set_init_done,
@@ -120,6 +121,7 @@ pub fn App() -> impl IntoView {
         emphasis_keywords, set_emphasis_keywords,
         use_relative_time, set_use_relative_time,
         current_time, set_current_time,
+        font_size, set_font_size,
     };
 
     provide_context(signals);
@@ -178,6 +180,7 @@ pub fn App() -> impl IntoView {
             alert_volume: alert_volume.get_untracked(),
             emphasis_keywords: emphasis_keywords.get_untracked(),
             use_relative_time: use_relative_time.get_untracked(),
+            font_size: font_size.get_untracked(),
         };
 
         async move {
@@ -359,6 +362,8 @@ pub fn App() -> impl IntoView {
                         set_alert_volume.set(config.alert_volume);
                         set_emphasis_keywords.set(config.emphasis_keywords);
                         set_use_relative_time.set(config.use_relative_time);
+                        let loaded_size = if config.font_size > 8 { config.font_size } else { 14 };
+                        set_font_size.set(loaded_size);
 
                         let mut safe_op = config.overlay_opacity;
                         if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85

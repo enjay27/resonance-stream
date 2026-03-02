@@ -54,6 +54,7 @@ pub struct AppConfig {
     pub alert_volume: f32,
     pub emphasis_keywords: Vec<String>,
     pub use_relative_time: bool,
+    pub font_size: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

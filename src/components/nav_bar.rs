@@ -297,10 +297,6 @@ pub fn NavBar() -> impl IntoView {
                     <div class="tooltip tooltip-bottom" data-tip="Settings">
                         <button class="btn btn-ghost btn-xs relative" on:click=move |_| signals.set_show_settings.set(true)>
                             "⚙️"
-                            <Show when=move || signals.restart_required.get()>
-                                <span class="absolute top-0 right-0 w-2 h-2 bg-warning rounded-full animate-ping"></span>
-                                <span class="absolute top-0 right-0 w-2 h-2 bg-warning rounded-full"></span>
-                            </Show>
                         </button>
                     </div>
                 </div>

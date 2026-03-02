@@ -150,4 +150,29 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
         *state.data_factory_tx.lock().unwrap() = None;
         inject_system_message(&app, SystemLogLevel::Info, "DataFactory", "Dataset logging disabled.");
     }
+
+    // --- MANAGE THE AI WORKER THREAD ---
+    let translation_toggled_on = !old_config.use_translation && config.use_translation;
+    let translation_toggled_off = old_config.use_translation && !config.use_translation;
+    let translation_specs_changed = config.use_translation && old_config.use_translation &&
+        (old_config.compute_mode != config.compute_mode || old_config.tier != config.tier);
+
+    if translation_toggled_on || translation_specs_changed {
+        if translation_specs_changed {
+            // Drop the old sender to break the current thread's loop
+            *state.translator_tx.lock().unwrap() = None;
+            inject_system_message(&app, SystemLogLevel::Info, "Translator", "Applying new AI Engine specifications...");
+        }
+
+        // Start the server and store the new Sender
+        let model_path = crate::get_model_path(&app);
+        let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
+        *state.translator_tx.lock().unwrap() = Some(tx);
+
+    } else if translation_toggled_off {
+        // Turned OFF: Drop the Sender (Kills the thread and frees VRAM)
+        *state.translator_tx.lock().unwrap() = None;
+        inject_system_message(&app, SystemLogLevel::Info, "Translator", "AI Translation Disabled. Server stopped and VRAM cleared.");
+        crate::services::translator::emit_translator_state(&app, "Off", "AI Translation Disabled.");
+    }
 }

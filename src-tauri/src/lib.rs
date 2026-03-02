@@ -145,6 +145,7 @@ pub fn run() {
                 translator_tx: Mutex::new(initial_tx),
                 data_factory_tx: Mutex::new(initial_df_tx),
                 sniffer_tx: Mutex::new(None),
+                dedup_cache: Mutex::new(std::collections::HashMap::new()),
             });
 
             Ok(())

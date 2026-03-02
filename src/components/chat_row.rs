@@ -150,26 +150,45 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                             "px-3 py-2 w-fit max-w-[85%] bg-base-200 border-y border-r border-base-content/5 border-l-[3px] rounded-md text-base-content shadow-sm transition-all {}",
                             channel_colors().1
                         )>
-                            <div class="leading-relaxed font-bold"
-                                style=move || format!("font-size: {}px;", signals.font_size.get())>
-                                {move || {
-                                    let show_original_prefix = is_japanese(&sig.get().message) && signals.use_translation.get();
-                                    if show_original_prefix {
-                                        view! { <span class="text-base-content/50 mr-1.5 font-bold">[원문]</span> }.into_any()
-                                    } else {
-                                        view! {}.into_any()
-                                    }
-                                }}
-                                {move || render_emphasized(&sig.get().message, &signals.emphasis_keywords.get())}
-                            </div>
+                            {move || {
+                                let msg = sig.get();
 
-                            {move || sig.get().translated.clone().map(|text| view! {
-                                <div class="mt-1.5 pt-1.5 border-t border-base-content/10 text-success font-bold animate-in slide-in-from-top-1 duration-200"
-                                    style=move || format!("font-size: {}px;", signals.font_size.get())>
-                                     <span class="opacity-70 mr-1.5 font-bold">[번역]</span>
-                                     {render_emphasized(&text, &signals.emphasis_keywords.get())}
-                                </div>
-                            })}
+                                if msg.is_blocked {
+                                    // Blocked Message UI
+                                    view! {
+                                        <div class="italic opacity-50 text-base-content/50 font-bold"
+                                            style=move || format!("font-size: {}px;", signals.font_size.get())>
+                                            "(차단된 사용자의 메시지입니다)"
+                                        </div>
+                                    }.into_any()
+                                } else {
+                                    // Normal Message UI
+                                    view! {
+                                        <>
+                                            <div class="leading-relaxed font-bold"
+                                                style=move || format!("font-size: {}px;", signals.font_size.get())>
+                                                {
+                                                    let show_original_prefix = is_japanese(&msg.message) && signals.use_translation.get();
+                                                    if show_original_prefix {
+                                                        view! { <span class="text-base-content/50 mr-1.5 font-bold">[원문]</span> }.into_any()
+                                                    } else {
+                                                        view! {}.into_any()
+                                                    }
+                                                }
+                                                {render_emphasized(&msg.message, &signals.emphasis_keywords.get())}
+                                            </div>
+
+                                            {msg.translated.clone().map(|text| view! {
+                                                <div class="mt-1.5 pt-1.5 border-t border-base-content/10 text-success font-bold animate-in slide-in-from-top-1 duration-200"
+                                                    style=move || format!("font-size: {}px;", signals.font_size.get())>
+                                                     <span class="opacity-70 mr-1.5 font-bold">[번역]</span>
+                                                     {render_emphasized(&text, &signals.emphasis_keywords.get())}
+                                                </div>
+                                            })}
+                                        </>
+                                    }.into_any()
+                                }
+                            }}
                         </div>
 
                         <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
@@ -257,49 +276,61 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                 <div class="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5 group/msg">
                     {move || {
                         let msg = sig.get();
-                        let emphasized_msg = msg.clone();
-                        let has_translation = msg.translated.is_some();
-                        let hide_orig_pref = signals.hide_original_in_compact.get();
 
-                        // Define the original message view
-                        let original_view = view! {
-                            <span class=move || format!(
-                                "text-[12px] text-base-content font-bold leading-snug break-words opacity-90 {}",
-                                if hide_orig_pref && has_translation { "hidden group-hover/msg:inline" } else { "inline" }
-                            )
-                            style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
-                                {move || {
-                                    // Only show the [원문] badge if we are NOT in the "Hide Original" mode
-                                    if !hide_orig_pref && is_japanese(&msg.message) && signals.use_translation.get() {
-                                        view! { <span class="text-base-content/50 mr-1 font-bold">[원문]</span> }.into_any()
-                                    } else {
-                                        view! {}.into_any()
-                                    }
-                                }}
-                                {render_emphasized(&emphasized_msg.message, &signals.emphasis_keywords.get())}
-                            </span>
-                        };
-
-                        // Define the translated message view
-                        let translated_view = msg.translated.clone().map(|text| {
+                        if msg.is_blocked {
+                            // Blocked Message UI
                             view! {
+                                <span class="italic opacity-50 text-base-content/50 font-bold leading-snug break-words"
+                                      style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
+                                    "(차단된 사용자의 메시지입니다)"
+                                </span>
+                            }.into_any()
+                        } else {
+                            // Normal Message UI
+                            let emphasized_msg = msg.clone();
+                            let has_translation = msg.translated.is_some();
+                            let hide_orig_pref = signals.hide_original_in_compact.get();
+
+                            // Define the original message view
+                            let original_view = view! {
                                 <span class=move || format!(
-                                    "text-[12px] text-success font-bold leading-snug break-words {}",
-                                    if hide_orig_pref { "inline group-hover/msg:hidden" } else { "inline" }
+                                    "text-base-content font-bold leading-snug break-words opacity-90 {}",
+                                    if hide_orig_pref && has_translation { "hidden group-hover/msg:inline" } else { "inline" }
                                 )
                                 style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
-                                    // Only show the [번역] badge if we are NOT in the "Hide Original" mode
-                                    <Show when=move || !hide_orig_pref>
-                                        <span class="opacity-70 mr-1 font-bold">[번역]</span>
-                                    </Show>
-                                    {render_emphasized(&text, &signals.emphasis_keywords.get())}
+                                    {
+                                        // Only show the [원문] badge if we are NOT in the "Hide Original" mode
+                                        if !hide_orig_pref && is_japanese(&msg.message) && signals.use_translation.get() {
+                                            view! { <span class="text-base-content/50 mr-1 font-bold">[원문]</span> }.into_any()
+                                        } else {
+                                            view! {}.into_any()
+                                        }
+                                    }
+                                    {render_emphasized(&emphasized_msg.message, &signals.emphasis_keywords.get())}
                                 </span>
-                            }
-                        });
+                            };
 
-                        view! {
-                            {original_view}
-                            {translated_view}
+                            // Define the translated message view
+                            let translated_view = msg.translated.clone().map(|text| {
+                                view! {
+                                    <span class=move || format!(
+                                        "text-success font-bold leading-snug break-words {}",
+                                        if hide_orig_pref { "inline group-hover/msg:hidden" } else { "inline" }
+                                    )
+                                    style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
+                                        // Only show the [번역] badge if we are NOT in the "Hide Original" mode
+                                        <Show when=move || !hide_orig_pref>
+                                            <span class="opacity-70 mr-1 font-bold">[번역]</span>
+                                        </Show>
+                                        {render_emphasized(&text, &signals.emphasis_keywords.get())}
+                                    </span>
+                                }
+                            });
+
+                            view! {
+                                {original_view}
+                                {translated_view}
+                            }.into_any()
                         }
                     }}
 

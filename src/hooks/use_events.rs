@@ -17,18 +17,21 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     let system_closure = create_system_handler(signals);
     let sniffer_state_closure = create_sniffer_state_handler(signals);
     let translation_closure = create_translation_handler(signals);
+    let update_message_closure = create_update_message_handler(signals);
 
     // 2. Register all listeners
     listen("packet-event", &packet_closure).await;
     listen("system-event", &system_closure).await;
     listen("sniffer-state", &sniffer_state_closure).await;
     listen("translation-event", &translation_closure).await;
+    listen("chat-message-update", &update_message_closure).await;
 
     // 3. Prevent memory leaks / keep closures alive
     packet_closure.forget();
     system_closure.forget();
     sniffer_state_closure.forget();
     translation_closure.forget();
+    update_message_closure.forget();
 }
 
 // --- EXTRACTED HANDLER FUNCTIONS ---
@@ -160,6 +163,24 @@ fn create_sniffer_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValu
                 if payload.state == "Error" {
                     signals.set_sniffer_error.set(payload.message);
                 }
+            }
+        }
+    }) as Box<dyn FnMut(JsValue)>)
+}
+
+fn create_update_message_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
+        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+            // Parse the fully updated ChatMessage sent from the backend
+            if let Ok(updated_msg) = serde_json::from_value::<ChatMessage>(ev["payload"].clone()) {
+
+                // Find the existing signal by PID and completely overwrite its value
+                signals.set_chat_log.update(|log| {
+                    if let Some(chat_rw) = log.get(&updated_msg.pid) {
+                        chat_rw.set(updated_msg);
+                    }
+                });
+
             }
         }
     }) as Box<dyn FnMut(JsValue)>)

@@ -352,11 +352,42 @@ pub fn emit_parsed_message(data: &[u8], app: &AppHandle) {
     // If it's a server packet, this safely returns without spamming logs
     let events = parsing_pipeline(data, app);
 
-    println!("[Emit] Events {:?}", events);
-
     for event in events {
         match event {
             Port5003Event::Chat(mut c) => {
+                let state = app.state::<AppState>();
+
+                // 1. Create a bulletproof unique signature
+                let signature = (c.uid, c.timestamp, c.sequence_id);
+
+                let mut cache = state.dedup_cache.lock().unwrap();
+
+                // 2. Check for Duplicates
+                if let Some(&existing_pid) = cache.get(&signature) {
+                    // DUPLICATE FOUND: Did THIS client have the user blocked?
+                    if c.is_blocked {
+                        let mut history = state.chat_history.lock().unwrap();
+                        if let Some(existing_msg) = history.get_mut(&existing_pid) {
+                            if !existing_msg.is_blocked {
+                                // Overwrite the existing message to be blocked!
+                                existing_msg.is_blocked = true;
+
+                                // Re-emit to the frontend so Leptos can hide it
+                                let _ = app.emit("chat-message-update", existing_msg.clone());
+                            }
+                        }
+                    }
+                    // Ignore the duplicate and continue to the next packet
+                    continue;
+                }
+
+                // 3. NEW MESSAGE LOGIC
+                let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
+                c.pid = current_pid;
+
+                // Save to cache so other clients ignore it
+                cache.insert(signature, current_pid);
+
                 // --- 1. NICKNAME CACHE & ROMAJI SWAP ---
                 if contains_japanese(&c.nickname) {
                     // Access the AppState from Tauri

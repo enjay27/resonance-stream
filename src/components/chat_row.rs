@@ -147,7 +147,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                             "px-3 py-2 w-fit max-w-[85%] bg-base-200 border-y border-r border-base-content/5 border-l-[3px] rounded-md text-base-content shadow-sm transition-all {}",
                             channel_colors().1
                         )>
-                            <div class="text-[14px] leading-relaxed">
+                            <div class="text-[14px] leading-relaxed font-bold">
                                 {move || {
                                     let show_original_prefix = is_japanese(&sig.get().message) && signals.use_translation.get();
                                     if show_original_prefix {
@@ -192,7 +192,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                         };
                         format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide text-[12px] flex-shrink-0 {}", color_class)
                     }
-                    style="text-shadow: -1px -1px 0 oklch(var(--b3)), 1px -1px 0 oklch(var(--b3)), -1px 1px 0 oklch(var(--b3)), 1px 1px 0 oklch(var(--b3)), 0px 2px 3px rgba(0,0,0,0.5);"
+                    style="text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;"
                     on:click=move |ev| {
                         ev.stop_propagation();
                         if is_active.get() {
@@ -256,7 +256,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                         // Define the original message view
                         let original_view = view! {
                             <span class=move || format!(
-                                "text-[12px] text-base-content leading-snug break-words opacity-90 {}",
+                                "text-[12px] text-base-content font-bold leading-snug break-words opacity-90 {}",
                                 if hide_orig_pref && has_translation { "hidden group-hover/msg:inline" } else { "inline" }
                             )>
                                 {move || {
@@ -311,8 +311,10 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 }
 
 fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
+    let shadow_style = "text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;";
+
     if keywords.is_empty() || text.is_empty() {
-        return view! { <span>{text.to_string()}</span> }.into_any();
+        return view! { <span class="font-bold" style=shadow_style>{text.to_string()}</span> }.into_any();
     }
 
     let mut views = Vec::new();
@@ -333,13 +335,22 @@ fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
             Some((idx, kw)) => {
                 let before = &current_text[..idx];
                 if !before.is_empty() {
-                    views.push(view! { <span>{before.to_string()}</span> }.into_any());
+                    views.push(view! {
+                        <span class="font-bold" style=shadow_style>{before.to_string()}</span>
+                    }.into_any());
                 }
-                views.push(view! { <span class="text-warning font-black drop-shadow-md mx-0.5">{kw.to_string()}</span> }.into_any());
+                // Emphasis keywords keep their specific color but gain the shadow
+                views.push(view! {
+                    <span class="text-warning font-black drop-shadow-md mx-0.5" style=shadow_style>
+                        {kw.to_string()}
+                    </span>
+                }.into_any());
                 current_text = &current_text[idx + kw.len()..];
             },
             None => {
-                views.push(view! { <span>{current_text.to_string()}</span> }.into_any());
+                views.push(view! {
+                    <span class="font-bold" style=shadow_style>{current_text.to_string()}</span>
+                }.into_any());
                 break;
             }
         }

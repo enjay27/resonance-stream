@@ -1,6 +1,6 @@
 use crate::components::ChatRow;
 use crate::store::AppSignals;
-use crate::types::{ChatMessage, SystemMessage};
+use crate::ui_types::{ChatMessage, SystemMessage};
 use crate::utils::format_time;
 use leptos::html;
 use leptos::leptos_dom::log;

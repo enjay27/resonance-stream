@@ -14,7 +14,7 @@ use crate::hooks::use_config::save_app_config;
 use crate::hooks::use_events::setup_event_listeners;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::{invoke, listen};
-use crate::types::{
+use crate::ui_types::{
     ChatMessage, SystemMessage, AppConfig, FolderStatus, ProgressPayload, TauriEvent
 };
 use crate::utils::{add_system_log, copy_to_clipboard, format_time, is_japanese};

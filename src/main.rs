@@ -1,5 +1,5 @@
 mod app;
-pub mod types;
+pub mod ui_types;
 pub mod components;
 pub mod hooks;
 pub mod utils;

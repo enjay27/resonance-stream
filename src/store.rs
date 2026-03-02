@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use indexmap::IndexMap;
 use leptos::prelude::{Action, ReadSignal, RwSignal, WriteSignal};
-use crate::types::{ChatMessage, SystemMessage};
+use crate::ui_types::{ChatMessage, SystemMessage};
 
 #[derive(Copy, Clone, Debug)]
 pub struct AppSignals {

@@ -1,7 +1,7 @@
 use leptos::logging::log;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
-use crate::types::{ChatMessage, SnifferStatePayload, SystemMessage, TranslationResult};
+use crate::ui_types::{ChatMessage, SnifferStatePayload, SystemMessage, TranslationResult};
 use crate::utils::is_japanese;
 use leptos::prelude::*;
 use leptos::task::spawn_local;

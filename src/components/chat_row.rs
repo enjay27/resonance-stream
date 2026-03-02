@@ -1,5 +1,5 @@
 use crate::store::AppSignals;
-use crate::types::ChatMessage;
+use crate::ui_types::ChatMessage;
 use crate::use_context;
 use crate::utils::{copy_to_clipboard, format_time, is_japanese};
 use leptos::prelude::*;

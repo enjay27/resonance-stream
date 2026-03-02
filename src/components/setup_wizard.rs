@@ -1,6 +1,6 @@
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
-use crate::types::TauriEvent;
+use crate::ui_types::TauriEvent;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;

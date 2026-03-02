@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
 use crate::tauri_bridge::invoke;
-use crate::types::{FolderStatus, NetworkInterface};
+use crate::ui_types::{FolderStatus, NetworkInterface};
 
 #[derive(serde::Serialize)]
 struct OpenBrowserArgs {

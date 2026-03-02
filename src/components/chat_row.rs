@@ -12,6 +12,25 @@ use crate::tauri_bridge::invoke;
 pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
 
+    Effect::new(move |_| {
+        // By calling sig.get(), we track any changes to this specific message.
+        if sig.get().translated.is_some() {
+            // If the user is currently looking at the bottom of the chat,
+            // push the scrollbar down so the expanded translation isn't hidden.
+            if signals.is_at_bottom.get_untracked() {
+                request_animation_frame(move || {
+                    if let Some(window) = web_sys::window() {
+                        if let Some(doc) = window.document() {
+                            if let Some(el) = doc.get_element_by_id("chat-scroll-container") {
+                                el.set_scroll_top(el.scroll_height());
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    });
+
     let is_active = Memo::new(move |_| signals.active_menu_id.get() == Some(sig.get_untracked().pid));
     let (menu_pos, set_menu_pos) = signal((0, 0));
 

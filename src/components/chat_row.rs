@@ -5,6 +5,8 @@ use crate::utils::{copy_to_clipboard, format_time, is_japanese};
 use leptos::prelude::*;
 use leptos::{component, view, IntoView};
 use leptos::portal::Portal;
+use leptos::reactive::spawn_local;
+use crate::tauri_bridge::invoke;
 
 #[component]
 pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
@@ -63,290 +65,315 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
     };
 
     view! {
-        <Show
-            when=move || signals.compact_mode.get()
-            fallback=move || view! {
-                // ==========================================
-                // STANDARD VIEW (Stacked)
-                // ==========================================
-                <div class="flex flex-col items-start px-2 py-1 group transition-colors hover:bg-base-content/5">
-                    <div class="opacity-90 mb-1 flex gap-2 items-center">
-                        <span
-                            class=move || {
-                                let color_class = if signals.search_term.get() == sig.get().nickname {
-                                    "text-success underline decoration-2"
-                                } else {
-                                    channel_colors().0
-                                };
-                                format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide {}", color_class)
-                            }
-                            style=move || format!(
-                                "font-size: {}px; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;",
-                                signals.font_size.get().saturating_sub(1).max(10)
-                            )
-                            on:click=move |ev| {
-                                ev.stop_propagation();
-                                if is_active.get() {
-                                    signals.set_active_menu_id.set(None);
-                                } else {
-                                    set_menu_pos.set((ev.client_x(), ev.client_y()));
-                                    signals.set_active_menu_id.set(Some(sig.get_untracked().pid));
-                                }
-                            }
-                        >
-                            {move || {
-                                let p = sig.get();
-                                match p.nickname_romaji {
-                                    Some(r) => format!("{}({})", p.nickname, r),
-                                    None => p.nickname.clone()
-                                }
-                            }}
-                        </span>
-
-                        <Show when=move || is_active.get()>
-                            <Portal>
-                                <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
-                                     style=move || {
-                                         let (x, y) = menu_pos.get();
-                                         format!("top: {}px; left: {}px;", y + 8, x + 8)
-                                     }
-                                     on:click=move |ev| ev.stop_propagation()>
-
-                                    <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
-                                        on:click=move |_| {
-                                            copy_to_clipboard(&sig.get_untracked().nickname);
-                                            signals.set_active_menu_id.set(None);
-                                        }>
-                                        "📋 Copy Name"
-                                    </button>
-
-                                    <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
-                                        on:click=move |_| {
-                                            let n = sig.get_untracked().nickname;
-                                            if signals.search_term.get_untracked() == n {
-                                                signals.set_search_term.set("".into());
-                                            } else {
-                                                signals.set_search_term.set(n);
-                                            }
-                                            signals.set_active_menu_id.set(None);
-                                        }>
-                                        "🔍 Filter Chat"
-                                    </button>
-                                </div>
-                            </Portal>
-                        </Show>
-
-                        <span class="text-base-content/50 font-bold text-[10px]">
-                            "Lv." {move || sig.get().level}
-                        </span>
-                        // 1. Time string replaced here
-                        <time class="ml-2 text-base-content/50 opacity-70 text-[10px]">
-                            {display_time}
-                        </time>
-                    </div>
-
-                    <div class="flex items-center gap-2 w-full">
-                        <div class=move || format!(
-                            "px-3 py-2 w-fit max-w-[85%] bg-base-200 border-y border-r border-base-content/5 border-l-[3px] rounded-md text-base-content shadow-sm transition-all {}",
-                            channel_colors().1
-                        )>
-                            {move || {
-                                let msg = sig.get();
-
-                                if msg.is_blocked {
-                                    // Blocked Message UI
-                                    view! {
-                                        <div class="italic opacity-50 text-base-content/50 font-bold"
-                                            style=move || format!("font-size: {}px;", signals.font_size.get())>
-                                            "(차단된 사용자의 메시지입니다)"
-                                        </div>
-                                    }.into_any()
-                                } else {
-                                    // Normal Message UI
-                                    view! {
-                                        <>
-                                            <div class="leading-relaxed font-bold"
-                                                style=move || format!("font-size: {}px;", signals.font_size.get())>
-                                                {
-                                                    let show_original_prefix = is_japanese(&msg.message) && signals.use_translation.get();
-                                                    if show_original_prefix {
-                                                        view! { <span class="text-base-content/50 mr-1.5 font-bold">[원문]</span> }.into_any()
-                                                    } else {
-                                                        view! {}.into_any()
-                                                    }
-                                                }
-                                                {render_emphasized(&msg.message, &signals.emphasis_keywords.get())}
-                                            </div>
-
-                                            {msg.translated.clone().map(|text| view! {
-                                                <div class="mt-1.5 pt-1.5 border-t border-base-content/10 text-success font-bold animate-in slide-in-from-top-1 duration-200"
-                                                    style=move || format!("font-size: {}px;", signals.font_size.get())>
-                                                     <span class="opacity-70 mr-1.5 font-bold">[번역]</span>
-                                                     {render_emphasized(&text, &signals.emphasis_keywords.get())}
-                                                </div>
-                                            })}
-                                        </>
-                                    }.into_any()
-                                }
-                            }}
-                        </div>
-
-                        <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                            <button class="btn btn-ghost btn-xs text-[10px] text-base-content/50 h-6 min-h-0 px-2 hover:bg-base-content/10 hover:text-base-content"
-                                on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
-                                "COPY"
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            }
-        >
-            // ==========================================
-            // COMPACT VIEW (Inline Flattened)
-            // ==========================================
-            <div class="flex flex-row items-baseline gap-2 px-2 py-0.5 group transition-colors hover:bg-base-content/5 w-full">
-
-                // 1. Nickname
-                <span
-                    class=move || {
-                        let color_class = if signals.search_term.get() == sig.get().nickname {
-                            "text-success underline decoration-2"
-                        } else {
-                            channel_colors().0
-                        };
-                        format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide flex-shrink-0 {}", color_class)
-                    }
-                    style=move || format!(
-                        "font-size: {}px; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;",
-                        signals.font_size.get().saturating_sub(2).max(10)
-                    )
-                    on:click=move |ev| {
-                        ev.stop_propagation();
-                        if is_active.get() {
-                            signals.set_active_menu_id.set(None);
-                        } else {
-                            set_menu_pos.set((ev.client_x(), ev.client_y()));
-                            signals.set_active_menu_id.set(Some(sig.get_untracked().pid));
-                        }
-                    }
-                >
-                    {move || {
-                        let p = sig.get();
-                        match p.nickname_romaji {
-                            Some(r) => format!("{}({})", p.nickname, r),
-                            None => p.nickname.clone()
-                        }
-                    }}
-                </span>
-
-                <Show when=move || is_active.get()>
-                    <Portal>
-                        <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
-                             style=move || {
-                                 let (x, y) = menu_pos.get();
-                                 format!("top: {}px; left: {}px;", y + 8, x + 8)
-                             }
-                             on:click=move |ev| ev.stop_propagation()>
-
-                            <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
-                                on:click=move |_| {
-                                    copy_to_clipboard(&sig.get_untracked().nickname);
-                                    signals.set_active_menu_id.set(None);
-                                }>
-                                "📋 Copy Name"
-                            </button>
-
-                            <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
-                                on:click=move |_| {
-                                    let n = sig.get_untracked().nickname;
-                                    if signals.search_term.get_untracked() == n {
-                                        signals.set_search_term.set("".into());
+        <Show when=move || !(sig.get().is_blocked && signals.hide_blocked_messages.get())>
+            <Show
+                when=move || signals.compact_mode.get()
+                fallback=move || view! {
+                    // ==========================================
+                    // STANDARD VIEW (Stacked)
+                    // ==========================================
+                    <div class="flex flex-col items-start px-2 py-1 group transition-colors hover:bg-base-content/5">
+                        <div class="opacity-90 mb-1 flex gap-2 items-center">
+                            <span
+                                class=move || {
+                                    let color_class = if signals.search_term.get() == sig.get().nickname {
+                                        "text-success underline decoration-2"
                                     } else {
-                                        signals.set_search_term.set(n);
-                                    }
-                                    signals.set_active_menu_id.set(None);
-                                }>
-                                "🔍 Filter Chat"
-                            </button>
-                        </div>
-                    </Portal>
-                </Show>
-
-                // 2. Message Body & Actions
-                <div class="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5 group/msg">
-                    {move || {
-                        let msg = sig.get();
-
-                        if msg.is_blocked {
-                            // Blocked Message UI
-                            view! {
-                                <span class="italic opacity-50 text-base-content/50 font-bold leading-snug break-words"
-                                      style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
-                                    "(차단된 사용자의 메시지입니다)"
-                                </span>
-                            }.into_any()
-                        } else {
-                            // Normal Message UI
-                            let emphasized_msg = msg.clone();
-                            let has_translation = msg.translated.is_some();
-                            let hide_orig_pref = signals.hide_original_in_compact.get();
-
-                            // Define the original message view
-                            let original_view = view! {
-                                <span class=move || format!(
-                                    "text-base-content font-bold leading-snug break-words opacity-90 {}",
-                                    if hide_orig_pref && has_translation { "hidden group-hover/msg:inline" } else { "inline" }
+                                        channel_colors().0
+                                    };
+                                    format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide {}", color_class)
+                                }
+                                style=move || format!(
+                                    "font-size: {}px; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;",
+                                    signals.font_size.get().saturating_sub(1).max(10)
                                 )
-                                style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
-                                    {
-                                        // Only show the [원문] badge if we are NOT in the "Hide Original" mode
-                                        if !hide_orig_pref && is_japanese(&msg.message) && signals.use_translation.get() {
-                                            view! { <span class="text-base-content/50 mr-1 font-bold">[원문]</span> }.into_any()
-                                        } else {
-                                            view! {}.into_any()
-                                        }
+                                on:click=move |ev| {
+                                    ev.stop_propagation();
+                                    if is_active.get() {
+                                        signals.set_active_menu_id.set(None);
+                                    } else {
+                                        set_menu_pos.set((ev.client_x(), ev.client_y()));
+                                        signals.set_active_menu_id.set(Some(sig.get_untracked().pid));
                                     }
-                                    {render_emphasized(&emphasized_msg.message, &signals.emphasis_keywords.get())}
-                                </span>
-                            };
+                                }
+                            >
+                                {move || {
+                                    let p = sig.get();
+                                    match p.nickname_romaji {
+                                        Some(r) => format!("{}({})", p.nickname, r),
+                                        None => p.nickname.clone()
+                                    }
+                                }}
+                            </span>
 
-                            // Define the translated message view
-                            let translated_view = msg.translated.clone().map(|text| {
+                            <Show when=move || is_active.get()>
+                                <Portal>
+                                    <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
+                                         style=move || {
+                                             let (x, y) = menu_pos.get();
+                                             format!("top: {}px; left: {}px;", y + 8, x + 8)
+                                         }
+                                         on:click=move |ev| ev.stop_propagation()>
+
+                                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
+                                            on:click=move |_| {
+                                                copy_to_clipboard(&sig.get_untracked().nickname);
+                                                signals.set_active_menu_id.set(None);
+                                            }>
+                                            "📋 Copy Name"
+                                        </button>
+
+                                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
+                                            on:click=move |_| {
+                                                let n = sig.get_untracked().nickname;
+                                                if signals.search_term.get_untracked() == n {
+                                                    signals.set_search_term.set("".into());
+                                                } else {
+                                                    signals.set_search_term.set(n);
+                                                }
+                                                signals.set_active_menu_id.set(None);
+                                            }>
+                                            "🔍 Filter Chat"
+                                        </button>
+
+                                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2 text-error"
+                                            on:click=move |_| {
+                                                let target_uid = sig.get_untracked().uid;
+                                                let target_name = sig.get_untracked().nickname.clone();
+                                                let blocked_name = sig.get_untracked().nickname.clone();
+
+                                                spawn_local(async move {
+                                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                                        "uid": target_uid,
+                                                        "nickname": target_name
+                                                    })).unwrap();
+                                                    let _ = invoke("block_user_command", args).await;
+                                                });
+
+                                                signals.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
+                                                signals.set_active_menu_id.set(None);
+                                            }>
+                                            "🚫 Block User"
+                                        </button>
+                                    </div>
+                                </Portal>
+                            </Show>
+
+                            <span class="text-base-content/50 font-bold text-[10px]">
+                                "Lv." {move || sig.get().level}
+                            </span>
+                            // 1. Time string replaced here
+                            <time class="ml-2 text-base-content/50 opacity-70 text-[10px]">
+                                {display_time}
+                            </time>
+                        </div>
+
+                        <div class="flex items-center gap-2 w-full">
+                            <div class=move || format!(
+                                "px-3 py-2 w-fit max-w-[85%] bg-base-200 border-y border-r border-base-content/5 border-l-[3px] rounded-md text-base-content shadow-sm transition-all {}",
+                                channel_colors().1
+                            )>
+                                {move || {
+                                    let msg = sig.get();
+
+                                    if msg.is_blocked {
+                                        // Blocked Message UI
+                                        view! {
+                                            <div class="italic opacity-50 text-base-content/50 font-bold"
+                                                style=move || format!("font-size: {}px;", signals.font_size.get())>
+                                                "(차단된 사용자의 메시지입니다)"
+                                            </div>
+                                        }.into_any()
+                                    } else {
+                                        // Normal Message UI
+                                        view! {
+                                            <>
+                                                <div class="leading-relaxed font-bold"
+                                                    style=move || format!("font-size: {}px;", signals.font_size.get())>
+                                                    {
+                                                        let show_original_prefix = is_japanese(&msg.message) && signals.use_translation.get();
+                                                        if show_original_prefix {
+                                                            view! { <span class="text-base-content/50 mr-1.5 font-bold">[원문]</span> }.into_any()
+                                                        } else {
+                                                            view! {}.into_any()
+                                                        }
+                                                    }
+                                                    {render_emphasized(&msg.message, &signals.emphasis_keywords.get())}
+                                                </div>
+
+                                                {msg.translated.clone().map(|text| view! {
+                                                    <div class="mt-1.5 pt-1.5 border-t border-base-content/10 text-success font-bold animate-in slide-in-from-top-1 duration-200"
+                                                        style=move || format!("font-size: {}px;", signals.font_size.get())>
+                                                         <span class="opacity-70 mr-1.5 font-bold">[번역]</span>
+                                                         {render_emphasized(&text, &signals.emphasis_keywords.get())}
+                                                    </div>
+                                                })}
+                                            </>
+                                        }.into_any()
+                                    }
+                                }}
+                            </div>
+
+                            <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                <button class="btn btn-ghost btn-xs text-[10px] text-base-content/50 h-6 min-h-0 px-2 hover:bg-base-content/10 hover:text-base-content"
+                                    on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
+                                    "COPY"
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            >
+                // ==========================================
+                // COMPACT VIEW (Inline Flattened)
+                // ==========================================
+                <div class="flex flex-row items-baseline gap-2 px-2 py-0.5 group transition-colors hover:bg-base-content/5 w-full">
+
+                    // 1. Nickname
+                    <span
+                        class=move || {
+                            let color_class = if signals.search_term.get() == sig.get().nickname {
+                                "text-success underline decoration-2"
+                            } else {
+                                channel_colors().0
+                            };
+                            format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide flex-shrink-0 {}", color_class)
+                        }
+                        style=move || format!(
+                            "font-size: {}px; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;",
+                            signals.font_size.get().saturating_sub(2).max(10)
+                        )
+                        on:click=move |ev| {
+                            ev.stop_propagation();
+                            if is_active.get() {
+                                signals.set_active_menu_id.set(None);
+                            } else {
+                                set_menu_pos.set((ev.client_x(), ev.client_y()));
+                                signals.set_active_menu_id.set(Some(sig.get_untracked().pid));
+                            }
+                        }
+                    >
+                        {move || {
+                            let p = sig.get();
+                            match p.nickname_romaji {
+                                Some(r) => format!("{}({})", p.nickname, r),
+                                None => p.nickname.clone()
+                            }
+                        }}
+                    </span>
+
+                    <Show when=move || is_active.get()>
+                        <Portal>
+                            <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
+                                 style=move || {
+                                     let (x, y) = menu_pos.get();
+                                     format!("top: {}px; left: {}px;", y + 8, x + 8)
+                                 }
+                                 on:click=move |ev| ev.stop_propagation()>
+
+                                <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
+                                    on:click=move |_| {
+                                        copy_to_clipboard(&sig.get_untracked().nickname);
+                                        signals.set_active_menu_id.set(None);
+                                    }>
+                                    "📋 Copy Name"
+                                </button>
+
+                                <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
+                                    on:click=move |_| {
+                                        let n = sig.get_untracked().nickname;
+                                        if signals.search_term.get_untracked() == n {
+                                            signals.set_search_term.set("".into());
+                                        } else {
+                                            signals.set_search_term.set(n);
+                                        }
+                                        signals.set_active_menu_id.set(None);
+                                    }>
+                                    "🔍 Filter Chat"
+                                </button>
+                            </div>
+                        </Portal>
+                    </Show>
+
+                    // 2. Message Body & Actions
+                    <div class="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5 group/msg">
+                        {move || {
+                            let msg = sig.get();
+
+                            if msg.is_blocked {
+                                // Blocked Message UI
                                 view! {
+                                    <span class="italic opacity-50 text-base-content/50 font-bold leading-snug break-words"
+                                          style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
+                                        "(차단된 사용자의 메시지입니다)"
+                                    </span>
+                                }.into_any()
+                            } else {
+                                // Normal Message UI
+                                let emphasized_msg = msg.clone();
+                                let has_translation = msg.translated.is_some();
+                                let hide_orig_pref = signals.hide_original_in_compact.get();
+
+                                // Define the original message view
+                                let original_view = view! {
                                     <span class=move || format!(
-                                        "text-success font-bold leading-snug break-words {}",
-                                        if hide_orig_pref { "inline group-hover/msg:hidden" } else { "inline" }
+                                        "text-base-content font-bold leading-snug break-words opacity-90 {}",
+                                        if hide_orig_pref && has_translation { "hidden group-hover/msg:inline" } else { "inline" }
                                     )
                                     style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
-                                        // Only show the [번역] badge if we are NOT in the "Hide Original" mode
-                                        <Show when=move || !hide_orig_pref>
-                                            <span class="opacity-70 mr-1 font-bold">[번역]</span>
-                                        </Show>
-                                        {render_emphasized(&text, &signals.emphasis_keywords.get())}
+                                        {
+                                            // Only show the [원문] badge if we are NOT in the "Hide Original" mode
+                                            if !hide_orig_pref && is_japanese(&msg.message) && signals.use_translation.get() {
+                                                view! { <span class="text-base-content/50 mr-1 font-bold">[원문]</span> }.into_any()
+                                            } else {
+                                                view! {}.into_any()
+                                            }
+                                        }
+                                        {render_emphasized(&emphasized_msg.message, &signals.emphasis_keywords.get())}
                                     </span>
-                                }
-                            });
+                                };
 
-                            view! {
-                                {original_view}
-                                {translated_view}
-                            }.into_any()
-                        }
-                    }}
+                                // Define the translated message view
+                                let translated_view = msg.translated.clone().map(|text| {
+                                    view! {
+                                        <span class=move || format!(
+                                            "text-success font-bold leading-snug break-words {}",
+                                            if hide_orig_pref { "inline group-hover/msg:hidden" } else { "inline" }
+                                        )
+                                        style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
+                                            // Only show the [번역] badge if we are NOT in the "Hide Original" mode
+                                            <Show when=move || !hide_orig_pref>
+                                                <span class="opacity-70 mr-1 font-bold">[번역]</span>
+                                            </Show>
+                                            {render_emphasized(&text, &signals.emphasis_keywords.get())}
+                                        </span>
+                                    }
+                                });
 
-                    // 3. Time / Copy Action Swapper (Inline with text)
-                    <div class="inline-flex items-center self-center flex-shrink-0 ml-1">
-                        <time class="text-[10px] text-base-content/40 whitespace-nowrap block group-hover:hidden">
-                            {display_time}
-                        </time>
+                                view! {
+                                    {original_view}
+                                    {translated_view}
+                                }.into_any()
+                            }
+                        }}
 
-                        <button class="hidden group-hover:flex btn btn-ghost btn-xs text-[10px] font-bold text-base-content/50 h-5 min-h-0 px-1.5 py-0 hover:bg-base-content/10 hover:text-base-content leading-none"
-                            on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
-                            "COPY"
-                        </button>
+                        // 3. Time / Copy Action Swapper (Inline with text)
+                        <div class="inline-flex items-center self-center flex-shrink-0 ml-1">
+                            <time class="text-[10px] text-base-content/40 whitespace-nowrap block group-hover:hidden">
+                                {display_time}
+                            </time>
+
+                            // --- NEW: HIDE COPY BUTTON ON BLOCKED MESSAGES ---
+                            <Show when=move || !sig.get().is_blocked>
+                                <button class="hidden group-hover:flex btn btn-ghost btn-xs text-[10px] font-bold text-base-content/50 h-5 min-h-0 px-1.5 py-0 hover:bg-base-content/10 hover:text-base-content leading-none"
+                                    on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
+                                    "COPY"
+                                </button>
+                            </Show>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </Show>
         </Show>
     }
 }

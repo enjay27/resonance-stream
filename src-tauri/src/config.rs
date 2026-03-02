@@ -1,10 +1,13 @@
+use serde_with::DisplayFromStr;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use serde_with::serde_as;
 use tauri::{AppHandle, Manager, State};
 use crate::{inject_system_message, AppState, SystemLogLevel};
 // Import Manager trait
 
+#[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AppConfig {
     pub init_done: bool,
@@ -29,6 +32,10 @@ pub struct AppConfig {
     pub emphasis_keywords: Vec<String>,
     pub use_relative_time: bool,
     pub font_size: u32,
+    #[serde(default)]
+    pub hide_blocked_messages: bool,
+    #[serde_as(as = "std::collections::HashMap<DisplayFromStr, _>")]
+    pub blocked_users: std::collections::HashMap<u64, String>,
 }
 
 impl Default for AppConfig {
@@ -56,6 +63,8 @@ impl Default for AppConfig {
             emphasis_keywords: vec![],
             use_relative_time: false,
             font_size: 14,
+            hide_blocked_messages: false,
+            blocked_users: std::collections::HashMap::new()
         }
     }
 }

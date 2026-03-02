@@ -21,6 +21,7 @@ indexmap = { version = "2.0", features = ["serde"] }
 gloo-timers = { version = "0.3.0", features = ["futures"] }
 tailwind-css = "0.13.0"
 chrono = "0.4.44"
+serde_with = "3.17.0"
 
 [workspace]
 members = ["src-tauri"]

@@ -1,4 +1,6 @@
+use serde_with::DisplayFromStr;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +33,7 @@ pub struct SystemMessage {
     pub message: String,
 }
 
+#[serde_as]
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct AppConfig {
     pub init_done: bool,
@@ -57,6 +60,10 @@ pub struct AppConfig {
     pub emphasis_keywords: Vec<String>,
     pub use_relative_time: bool,
     pub font_size: u32,
+    #[serde(default)]
+    pub hide_blocked_messages: bool,
+    #[serde_as(as = "std::collections::HashMap<DisplayFromStr, _>")]
+    pub blocked_users: std::collections::HashMap<u64, String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

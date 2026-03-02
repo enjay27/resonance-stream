@@ -98,6 +98,10 @@ pub struct AppSignals {
     pub set_current_time: WriteSignal<u64>,
     pub font_size: ReadSignal<u32>,
     pub set_font_size: WriteSignal<u32>,
+    pub hide_blocked_messages: ReadSignal<bool>,
+    pub set_hide_blocked_messages: WriteSignal<bool>,
+    pub blocked_users: ReadSignal<HashMap<u64, String>>,
+    pub set_blocked_users: WriteSignal<HashMap<u64, String>>,
 }
 
 #[derive(Copy, Clone)]

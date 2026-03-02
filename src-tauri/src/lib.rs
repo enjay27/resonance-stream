@@ -146,6 +146,7 @@ pub fn run() {
                 data_factory_tx: Mutex::new(initial_df_tx),
                 sniffer_tx: Mutex::new(None),
                 dedup_cache: Mutex::new(std::collections::HashMap::new()),
+                blocked_users: Mutex::new(config.blocked_users.clone()),
             });
 
             Ok(())
@@ -174,7 +175,9 @@ pub fn run() {
             get_network_interfaces,
             set_click_through,
             update_tray_menu,
-            launch_translator
+            launch_translator,
+            block_user_command,
+            unblock_user_command
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

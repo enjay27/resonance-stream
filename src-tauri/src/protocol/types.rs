@@ -15,6 +15,7 @@ pub struct AppState {
     pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
     pub sniffer_tx: Mutex<Option<Sender<()>>>,
     pub dedup_cache: Mutex<HashMap<(u64, u64, u64), u64>>,
+    pub blocked_users: Mutex<HashMap<u64, String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]

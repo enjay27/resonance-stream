@@ -1,5 +1,5 @@
 use crate::packet_buffer::PacketBuffer;
-use crate::{get_model_path, inject_system_message, parsing_pipeline, store_and_emit, NetworkInterface, SnifferStatePayload};
+use crate::{config, get_model_path, inject_system_message, parsing_pipeline, store_and_emit, NetworkInterface, SnifferStatePayload};
 use lazy_static::lazy_static;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -349,7 +349,6 @@ fn process_game_stream(
 // --- STAGE 3: EMIT ---
 // Filters out duplicates and dispatches the final events to Tauri.
 pub fn emit_parsed_message(data: &[u8], app: &AppHandle) {
-    // If it's a server packet, this safely returns without spamming logs
     let events = parsing_pipeline(data, app);
 
     for event in events {
@@ -357,79 +356,62 @@ pub fn emit_parsed_message(data: &[u8], app: &AppHandle) {
             Port5003Event::Chat(mut c) => {
                 let state = app.state::<AppState>();
 
+                {
+                    let blocked = state.blocked_users.lock().unwrap();
+                    if blocked.contains_key(&c.uid) {
+                        c.is_blocked = true;
+                    }
+                }
+
                 // 1. Create a bulletproof unique signature
                 let signature = (c.uid, c.timestamp, c.sequence_id);
-
                 let mut cache = state.dedup_cache.lock().unwrap();
 
-                // 2. Check for Duplicates
+                // 2. Check for Duplicates (Multi-client support)
                 if let Some(&existing_pid) = cache.get(&signature) {
-                    // DUPLICATE FOUND: Did THIS client have the user blocked?
                     if c.is_blocked {
                         let mut history = state.chat_history.lock().unwrap();
                         if let Some(existing_msg) = history.get_mut(&existing_pid) {
                             if !existing_msg.is_blocked {
-                                // Overwrite the existing message to be blocked!
                                 existing_msg.is_blocked = true;
-
-                                // Re-emit to the frontend so Leptos can hide it
                                 let _ = app.emit("chat-message-update", existing_msg.clone());
                             }
                         }
                     }
-                    // Ignore the duplicate and continue to the next packet
                     continue;
                 }
 
-                // 3. NEW MESSAGE LOGIC
+                // 3. NEW MESSAGE LOGIC (Bug fix: Only fetch PID once!)
                 let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
                 c.pid = current_pid;
-
-                // Save to cache so other clients ignore it
                 cache.insert(signature, current_pid);
 
-                // --- 1. NICKNAME CACHE & ROMAJI SWAP ---
+                // --- 4. NICKNAME CACHE & ROMAJI SWAP ---
                 if contains_japanese(&c.nickname) {
-                    // Access the AppState from Tauri
-                    let state = app.state::<AppState>();
-                    let mut cache = state.nickname_cache.lock().unwrap();
-                    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] check nickname cache included {:?}", c.nickname));
-
-                    // Check cache. If miss, ask the processor to convert it!
-                    let romaji = cache.entry(c.nickname.clone()).or_insert_with(|| {
-                        inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] nickname not included in cache. convert from Japanese {:?}", c.nickname));
+                    let mut nick_cache = state.nickname_cache.lock().unwrap();
+                    let romaji = nick_cache.entry(c.nickname.clone()).or_insert_with(|| {
                         convert_to_romaji(&c.nickname)
                     }).clone();
-
-                    inject_system_message(&app, SystemLogLevel::Trace, "Sniffer", format!("[5003 Event] nickname romaji {:?}", romaji));
-
-                    // Attach it to the struct so the UI and Preprocessor can see it
                     c.nickname_romaji = Some(romaji);
                 }
 
-                // --- 2. EMIT TO UI ---
-                let current_pid = app.state::<AppState>().next_pid.fetch_add(1, Ordering::SeqCst);
-                c.pid = current_pid;
+                // --- 5. EMIT TO UI ---
                 store_and_emit(app, c.clone());
 
-                // --- 3. TRANSLATE & ARCHIVE ROUTING ---
+                // --- 6. TRANSLATE & ARCHIVE ROUTING ---
                 let config = crate::config::load_config(app.clone());
                 let requires_translation = config.use_translation && contains_japanese(&c.message);
 
                 if requires_translation {
-                    // Route to Translator: The translator will archive it AFTER finishing the translation.
-                    let state = app.state::<AppState>();
                     if let Some(tx) = state.translator_tx.lock().unwrap().as_ref() {
                         let _ = tx.send(crate::services::translator::TranslationJob { chat: c.clone() });
                     };
                 } else if config.archive_chat {
-                    // Route directly to Archive: Translation is OFF (or text isn't Japanese), but archiving is ON.
-                    let state = app.state::<AppState>();
                     if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
                         let _ = df_tx.send(crate::io::DataFactoryJob {
                             pid: current_pid,
                             original: c.message.clone(),
-                            translated: None, // Explicitly no translation
+                            translated: None,
                         });
                     };
                 }
@@ -507,4 +489,47 @@ pub fn emit_sniffer_state(app: &tauri::AppHandle, state: &str, message: &str) {
         state: state.to_string(),
         message: message.to_string(),
     });
+}
+
+#[tauri::command]
+pub fn block_user_command(uid: u64, nickname: String, app: tauri::AppHandle, state: tauri::State<'_, AppState>) {
+    // 1. Add to In-Memory AppState
+    state.blocked_users.lock().unwrap().insert(uid, nickname.clone());
+
+    // 2. Add to Disk Config
+    let mut config = crate::config::load_config(app.clone());
+    config.blocked_users.insert(uid, nickname);
+
+    // Pass app and state exactly as your config.rs requires
+    crate::config::save_config(app.clone(), state.clone(), config);
+
+    // 3. Retroactively scrub existing messages in the UI
+    let mut history = state.chat_history.lock().unwrap();
+    for (_, msg) in history.iter_mut() {
+        if msg.uid == uid && !msg.is_blocked {
+            msg.is_blocked = true;
+            let _ = app.emit("chat-message-update", msg.clone());
+        }
+    }
+}
+
+#[tauri::command]
+pub fn unblock_user_command(uid: u64, app: tauri::AppHandle, state: tauri::State<'_, AppState>) {
+    // 1. Remove from In-Memory AppState
+    state.blocked_users.lock().unwrap().remove(&uid);
+
+    // 2. Remove from Disk Config
+    let mut config = crate::config::load_config(app.clone());
+    config.blocked_users.remove(&uid);
+
+    crate::config::save_config(app.clone(), state.clone(), config);
+
+    // 3. Retroactively un-scrub existing messages in the UI
+    let mut history = state.chat_history.lock().unwrap();
+    for (_, msg) in history.iter_mut() {
+        if msg.uid == uid && msg.is_blocked {
+            msg.is_blocked = false;
+            let _ = app.emit("chat-message-update", msg.clone());
+        }
+    }
 }

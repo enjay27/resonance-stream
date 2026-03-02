@@ -15,7 +15,6 @@ lazy_static! {
     static ref NUM_PATTERN_2: Regex = Regex::new(r"(\d+)人").unwrap();
     static ref NUM_PATTERN_3: Regex = Regex::new(r"(\d+)周").unwrap();
     static ref NUM_PATTERN_4: Regex = Regex::new(r"(\d+)回").unwrap();
-    static ref JOSA_PATTERN: Regex = Regex::new(r"([가-힣a-zA-Z0-9\)])(을|를|이|가|은|는|와|과)([^가-힣]|$)").unwrap();
     static ref THINK_PATTERN: Regex = Regex::new(r"(?s)<think>.*?</think>\s*").unwrap();
 }
 
@@ -107,9 +106,6 @@ pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
     let space_punct = Regex::new(r"\s+([.!?,~])").unwrap();
     final_text = space_punct.replace_all(&final_text, "$1").to_string();
 
-    // Fix Korean Josa (Particles)
-    final_text = fix_korean_josa(&final_text);
-
     // Collapse extra spaces
     let extra_spaces = Regex::new(r"\s+").unwrap();
     extra_spaces.replace_all(&final_text, " ").trim().to_string()
@@ -126,29 +122,6 @@ fn has_batchim(c: char) -> bool {
     // Fallback for English/Numbers (rough approximation based on your python code)
     if "013678lmnLMN".contains(c) { return true; }
     false
-}
-
-fn fix_korean_josa(text: &str) -> String {
-    JOSA_PATTERN.replace_all(text, |caps: &Captures| {
-        let word = &caps[1];
-        let particle = &caps[2];
-        let trailing = &caps[3]; // Crucial: Capture the space or punctuation!
-
-        // Get the last character of the word
-        let last_char = word.chars().last().unwrap_or(' ');
-        let final_cons = has_batchim(last_char);
-
-        let fixed_particle = match particle {
-            "을" | "를" => if final_cons { "을" } else { "를" },
-            "이" | "가" => if final_cons { "이" } else { "가" },
-            "은" | "는" => if final_cons { "은" } else { "는" },
-            "와" | "과" => if final_cons { "과" } else { "와" },
-            _ => particle,
-        };
-
-        // Recombine: Word + Corrected Particle + Trailing character
-        format!("{}{}{}", word, fixed_particle, trailing)
-    }).to_string()
 }
 
 pub fn load_dictionary(path: &Path) -> HashMap<String, String> {

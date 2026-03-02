@@ -27,7 +27,8 @@ pub fn App() -> impl IntoView {
     let (compute_mode, set_compute_mode) = signal("cpu".to_string());
     let (wizard_step, set_wizard_step) = signal(0); // 0: Welcome, 1: Options, 2: Download
 
-    let (is_translator_active, set_is_translator_active) = signal(false);
+    let (translator_state, set_translator_state) = signal("Off".to_string());
+    let (translator_error, set_translator_error) = signal("".to_string());
     let (is_sniffer_active, set_is_sniffer_active) = signal(false);
     let (status_text, set_status_text) = signal("".to_string());
     let (model_ready, set_model_ready) = signal(false);
@@ -82,7 +83,8 @@ pub fn App() -> impl IntoView {
         use_translation, set_use_translation,
         compute_mode, set_compute_mode,
         wizard_step, set_wizard_step,
-        is_translator_active, set_is_translator_active,
+        translator_state, set_translator_state,
+        translator_error, set_translator_error,
         is_sniffer_active, set_is_sniffer_active,
         status_text, set_status_text,
         model_ready, set_model_ready,
@@ -130,36 +132,6 @@ pub fn App() -> impl IntoView {
     };
 
     provide_context(signals);
-
-    // --- WATCHDOG: SIDE CAR MONITOR ---
-    spawn_local(async move {
-        loop {
-            if let Ok(res) = invoke("is_translator_running", JsValue::NULL).await {
-                if let Some(running) = res.as_bool() {
-                    set_is_translator_active.set(running);
-
-                    if !running && use_translation.get_untracked() && init_done.get_untracked() {
-                        add_system_log("Warning", "[WatchDog]", "Translator not running. Run Translator Sidecar.");
-                        let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
-                    }
-                }
-            }
-
-            if let Ok(res) = invoke("is_sniffer_active", JsValue::NULL).await {
-                if let Some(active) = res.as_bool() {
-                    set_is_sniffer_active.set(active);
-
-                    if !active && init_done.get_untracked() {
-                        add_system_log("Warning", "[WatchDog]", "Sniffer not running. Run Sniffer.");
-                        let _ = invoke("start_sniffer_command", JsValue::NULL).await;
-                    }
-                }
-            }
-
-            // Poll every 5 seconds
-            gloo_timers::future::TimeoutFuture::new(5000).await;
-        }
-    });
 
     // --- CONFIG ACTIONS ---
     let save_config = Action::new_local(move |_: &()| {

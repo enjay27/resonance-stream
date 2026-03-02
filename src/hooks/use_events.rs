@@ -15,6 +15,7 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     // 1. Create the closures using our new helper functions
     let packet_closure = create_packet_handler(signals);
     let system_closure = create_system_handler(signals);
+    let translator_state_closure = create_translator_state_handler(signals);
     let sniffer_state_closure = create_sniffer_state_handler(signals);
     let translation_closure = create_translation_handler(signals);
     let update_message_closure = create_update_message_handler(signals);
@@ -22,6 +23,7 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     // 2. Register all listeners
     listen("packet-event", &packet_closure).await;
     listen("system-event", &system_closure).await;
+    listen("translator-state", &translator_state_closure).await;
     listen("sniffer-state", &sniffer_state_closure).await;
     listen("translation-event", &translation_closure).await;
     listen("chat-message-update", &update_message_closure).await;
@@ -29,6 +31,7 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     // 3. Prevent memory leaks / keep closures alive
     packet_closure.forget();
     system_closure.forget();
+    translator_state_closure.forget();
     sniffer_state_closure.forget();
     translation_closure.forget();
     update_message_closure.forget();
@@ -148,6 +151,20 @@ fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
                     }
                     log.push(RwSignal::new(packet));
                 });
+            }
+        }
+    }) as Box<dyn FnMut(JsValue)>)
+}
+
+fn create_translator_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
+        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+            // NOTE: Make sure to import TranslatorStatePayload at the top of use_events.rs!
+            if let Ok(payload) = serde_json::from_value::<crate::ui_types::TranslatorStatePayload>(ev["payload"].clone()) {
+                signals.set_translator_state.set(payload.state.clone());
+                if payload.state == "Error" {
+                    signals.set_translator_error.set(payload.message);
+                }
             }
         }
     }) as Box<dyn FnMut(JsValue)>)

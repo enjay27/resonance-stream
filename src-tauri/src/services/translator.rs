@@ -99,9 +99,10 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
     let config = crate::config::load_config(app.clone());
 
     thread::spawn(move || {
-        kill_orphaned_servers(&app);
-
         inject_system_message(&app, SystemLogLevel::Info, "Translator", "Initializing HTTP AI Backend...");
+        emit_translator_state(&app, "Starting", "Initializing AI Backend..."); // STATE 1
+
+        kill_orphaned_servers(&app);
 
         let server_path = app.path()
             .app_data_dir()
@@ -177,20 +178,28 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 child
             },
             Err(e) => {
-                inject_system_message(&app, SystemLogLevel::Error, "Translator", format!("Failed to start llama-server.exe. Is it in the root folder? ({})", e));
+                let err_msg = format!("Failed to start llama-server.exe. Is it in the root folder? ({})", e);
+                inject_system_message(&app, SystemLogLevel::Error, "Translator", &err_msg);
+                emit_translator_state(&app, "Error", &err_msg); // ERROR STATE
                 return;
             }
         };
 
         let _server_guard = ServerGuard(server_process);
 
-        if server_health_check(&app) { return; }
+        emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM..."); // STATE 2
+
+        if server_health_check(&app) {
+            emit_translator_state(&app, "Error", "AI Engine failed to start (OOM or missing model)."); // ERROR STATE
+            return;
+        }
 
         let client = Client::new();
         let dict_path = app.path().app_data_dir().unwrap().join("custom_dict.json");
         let custom_dict = load_dictionary(&dict_path);
 
         inject_system_message(&app, SystemLogLevel::Success, "Translator", "AI Server running! Ready for translation.");
+        emit_translator_state(&app, "Active", "AI Engine Ready"); // STATE 3 (SUCCESS)
 
         // Convert the 'parallel' string into a number for our batch limit
         let max_concurrent_jobs: usize = parallel.parse().unwrap_or(1);
@@ -396,4 +405,11 @@ mod tests {
         // 5. Cleanup
         let _ = server_process.kill();
     }
+}
+
+pub fn emit_translator_state(app: &tauri::AppHandle, state: &str, message: &str) {
+    let _ = app.emit("translator-state", crate::protocol::types::TranslatorStatePayload {
+        state: state.to_string(),
+        message: message.to_string(),
+    });
 }

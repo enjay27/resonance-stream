@@ -95,6 +95,12 @@ pub struct SnifferStatePayload {
     pub message: String, // Context or Error message
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct TranslatorStatePayload {
+    pub state: String,   // "Starting", "Loading Model", "Active", "Error", "Off"
+    pub message: String,
+}
+
 pub struct TrayMenuState {
     pub click_through: tauri::menu::MenuItem<tauri::Wry>,
     pub always_on_top: tauri::menu::MenuItem<tauri::Wry>,

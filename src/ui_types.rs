@@ -99,6 +99,12 @@ pub struct NetworkInterface {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct TranslatorStatePayload {
+    pub state: String,   // "Starting", "Loading Model", "Active", "Error", "Off"
+    pub message: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct SnifferStatePayload {
     pub state: String,   // "Starting", "Firewall", "Binding", "Active", "Error", "Off"
     pub message: String, // Context or Error message

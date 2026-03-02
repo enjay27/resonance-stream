@@ -136,6 +136,7 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
         // Turned OFF: Drop the Sender (Kills the thread and frees VRAM)
         *state.translator_tx.lock().unwrap() = None;
         inject_system_message(&app, SystemLogLevel::Info, "Translator", "AI Translation Disabled. Server stopped and VRAM cleared.");
+        crate::services::translator::emit_translator_state(&app, "Off", "AI Translation Disabled.");
     }
 
     // --- MANAGE THE DATA FACTORY THREAD ---

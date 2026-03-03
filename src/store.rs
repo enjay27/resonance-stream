@@ -104,6 +104,8 @@ pub struct AppSignals {
     pub set_hide_blocked_messages: WriteSignal<bool>,
     pub blocked_users: ReadSignal<HashMap<u64, String>>,
     pub set_blocked_users: WriteSignal<HashMap<u64, String>>,
+    pub min_sender_level: ReadSignal<u64>,
+    pub set_min_sender_level: WriteSignal<u64>,
 }
 
 #[derive(Copy, Clone)]

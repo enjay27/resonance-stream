@@ -36,6 +36,8 @@ pub struct AppConfig {
     pub hide_blocked_messages: bool,
     #[serde_as(as = "std::collections::HashMap<DisplayFromStr, _>")]
     pub blocked_users: std::collections::HashMap<u64, String>,
+    #[serde(default)]
+    pub min_sender_level: u64,
 }
 
 impl Default for AppConfig {
@@ -64,7 +66,8 @@ impl Default for AppConfig {
             use_relative_time: false,
             font_size: 14,
             hide_blocked_messages: false,
-            blocked_users: std::collections::HashMap::new()
+            blocked_users: std::collections::HashMap::new(),
+            min_sender_level: 1,
         }
     }
 }

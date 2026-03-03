@@ -77,6 +77,7 @@ pub fn App() -> impl IntoView {
     let (font_size, set_font_size) = signal(14u32);
     let (hide_blocked_messages, set_hide_blocked_messages) = signal(false);
     let (blocked_users, set_blocked_users) = signal::<std::collections::HashMap<u64, String>>(HashMap::new());
+    let (min_sender_level, set_min_sender_level) = signal(1);
 
     let signals = AppSignals {
         init_done, set_init_done,
@@ -129,6 +130,7 @@ pub fn App() -> impl IntoView {
         font_size, set_font_size,
         hide_blocked_messages, set_hide_blocked_messages,
         blocked_users, set_blocked_users,
+        min_sender_level, set_min_sender_level
     };
 
     provide_context(signals);
@@ -160,6 +162,7 @@ pub fn App() -> impl IntoView {
             font_size: font_size.get_untracked(),
             hide_blocked_messages: hide_blocked_messages.get_untracked(),
             blocked_users: blocked_users.get_untracked(),
+            min_sender_level: min_sender_level.get_untracked(),
         };
 
         async move {
@@ -345,6 +348,7 @@ pub fn App() -> impl IntoView {
                         set_font_size.set(loaded_size);
                         set_hide_blocked_messages.set(config.hide_blocked_messages);
                         set_blocked_users.set(config.blocked_users);
+                        set_min_sender_level.set(config.min_sender_level);
 
                         let mut safe_op = config.overlay_opacity;
                         if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85

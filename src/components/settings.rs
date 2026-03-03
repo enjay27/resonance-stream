@@ -29,6 +29,8 @@ pub fn Settings() -> impl IntoView {
                     }
                 }
             });
+        } else {
+            signals.set_restart_required.set(false);
         }
     });
 
@@ -87,56 +89,60 @@ pub fn Settings() -> impl IntoView {
                                         prop:checked=move || signals.use_translation.get()
                                         on:click=move |ev| {
                                             // Prevent the browser from automatically flipping the switch
-                                            ev.prevent_default();
+                                            let is_turning_on = event_target_checked(&ev);
 
-                                            let current = signals.use_translation.get_untracked();
+                                            if is_turning_on {
+                                                // 1. Optimistically set the UI to ON so the toggle moves immediately
+                                                signals.set_use_translation.set(true);
 
-                                            if !current {
-                                                // User is trying to turn it ON
                                                 spawn_local(async move {
+                                                    let mut has_error = false;
+
+                                                    // 2. Check Model Status
                                                     if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
                                                         if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
-                                                            if status.exists {
-                                                                // Model exists -> Turn it on normally
-                                                                signals.set_use_translation.set(true);
-                                                                actions.save_config.dispatch(());
-                                                            } else {
-                                                                // Model missing -> Prompt user
+                                                            if !status.exists {
+                                                                has_error = true;
                                                                 if let Some(w) = web_sys::window() {
                                                                     if w.confirm_with_message("AI 모델 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
-                                                                        // Redirect to Setup Wizard
-                                                                        signals.set_use_translation.set(true);
                                                                         signals.set_wizard_step.set(2);
-                                                                        signals.set_show_settings.set(false); // Close modal
-                                                                        signals.set_init_done.set(false);     // Trigger Wizard UI
+                                                                        signals.set_show_settings.set(false);
+                                                                        signals.set_init_done.set(false);
                                                                     }
                                                                 }
                                                             }
                                                         }
                                                     }
-                                                    if let Ok(st) = invoke("check_ai_server_status", JsValue::NULL).await {
-                                                        if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
-                                                            if status.exists {
-                                                                // Model exists -> Turn it on normally
-                                                                signals.set_use_translation.set(true);
-                                                                actions.save_config.dispatch(());
-                                                            } else {
-                                                                // Model missing -> Prompt user
-                                                                if let Some(w) = web_sys::window() {
-                                                                    if w.confirm_with_message("AI 실행 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
-                                                                        // Redirect to Setup Wizard
-                                                                        signals.set_use_translation.set(true);
-                                                                        signals.set_wizard_step.set(2);
-                                                                        signals.set_show_settings.set(false); // Close modal
-                                                                        signals.set_init_done.set(false);     // Trigger Wizard UI
+
+                                                    // 3. Check Server Status (Only if model check passed, preventing double popups!)
+                                                    if !has_error {
+                                                        if let Ok(st) = invoke("check_ai_server_status", JsValue::NULL).await {
+                                                            if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
+                                                                if !status.exists {
+                                                                    has_error = true;
+                                                                    if let Some(w) = web_sys::window() {
+                                                                        if w.confirm_with_message("AI 실행 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
+                                                                            signals.set_wizard_step.set(2);
+                                                                            signals.set_show_settings.set(false);
+                                                                            signals.set_init_done.set(false);
+                                                                        }
                                                                     }
                                                                 }
                                                             }
                                                         }
+                                                    }
+
+                                                    // 4. Finalize
+                                                    if has_error {
+                                                        // Revert the toggle visually back to OFF if files are missing
+                                                        signals.set_use_translation.set(false);
+                                                    } else {
+                                                        // Everything exists, safely save the config
+                                                        actions.save_config.dispatch(());
                                                     }
                                                 });
                                             } else {
-                                                // User is trying to turn it OFF
+                                                // User is turning it OFF (Toggle visually moves immediately)
                                                 signals.set_use_translation.set(false);
                                                 actions.save_config.dispatch(());
                                             }
@@ -203,7 +209,7 @@ pub fn Settings() -> impl IntoView {
 
                                     <Show when=move || signals.restart_required.get()>
                                         <div class="text-[10px] text-warning font-bold animate-pulse mt-2 p-2 bg-warning/10 rounded">
-                                            "⚠️ 변경 사항을 적용하려면 앱을 재시작해야 합니다."
+                                            "⚠️ 변경 사항 적용을 위해 AI 번역기가 재시작 됩니다. 번역을 위해 잠시 시간이 소요됩니다."
                                         </div>
                                     </Show>
                                 </div>

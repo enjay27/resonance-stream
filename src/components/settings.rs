@@ -287,6 +287,32 @@ pub fn Settings() -> impl IntoView {
                                     />
                                 </label>
                             </div>
+
+                            // Minimum Sender Level Filter (Spam Prevention)
+                            <div class="space-y-2 mt-4 pt-4 border-t border-base-content/10">
+                                <div class="flex justify-between text-[11px] font-bold">
+                                    <div class="flex flex-col">
+                                        <span class="text-base-content/80">"생체 엔그렘 레벨"</span>
+                                    </div>
+                                    <span class="text-success">{move || format!("Lv. {}", signals.min_sender_level.get())}</span>
+                                </div>
+                                <input type="range" min="1" max="60" step="1"
+                                    class="range range-xs range-success"
+                                    prop:value=move || signals.min_sender_level.get().to_string()
+                                    on:input=move |ev| {
+                                        // Update UI live while dragging
+                                        let val = event_target_value(&ev).parse::<u64>().unwrap_or(1);
+                                        signals.set_min_sender_level.set(val);
+                                    }
+                                    on:change=move |ev| {
+                                        // Save to config when released
+                                        let val = event_target_value(&ev).parse::<u64>().unwrap_or(1);
+                                        signals.set_min_sender_level.set(val);
+                                        actions.save_config.dispatch(());
+                                    }
+                                />
+                                <div class="text-[9px] text-base-content/50">"설정한 레벨 미만의 유저가 보낸 채팅은 화면에 표시되지 않습니다. (스팸 봇 차단용)"</div>
+                            </div>
                         </section>
 
                         // ==========================================

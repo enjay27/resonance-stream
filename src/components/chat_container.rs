@@ -32,6 +32,7 @@ pub fn ChatContainer() -> impl IntoView {
         let search = signals.search_term.get().to_lowercase();
         let filters = signals.custom_filters.get();
         let chat_log = signals.chat_log.get();
+        let min_level = signals.min_sender_level.get();
 
         if tab == "시스템" { return Vec::new(); }
 
@@ -50,11 +51,25 @@ pub fn ChatContainer() -> impl IntoView {
             }
         };
 
-        let full_list: Vec<_> = if search.is_empty() { base_list }
+        let full_list: Vec<_> = if search.is_empty() {
+            // Apply level filter AND block system messages from general level-filtering logic if desired
+            base_list.into_iter().filter(|sig| {
+                let m = sig.get();
+                // We only apply the level filter if the message is specifically from the World Channel
+                if m.channel == "WORLD" {
+                    m.level >= min_level
+                } else {
+                    true // Pass all other channels regardless of level
+                }
+            }).collect()
+        }
         else {
             base_list.into_iter().filter(|sig| {
                 let m = sig.get();
-                m.nickname.to_lowercase().contains(&search) || m.message.to_lowercase().contains(&search)
+                // Apply level filter to World Channel AND search term filter
+                let passes_level_check = if m.channel == "WORLD" { m.level >= min_level } else { true };
+
+                passes_level_check && (m.nickname.to_lowercase().contains(&search) || m.message.to_lowercase().contains(&search))
             }).collect()
         };
 

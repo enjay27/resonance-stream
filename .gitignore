@@ -14,10 +14,14 @@ WinDivert64.sys
 # Python
 .venv
 
+# npm
+node_modules
+
 # build
 .venv.build
 build/
 dist/
+style/output.css
 *.exe
 
 # downloaded libraries

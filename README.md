@@ -31,6 +31,8 @@
 1. **관리자 권한**: 패킷 감지를 위해 프로그램 실행 시 관리자 권한이 반드시 필요합니다.
 2. **MSVC++ Redistributable (x64)**: 파이썬 엔진 구동을 위해 필수적입니다. [다운로드](https://www.google.com/search?q=https://aka.ms/vs/17/release/vc_redist.x64.exe).
 3. **NVIDIA GPU**: CUDA 가속을 통한 최상의 번역 경험을 위해 최신 드라이버 설치를 권장합니다.
+4. winget install LLVM.LLVM
+    - $env:LIBCLANG_PATH="C:\Program Files\LLVM\bin" 환경변수 등록
 
 ### 설치 방법
 

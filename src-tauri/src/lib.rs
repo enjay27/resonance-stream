@@ -1,70 +1,159 @@
-use crate::model_manager::*;
-use crate::python_translator::*;
-use crate::sniffer::*;
+use std::io::Write;
 use crate::config::*;
-use std::collections::VecDeque;
-use std::sync::atomic::Ordering;
-use std::sync::Mutex;
 use indexmap::IndexMap;
-use tauri::{Emitter, Manager};
-use windows::core::{HSTRING, PCWSTR};
-use windows::Win32::System::LibraryLoader::SetDllDirectoryW;
+use std::collections::VecDeque;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use env_logger::fmt::style::{AnsiColor, Color, Style};
+use lazy_static::lazy_static;
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri_plugin_shell::ShellExt;
 
-mod model_manager;
-mod python_translator;
-mod sniffer_logic_test;
-mod sniffer;
-mod packet_buffer;
-mod config;
+lazy_static! {
+    // Stores: (Message Fingerprint, Arrival Time)
+    static ref CHAT_DEDUPE_CACHE: Mutex<VecDeque<(u64, Instant)>> = Mutex::new(VecDeque::new());
+}
 
+pub mod config;
+pub mod io;
+pub mod packet_buffer;
+
+pub mod protocol;
+pub mod services;
+
+pub use protocol::parser::*;
+pub use protocol::types::*;
+pub use services::downloader::*;
+pub use services::sniffer::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    env_logger::builder()
+        .format(|buf, record| {
+            let target = record.target();
+            let short_target = target
+                .strip_prefix("resonance_stream_lib::")
+                .unwrap_or(target);
+
+            // 1. Get the default ANSI style for the log level (Info=Green, Warn=Yellow, etc.)
+            let level_style = buf.default_level_style(record.level());
+
+            // 2. Create a custom style for the target name using the new API
+            let target_style = Style::new()
+                .fg_color(Some(AnsiColor::Cyan.into())) // Set text to Cyan
+                .dimmed();                              // Make it slightly darker
+
+            // 3. Apply the styles using the 0.11 `{style}text{style:#}` pattern
+            writeln!(
+                buf,
+                "[{timestamp} {level_style}{level}{level_style:#} {target_style}{target}{target_style:#}] {message}",
+                timestamp = buf.timestamp(),
+                level_style = level_style,   // Turns level color ON
+                level = record.level(),
+                // {level_style:#} magically turns the color OFF
+                target_style = target_style, // Turns target color ON
+                target = short_target,
+                // {target_style:#} turns target color OFF
+                message = record.args()
+            )
+        })
+        .filter_level(log::LevelFilter::Warn) // Keep other crates quiet
+        .filter_module("resonance_stream_lib", log::LevelFilter::Trace) // Show your debugs
+        .init();
+
+    let app = tauri::Builder::default()
         .setup(|app| {
-            // 1. Resolve the absolute path to your bundled 'bin' folder
-            let resource_path = app.path().resource_dir()?
-                .join("bin");
-
-            // 2. Add this path to the DLL search order
-            if resource_path.exists() {
-                let path_str = resource_path.to_str().ok_or("Invalid path")?;
-                let path_hstring = HSTRING::from(path_str);
-
-                unsafe {
-                    // SetDllDirectoryW expects a PCWSTR
-                    let _ = SetDllDirectoryW(PCWSTR(path_hstring.as_ptr()));
-                }
-            }
-
-            let handle = app.handle();
-            inject_system_message(handle, SystemLogLevel::Info, "Backend", "Initializing Resonance Stream...");
+            let handle = app.handle().clone();
+            inject_system_message(&handle, SystemLogLevel::Info, "Backend", "Initializing Resonance Stream...");
 
             let is_admin = is_elevated::is_elevated();
-            inject_system_message(handle, SystemLogLevel::Info, "Backend", format!("Admin Privileges: {}", is_admin));
+            inject_system_message(&handle, SystemLogLevel::Info, "Backend", format!("Admin Privileges: {}", is_admin));
 
             if !is_admin {
-                inject_system_message(handle, SystemLogLevel::Warning, "Backend", "Sniffer may fail without Admin rights.");
+                inject_system_message(&handle, SystemLogLevel::Warning, "Backend", "Sniffer may fail without Admin rights.");
             }
 
+            // --- CHECK CONFIG AND START AI IF NEEDED ---
+            let config = load_config(handle.clone());
+            let initial_tx = if config.use_translation {
+                let model_path = crate::get_model_path(&handle);
+                Some(crate::services::translator::start_translator_worker(handle.clone(), model_path))
+            } else {
+                None
+            };
+
+            // --- CHECK CONFIG AND START DATA LOGGING IF NEEDED ---
+            let initial_df_tx = if config.archive_chat {
+                Some(crate::io::start_data_factory_worker(handle.clone()))
+            } else {
+                None
+            };
+
+            let toggle_i = MenuItem::with_id(app, "toggle_click_through", "클릭 관통 (Click-Through): OFF", true, None::<&str>)?;
+            let top_i = MenuItem::with_id(app, "toggle_always_on_top", "항상 위에 표시 (Always on Top): OFF", true, None::<&str>)?;
+            let show_i = MenuItem::with_id(app, "show", "앱 열기 (Open App)", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "종료 (Quit)", true, None::<&str>)?;
+
+            let menu = Menu::with_items(app, &[&top_i, &toggle_i, &show_i, &quit_i])?;
+
+            // Store the items in Tauri's managed state so the command can mutate them later
+            app.manage(TrayMenuState {
+                click_through: toggle_i.clone(),
+                always_on_top: top_i.clone(),
+            });
+
+            let _tray = TrayIconBuilder::new()
+                .tooltip("Resonance Stream")
+                .icon(app.default_window_icon().unwrap().clone()) // Uses icon from tauri.conf.json
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "toggle_always_on_top" => {
+                            let _ = app.emit("tray-toggle-always-on-top", ());
+                        }
+                        "toggle_click_through" => {
+                            // Tell the frontend to flip the toggle and update the window
+                            let _ = app.emit("tray-toggle-click-through", ());
+                        }
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .build(app)?;
+
+            // Initialize State INSIDE setup so we have access to the App context
+            app.manage(AppState {
+                batch_data: Arc::new((Mutex::new((vec![], 0)), Default::default())),
+                chat_history: Mutex::new(IndexMap::new()),
+                system_history: Mutex::new(VecDeque::with_capacity(200)),
+                next_pid: 1.into(),
+                nickname_cache: Mutex::new(std::collections::HashMap::new()),
+                translator_tx: Mutex::new(initial_tx),
+                data_factory_tx: Mutex::new(initial_df_tx),
+                sniffer_tx: Mutex::new(None),
+            });
+
             Ok(())
-        })
-        .manage(AppState {
-            tx: Mutex::new(None),
-            chat_history: Mutex::new(IndexMap::new()),
-            system_history: Mutex::new(VecDeque::with_capacity(200)),
-            next_pid: 1.into(),
-            nickname_cache: Mutex::new(std::collections::HashMap::new()),
         })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             check_model_status,
             download_model,
-            is_translator_running,
-            start_translator_sidecar,
-            translate_message,
-            translate_nickname,
+            check_ai_server_status,
+            download_ai_server,
             start_sniffer_command,
             get_chat_history,
             get_system_history,
@@ -76,10 +165,35 @@ pub fn run() {
             save_config,
             minimize_window,
             close_window,
-            open_model_folder,
+            open_app_data_folder,
+            export_chat_log,
+            open_browser,
+            get_network_interfaces,
+            set_click_through,
+            update_tray_menu
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    app.run(|_app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+            log::info!("Application closing. Cleaning up Firewall Rules & AI Server...");
+
+            // 1. Remove the firewall rule
+            services::sniffer::remove_firewall_rule();
+
+            // 2. Explicitly kill the llama-server to prevent zombie processes
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                // If you use a custom constant, you can replace "llama-server.exe" with crate::AI_SERVER_FILENAME
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/IM", "llama-server.exe"])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW (Prevents CMD popup)
+                    .status();
+            }
+        }
+    });
 }
 
 pub fn inject_system_message<S: Into<String>>(
@@ -100,6 +214,7 @@ pub fn inject_system_message<S: Into<String>>(
             SystemLogLevel::Error => "error",
             SystemLogLevel::Success => "success",
             SystemLogLevel::Debug => "debug",
+            SystemLogLevel::Trace => "trace",
         };
 
         println!("[{}] [{}] [{:?}] {}", current_pid, source, level, msg);
@@ -125,7 +240,32 @@ pub fn inject_system_message<S: Into<String>>(
     }
 }
 
-pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatPacket) {
+pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
+    let fingerprint = generate_message_fingerprint(&packet);
+    let now = Instant::now();
+
+    {
+        let mut cache = CHAT_DEDUPE_CACHE.lock().unwrap();
+
+        // 1. Prune old messages from the sliding window (e.g., older than 2 seconds)
+        while let Some(&(_, time)) = cache.front() {
+            if now.duration_since(time) > Duration::from_secs(2) {
+                cache.pop_front();
+            } else {
+                break; // VecDeque is ordered by time, so we can stop here
+            }
+        }
+
+        // 2. Check if this exact message was already processed
+        if cache.iter().any(|(hash, _)| *hash == fingerprint) {
+            // Silently drop the duplicate packet from the second client
+            return;
+        }
+
+        // 3. Not a duplicate, add it to the cache
+        cache.push_back((fingerprint, now));
+    }
+
     if let Some(state) = app.try_state::<AppState>() {
         let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
         packet.pid = current_pid;
@@ -154,6 +294,19 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatPacket) {
     }
 }
 
+// Helper to generate a unique fingerprint for the chat message
+fn generate_message_fingerprint(packet: &ChatMessage) -> u64 {
+    let mut hasher = DefaultHasher::new();
+
+    // If your server provides a truly unique sequence_id for every message,
+    // you only need to hash that. Otherwise, hash the combination of sender, text, and time:
+    packet.uid.hash(&mut hasher);
+    packet.message.hash(&mut hasher);
+    packet.timestamp.hash(&mut hasher);
+
+    hasher.finish()
+}
+
 #[tauri::command]
 fn clear_chat_history(state: tauri::State<AppState>) {
     // 1. Clear Game Chat
@@ -179,4 +332,40 @@ fn minimize_window(window: tauri::Window) {
 #[tauri::command]
 fn close_window(window: tauri::Window) {
     let _ = window.close();
+}
+
+#[tauri::command]
+fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatMessage> {
+    // Returns ONLY Game Chat
+    let history = state.chat_history.lock().unwrap();
+    history.values().cloned().collect()
+}
+
+#[tauri::command]
+fn get_system_history(state: tauri::State<AppState>) -> Vec<SystemMessage> {
+    // Change: Returns specialized SystemMessages
+    let history = state.system_history.lock().unwrap();
+    history.iter().cloned().collect()
+}
+
+#[tauri::command]
+fn set_click_through(window: tauri::Window, enabled: bool) {
+    let _ = window.set_ignore_cursor_events(enabled);
+}
+
+#[tauri::command]
+fn update_tray_menu(state: tauri::State<TrayMenuState>, click_through: bool, always_on_top: bool) {
+    let ct_text = if click_through {
+        "클릭 관통 (Click-Through): ON"
+    } else {
+        "클릭 관통 (Click-Through): OFF"
+    };
+    let _ = state.click_through.set_text(ct_text);
+
+    let aot_text = if always_on_top {
+        "항상 위에 표시 (Always on Top): ON"
+    } else {
+        "항상 위에 표시 (Always on Top): OFF"
+    };
+    let _ = state.always_on_top.set_text(aot_text);
 }

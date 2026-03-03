@@ -1,0 +1,7 @@
+@import "tailwindcss"; /* */
+@plugin "daisyui";     /* v4 handles plugins via the @plugin directive */
+
+/* Define your theme variables directly in CSS */
+@theme {
+    --color-bpsr-green: #00ff88; /* */
+}

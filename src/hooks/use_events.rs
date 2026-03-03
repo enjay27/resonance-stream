@@ -1,7 +1,7 @@
 use leptos::logging::log;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
-use crate::types::{ChatMessage, SnifferStatePayload, SystemMessage, TranslationResult};
+use crate::ui_types::{ChatMessage, SnifferStatePayload, SystemMessage, TranslationResult};
 use crate::utils::is_japanese;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -15,20 +15,26 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     // 1. Create the closures using our new helper functions
     let packet_closure = create_packet_handler(signals);
     let system_closure = create_system_handler(signals);
+    let translator_state_closure = create_translator_state_handler(signals);
     let sniffer_state_closure = create_sniffer_state_handler(signals);
     let translation_closure = create_translation_handler(signals);
+    let update_message_closure = create_update_message_handler(signals);
 
     // 2. Register all listeners
     listen("packet-event", &packet_closure).await;
     listen("system-event", &system_closure).await;
+    listen("translator-state", &translator_state_closure).await;
     listen("sniffer-state", &sniffer_state_closure).await;
     listen("translation-event", &translation_closure).await;
+    listen("chat-message-update", &update_message_closure).await;
 
     // 3. Prevent memory leaks / keep closures alive
     packet_closure.forget();
     system_closure.forget();
+    translator_state_closure.forget();
     sniffer_state_closure.forget();
     translation_closure.forget();
+    update_message_closure.forget();
 }
 
 // --- EXTRACTED HANDLER FUNCTIONS ---
@@ -95,6 +101,21 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
                 if is_visible && !signals.is_at_bottom.get_untracked() {
                     signals.set_unread_count.update(|c| *c += 1);
                 }
+
+                let keywords = signals.alert_keywords.get_untracked();
+                let volume = signals.alert_volume.get_untracked();
+
+                if keywords.iter().any(|kw| packet.message.contains(kw)) {
+                    // Fire and forget the audio ping
+                    if volume > 0.0 {
+                        log!("audio ping by keyword {:?}", packet.message);
+                        if let Ok(audio) = web_sys::HtmlAudioElement::new_with_src("public/ping.mp3") {
+                            // Convert f32 to f64 for the Web Audio API
+                            audio.set_volume(volume as f64);
+                            let _ = audio.play();
+                        }
+                    }
+                }
             }
         }
     }) as Box<dyn FnMut(JsValue)>)
@@ -135,6 +156,20 @@ fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     }) as Box<dyn FnMut(JsValue)>)
 }
 
+fn create_translator_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
+        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+            // NOTE: Make sure to import TranslatorStatePayload at the top of use_events.rs!
+            if let Ok(payload) = serde_json::from_value::<crate::ui_types::TranslatorStatePayload>(ev["payload"].clone()) {
+                signals.set_translator_state.set(payload.state.clone());
+                if payload.state == "Error" {
+                    signals.set_translator_error.set(payload.message);
+                }
+            }
+        }
+    }) as Box<dyn FnMut(JsValue)>)
+}
+
 fn create_sniffer_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |event_obj: JsValue| {
         if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
@@ -145,6 +180,24 @@ fn create_sniffer_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValu
                 if payload.state == "Error" {
                     signals.set_sniffer_error.set(payload.message);
                 }
+            }
+        }
+    }) as Box<dyn FnMut(JsValue)>)
+}
+
+fn create_update_message_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |event_obj: JsValue| {
+        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
+            // Parse the fully updated ChatMessage sent from the backend
+            if let Ok(updated_msg) = serde_json::from_value::<ChatMessage>(ev["payload"].clone()) {
+
+                // Find the existing signal by PID and completely overwrite its value
+                signals.set_chat_log.update(|log| {
+                    if let Some(chat_rw) = log.get(&updated_msg.pid) {
+                        chat_rw.set(updated_msg);
+                    }
+                });
+
             }
         }
     }) as Box<dyn FnMut(JsValue)>)

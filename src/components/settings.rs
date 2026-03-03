@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
 use crate::tauri_bridge::invoke;
-use crate::types::{FolderStatus, NetworkInterface};
+use crate::ui_types::{FolderStatus, NetworkInterface};
 
 #[derive(serde::Serialize)]
 struct OpenBrowserArgs {
@@ -17,6 +17,8 @@ pub fn Settings() -> impl IntoView {
     let actions = use_context::<AppActions>().expect("AppActions missing");
 
     let (interfaces, set_interfaces) = signal(Vec::<NetworkInterface>::new());
+    let (new_keyword, set_new_keyword) = signal(String::new());
+    let (new_emphasis, set_new_emphasis) = signal(String::new());
 
     Effect::new(move |_| {
         if signals.show_settings.get() {
@@ -27,6 +29,8 @@ pub fn Settings() -> impl IntoView {
                     }
                 }
             });
+        } else {
+            signals.set_restart_required.set(false);
         }
     });
 
@@ -85,56 +89,60 @@ pub fn Settings() -> impl IntoView {
                                         prop:checked=move || signals.use_translation.get()
                                         on:click=move |ev| {
                                             // Prevent the browser from automatically flipping the switch
-                                            ev.prevent_default();
+                                            let is_turning_on = event_target_checked(&ev);
 
-                                            let current = signals.use_translation.get_untracked();
+                                            if is_turning_on {
+                                                // 1. Optimistically set the UI to ON so the toggle moves immediately
+                                                signals.set_use_translation.set(true);
 
-                                            if !current {
-                                                // User is trying to turn it ON
                                                 spawn_local(async move {
+                                                    let mut has_error = false;
+
+                                                    // 2. Check Model Status
                                                     if let Ok(st) = invoke("check_model_status", JsValue::NULL).await {
                                                         if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
-                                                            if status.exists {
-                                                                // Model exists -> Turn it on normally
-                                                                signals.set_use_translation.set(true);
-                                                                actions.save_config.dispatch(());
-                                                            } else {
-                                                                // Model missing -> Prompt user
+                                                            if !status.exists {
+                                                                has_error = true;
                                                                 if let Some(w) = web_sys::window() {
                                                                     if w.confirm_with_message("AI 모델 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
-                                                                        // Redirect to Setup Wizard
-                                                                        signals.set_use_translation.set(true);
                                                                         signals.set_wizard_step.set(2);
-                                                                        signals.set_show_settings.set(false); // Close modal
-                                                                        signals.set_init_done.set(false);     // Trigger Wizard UI
+                                                                        signals.set_show_settings.set(false);
+                                                                        signals.set_init_done.set(false);
                                                                     }
                                                                 }
                                                             }
                                                         }
                                                     }
-                                                    if let Ok(st) = invoke("check_ai_server_status", JsValue::NULL).await {
-                                                        if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
-                                                            if status.exists {
-                                                                // Model exists -> Turn it on normally
-                                                                signals.set_use_translation.set(true);
-                                                                actions.save_config.dispatch(());
-                                                            } else {
-                                                                // Model missing -> Prompt user
-                                                                if let Some(w) = web_sys::window() {
-                                                                    if w.confirm_with_message("AI 실행 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
-                                                                        // Redirect to Setup Wizard
-                                                                        signals.set_use_translation.set(true);
-                                                                        signals.set_wizard_step.set(2);
-                                                                        signals.set_show_settings.set(false); // Close modal
-                                                                        signals.set_init_done.set(false);     // Trigger Wizard UI
+
+                                                    // 3. Check Server Status (Only if model check passed, preventing double popups!)
+                                                    if !has_error {
+                                                        if let Ok(st) = invoke("check_ai_server_status", JsValue::NULL).await {
+                                                            if let Ok(status) = serde_wasm_bindgen::from_value::<FolderStatus>(st) {
+                                                                if !status.exists {
+                                                                    has_error = true;
+                                                                    if let Some(w) = web_sys::window() {
+                                                                        if w.confirm_with_message("AI 실행 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
+                                                                            signals.set_wizard_step.set(2);
+                                                                            signals.set_show_settings.set(false);
+                                                                            signals.set_init_done.set(false);
+                                                                        }
                                                                     }
                                                                 }
                                                             }
                                                         }
+                                                    }
+
+                                                    // 4. Finalize
+                                                    if has_error {
+                                                        // Revert the toggle visually back to OFF if files are missing
+                                                        signals.set_use_translation.set(false);
+                                                    } else {
+                                                        // Everything exists, safely save the config
+                                                        actions.save_config.dispatch(());
                                                     }
                                                 });
                                             } else {
-                                                // User is trying to turn it OFF
+                                                // User is turning it OFF (Toggle visually moves immediately)
                                                 signals.set_use_translation.set(false);
                                                 actions.save_config.dispatch(());
                                             }
@@ -169,36 +177,39 @@ pub fn Settings() -> impl IntoView {
                                         }).collect_view()}
                                     </div>
 
-                                    // [RESTORED] Performance Tier
-                                    <span class="text-[11px] font-bold text-base-content/50 uppercase block mt-3">"성능 (Performance Tier)"</span>
-                                    <div class="join w-full">
-                                        {vec!["low", "middle", "high", "extreme"].into_iter().map(|t| {
-                                            let t_val = t.to_string();
-                                            let t_click = t.to_string();
-                                            let t_line = t.to_string();
-                                            let t_tier = t.to_string();
-                                            view! {
-                                                <button
-                                                    class="join-item btn btn-xs flex-1 font-black border-base-content/10"
-                                                    class:btn-success=move || signals.tier.get() == t_val
-                                                    class:btn-outline=move || signals.tier.get() != t_line
-                                                    class:text-secondary=move || t_tier == "extreme" // Make Extreme slightly distinct
-                                                    on:click=move |_| {
-                                                        signals.set_tier.set(t_click.clone());
-                                                        actions.save_config.dispatch(());
-                                                        signals.set_restart_required.set(true);
-                                                    }
-                                                >
-                                                    {t.to_uppercase()}
-                                                </button>
-                                            }
-                                        }).collect_view()}
-                                    </div>
-                                    <div class="text-[9px] opacity-50">"성능이 높을수록 번역 품질이 좋아지지만 VRAM을 더 소모합니다."</div>
+                                    // Hide VRAM settings if CPU is selected
+                                    <Show when=move || signals.compute_mode.get() == "gpu">
+                                        <span class="text-[11px] font-bold text-base-content/50 uppercase block mt-3">"VRAM 사용량 (GPU Offload)"</span>
+                                        <div class="join w-full">
+                                            {vec!["low", "middle", "high", "very high"].into_iter().map(|t| {
+                                                let t_val = t.to_string();
+                                                let t_click = t.to_string();
+                                                let t_line = t.to_string();
+                                                let t_tier = t.to_string();
+                                                view! {
+                                                    <button
+                                                        class="join-item btn btn-xs flex-1 font-black border-base-content/10"
+                                                        class:btn-success=move || signals.tier.get() == t_val
+                                                        class:btn-outline=move || signals.tier.get() != t_line
+                                                        class:text-secondary=move || t_tier == "extreme"
+                                                        on:click=move |_| {
+                                                            signals.set_tier.set(t_click.clone());
+                                                            actions.save_config.dispatch(());
+                                                            signals.set_restart_required.set(true);
+                                                        }
+                                                    >
+                                                        {t.to_uppercase()}
+                                                    </button>
+                                                }
+                                            }).collect_view()}
+                                        </div>
+                                        // Updated the description to accurately reflect that it improves speed, not quality
+                                        <div class="text-[9px] opacity-50">"할당량이 높을수록 번역 속도가 빨라지지만 VRAM을 더 많이 소모합니다."</div>
+                                    </Show>
 
                                     <Show when=move || signals.restart_required.get()>
                                         <div class="text-[10px] text-warning font-bold animate-pulse mt-2 p-2 bg-warning/10 rounded">
-                                            "⚠️ 변경 사항을 적용하려면 앱을 재시작해야 합니다."
+                                            "⚠️ 변경 사항 적용을 위해 AI 번역기가 재시작 됩니다. 번역을 위해 잠시 시간이 소요됩니다."
                                         </div>
                                     </Show>
                                 </div>
@@ -206,36 +217,32 @@ pub fn Settings() -> impl IntoView {
                         </section>
 
                         // ==========================================
-                        // SECTION: CHAT SETTINGS (RESTORED)
+                        // SECTION: CHAT SETTINGS
                         // ==========================================
                         <section class="space-y-4">
                             <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"Chat Settings"</h3>
 
-                            // Custom Tab Configuration
-                            <div class="space-y-2 px-1">
-                                <span class="text-[11px] font-bold text-base-content/60 uppercase">"커스텀 탭 필터 (Custom Tab)"</span>
-                                <div class="grid grid-cols-2 gap-2">
-                                    {vec!["WORLD", "GUILD", "PARTY", "LOCAL"].into_iter().map(|channel| {
-                                        let ch = channel.to_string();
-                                        let ch_clone = ch.clone();
-                                        view! {
-                                            <label class="label cursor-pointer bg-base-200 rounded p-2 border border-base-content/5 hover:bg-base-content/5 transition-colors">
-                                                <span class="label-text text-xs font-bold">{channel}</span>
-                                                <input type="checkbox" class="checkbox checkbox-xs checkbox-success"
-                                                    checked=move || signals.custom_filters.get().contains(&ch_clone)
-                                                    on:change=move |ev| {
-                                                        let checked = event_target_checked(&ev);
-                                                        signals.set_custom_filters.update(|f| {
-                                                            if checked { f.push(ch.clone()); }
-                                                            else { f.retain(|x| x != &ch); }
-                                                        });
-                                                        actions.save_config.dispatch(());
-                                                    }
-                                                />
-                                            </label>
-                                        }
-                                    }).collect_view()}
+                            // Font Size Slider
+                            <div class="space-y-2 mt-4 pt-4 border-t border-base-content/10">
+                                <div class="flex justify-between text-[11px] font-bold">
+                                    <span class="text-base-content/80">"채팅 글꼴 크기 (Font Size)"</span>
+                                    <span class="text-success">{move || format!("{}px", signals.font_size.get())}</span>
                                 </div>
+                                <input type="range" min="10" max="24" step="1"
+                                    class="range range-xs range-success"
+                                    prop:value=move || signals.font_size.get().to_string()
+                                    on:input=move |ev| {
+                                        // 1. Update UI live while dragging
+                                        let val = event_target_value(&ev).parse::<u32>().unwrap_or(14);
+                                        signals.set_font_size.set(val);
+                                    }
+                                    on:change=move |ev| {
+                                        // 2. Save to file when mouse is released
+                                        let val = event_target_value(&ev).parse::<u32>().unwrap_or(14);
+                                        actions.save_config.dispatch(());
+                                    }
+                                />
+                                <div class="text-[9px] text-base-content/50">"기본 크기는 14px 입니다."</div>
                             </div>
 
                             // Message Limit
@@ -263,6 +270,169 @@ pub fn Settings() -> impl IntoView {
                                     />
                                 </label>
                             </div>
+
+                            // Relative Time Toggle
+                            <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
+                                <label class="label cursor-pointer p-0">
+                                    <div class="flex flex-col">
+                                        <span class="label-text text-xs font-bold text-base-content/80">"상대적 시간 표시 (Relative Time)"</span>
+                                        <span class="text-[9px] text-base-content/60 mt-1">"시간을 'now', '4m' 형식으로 표시합니다."</span>
+                                    </div>
+                                    <input type="checkbox" class="toggle toggle-success toggle-sm"
+                                        prop:checked=move || signals.use_relative_time.get()
+                                        on:change=move |ev| {
+                                            signals.set_use_relative_time.set(event_target_checked(&ev));
+                                            actions.save_config.dispatch(());
+                                        }
+                                    />
+                                </label>
+                            </div>
+                        </section>
+
+                        // ==========================================
+                        // SECTION: KEYWORD
+                        // ==========================================
+                        <section class="space-y-4">
+
+                            <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"키워드 설정 (Keyword Settings)"</h3>
+
+                            // Emphasis Keywords
+                            <div class="bg-base-200 p-3 rounded-lg border border-base-content/5 space-y-3 mt-4">
+                                <span class="text-[11px] font-bold text-base-content/60">"강조 키워드 (Emphasis Keywords) - 채팅창에서 다른 색상으로 굵게 표시됩니다."</span>
+
+                                <div class="flex gap-2">
+                                    <input type="text" class="input input-xs input-bordered flex-1 font-bold" placeholder="강조할 단어 입력..."
+                                        prop:value=move || new_emphasis.get()
+                                        on:input=move |ev| set_new_emphasis.set(event_target_value(&ev))
+                                        on:keydown=move |ev| {
+                                            if ev.key() == "Enter" && !new_emphasis.get_untracked().trim().is_empty() {
+                                                let kw = new_emphasis.get_untracked().trim().to_string();
+                                                signals.set_emphasis_keywords.update(|list| {
+                                                    if !list.contains(&kw) { list.push(kw); }
+                                                });
+                                                set_new_emphasis.set("".to_string());
+                                                actions.save_config.dispatch(());
+                                            }
+                                        }
+                                    />
+                                    <button class="btn btn-xs btn-warning font-black"
+                                        on:click=move |_| {
+                                            let kw = new_emphasis.get_untracked().trim().to_string();
+                                            if !kw.is_empty() {
+                                                signals.set_emphasis_keywords.update(|list| {
+                                                    if !list.contains(&kw) { list.push(kw); }
+                                                });
+                                                set_new_emphasis.set("".to_string());
+                                                actions.save_config.dispatch(());
+                                            }
+                                        }>
+                                        "추가"
+                                    </button>
+                                </div>
+
+                                <div class="flex flex-wrap gap-1 mt-2">
+                                    <For each=move || signals.emphasis_keywords.get() key=|k| k.clone() children=move |kw| {
+                                        let kw_clone = kw.clone();
+                                        view! {
+                                            <div class="badge badge-warning badge-sm gap-1 pl-2 font-bold shadow-sm">
+                                                {kw.clone()}
+                                                <button class="btn btn-ghost btn-xs btn-circle h-4 w-4 min-h-0 text-[10px] hover:bg-black/20"
+                                                    on:click=move |_| {
+                                                        signals.set_emphasis_keywords.update(|list| list.retain(|x| x != &kw_clone));
+                                                        actions.save_config.dispatch(());
+                                                    }>
+                                                    "✕"
+                                                </button>
+                                            </div>
+                                        }
+                                    } />
+                                </div>
+                            </div>
+
+                            <div class="bg-base-200 p-3 rounded-lg border border-base-content/5 space-y-3">
+                                <span class="text-[11px] font-bold text-base-content/60">"등록된 단어가 채팅에 등장하면 알림을 보냅니다."</span>
+
+                                // Input Field & Add Button
+                                <div class="flex gap-2">
+                                    <input type="text" class="input input-xs input-bordered flex-1 font-bold" placeholder="키워드 입력..."
+                                        prop:value=move || new_keyword.get()
+                                        on:input=move |ev| set_new_keyword.set(event_target_value(&ev))
+                                        on:keydown=move |ev| {
+                                            if ev.key() == "Enter" && !new_keyword.get_untracked().trim().is_empty() {
+                                                let kw = new_keyword.get_untracked().trim().to_string();
+                                                signals.set_alert_keywords.update(|list| {
+                                                    if !list.contains(&kw) { list.push(kw); }
+                                                });
+                                                set_new_keyword.set("".to_string());
+                                                actions.save_config.dispatch(());
+                                            }
+                                        }
+                                    />
+                                    <button class="btn btn-xs btn-success font-black"
+                                        on:click=move |_| {
+                                            let kw = new_keyword.get_untracked().trim().to_string();
+                                            if !kw.is_empty() {
+                                                signals.set_alert_keywords.update(|list| {
+                                                    if !list.contains(&kw) { list.push(kw); }
+                                                });
+                                                set_new_keyword.set("".to_string());
+                                                actions.save_config.dispatch(());
+                                            }
+                                        }>
+                                        "추가"
+                                    </button>
+                                </div>
+
+                                // Keyword Chips
+                                <div class="flex flex-wrap gap-1 mt-2">
+                                    <For each=move || signals.alert_keywords.get() key=|k| k.clone() children=move |kw| {
+                                        let kw_clone = kw.clone();
+                                        view! {
+                                            <div class="badge badge-success badge-sm gap-1 pl-2 font-bold shadow-sm">
+                                                {kw.clone()}
+                                                <button class="btn btn-ghost btn-xs btn-circle h-4 w-4 min-h-0 text-[10px] hover:bg-black/20"
+                                                    on:click=move |_| {
+                                                        signals.set_alert_keywords.update(|list| list.retain(|x| x != &kw_clone));
+                                                        actions.save_config.dispatch(());
+                                                    }>
+                                                    "✕"
+                                                </button>
+                                            </div>
+                                        }
+                                    } />
+                                </div>
+
+                                // Volume Slider
+                                <div class="space-y-2 mt-4 pt-4 border-t border-base-content/10">
+                                    <div class="flex justify-between text-[11px] font-bold">
+                                        <span class="text-base-content/80">"알림음 볼륨 (Volume)"</span>
+                                        <span class="text-success">{move || format!("{:.0}%", signals.alert_volume.get() * 100.0)}</span>
+                                    </div>
+                                    <input type="range" min="0.0" max="1.0" step="0.05"
+                                        class="range range-xs range-success"
+                                        prop:value=move || signals.alert_volume.get().to_string()
+                                        on:input=move |ev| {
+                                            // 1. Update the UI state smoothly while dragging (no sound)
+                                            let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.5);
+                                            signals.set_alert_volume.set(val);
+                                        }
+                                        on:change=move |ev| {
+                                            // 2. Play the sound and save to config ONLY when the mouse click is released
+                                            let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.5);
+                                            actions.save_config.dispatch(());
+
+                                            if val > 0.0 {
+                                                if let Ok(audio) = web_sys::HtmlAudioElement::new_with_src("public/ping.mp3") {
+                                                    audio.set_volume(val as f64);
+                                                    let _ = audio.play();
+                                                }
+                                            }
+                                        }
+                                    />
+                                    <div class="text-[9px] text-base-content/50">"볼륨을 0%로 설정하면 알림음이 음소거됩니다."</div>
+                                </div>
+                            </div>
+
                         </section>
 
                         // ==========================================
@@ -343,6 +513,63 @@ pub fn Settings() -> impl IntoView {
                                 </span>
                             </button>
                         </section>
+
+                        // --- SECTION: BLOCKED USERS ---
+                        <div class="space-y-2 mt-6 pt-4 border-t border-base-content/10">
+                            <div class="text-[11px] font-bold text-error mb-2">"차단된 사용자 (Blocked Users)"</div>
+
+                            // HIDE BLOCKED MESSAGES TOGGLE
+                            <div class="flex items-center justify-between bg-base-200/50 p-2 rounded-lg border border-base-content/5 mb-2">
+                                <div class="flex flex-col">
+                                    <span class="text-xs font-bold text-base-content/80">"차단된 메시지 완전 숨기기"</span>
+                                    <span class="text-[9px] text-base-content/50">"활성화 시 '(차단된 사용자의 메시지입니다)' 문구도 표시하지 않습니다."</span>
+                                </div>
+                                <input type="checkbox" class="toggle toggle-error toggle-sm"
+                                    prop:checked=move || signals.hide_blocked_messages.get()
+                                    on:change=move |ev| {
+                                        signals.set_hide_blocked_messages.set(event_target_checked(&ev));
+                                        actions.save_config.dispatch(());
+                                    }
+                                />
+                            </div>
+
+                            <div class="bg-base-200/50 rounded-lg p-2 max-h-40 overflow-y-auto border border-base-content/5">
+                                {move || {
+                                    let blocked = signals.blocked_users.get();
+                                    if blocked.is_empty() {
+                                        view! { <div class="text-[10px] text-base-content/50 italic text-center py-2">"차단된 사용자가 없습니다."</div> }.into_any()
+                                    } else {
+                                        // Convert the HashMap into a viewable list
+                                        let blocked_list = blocked.into_iter().collect::<Vec<_>>();
+
+                                        blocked_list.into_iter().map(|(uid, nickname)| {
+                                            let uid_clone = uid;
+                                            view! {
+                                                <div class="flex items-center justify-between p-1.5 hover:bg-base-content/5 rounded transition-colors group">
+                                                    <span class="text-xs font-bold text-base-content/80">{nickname}</span>
+                                                    <button
+                                                        class="btn btn-ghost btn-xs text-error opacity-50 group-hover:opacity-100 h-6 min-h-0 px-2"
+                                                        on:click=move |_| {
+                                                            // 1. Tell Backend to unblock and save
+                                                            spawn_local(async move {
+                                                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({"uid": uid_clone})).unwrap();
+                                                                let _ = invoke("unblock_user_command", args).await;
+                                                            });
+
+                                                            // 2. Instantly remove from frontend UI state
+                                                            signals.set_blocked_users.update(|map| {
+                                                                map.remove(&uid_clone);
+                                                            });
+                                                        }>
+                                                        "차단 해제"
+                                                    </button>
+                                                </div>
+                                            }
+                                        }).collect_view().into_any()
+                                    }
+                                }}
+                            </div>
+                        </div>
 
                         // ==========================================
                         // SECTION: DATA & DEVELOPER

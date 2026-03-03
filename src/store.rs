@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use indexmap::IndexMap;
 use leptos::prelude::{Action, ReadSignal, RwSignal, WriteSignal};
-use crate::types::{ChatMessage, SystemMessage};
+use crate::ui_types::{ChatMessage, SystemMessage};
 
 #[derive(Copy, Clone, Debug)]
 pub struct AppSignals {
@@ -14,8 +14,10 @@ pub struct AppSignals {
     pub set_compute_mode: WriteSignal<String>,
     pub wizard_step: ReadSignal<i32>,
     pub set_wizard_step: WriteSignal<i32>,
-    pub is_translator_active: ReadSignal<bool>,
-    pub set_is_translator_active: WriteSignal<bool>,
+    pub translator_state: ReadSignal<String>,
+    pub set_translator_state: WriteSignal<String>,
+    pub translator_error: ReadSignal<String>,
+    pub set_translator_error: WriteSignal<String>,
     pub is_sniffer_active: ReadSignal<bool>,
     pub set_is_sniffer_active: WriteSignal<bool>,
     pub status_text: ReadSignal<String>,
@@ -86,6 +88,22 @@ pub struct AppSignals {
     pub set_click_through: WriteSignal<bool>,
     pub drag_to_scroll: ReadSignal<bool>,
     pub set_drag_to_scroll: WriteSignal<bool>,
+    pub alert_keywords: ReadSignal<Vec<String>>,
+    pub set_alert_keywords: WriteSignal<Vec<String>>,
+    pub alert_volume: ReadSignal<f32>,
+    pub set_alert_volume: WriteSignal<f32>,
+    pub emphasis_keywords: ReadSignal<Vec<String>>,
+    pub set_emphasis_keywords: WriteSignal<Vec<String>>,
+    pub use_relative_time: ReadSignal<bool>,
+    pub set_use_relative_time: WriteSignal<bool>,
+    pub current_time: ReadSignal<u64>,
+    pub set_current_time: WriteSignal<u64>,
+    pub font_size: ReadSignal<u32>,
+    pub set_font_size: WriteSignal<u32>,
+    pub hide_blocked_messages: ReadSignal<bool>,
+    pub set_hide_blocked_messages: WriteSignal<bool>,
+    pub blocked_users: ReadSignal<HashMap<u64, String>>,
+    pub set_blocked_users: WriteSignal<HashMap<u64, String>>,
 }
 
 #[derive(Copy, Clone)]

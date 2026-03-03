@@ -14,6 +14,8 @@ pub struct AppState {
     pub translator_tx: Mutex<Option<Sender<crate::services::translator::TranslationJob>>>,
     pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
     pub sniffer_tx: Mutex<Option<Sender<()>>>,
+    pub dedup_cache: Mutex<HashMap<(u64, u64, u64), u64>>,
+    pub blocked_users: Mutex<HashMap<u64, String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -35,6 +37,8 @@ pub struct ChatMessage {
     pub translated: Option<String>,
     #[serde(default)]
     pub nickname_romaji: Option<String>,
+    #[serde(default)]
+    pub unknown_fields: HashMap<String, Vec<u8>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -89,6 +93,12 @@ pub struct NetworkInterface {
 pub struct SnifferStatePayload {
     pub state: String,   // "Starting", "Firewall", "Binding", "Active", "Error", "Off"
     pub message: String, // Context or Error message
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct TranslatorStatePayload {
+    pub state: String,   // "Starting", "Loading Model", "Active", "Error", "Off"
+    pub message: String,
 }
 
 pub struct TrayMenuState {

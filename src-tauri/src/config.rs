@@ -1,10 +1,13 @@
+use serde_with::DisplayFromStr;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use serde_with::serde_as;
 use tauri::{AppHandle, Manager, State};
 use crate::{inject_system_message, AppState, SystemLogLevel};
 // Import Manager trait
 
+#[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AppConfig {
     pub init_done: bool,
@@ -24,6 +27,15 @@ pub struct AppConfig {
     pub hide_original_in_compact: bool,
     pub network_interface: String,
     pub drag_to_scroll: bool,
+    pub alert_keywords: Vec<String>,
+    pub alert_volume: f32,
+    pub emphasis_keywords: Vec<String>,
+    pub use_relative_time: bool,
+    pub font_size: u32,
+    #[serde(default)]
+    pub hide_blocked_messages: bool,
+    #[serde_as(as = "std::collections::HashMap<DisplayFromStr, _>")]
+    pub blocked_users: std::collections::HashMap<u64, String>,
 }
 
 impl Default for AppConfig {
@@ -46,6 +58,13 @@ impl Default for AppConfig {
             hide_original_in_compact: false,
             network_interface: "".to_string(),
             drag_to_scroll: false,
+            alert_keywords: vec![],
+            alert_volume: 0.5,
+            emphasis_keywords: vec![],
+            use_relative_time: false,
+            font_size: 14,
+            hide_blocked_messages: false,
+            blocked_users: std::collections::HashMap::new()
         }
     }
 }
@@ -117,6 +136,7 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
         // Turned OFF: Drop the Sender (Kills the thread and frees VRAM)
         *state.translator_tx.lock().unwrap() = None;
         inject_system_message(&app, SystemLogLevel::Info, "Translator", "AI Translation Disabled. Server stopped and VRAM cleared.");
+        crate::services::translator::emit_translator_state(&app, "Off", "AI Translation Disabled.");
     }
 
     // --- MANAGE THE DATA FACTORY THREAD ---
@@ -129,5 +149,30 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
         // Turned OFF: Drop the Sender (Kills the thread)
         *state.data_factory_tx.lock().unwrap() = None;
         inject_system_message(&app, SystemLogLevel::Info, "DataFactory", "Dataset logging disabled.");
+    }
+
+    // --- MANAGE THE AI WORKER THREAD ---
+    let translation_toggled_on = !old_config.use_translation && config.use_translation;
+    let translation_toggled_off = old_config.use_translation && !config.use_translation;
+    let translation_specs_changed = config.use_translation && old_config.use_translation &&
+        (old_config.compute_mode != config.compute_mode || old_config.tier != config.tier);
+
+    if translation_toggled_on || translation_specs_changed {
+        if translation_specs_changed {
+            // Drop the old sender to break the current thread's loop
+            *state.translator_tx.lock().unwrap() = None;
+            inject_system_message(&app, SystemLogLevel::Info, "Translator", "Applying new AI Engine specifications...");
+        }
+
+        // Start the server and store the new Sender
+        let model_path = crate::get_model_path(&app);
+        let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
+        *state.translator_tx.lock().unwrap() = Some(tx);
+
+    } else if translation_toggled_off {
+        // Turned OFF: Drop the Sender (Kills the thread and frees VRAM)
+        *state.translator_tx.lock().unwrap() = None;
+        inject_system_message(&app, SystemLogLevel::Info, "Translator", "AI Translation Disabled. Server stopped and VRAM cleared.");
+        crate::services::translator::emit_translator_state(&app, "Off", "AI Translation Disabled.");
     }
 }

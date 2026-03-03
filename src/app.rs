@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use futures::FutureExt;
 use indexmap::IndexMap;
 use leptos::html;
@@ -13,7 +14,7 @@ use crate::hooks::use_config::save_app_config;
 use crate::hooks::use_events::setup_event_listeners;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::{invoke, listen};
-use crate::types::{
+use crate::ui_types::{
     ChatMessage, SystemMessage, AppConfig, FolderStatus, ProgressPayload, TauriEvent
 };
 use crate::utils::{add_system_log, copy_to_clipboard, format_time, is_japanese};
@@ -26,7 +27,8 @@ pub fn App() -> impl IntoView {
     let (compute_mode, set_compute_mode) = signal("cpu".to_string());
     let (wizard_step, set_wizard_step) = signal(0); // 0: Welcome, 1: Options, 2: Download
 
-    let (is_translator_active, set_is_translator_active) = signal(false);
+    let (translator_state, set_translator_state) = signal("Off".to_string());
+    let (translator_error, set_translator_error) = signal("".to_string());
     let (is_sniffer_active, set_is_sniffer_active) = signal(false);
     let (status_text, set_status_text) = signal("".to_string());
     let (model_ready, set_model_ready) = signal(false);
@@ -67,12 +69,22 @@ pub fn App() -> impl IntoView {
     let (sniffer_state, set_sniffer_state) = signal("Off".to_string());
     let (sniffer_error, set_sniffer_error) = signal("".to_string());
 
+    let (alert_keywords, set_alert_keywords) = signal(Vec::<String>::new());
+    let (alert_volume, set_alert_volume) = signal(0.5f32);
+    let (emphasis_keywords, set_emphasis_keywords) = signal(Vec::<String>::new());
+    let (use_relative_time, set_use_relative_time) = signal(false);
+    let (current_time, set_current_time) = signal(chrono::Local::now().timestamp_millis() as u64);
+    let (font_size, set_font_size) = signal(14u32);
+    let (hide_blocked_messages, set_hide_blocked_messages) = signal(false);
+    let (blocked_users, set_blocked_users) = signal::<std::collections::HashMap<u64, String>>(HashMap::new());
+
     let signals = AppSignals {
         init_done, set_init_done,
         use_translation, set_use_translation,
         compute_mode, set_compute_mode,
         wizard_step, set_wizard_step,
-        is_translator_active, set_is_translator_active,
+        translator_state, set_translator_state,
+        translator_error, set_translator_error,
         is_sniffer_active, set_is_sniffer_active,
         status_text, set_status_text,
         model_ready, set_model_ready,
@@ -109,39 +121,17 @@ pub fn App() -> impl IntoView {
         drag_to_scroll, set_drag_to_scroll,
         sniffer_state, set_sniffer_state,
         sniffer_error, set_sniffer_error,
+        alert_keywords, set_alert_keywords,
+        alert_volume, set_alert_volume,
+        emphasis_keywords, set_emphasis_keywords,
+        use_relative_time, set_use_relative_time,
+        current_time, set_current_time,
+        font_size, set_font_size,
+        hide_blocked_messages, set_hide_blocked_messages,
+        blocked_users, set_blocked_users,
     };
 
     provide_context(signals);
-
-    // --- WATCHDOG: SIDE CAR MONITOR ---
-    spawn_local(async move {
-        loop {
-            if let Ok(res) = invoke("is_translator_running", JsValue::NULL).await {
-                if let Some(running) = res.as_bool() {
-                    set_is_translator_active.set(running);
-
-                    if !running && use_translation.get_untracked() && init_done.get_untracked() {
-                        add_system_log("Warning", "[WatchDog]", "Translator not running. Run Translator Sidecar.");
-                        let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
-                    }
-                }
-            }
-
-            if let Ok(res) = invoke("is_sniffer_active", JsValue::NULL).await {
-                if let Some(active) = res.as_bool() {
-                    set_is_sniffer_active.set(active);
-
-                    if !active && init_done.get_untracked() {
-                        add_system_log("Warning", "[WatchDog]", "Sniffer not running. Run Sniffer.");
-                        let _ = invoke("start_sniffer_command", JsValue::NULL).await;
-                    }
-                }
-            }
-
-            // Poll every 5 seconds
-            gloo_timers::future::TimeoutFuture::new(5000).await;
-        }
-    });
 
     // --- CONFIG ACTIONS ---
     let save_config = Action::new_local(move |_: &()| {
@@ -163,6 +153,13 @@ pub fn App() -> impl IntoView {
             hide_original_in_compact: hide_original_in_compact.get_untracked(),
             network_interface: network_interface.get_untracked(),
             drag_to_scroll: drag_to_scroll.get_untracked(),
+            alert_keywords: alert_keywords.get_untracked(),
+            alert_volume: alert_volume.get_untracked(),
+            emphasis_keywords: emphasis_keywords.get_untracked(),
+            use_relative_time: use_relative_time.get_untracked(),
+            font_size: font_size.get_untracked(),
+            hide_blocked_messages: hide_blocked_messages.get_untracked(),
+            blocked_users: blocked_users.get_untracked(),
         };
 
         async move {
@@ -201,28 +198,58 @@ pub fn App() -> impl IntoView {
         ev.prevent_default();
 
         set_downloading.set(true);
-        set_status_text.set("Starting Download...".to_string());
+        set_status_text.set("Starting Downloads...".to_string());
+
         spawn_local(async move {
+            // 1. Setup the progress listener
             let closure = Closure::wrap(Box::new(move |event_obj: JsValue| {
                 if let Ok(wrapper) = serde_wasm_bindgen::from_value::<TauriEvent>(event_obj) {
                     set_progress.set(wrapper.payload.total_percent);
-                    set_status_text.set(format!("Downloading AI Model {}%", wrapper.payload.total_percent));
+                    // Optional: Update status text to show what is currently downloading
+                    // using the `current_file` field we defined in downloader.rs
+                    set_status_text.set(format!("{} ({}%)", wrapper.payload.current_file, wrapper.payload.total_percent));
                 }
             }) as Box<dyn FnMut(JsValue)>);
             let _ = listen("download-progress", &closure).await;
-            match invoke("download_model", JsValue::NULL).await {
-                Ok(_) => {
-                    set_downloading.set(false);
-                    set_model_ready.set(true);
-                    set_status_text.set("Ready".to_string());
-                    finalize_setup(());
-                }
-                Err(e) => {
-                    set_downloading.set(false);
-                    set_status_text.set(format!("Error: {:?}", e));
-                    add_system_log("error", "ModelManager", &format!("Download failed: {:?}", e));
-                }
+
+            // 2. Download the AI Model (.gguf)
+            let model_result = invoke("download_model", JsValue::NULL).await;
+            if let Err(e) = model_result {
+                set_downloading.set(false);
+                set_status_text.set(format!("Model Error: {:?}", e));
+                add_system_log("error", "ModelManager", &format!("Model download failed: {:?}", e));
+                closure.forget();
+                return;
             }
+
+            // 3. Download the AI Server (llama-server.exe via zip)
+            let server_result = invoke("download_ai_server", JsValue::NULL).await;
+            if let Err(e) = server_result {
+                set_downloading.set(false);
+                set_status_text.set(format!("Server Error: {:?}", e));
+                add_system_log("error", "ModelManager", &format!("Server download failed: {:?}", e));
+                closure.forget();
+                return;
+            }
+
+            // 3. Download the AI Server (llama-server.exe via zip)
+            let sync_dict = invoke("sync_dictionary", JsValue::NULL).await;
+            if let Err(e) = sync_dict {
+                set_downloading.set(false);
+                set_status_text.set(format!("Server Error: {:?}", e));
+                add_system_log("error", "ModelManager", &format!("Sync dictionary failed: {:?}", e));
+                closure.forget();
+                return;
+            }
+
+            let _ = invoke("launch_translator", JsValue::NULL).await;
+
+            // 4. Both downloads succeeded
+            set_downloading.set(false);
+            set_model_ready.set(true);
+            set_status_text.set("Ready".to_string());
+            finalize_setup(());
+
             closure.forget();
         });
     };
@@ -310,6 +337,14 @@ pub fn App() -> impl IntoView {
                         set_hide_original_in_compact.set(config.hide_original_in_compact);
                         set_network_interface.set(config.network_interface);
                         set_drag_to_scroll.set(config.drag_to_scroll);
+                        set_alert_keywords.set(config.alert_keywords);
+                        set_alert_volume.set(config.alert_volume);
+                        set_emphasis_keywords.set(config.emphasis_keywords);
+                        set_use_relative_time.set(config.use_relative_time);
+                        let loaded_size = if config.font_size > 8 { config.font_size } else { 14 };
+                        set_font_size.set(loaded_size);
+                        set_hide_blocked_messages.set(config.hide_blocked_messages);
+                        set_blocked_users.set(config.blocked_users);
 
                         let mut safe_op = config.overlay_opacity;
                         if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85
@@ -440,6 +475,15 @@ pub fn App() -> impl IntoView {
 
             let _ = invoke("update_tray_menu", args).await;
         });
+    });
+
+    // --- TICKER FOR RELATIVE TIME ---
+    // Updates the global current_time signal every 10 seconds
+    spawn_local(async move {
+        loop {
+            set_current_time.set(chrono::Local::now().timestamp_millis() as u64);
+            gloo_timers::future::TimeoutFuture::new(10_000).await;
+        }
     });
 
     view! {

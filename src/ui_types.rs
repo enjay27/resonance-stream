@@ -1,4 +1,6 @@
+use serde_with::DisplayFromStr;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -12,6 +14,8 @@ pub struct ChatMessage {
     pub class_id: u64,
     pub level: u64,
     pub sequence_id: u64,
+    #[serde(default)]
+    pub is_blocked: bool,
     // --- Translation Support ---
     #[serde(default)]
     pub translated: Option<String>,
@@ -29,6 +33,7 @@ pub struct SystemMessage {
     pub message: String,
 }
 
+#[serde_as]
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct AppConfig {
     pub init_done: bool,
@@ -50,6 +55,15 @@ pub struct AppConfig {
     pub network_interface: String,
     #[serde(default)]
     pub drag_to_scroll: bool,
+    pub alert_keywords: Vec<String>,
+    pub alert_volume: f32,
+    pub emphasis_keywords: Vec<String>,
+    pub use_relative_time: bool,
+    pub font_size: u32,
+    #[serde(default)]
+    pub hide_blocked_messages: bool,
+    #[serde_as(as = "std::collections::HashMap<DisplayFromStr, _>")]
+    pub blocked_users: std::collections::HashMap<u64, String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -82,6 +96,12 @@ pub struct ProgressPayload {
 pub struct NetworkInterface {
     pub name: String,
     pub ip: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct TranslatorStatePayload {
+    pub state: String,   // "Starting", "Loading Model", "Active", "Error", "Off"
+    pub message: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]

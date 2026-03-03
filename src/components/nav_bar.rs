@@ -203,7 +203,7 @@ pub fn NavBar() -> impl IntoView {
                 // Triangle Toggle Button (Folds when width < 650px)
                 <button
                     node_ref=folder_btn_ref
-                    class="btn btn-ghost btn-xs text-lg min-[650px]:hidden z-[60]"
+                    class="btn btn-ghost btn-xs text-lg min-[675px]:hidden z-[60]"
                     class:text-success=move || is_controls_open.get()
                     on:click=move |_| set_is_controls_open.update(|b| *b = !*b)
                 >
@@ -214,7 +214,7 @@ pub fn NavBar() -> impl IntoView {
                 <div
                     node_ref=controls_container_ref
                     class=move || format!(
-                        "items-center gap-1 min-[650px]:flex min-[650px]:static min-[650px]:bg-transparent min-[650px]:shadow-none min-[650px]:p-0 min-[650px]:border-none transition-all duration-200 z-[55] {}",
+                        "items-center gap-1 min-[675px]:flex min-[675px]:static min-[675px]:bg-transparent min-[675px]:shadow-none min-[675px]:p-0 min-[675px]:border-none transition-all duration-200 z-[55] {}",
                         if is_controls_open.get() {
                             // Expanded Overlapping View
                             "absolute right-10 top-1.5 flex bg-base-300 p-1 rounded-lg shadow-2xl border border-white/10 animate-in slide-in-from-right-2"
@@ -248,8 +248,6 @@ pub fn NavBar() -> impl IntoView {
                         </button>
                     </div>
 
-                    <div class="divider divider-horizontal mx-0 opacity-10"></div>
-
                     // Always on Top
                     <div class="tooltip tooltip-bottom" data-tip="Always on Top">
                         <button class="btn btn-xs"
@@ -266,6 +264,37 @@ pub fn NavBar() -> impl IntoView {
                             }>
                             <span class=move || if signals.is_pinned.get() { "rotate-45 block" } else { "block" }>"📌"</span>
                         </button>
+                    </div>
+
+                    // NEW: Background Opacity Control
+                    <div class="relative group flex items-center justify-center">
+                        <div class="tooltip tooltip-bottom" data-tip="Background Opacity">
+                            <button class="btn btn-ghost btn-xs text-lg">
+                                "🌗"
+                            </button>
+                        </div>
+
+                        // Opacity Slider Popup on Hover
+                        <div class="absolute top-full right-1/2 translate-x-1/2 pt-1.5 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
+                            <div class="bg-base-300 border border-base-content/10 rounded-lg shadow-xl p-3 w-32 flex flex-col gap-2 items-center cursor-default">
+                                <span class="text-[9px] font-black text-success uppercase tracking-widest opacity-80">
+                                    {move || format!("투명도: {:.0}%", signals.opacity.get() * 100.0)}
+                                </span>
+                                <input type="range" min="0.1" max="1.0" step="0.05"
+                                    class="range range-xs range-success w-full"
+                                    prop:value=move || signals.opacity.get().to_string()
+                                    on:input=move |ev| {
+                                        let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
+                                        signals.set_opacity.set(val);
+                                    }
+                                    on:change=move |ev| {
+                                        let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
+                                        signals.set_opacity.set(val);
+                                        actions.save_config.dispatch(());
+                                    }
+                                />
+                            </div>
+                        </div>
                     </div>
 
                     // Compact Mode Toggle

@@ -3,6 +3,8 @@ use crate::config::*;
 use indexmap::IndexMap;
 use std::collections::VecDeque;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::os::windows::process::CommandExt;
+use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -143,6 +145,8 @@ pub fn run() {
                 translator_tx: Mutex::new(initial_tx),
                 data_factory_tx: Mutex::new(initial_df_tx),
                 sniffer_tx: Mutex::new(None),
+                dedup_cache: Mutex::new(std::collections::HashMap::new()),
+                blocked_users: Mutex::new(config.blocked_users.clone()),
             });
 
             Ok(())
@@ -170,7 +174,10 @@ pub fn run() {
             open_browser,
             get_network_interfaces,
             set_click_through,
-            update_tray_menu
+            update_tray_menu,
+            launch_translator,
+            block_user_command,
+            unblock_user_command
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -185,12 +192,7 @@ pub fn run() {
             // 2. Explicitly kill the llama-server to prevent zombie processes
             #[cfg(target_os = "windows")]
             {
-                use std::os::windows::process::CommandExt;
-                // If you use a custom constant, you can replace "llama-server.exe" with crate::AI_SERVER_FILENAME
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/F", "/IM", "llama-server.exe"])
-                    .creation_flags(0x08000000) // CREATE_NO_WINDOW (Prevents CMD popup)
-                    .status();
+                kill_orphaned_servers(&_app_handle);
             }
         }
     });
@@ -267,8 +269,6 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
     }
 
     if let Some(state) = app.try_state::<AppState>() {
-        let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
-        packet.pid = current_pid;
 
         // Auto-populate from Backend Cache
         {
@@ -368,4 +368,22 @@ fn update_tray_menu(state: tauri::State<TrayMenuState>, click_through: bool, alw
         "항상 위에 표시 (Always on Top): OFF"
     };
     let _ = state.always_on_top.set_text(aot_text);
+}
+
+fn kill_orphaned_servers(app: &AppHandle) {
+    inject_system_message(app, SystemLogLevel::Info, "Translator", "Cleaning up any orphaned AI server processes...");
+
+    // Uses Windows taskkill to forcefully close any dangling llama-server.exe instances
+    let _ = Command::new("taskkill")
+        .args(["/F", "/IM", "llama-server.exe"])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW so it doesn't flash a cmd prompt
+        .output(); // .output() waits for the command to finish
+}
+
+#[tauri::command]
+fn launch_translator(app: AppHandle, state: State<'_, AppState>) {
+    // Turned ON: Start the server and store the Sender
+    let model_path = crate::get_model_path(&app);
+    let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
+    *state.translator_tx.lock().unwrap() = Some(tx);
 }

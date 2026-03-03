@@ -13,11 +13,14 @@ pub fn NavBar() -> impl IntoView {
     let actions = use_context::<AppActions>().expect("AppActions missing");
 
     let (is_search_open, set_is_search_open) = signal(false);
+    let (is_controls_open, set_is_controls_open) = signal(false);
 
     // --- NODE REFERENCES ---
     let search_input_ref = create_node_ref::<Input>();
     let search_container_ref = create_node_ref::<Div>(); // The absolute popup box
     let search_btn_ref = create_node_ref::<Button>(); // The magnifier toggle button
+    let controls_container_ref = create_node_ref::<Div>();
+    let folder_btn_ref = create_node_ref::<Button>();
 
     // ==========================================
     // GLOBAL KEYBOARD SHORTCUT (Ctrl+F)
@@ -37,30 +40,37 @@ pub fn NavBar() -> impl IntoView {
     });
 
     // ==========================================
-    // NEW: CLICK-OUTSIDE TO CLOSE
+    // CLICK-OUTSIDE TO CLOSE (Search & Controls)
     // ==========================================
     window_event_listener(click, move |ev| {
-        // Only run this logic if the search bar is actually open
-        if is_search_open.get_untracked() {
-            let target = event_target::<Node>(&ev);
+        let target = event_target::<Node>(&ev);
 
+        if is_search_open.get_untracked() {
             let container = search_container_ref.get();
             let btn = search_btn_ref.get();
-
-            // Check if the click target is inside the Search Box OR the Magnifier Button
             let clicked_inside = container.map(|c| c.contains(Some(&target))).unwrap_or(false);
             let clicked_btn = btn.map(|b| b.contains(Some(&target))).unwrap_or(false);
 
-            // If they clicked somewhere else entirely, close it!
             if !clicked_inside && !clicked_btn {
                 set_is_search_open.set(false);
+            }
+        }
+
+        if is_controls_open.get_untracked() {
+            let container = controls_container_ref.get();
+            let btn = folder_btn_ref.get();
+            let clicked_inside = container.map(|c| c.contains(Some(&target))).unwrap_or(false);
+            let clicked_btn = btn.map(|b| b.contains(Some(&target))).unwrap_or(false);
+
+            if !clicked_inside && !clicked_btn {
+                set_is_controls_open.set(false);
             }
         }
     });
 
     view! {
         <nav
-            class="relative flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 py-1 bg-base-content/5 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300"
+            class="relative z-50 flex flex-nowrap items-center justify-between gap-x-2 px-2 py-1 bg-base-content/5 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300 overflow-visible"
             data-tauri-drag-region
         >
 
@@ -76,6 +86,7 @@ pub fn NavBar() -> impl IntoView {
                     tabs.into_iter().map(|(full, icon)| {
                         let t_full = full.to_string();
                         let t_click = t_full.clone();
+                        let is_custom = full == "커스텀";
                         let is_active = move || signals.active_tab.get() == t_full;
 
                         let (text_color, border_color) = match full {
@@ -90,27 +101,62 @@ pub fn NavBar() -> impl IntoView {
                         };
 
                         view! {
-                            <button
-                                class=move || format!(
-                                    "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] {} {}",
-                                    text_color,
-                                    if is_active() {
-                                        format!("{} bg-white/5 opacity-100", border_color)
-                                    } else {
-                                        "border-transparent bg-transparent opacity-40 hover:opacity-100".to_string()
+                            <div class="relative group flex items-center h-full">
+                                <button
+                                    class=move || format!(
+                                        "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] {} {}",
+                                        text_color,
+                                        if is_active() {
+                                            format!("{} bg-white/5 opacity-100", border_color)
+                                        } else {
+                                            "border-transparent bg-transparent opacity-40 hover:opacity-100".to_string()
+                                        }
+                                    )
+                                    on:click=move |_| {
+                                        signals.set_active_tab.set(t_click.clone());
+                                        signals.set_unread_count.set(0);
+                                        signals.set_is_at_bottom.set(true);
+                                        signals.set_system_at_bottom.set(true);
+                                        actions.save_config.dispatch(());
                                     }
-                                )
-                                on:click=move |_| {
-                                    signals.set_active_tab.set(t_click.clone());
-                                    signals.set_unread_count.set(0);
-                                    signals.set_is_at_bottom.set(true);
-                                    signals.set_system_at_bottom.set(true);
-                                    actions.save_config.dispatch(());
-                                }
-                            >
-                                <span class="sm:hidden">{full}</span>
-                                <span class="hidden sm:inline">{full} " " {icon}</span>
-                            </button>
+                                >
+                                    // Text only (Shows when narrower than 400px)
+                                    <span class="min-[460px]:hidden">{full}</span>
+
+                                    // Text + Emoji (Shows when wider than 400px)
+                                    <span class="hidden min-[460px]:inline">{full} " " {icon}</span>
+                                </button>
+
+                                // NEW: Dropdown Menu that appears when hovering the '커스텀' tab
+                                <Show when=move || is_custom>
+                                    <div class="absolute top-full left-0 pt-2 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
+                                        <div class="bg-base-300 border border-base-content/10 rounded-lg shadow-2xl p-2 w-36 flex flex-col gap-1">
+                                            <span class="text-[9px] font-black text-success uppercase tracking-widest px-1 mb-1 opacity-80">"필터 설정"</span>
+
+                                            {vec!["WORLD", "GUILD", "PARTY", "LOCAL"].into_iter().map(|channel| {
+                                                let ch = channel.to_string();
+                                                let ch_clone = ch.clone();
+                                                view! {
+                                                    <label class="label cursor-pointer flex justify-between px-1.5 py-1 hover:bg-base-content/10 rounded">
+                                                        <span class="label-text text-[10px] font-bold">{channel}</span>
+                                                        <input type="checkbox" class="checkbox checkbox-xs checkbox-success"
+                                                            checked=move || signals.custom_filters.get().contains(&ch_clone)
+                                                            on:change=move |ev| {
+                                                                let checked = event_target_checked(&ev);
+                                                                signals.set_custom_filters.update(|f| {
+                                                                    if checked { f.push(ch.clone()); }
+                                                                    else { f.retain(|x| x != &ch); }
+                                                                });
+                                                                actions.save_config.dispatch(());
+                                                            }
+                                                        />
+                                                    </label>
+                                                }
+                                            }).collect_view()}
+                                        </div>
+                                    </div>
+                                </Show>
+                            </div>
                         }
                     }).collect_view()
                 }}
@@ -149,86 +195,139 @@ pub fn NavBar() -> impl IntoView {
             </div>
 
             // --- RIGHT: Control Icons ---
-            <div class="flex items-center gap-1 ml-auto" data-tauri-no-drag>
+            <div class="flex items-center gap-1 ml-auto" data-tauri-no-drag
+                on:mouseenter=move |_| set_is_controls_open.set(true)
+                on:mouseleave=move |_| set_is_controls_open.set(false)
+            >
 
-                // The Magnifier Button
-                <div class="tooltip tooltip-bottom" data-tip="Search (Ctrl+F)">
-                    <button
-                        node_ref=search_btn_ref // <-- Attached ref here
-                        class="btn btn-ghost btn-xs text-lg"
-                        class:text-success=move || !signals.search_term.get().is_empty()
-                        on:click=move |_| {
-                            let new_state = !is_search_open.get_untracked();
-                            set_is_search_open.set(new_state);
+                // Triangle Toggle Button (Folds when width < 650px)
+                <button
+                    node_ref=folder_btn_ref
+                    class="btn btn-ghost btn-xs text-lg min-[675px]:hidden z-[60]"
+                    class:text-success=move || is_controls_open.get()
+                    on:click=move |_| set_is_controls_open.update(|b| *b = !*b)
+                >
+                    {move || if is_controls_open.get() { "▶" } else { "◀" }}
+                </button>
 
-                            if new_state {
-                                request_animation_frame(move || {
-                                    if let Some(el) = search_input_ref.get() {
-                                        let _ = el.focus();
-                                        el.select();
-                                    }
-                                });
-                            }
+                // Control Icons Wrapper
+                <div
+                    node_ref=controls_container_ref
+                    class=move || format!(
+                        "items-center gap-1 min-[675px]:flex min-[675px]:static min-[675px]:bg-transparent min-[675px]:shadow-none min-[675px]:p-0 min-[675px]:border-none transition-all duration-200 z-[55] {}",
+                        if is_controls_open.get() {
+                            // Expanded Overlapping View
+                            "absolute right-10 top-1.5 flex bg-base-300 p-1 rounded-lg shadow-2xl border border-white/10 animate-in slide-in-from-right-2"
+                        } else {
+                            // Hidden View
+                            "hidden"
                         }
-                    >
-                        "🔍"
-                    </button>
-                </div>
+                    )
+                >
+                    // The Magnifier Button
+                    <div class="tooltip tooltip-bottom" data-tip="Search (Ctrl+F)">
+                        <button
+                            node_ref=search_btn_ref
+                            class="btn btn-ghost btn-xs text-lg"
+                            class:text-success=move || !signals.search_term.get().is_empty()
+                            on:click=move |_| {
+                                let new_state = !is_search_open.get_untracked();
+                                set_is_search_open.set(new_state);
 
-                <div class="divider divider-horizontal mx-0 opacity-10"></div>
-
-                // Always on Top
-                <div class="tooltip tooltip-bottom" data-tip="Always on Top">
-                    <button class="btn btn-xs"
-                        class:btn-success=move || signals.is_pinned.get()
-                        class:btn-ghost=move || !signals.is_pinned.get()
-                        on:click=move |_| {
-                            let new_state = !signals.is_pinned.get();
-                            signals.set_is_pinned.set(new_state);
-                            spawn_local(async move {
-                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
-                                let _ = invoke("set_always_on_top", args).await;
-                            });
-                            actions.save_config.dispatch(());
-                        }>
-                        <span class=move || if signals.is_pinned.get() { "rotate-45 block" } else { "block" }>"📌"</span>
-                    </button>
-                </div>
-
-                // Compact Mode Toggle
-                <div class="tooltip tooltip-bottom" data-tip="Compact Mode">
-                    <button class="btn btn-ghost btn-xs text-lg"
-                        on:click=move |_| {
-                            let new_compact_state = !signals.compact_mode.get_untracked();
-                            signals.set_compact_mode.set(new_compact_state);
-
-                            if new_compact_state && signals.active_tab.get_untracked() != "시스템" {
-                                signals.set_active_tab.set("커스텀".to_string());
+                                if new_state {
+                                    request_animation_frame(move || {
+                                        if let Some(el) = search_input_ref.get() {
+                                            let _ = el.focus();
+                                            el.select();
+                                        }
+                                    });
+                                }
                             }
+                        >
+                            "🔍"
+                        </button>
+                    </div>
 
-                            actions.save_config.dispatch(());
-                        }>
-                        {move || if signals.compact_mode.get() { "🔽" } else { "🔼" }}
-                    </button>
-                </div>
+                    // Always on Top
+                    <div class="tooltip tooltip-bottom" data-tip="Always on Top">
+                        <button class="btn btn-xs"
+                            class:btn-success=move || signals.is_pinned.get()
+                            class:btn-ghost=move || !signals.is_pinned.get()
+                            on:click=move |_| {
+                                let new_state = !signals.is_pinned.get();
+                                signals.set_is_pinned.set(new_state);
+                                spawn_local(async move {
+                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
+                                    let _ = invoke("set_always_on_top", args).await;
+                                });
+                                actions.save_config.dispatch(());
+                            }>
+                            <span class=move || if signals.is_pinned.get() { "rotate-45 block" } else { "block" }>"📌"</span>
+                        </button>
+                    </div>
 
-                // Clear Chat History
-                <div class="tooltip tooltip-bottom" data-tip="Clear History">
-                    <button class="btn btn-ghost btn-xs text-lg hover:text-error"
-                        on:click=move |_| { actions.clear_history.dispatch(()); }>
-                        "🗑️"
-                    </button>
-                </div>
+                    // NEW: Background Opacity Control
+                    <div class="relative group flex items-center justify-center">
+                        <div class="tooltip tooltip-bottom" data-tip="Background Opacity">
+                            <button class="btn btn-ghost btn-xs text-lg">
+                                "🌗"
+                            </button>
+                        </div>
 
-                // Settings & Restart Indicator
-                <div class="tooltip tooltip-bottom" data-tip="Settings">
-                    <button class="btn btn-ghost btn-xs relative" on:click=move |_| signals.set_show_settings.set(true)>
-                        "⚙️"
-                        <Show when=move || signals.restart_required.get()>
-                            <span class="absolute top-0 right-0 w-2 h-2 bg-warning rounded-full animate-ping"></span>
-                            <span class="absolute top-0 right-0 w-2 h-2 bg-warning rounded-full"></span>
-                        </Show>
-                    </button>
+                        // Opacity Slider Popup on Hover
+                        <div class="absolute top-full right-1/2 translate-x-1/2 pt-1.5 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
+                            <div class="bg-base-300 border border-base-content/10 rounded-lg shadow-xl p-3 w-32 flex flex-col gap-2 items-center cursor-default">
+                                <span class="text-[9px] font-black text-success uppercase tracking-widest opacity-80">
+                                    {move || format!("투명도: {:.0}%", signals.opacity.get() * 100.0)}
+                                </span>
+                                <input type="range" min="0.1" max="1.0" step="0.05"
+                                    class="range range-xs range-success w-full"
+                                    prop:value=move || signals.opacity.get().to_string()
+                                    on:input=move |ev| {
+                                        let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
+                                        signals.set_opacity.set(val);
+                                    }
+                                    on:change=move |ev| {
+                                        let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
+                                        signals.set_opacity.set(val);
+                                        actions.save_config.dispatch(());
+                                    }
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    // Compact Mode Toggle
+                    <div class="tooltip tooltip-bottom" data-tip="Compact Mode">
+                        <button class="btn btn-ghost btn-xs text-lg"
+                            on:click=move |_| {
+                                let new_compact_state = !signals.compact_mode.get_untracked();
+                                signals.set_compact_mode.set(new_compact_state);
+
+                                if new_compact_state && signals.active_tab.get_untracked() != "시스템" {
+                                    signals.set_active_tab.set("커스텀".to_string());
+                                }
+
+                                actions.save_config.dispatch(());
+                            }>
+                            {move || if signals.compact_mode.get() { "🔽" } else { "🔼" }}
+                        </button>
+                    </div>
+
+                    // Clear Chat History
+                    <div class="tooltip tooltip-bottom" data-tip="Clear History">
+                        <button class="btn btn-ghost btn-xs text-lg hover:text-error"
+                            on:click=move |_| { actions.clear_history.dispatch(()); }>
+                            "🗑️"
+                        </button>
+                    </div>
+
+                    // Settings & Restart Indicator
+                    <div class="tooltip tooltip-bottom" data-tip="Settings">
+                        <button class="btn btn-ghost btn-xs relative" on:click=move |_| signals.set_show_settings.set(true)>
+                            "⚙️"
+                        </button>
+                    </div>
                 </div>
             </div>
         </nav>

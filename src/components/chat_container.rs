@@ -1,6 +1,6 @@
 use crate::components::ChatRow;
 use crate::store::AppSignals;
-use crate::types::{ChatMessage, SystemMessage};
+use crate::ui_types::{ChatMessage, SystemMessage};
 use crate::utils::format_time;
 use leptos::html;
 use leptos::leptos_dom::log;
@@ -157,6 +157,7 @@ pub fn ChatContainer() -> impl IntoView {
     view! {
         <div class="relative flex-1 min-h-0 flex flex-col transition-colors duration-300">
             <div
+                id="chat-scroll-container"
                 class=move || {
                     let base = "flex-1 overflow-y-auto custom-scrollbar p-2 min-h-0";
 

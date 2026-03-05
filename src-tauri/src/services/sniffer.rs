@@ -1,51 +1,34 @@
-use crate::packet_buffer::PacketBuffer;
-use crate::{config, get_model_path, inject_system_message, parsing_pipeline, store_and_emit, NetworkInterface, SnifferStatePayload};
-use lazy_static::lazy_static;
-use std::collections::{HashMap, HashSet};
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{env, thread};
-use tauri::{AppHandle, Emitter, Manager, State, Window};
+mod stream_traacker;
+mod message_processor;
 
-use crate::config::AppConfig;
-use crate::protocol::parser::{self, Port5003Event};
+use crate::{inject_system_message, parsing_pipeline, store_and_emit, NetworkInterface, SnifferStatePayload};
+use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{env, thread};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::protocol::parser::Port5003Event;
 use crate::protocol::types::{
     AppState, SystemLogLevel
 };
+use crate::services::processor::convert_to_romaji;
+use crate::services::sniffer::message_processor::{MessageProcessor, ProcessAction};
+use crate::services::sniffer::stream_traacker::StreamTracker;
 use crate::services::translator::{contains_japanese, TranslationJob};
 use crossbeam_channel::Sender;
 use etherparse::{NetHeaders, PacketHeaders, TransportHeader};
-use local_ip_address::{list_afinet_netifas, local_ip};
+use local_ip_address::list_afinet_netifas;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::Ipv4Addr;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
-use crate::services::processor::convert_to_romaji;
-// --- DATA STRUCTURES ---
-// 1. Standard Chat: Focuses on player communication
-
-lazy_static! {
-    // Tracks already seen fields to prevent log flooding
-    static ref DISCOVERED_FIELDS: Mutex<HashSet<u32>> = Mutex::new(HashSet::from([
-        1, 2, 3, 7, 10, 11, 13, 15, 18, 20, 25, 34, 35
-    ]));
-
-    static ref DISCOVERED_FIELDS_5003: Mutex<HashSet<u32>> = Mutex::new(HashSet::from([
-        0, 1, 2, 3, 4, 5, 6, 7, 12, 16, 17, 18, 21, 22, 23, 24, 25, 26, 29, 30, 31
-    ]));
-}
 
 // --- GLOBAL STATE ---
-// Watchdog Timer (Last time we saw a packet)
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
 
-// Generation Counter: Allows us to "soft kill" old threads safely
-static SNIFFER_GENERATION: AtomicU64 = AtomicU64::new(0);
-
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const RULE_NAME: &str = "BPSR Translator (Game Data)";
+const RULE_NAME: &str = "Resonance Stream (Packet Sniffing)";
 
 // Helper to "Kick" or "Feed" the Watchdog
 fn feed_watchdog() {
@@ -156,11 +139,9 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
         emit_sniffer_state(&app_handle, "Active", "Listening for game traffic...");
 
         let mut buf = [0u8; 65535];
-        let uninit_buf = unsafe {
-            std::mem::transmute::<&mut [u8], &mut [std::mem::MaybeUninit<u8>]>(buf.as_mut_slice())
-        };
 
-        let mut streams: HashMap<[u8; 6], PacketBuffer> = HashMap::new();
+        let mut tracker = StreamTracker::new();
+        let mut processor = MessageProcessor::new();
 
         loop {
             // Check if the Config changed and the thread should commit suicide
@@ -169,6 +150,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
                 break;
             }
 
+            let uninit_buf = unsafe { std::mem::transmute::<&mut [u8], &mut [std::mem::MaybeUninit<u8>]>(buf.as_mut_slice()) };
             let n = match socket.recv(uninit_buf) {
                 Ok(n) => n,
                 // Loop back to check the channel if the 500ms timeout occurs
@@ -195,7 +177,73 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
                     stream_key[4..6].copy_from_slice(&src_port.to_be_bytes());
 
                     feed_watchdog();
-                    process_game_stream(&app_handle, &mut streams, stream_key, payload, src_port);
+
+                    // 1. Process Bytes -> Extract Packets
+                    let assembled_packets = tracker.process_bytes(stream_key, payload);
+
+                    for packet_data in assembled_packets {
+                        // 2. Parse Protobuf
+                        let events = parsing_pipeline(&packet_data, &app_handle);
+
+                        for event in events {
+                            if let Port5003Event::Chat(mut chat) = event {
+                                // 1. Get the LATEST blocked list from Tauri's UI state dynamically
+                                let state = app_handle.state::<AppState>();
+                                let blocked_users = state.blocked_users.lock().unwrap().clone();
+
+                                // 2. Pass it to your pure, testable processor
+                                match processor.process(&mut chat, &blocked_users) {
+                                    ProcessAction::IgnoreDuplicate => continue,
+
+                                    ProcessAction::UpdateBlockedMessage => {
+                                        let mut history = state.chat_history.lock().unwrap();
+                                        if let Some(existing_msg) = history.get_mut(&chat.pid) {
+                                            if !existing_msg.is_blocked {
+                                                existing_msg.is_blocked = true;
+                                                let _ = app_handle.emit("chat-message-update", existing_msg.clone());
+                                            }
+                                        }
+                                    },
+
+                                    ProcessAction::EmitNewMessage => {
+                                        // Tauri handles the PID securely across threads
+                                        let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
+                                        chat.pid = current_pid;
+
+                                        // Cache the newly assigned PID
+                                        processor.commit_new_message(&chat);
+
+                                        // Apply Romaji Swap
+                                        if contains_japanese(&chat.nickname) {
+                                            let mut nick_cache = state.nickname_cache.lock().unwrap();
+                                            let romaji = nick_cache.entry(chat.nickname.clone()).or_insert_with(|| {
+                                                convert_to_romaji(&chat.nickname)
+                                            }).clone();
+                                            chat.nickname_romaji = Some(romaji);
+                                        }
+
+                                        // 4. Dispatch Side Effects (UI, Translator, Logger)
+                                        store_and_emit(&app_handle, chat.clone());
+
+                                        let config = crate::config::load_config(app_handle.clone());
+                                        if config.use_translation && contains_japanese(&chat.message) {
+                                            if let Some(tx) = state.translator_tx.lock().unwrap().as_ref() {
+                                                let _ = tx.send(TranslationJob { chat: chat.clone() });
+                                            }
+                                        } else if config.archive_chat {
+                                            if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
+                                                let _ = df_tx.send(crate::io::DataFactoryJob {
+                                                    pid: current_pid,
+                                                    original: chat.message.clone(),
+                                                    translated: None,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -317,147 +365,6 @@ pub fn ensure_firewall_rule(app: &AppHandle) {
             }
         }
     }
-}
-
-fn process_game_stream(
-    app_handle: &AppHandle,
-    streams: &mut HashMap<[u8; 6], PacketBuffer>,
-    stream_key: [u8; 6],
-    payload: &[u8],
-    src_port: u16,
-) {
-    // 1. Strip the 5003 application header
-    inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("process game stream {:?}", payload));
-    if let Some(game_data) = parser::strip_application_header(payload, 5003) {
-        inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("game data {:?}", game_data));
-        // 2. Append the bytes to the correct player/server stream buffer
-        let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
-        p_buf.add(game_data);
-
-        // 3. Extract fully assembled Protobuf packets
-        while let Some(full_packet) = p_buf.next() {
-            // We double-check the port to ensure we only emit 5003 data
-            inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("full packet {:?}", full_packet));
-            if src_port == 5003 {
-                inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", "request parse for 5003 port packet");
-                emit_parsed_message(&full_packet, app_handle);
-            }
-        }
-    }
-}
-
-// --- STAGE 3: EMIT ---
-// Filters out duplicates and dispatches the final events to Tauri.
-pub fn emit_parsed_message(data: &[u8], app: &AppHandle) {
-    let events = parsing_pipeline(data, app);
-
-    for event in events {
-        match event {
-            Port5003Event::Chat(mut c) => {
-                let state = app.state::<AppState>();
-
-                {
-                    let blocked = state.blocked_users.lock().unwrap();
-                    if blocked.contains_key(&c.uid) {
-                        c.is_blocked = true;
-                    }
-                }
-
-                // 1. Create a bulletproof unique signature
-                let signature = (c.uid, c.timestamp, c.sequence_id);
-                let mut cache = state.dedup_cache.lock().unwrap();
-
-                // 2. Check for Duplicates (Multi-client support)
-                if let Some(&existing_pid) = cache.get(&signature) {
-                    if c.is_blocked {
-                        let mut history = state.chat_history.lock().unwrap();
-                        if let Some(existing_msg) = history.get_mut(&existing_pid) {
-                            if !existing_msg.is_blocked {
-                                existing_msg.is_blocked = true;
-                                let _ = app.emit("chat-message-update", existing_msg.clone());
-                            }
-                        }
-                    }
-                    continue;
-                }
-
-                // 3. NEW MESSAGE LOGIC (Bug fix: Only fetch PID once!)
-                let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
-                c.pid = current_pid;
-                cache.insert(signature, current_pid);
-
-                // --- 4. NICKNAME CACHE & ROMAJI SWAP ---
-                if contains_japanese(&c.nickname) {
-                    let mut nick_cache = state.nickname_cache.lock().unwrap();
-                    let romaji = nick_cache.entry(c.nickname.clone()).or_insert_with(|| {
-                        convert_to_romaji(&c.nickname)
-                    }).clone();
-                    c.nickname_romaji = Some(romaji);
-                }
-
-                // --- 5. EMIT TO UI ---
-                store_and_emit(app, c.clone());
-
-                // --- 6. TRANSLATE & ARCHIVE ROUTING ---
-                let config = crate::config::load_config(app.clone());
-                let requires_translation = config.use_translation && contains_japanese(&c.message);
-
-                if requires_translation {
-                    if let Some(tx) = state.translator_tx.lock().unwrap().as_ref() {
-                        let _ = tx.send(crate::services::translator::TranslationJob { chat: c.clone() });
-                    };
-                } else if config.archive_chat {
-                    if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
-                        let _ = df_tx.send(crate::io::DataFactoryJob {
-                            pid: current_pid,
-                            original: c.message.clone(),
-                            translated: None,
-                        });
-                    };
-                }
-            }
-        }
-    }
-}
-
-/// Logs a warning with full packet data when a new protocol field is found
-fn log_missing_field_5003(app: &AppHandle, field_num: u32, wire_type: u8, data: &[u8]) {
-    let mut discovered = DISCOVERED_FIELDS_5003.lock().unwrap();
-    if discovered.insert(field_num) {
-        inject_system_message(
-            app,
-            SystemLogLevel::Warning,
-            "Discovery-5003",
-            format!("New Chat/Party Field #{} (Wire {}). Packet: {:?}", field_num, wire_type, data)
-        );
-    }
-}
-
-fn split_port_5003_fields(data: &[u8]) -> HashMap<u32, Vec<u8>> {
-    let mut fields = HashMap::new();
-    if data.len() < 2 || data[0] != 0x0A { return fields; }
-
-    let (total_len, header_read) = crate::protocol::parser::read_varint(&data[1..]);
-    let mut i = 1 + header_read;
-    let safe_end = (i + total_len as usize).min(data.len());
-
-    while i < safe_end {
-        let tag = data[i];
-        let wire_type = tag & 0x07;
-        let field_num = (tag >> 3) as u32;
-        i += 1;
-
-        let start = i;
-        let consumed = crate::protocol::parser::skip_field(wire_type, &data[i..safe_end]);
-        i += consumed;
-        let end = i.min(safe_end);
-
-        if let Some(payload) = data.get(start..end) {
-            // Use entry to handle repeated fields if necessary
-            fields.insert(field_num, payload.to_vec());
-        }
-    }
-    fields
 }
 
 pub fn remove_firewall_rule() {

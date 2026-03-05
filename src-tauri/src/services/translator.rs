@@ -97,7 +97,7 @@ pub fn translate_text(client: &Client, jp_text: &str) -> String {
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": jp_text}
         ],
-        "stream": true, // Enable SSE
+        "stream": false,
         "temperature": 0.1,
         "max_tokens": 512
     });
@@ -111,27 +111,15 @@ pub fn translate_text(client: &Client, jp_text: &str) -> String {
         Err(_) => return "[AI Server Connection Error]".to_string(),
     };
 
-    let mut full_translated_text = String::new();
-    let reader = BufReader::new(response);
-
-    // 2. Parse the stream line-by-line
-    for line in reader.lines() {
-        if let Ok(l) = line {
-            if l.starts_with("data: ") {
-                let json_str = &l[6..];
-                if json_str.trim() == "[DONE]" { break; }
-
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
-                    // Extract the "delta" (the new piece of text)
-                    if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
-                        full_translated_text.push_str(content);
-                    }
-                }
-            }
+    // 2. Parse the entire JSON body at once
+    if let Ok(json_body) = response.json::<serde_json::Value>() {
+        // In a non-streaming response, the text is inside message.content
+        if let Some(content) = json_body["choices"][0]["message"]["content"].as_str() {
+            return content.trim().to_string();
         }
     }
 
-    full_translated_text.trim().to_string()
+    "[AI Server Parsing Error]".to_string()
 }
 
 pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<TranslationJob> {
@@ -393,4 +381,38 @@ pub fn emit_translator_state(app: &tauri::AppHandle, state: &str, message: &str)
         state: state.to_string(),
         message: message.to_string(),
     });
+}
+
+#[test]
+fn test_translate_text_standard_parsing() {
+    use std::net::TcpListener;
+    use std::io::{Read, Write};
+
+    // 1. Create a mock server on a random available local port
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
+    let port = listener.local_addr().unwrap().port();
+    let mock_url = format!("http://127.0.0.1:{}", port);
+
+    // 2. Spawn a thread to handle the incoming request and send standard JSON
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            // Read and discard the incoming HTTP request
+            let mut buffer = [0; 1024];
+            let _ = stream.read(&mut buffer);
+
+            // Send a fake standard JSON HTTP response
+            let mock_response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n\
+                    {\"choices\": [{\"message\": {\"content\": \"안녕하세요\"}}]}";
+
+            let _ = stream.write_all(mock_response.as_bytes());
+        }
+    });
+
+    // 3. Call the translation function against our mock server
+    let client = Client::new();
+    let result = translate_text(&client, "こんにちは");
+    println!("{:?}", result);
+
+    // 4. Assert the parsed output extracted the text perfectly
+    assert_eq!(result, "안녕하세요");
 }

@@ -106,3 +106,51 @@ pub(crate) fn read_varint_safe(data: &[u8]) -> (u64, usize) {
     // we don't have the full Varint yet.
     (0, 0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_varint_safe() {
+        // Test valid 1-byte varint (Value: 5)
+        let data1 = [0x05];
+        let (val1, len1) = read_varint_safe(&data1);
+        assert_eq!(val1, 5);
+        assert_eq!(len1, 1);
+
+        // Test valid 2-byte varint (Value: 150 -> 0x96 0x01)
+        let data2 = [0x96, 0x01];
+        let (val2, len2) = read_varint_safe(&data2);
+        assert_eq!(val2, 150);
+        assert_eq!(len2, 2);
+
+        // Test INCOMPLETE varint (Missing the second byte)
+        let data3 = [0x96];
+        let (val3, len3) = read_varint_safe(&data3);
+        assert_eq!(val3, 0);
+        assert_eq!(len3, 0); // Should return 0 length indicating "need more data"
+    }
+
+    #[test]
+    fn test_packet_buffer_reassembly() {
+        let mut pb = PacketBuffer::new();
+
+        // Construct a fake protobuf packet
+        // 0x0A (Start), 0x03 (Varint Length 3), [0x01, 0x02, 0x03] (Payload)
+
+        // 1. Add partial data
+        pb.add(&[0x0A, 0x03, 0x01]);
+        assert_eq!(pb.next(), None); // Packet is incomplete, should return None
+
+        // 2. Add the rest of the data
+        pb.add(&[0x02, 0x03]);
+        let assembled = pb.next().unwrap();
+
+        // 3. Verify exact extraction
+        assert_eq!(assembled, vec![0x0A, 0x03, 0x01, 0x02, 0x03]);
+
+        // Buffer should now be empty
+        assert_eq!(pb.next(), None);
+    }
+}

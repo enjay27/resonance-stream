@@ -207,3 +207,57 @@ pub fn convert_to_romaji(ja_name: &str) -> String {
         .collect::<Vec<String>>()
         .join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_batchim_detection() {
+        // Test Hangul with batchim (final consonant)
+        assert_eq!(has_batchim('각'), true);
+        assert_eq!(has_batchim('은'), true);
+
+        // Test Hangul without batchim
+        assert_eq!(has_batchim('가'), false);
+        assert_eq!(has_batchim('는'), false);
+
+        // Test fallback numeric/english rules
+        assert_eq!(has_batchim('1'), true);
+        assert_eq!(has_batchim('2'), false);
+        assert_eq!(has_batchim('L'), true);
+    }
+
+    #[test]
+    fn test_shielding_pipeline() {
+        let mut custom_dict = HashMap::new();
+        custom_dict.insert("火力".to_string(), "딜러".to_string());
+        custom_dict.insert("完凸".to_string(), "풀돌".to_string());
+
+        let original_text = "【火力】@azururu 完凸 3周 <think>LLM is thinking...</think>";
+
+        // 1. Test Preprocessor
+        let shield = preprocess_text(original_text, &custom_dict, Some("Azururu"), Some("azururu"));
+
+        // Ensure the original terms are no longer in the masked text
+        assert!(!shield.masked_text.contains("火力"));
+        assert!(!shield.masked_text.contains("【"));
+        assert!(!shield.masked_text.contains("3周"));
+
+        // Ensure the dictionary captured the correct replacements
+        let vals: Vec<&String> = shield.replacements.values().collect();
+        assert!(vals.contains(&&"【".to_string()));
+        assert!(vals.contains(&&"딜러".to_string()));
+        assert!(vals.contains(&&"풀돌".to_string()));
+        assert!(vals.contains(&&"3주".to_string())); // 3周 -> 3주
+
+        // 2. Test Postprocessor (Simulating LLM output)
+        // We pretend the LLM translated the text but left the [P0] tags intact
+        let simulated_llm_output = shield.masked_text.clone();
+        let final_result = postprocess_text(&simulated_llm_output, &shield);
+
+        // The <think> tag should be stripped, and placeholders restored
+        assert_eq!(final_result, "【딜러】@azururu 풀돌 3주");
+    }
+}

@@ -537,3 +537,50 @@ pub(crate) fn skip_field(wire_type: u8, data: &[u8]) -> usize {
         _ => 1,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_standard_read_varint() {
+        // 300 in Varint is 10101100 00000010 (0xAC 0x02)
+        let data = [0xAC, 0x02, 0xFF];
+        let (val, read_bytes) = read_varint(&data);
+        assert_eq!(val, 300);
+        assert_eq!(read_bytes, 2);
+    }
+
+    #[test]
+    fn test_skip_field() {
+        // Wire Type 0 (Varint)
+        let data_varint = [0xAC, 0x02, 0xFF];
+        assert_eq!(skip_field(0, &data_varint), 2);
+
+        // Wire Type 1 (64-bit / 8 bytes)
+        let data_64bit = [0; 10];
+        assert_eq!(skip_field(1, &data_64bit), 8);
+
+        // Wire Type 2 (Length-delimited)
+        // Length 3, followed by 3 bytes = total 4 bytes to skip
+        let data_length = [0x03, 0xAA, 0xBB, 0xCC, 0xFF];
+        assert_eq!(skip_field(2, &data_length), 4);
+    }
+
+    #[test]
+    fn test_strip_application_header_5003() {
+        // Fake TCP Packet from port 5003
+        // Includes garbage app header [0x00, 0x00, 0x11, 0x22]
+        // Real payload starts at 0x0A, len 0x02, payload [0xBB, 0xCC]
+        let packet = [0x00, 0x00, 0x11, 0x22, 0x0A, 0x02, 0xBB, 0xCC];
+
+        let stripped = strip_application_header(&packet, 5003).unwrap();
+
+        // Should perfectly ignore the first 4 bytes
+        assert_eq!(stripped, &[0x0A, 0x02, 0xBB, 0xCC]);
+
+        // Test rejection of bad packet
+        let bad_packet = [0x00, 0x11, 0x22, 0x0A, 0x09, 0xBB]; // Claims length 9, but ends early
+        assert!(strip_application_header(&bad_packet, 5003).is_none());
+    }
+}

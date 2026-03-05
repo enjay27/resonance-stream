@@ -278,101 +278,77 @@ pub fn emit_translator_state(app: &tauri::AppHandle, state: &str, message: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::downloader::{MODEL_FILENAME, MODEL_FOLDER};
-    use crate::{AI_SERVER_FILENAME, AI_SERVER_FOLDER};
     use reqwest::blocking::Client;
-    use std::path::PathBuf;
-    use std::process::Command;
     use std::time::{Duration, Instant};
 
     #[test]
-    fn evaluate_translation() {
-        // 1. Resolve paths (pointing to your AppData/bin folder)
-        let appdata = std::env::var("APPDATA").expect("Could not find APPDATA environment variable");
-        let base_path = PathBuf::from(appdata).join("com.enjay.bpsr.resonance-stream");
+    fn test_full_translator_flow_with_mock() {
+        use std::net::TcpListener;
+        use std::io::{Read, Write};
 
-        let model_path = base_path.join("models").join(MODEL_FOLDER).join(MODEL_FILENAME);
-        let server_path = base_path.join("bin").join(AI_SERVER_FOLDER).join(AI_SERVER_FILENAME);
+        // 1. Create a mock server on a random available port
+        let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
+        let port = listener.local_addr().unwrap().port();
+        let mock_url = format!("http://127.0.0.1:{}", port);
 
-        println!("Looking for model at: {:?}", model_path);
-        println!("Looking for server at: {:?}", server_path);
+        // 2. Spawn a thread to act as the "llama-server"
+        std::thread::spawn(move || {
+            // Loop to handle multiple incoming requests (health check + translation)
+            for stream in listener.incoming() {
+                if let Ok(mut stream) = stream {
+                    let mut buffer = [0; 4096];
+                    if let Ok(bytes_read) = stream.read(&mut buffer) {
+                        let request = String::from_utf8_lossy(&buffer[..bytes_read]);
 
-        // 2. Start the AI Server
-        println!("Starting llama-server.exe...");
-        let mut server_process = Command::new(server_path)
-            .arg("-m").arg(&model_path)
-            .arg("--port").arg("8080")
-            .arg("-ngl").arg("99") // Force GPU for the test
-            .arg("--log-disable")
-            .spawn()
-            .expect("Failed to start llama-server.exe. Is it downloaded to AppData/bin?");
+                        // Route 1: Mock the Health Check endpoint
+                        if request.starts_with("GET /health") {
+                            let body = r#"{"status":"ok"}"#;
+                            // FIXED: Added Content-Length and Connection: close
+                            let response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                body.len(), body
+                            );
+                            let _ = stream.write_all(response.as_bytes());
+                        }
+                        // Route 2: Mock the Translation endpoint
+                        else if request.starts_with("POST /v1/chat/completions") {
+                            let body = r#"{"choices": [{"message": {"content": "116 정찰 우측 은나포"}}]}"#;
+                            // FIXED: Added Content-Length and Connection: close
+                            let response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                body.len(), body
+                            );
+                            let _ = stream.write_all(response.as_bytes());
+                        }
+                    }
+                }
+            }
+        });
 
-        // 3. Smart Health Check (Polled every 500ms)
         let client = Client::new();
+
+        // 3. Test the Health Check polling logic against the mock
         let mut is_ready = false;
         let start_wait = Instant::now();
 
-        println!("Waiting for AI Engine to warm up...");
-        while start_wait.elapsed().as_secs() < 30 {
-            if let Ok(res) = client.get(format!("{}/health", AI_SERVER_URL)).send() {
+        // We use a much shorter timeout (2 seconds) since the mock is instant
+        while start_wait.elapsed().as_secs() < 2 {
+            if let Ok(res) = client.get(format!("{}/health", mock_url)).send() {
                 if res.status().is_success() {
                     is_ready = true;
                     break;
                 }
             }
-            std::thread::sleep(Duration::from_millis(1000));
+            std::thread::sleep(Duration::from_millis(50));
         }
 
-        if !is_ready {
-            let _ = server_process.kill();
-            panic!("AI Engine failed to initialize within 30s (Model too large or GPU OOM?)");
-        }
+        assert!(is_ready, "Mock server failed the health check loop!");
 
-        // 4. Run the test translation using SSE logic
+        // 4. Test the actual Translation pipeline against the mock
         let test_jp = "116　偵察右　銀なぽ";
-        println!("-----------------------------------");
-        println!("[Input JA]: {}", test_jp);
+        let result_ko = translate_text(&client, &mock_url, test_jp);
 
-        let start_time = Instant::now();
-
-        // This now calls the updated translate_text that uses SSE streaming
-        let result_ko = translate_text(&client, AI_SERVER_URL, test_jp);
-
-        let elapsed = start_time.elapsed();
-
-        println!("[Output KO]: {}", result_ko);
-        println!("[Time]: {:.2?}", elapsed);
-        println!("-----------------------------------");
-
-        // 5. Cleanup
-        let _ = server_process.kill();
-    }
-
-    #[test]
-    fn test_translate_text_standard_parsing() {
-        use std::net::TcpListener;
-        use std::io::{Read, Write};
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
-        let port = listener.local_addr().unwrap().port();
-        let mock_url = format!("http://127.0.0.1:{}", port);
-
-        std::thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buffer = [0; 1024];
-                let _ = stream.read(&mut buffer);
-
-                let mock_response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n\
-                        {\"choices\": [{\"message\": {\"content\": \"안녕하세요\"}}]}";
-                let _ = stream.write_all(mock_response.as_bytes());
-            }
-        });
-
-        let client = Client::new();
-        // FIXED: Now we pass the mock_url so it doesn't try to hit port 8080!
-        let result = translate_text(&client, &mock_url, "こんにちは");
-
-        assert_eq!(result, "안녕하세요");
+        assert_eq!(result_ko, "116 정찰 우측 은나포");
     }
 }
 

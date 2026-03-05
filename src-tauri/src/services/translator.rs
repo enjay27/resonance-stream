@@ -1,7 +1,7 @@
-use std::io::{BufRead, BufReader};
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded, Sender};
 use reqwest::blocking::Client;
 use serde_json::json;
+use std::io::BufRead;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command};
@@ -9,10 +9,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::io::save_to_data_factory;
 use crate::protocol::types::{ChatMessage, SystemLogLevel};
 use crate::services::processor::{load_dictionary, postprocess_text, preprocess_text};
-use crate::{inject_system_message, kill_orphaned_servers, store_and_emit, AI_SERVER_FILENAME, AI_SERVER_FOLDER};
+use crate::{inject_system_message, kill_orphaned_servers, AI_SERVER_FILENAME, AI_SERVER_FOLDER};
 
 pub const AI_SERVER_URL: &str = "http://127.0.0.1:8080";
 
@@ -28,13 +27,7 @@ impl Drop for ServerGuard {
     }
 }
 
-#[derive(serde::Serialize, Clone)]
-struct TranslationUpdate {
-    pid: u64,
-    translated: String,
-}
-
-pub fn translate_text(client: &Client, jp_text: &str) -> String {
+pub fn translate_text(client: &Client, server_url: &str, jp_text: &str) -> String {
     let system_prompt =
         "당신은 '블루 프로토콜: 스타 레조넌스' 일본 서버 전문 번역 엔진입니다. 일본어 채팅을 한국어 게임 용어(한국 서버 공식 명칭)로 번역하는 것이 유일한 임무입니다.
 
@@ -102,8 +95,10 @@ pub fn translate_text(client: &Client, jp_text: &str) -> String {
         "max_tokens": 512
     });
 
-    // 1. Send the request and get a streaming response
-    let response = match client.post("http://127.0.0.1:8080/v1/chat/completions")
+    // 2. Dynamically build the endpoint
+    let endpoint = format!("{}/v1/chat/completions", server_url);
+
+    let response = match client.post(&endpoint)
         .json(&payload)
         .send()
     {
@@ -111,9 +106,7 @@ pub fn translate_text(client: &Client, jp_text: &str) -> String {
         Err(_) => return "[AI Server Connection Error]".to_string(),
     };
 
-    // 2. Parse the entire JSON body at once
     if let Ok(json_body) = response.json::<serde_json::Value>() {
-        // In a non-streaming response, the text is inside message.content
         if let Some(content) = json_body["choices"][0]["message"]["content"].as_str() {
             return content.trim().to_string();
         }
@@ -122,86 +115,67 @@ pub fn translate_text(client: &Client, jp_text: &str) -> String {
     "[AI Server Parsing Error]".to_string()
 }
 
+fn launch_ai_server(app: &AppHandle, model_path: &PathBuf, config: &crate::config::AppConfig) -> Option<Child> {
+    let server_path = app.path()
+        .app_data_dir().unwrap()
+        .join("bin").join(AI_SERVER_FOLDER).join(AI_SERVER_FILENAME);
+
+    let mut server_cmd = Command::new(server_path);
+    server_cmd.arg("-m").arg(model_path);
+    server_cmd.arg("--port").arg("8080");
+    server_cmd.arg("--log-disable");
+
+    let gpu_layers = if config.compute_mode.to_lowercase() == "gpu" {
+        match config.tier.to_lowercase().as_str() {
+            "low" => "12",
+            "middle" => "24",
+            "high" => "32",
+            "very high" => "99",
+            _ => "24",
+        }
+    } else {
+        "0"
+    };
+
+    server_cmd.args(["-ngl", gpu_layers, "-c", "1536", "-b", "64", "-ub", "64", "-t", "4", "--parallel", "1"]);
+    server_cmd.creation_flags(0x08000000);
+
+    match server_cmd.spawn() {
+        Ok(child) => Some(child),
+        Err(e) => {
+            let err_msg = format!("Failed to start llama-server.exe. ({})", e);
+            inject_system_message(app, SystemLogLevel::Error, "Translator", &err_msg);
+            emit_translator_state(app, "Error", &err_msg);
+            None
+        }
+    }
+}
+
 pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<TranslationJob> {
-    let (tx, rx): (Sender<TranslationJob>, Receiver<TranslationJob>) = unbounded();
+    let (tx, rx) = unbounded();
     let config = crate::config::load_config(app.clone());
 
     thread::spawn(move || {
         inject_system_message(&app, SystemLogLevel::Info, "Translator", "Initializing HTTP AI Backend...");
-        emit_translator_state(&app, "Starting", "Initializing AI Backend..."); // STATE 1
+        emit_translator_state(&app, "Starting", "Initializing AI Backend...");
 
         kill_orphaned_servers(&app);
 
-        let server_path = app.path()
-            .app_data_dir()
-            .unwrap()
-            .join("bin")
-            .join(AI_SERVER_FOLDER)
-            .join(AI_SERVER_FILENAME);
-
-        // Launch the Vulkan Server Process
-        let mut server_cmd = Command::new(server_path);
-        server_cmd.arg("-m").arg(&model_path);
-        server_cmd.arg("--port").arg("8080");
-        server_cmd.arg("--log-disable");
-
-        // Dynamically scale Layers, Parallel slots, and Context based on hardware tier
-        let gpu_layers = if config.compute_mode.to_lowercase() == "gpu" {
-            match config.tier.to_lowercase().as_str() {
-                "low" => "12",       // Safe for 4GB/6GB GPUs playing heavy games
-                "middle" => "24",    // Sweet spot for 8GB GPUs
-                "high" => "32",      // Good for 12GB GPUs
-                "very high" => "99", // Full offload for 16GB+ GPUs
-                _ => "24",
-            }
-        } else {
-            "0" // CPU Mode
+        // 1. Launch the Server
+        let server_process = match launch_ai_server(&app, &model_path, &config) {
+            Some(p) => p,
+            None => return,
         };
-
-        server_cmd.arg("-ngl").arg(gpu_layers);
-
-        // 2. Strict Memory Constraints (Optimized for single-chat processing)
-        server_cmd.arg("-c").arg("1536"); // Fixed 1024 context window (plenty for chat)
-
-        // Remove --parallel entirely, letting it default to 1 (sequential)
-        // Remove --cont-batching, as it requires extra memory overhead for multi-user generation
-
-        // 3. Batching & Cache Settings
-
-        server_cmd.arg("-b").arg("64");
-        server_cmd.arg("-ub").arg("64");
-        server_cmd.arg("-t").arg("4");
-        server_cmd.arg("--parallel").arg("1");
-
-        inject_system_message(&app, SystemLogLevel::Info, "Translator", format!("Performance Tier: {}", config.tier.to_uppercase()));
-
-        // Log the final command construction for deep debugging
-        inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("Server Launch Command: {:?}", server_cmd));
-
-        server_cmd.creation_flags(0x08000000);
-
-        let server_process = match server_cmd.spawn() {
-            Ok(child) => {
-                inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("Server process successfully spawned with OS PID: {}", child.id()));
-                child
-            },
-            Err(e) => {
-                let err_msg = format!("Failed to start llama-server.exe. Is it in the root folder? ({})", e);
-                inject_system_message(&app, SystemLogLevel::Error, "Translator", &err_msg);
-                emit_translator_state(&app, "Error", &err_msg); // ERROR STATE
-                return;
-            }
-        };
-
         let _server_guard = ServerGuard(server_process);
 
-        emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM..."); // STATE 2
-
-        if server_health_check(&app) {
-            emit_translator_state(&app, "Error", "AI Engine failed to start (OOM or missing model)."); // ERROR STATE
+        // 2. Wait for Health
+        emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
+        if !server_health_check(&app) {
+            emit_translator_state(&app, "Error", "AI Engine failed to start (OOM or missing model).");
             return;
         }
 
+        // 3. Setup Dependencies
         let client = Client::new();
         let dict_path = app.path().app_data_dir().unwrap().join("custom_dict.json");
         let custom_dict = load_dictionary(&dict_path);
@@ -209,55 +183,47 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         inject_system_message(&app, SystemLogLevel::Success, "Translator", "AI Server running! Ready for translation.");
         emit_translator_state(&app, "Active", "AI Engine Ready");
 
-        // Sequential Processing Loop (No Batching, No Parallelism)
+        // 4. Run the pure translation loop
         while let Ok(job) = rx.recv() {
-            let chat = job.chat;
-            let pid = chat.pid;
-
-            inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("[PID {}] Input JA: {}", pid, chat.message));
-
-            // 1. Preprocess
-            let shield = preprocess_text(&chat.message, &custom_dict, chat.nickname_romaji.as_deref(), Some(&chat.nickname));
-            inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("[PID {}] Preprocessed (Masked): {}", pid, shield.masked_text));
-
-            // 2. HTTP Request (Blocking)
-            let req_start = Instant::now();
-            let raw_translation = translate_text(&client, &shield.masked_text);
-
-            inject_system_message(&app, SystemLogLevel::Trace, "Translator", format!("[PID {}] Raw AI Response ({}ms): {}", pid, req_start.elapsed().as_millis(), raw_translation));
-
-            // 3. Postprocess
-            let final_str = postprocess_text(&raw_translation, &shield);
-            inject_system_message(&app, SystemLogLevel::Debug, "Translator", format!("[PID {}] Final Output KO: {}", pid, final_str));
-
-            // --- 4. DATA LOGGER DISPATCH ---
-            let state = app.state::<crate::AppState>();
-            if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
-                let _ = df_tx.send(crate::io::DataFactoryJob {
-                    pid: chat.pid,
-                    original: chat.message.clone(),
-                    translated: Some(final_str.clone()),
-                });
-            }
-
-            // --- 5. UPDATE MEMORY HISTORY ---
-            {
-                let mut history = state.chat_history.lock().unwrap();
-                if let Some(existing_chat) = history.get_mut(&chat.pid) {
-                    existing_chat.translated = Some(final_str.clone());
-                }
-            }
-
-            // --- 6. EMIT TO UI ---
-            let result = crate::protocol::types::TranslationResult {
-                pid: chat.pid,
-                translated: final_str,
-            };
-            let _ = app.emit("translation-event", &result);
+            process_translation_job(job, &client, &custom_dict, &app);
         }
     });
 
     tx
+}
+
+fn process_translation_job(job: TranslationJob, client: &Client, dict: &std::collections::HashMap<String, String>, app: &AppHandle) {
+    let chat = job.chat;
+    let pid = chat.pid;
+
+    // 1. Preprocess
+    let shield = preprocess_text(&chat.message, dict, chat.nickname_romaji.as_deref(), Some(&chat.nickname));
+
+    // 2. HTTP Request (Blocking)
+    let raw_translation = translate_text(client, AI_SERVER_URL, &shield.masked_text);
+
+    // 3. Postprocess
+    let final_str = postprocess_text(&raw_translation, &shield);
+
+    // 4. Dispatch Side Effects
+    let state = app.state::<crate::AppState>();
+
+    if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
+        let _ = df_tx.send(crate::io::DataFactoryJob {
+            pid: chat.pid,
+            original: chat.message.clone(),
+            translated: Some(final_str.clone()),
+        });
+    }
+
+    if let Some(existing_chat) = state.chat_history.lock().unwrap().get_mut(&chat.pid) {
+        existing_chat.translated = Some(final_str.clone());
+    }
+
+    let _ = app.emit("translation-event", &crate::protocol::types::TranslationResult {
+        pid: chat.pid,
+        translated: final_str,
+    });
 }
 
 fn server_health_check(app: &AppHandle) -> bool {
@@ -269,9 +235,9 @@ fn server_health_check(app: &AppHandle) -> bool {
 
     // Poll the health endpoint for up to 30 seconds
     while start_wait.elapsed().as_secs() < 30 {
-        inject_system_message(app, SystemLogLevel::Trace, "Translator", "Polling http://127.0.0.1:8080/health...");
+        inject_system_message(app, SystemLogLevel::Trace, "Translator", format!("Polling {}/health...", AI_SERVER_URL));
 
-        if let Ok(res) = client.get("http://127.0.0.1:8080/health").send() {
+        if let Ok(res) = client.get(format!("{}/health", AI_SERVER_URL)).send() {
             if res.status().is_success() {
                 inject_system_message(app, SystemLogLevel::Trace, "Translator", format!("Health check passed after {}ms", start_wait.elapsed().as_millis()));
                 is_ready = true;
@@ -302,15 +268,22 @@ pub fn contains_japanese(text: &str) -> bool {
     })
 }
 
+pub fn emit_translator_state(app: &tauri::AppHandle, state: &str, message: &str) {
+    let _ = app.emit("translator-state", crate::protocol::types::TranslatorStatePayload {
+        state: state.to_string(),
+        message: message.to_string(),
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use std::time::{Instant, Duration};
-    use std::process::Command;
-    use reqwest::blocking::Client;
-    use crate::{AI_SERVER_FILENAME, AI_SERVER_FOLDER};
     use crate::services::downloader::{MODEL_FILENAME, MODEL_FOLDER};
+    use crate::{AI_SERVER_FILENAME, AI_SERVER_FOLDER};
+    use reqwest::blocking::Client;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn evaluate_translation() {
@@ -341,7 +314,7 @@ mod tests {
 
         println!("Waiting for AI Engine to warm up...");
         while start_wait.elapsed().as_secs() < 30 {
-            if let Ok(res) = client.get("http://127.0.0.1:8080/health").send() {
+            if let Ok(res) = client.get(format!("{}/health", AI_SERVER_URL)).send() {
                 if res.status().is_success() {
                     is_ready = true;
                     break;
@@ -363,7 +336,7 @@ mod tests {
         let start_time = Instant::now();
 
         // This now calls the updated translate_text that uses SSE streaming
-        let result_ko = translate_text(&client, test_jp);
+        let result_ko = translate_text(&client, AI_SERVER_URL, test_jp);
 
         let elapsed = start_time.elapsed();
 
@@ -374,45 +347,32 @@ mod tests {
         // 5. Cleanup
         let _ = server_process.kill();
     }
+
+    #[test]
+    fn test_translate_text_standard_parsing() {
+        use std::net::TcpListener;
+        use std::io::{Read, Write};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
+        let port = listener.local_addr().unwrap().port();
+        let mock_url = format!("http://127.0.0.1:{}", port);
+
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buffer = [0; 1024];
+                let _ = stream.read(&mut buffer);
+
+                let mock_response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n\
+                        {\"choices\": [{\"message\": {\"content\": \"안녕하세요\"}}]}";
+                let _ = stream.write_all(mock_response.as_bytes());
+            }
+        });
+
+        let client = Client::new();
+        // FIXED: Now we pass the mock_url so it doesn't try to hit port 8080!
+        let result = translate_text(&client, &mock_url, "こんにちは");
+
+        assert_eq!(result, "안녕하세요");
+    }
 }
 
-pub fn emit_translator_state(app: &tauri::AppHandle, state: &str, message: &str) {
-    let _ = app.emit("translator-state", crate::protocol::types::TranslatorStatePayload {
-        state: state.to_string(),
-        message: message.to_string(),
-    });
-}
-
-#[test]
-fn test_translate_text_standard_parsing() {
-    use std::net::TcpListener;
-    use std::io::{Read, Write};
-
-    // 1. Create a mock server on a random available local port
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
-    let port = listener.local_addr().unwrap().port();
-    let mock_url = format!("http://127.0.0.1:{}", port);
-
-    // 2. Spawn a thread to handle the incoming request and send standard JSON
-    std::thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            // Read and discard the incoming HTTP request
-            let mut buffer = [0; 1024];
-            let _ = stream.read(&mut buffer);
-
-            // Send a fake standard JSON HTTP response
-            let mock_response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n\
-                    {\"choices\": [{\"message\": {\"content\": \"안녕하세요\"}}]}";
-
-            let _ = stream.write_all(mock_response.as_bytes());
-        }
-    });
-
-    // 3. Call the translation function against our mock server
-    let client = Client::new();
-    let result = translate_text(&client, "こんにちは");
-    println!("{:?}", result);
-
-    // 4. Assert the parsed output extracted the text perfectly
-    assert_eq!(result, "안녕하세요");
-}

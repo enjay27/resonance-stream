@@ -300,4 +300,43 @@ mod tests {
         assert_eq!(has_batchim('!'), false);
         assert_eq!(has_batchim(' '), false);
     }
+
+    #[test]
+    fn test_nickname_replacement() {
+        let dict = HashMap::new();
+
+        // Standard Case: The player's Japanese name is in the chat
+        let original_text = "あずるるさん、こんにちは！";
+        let shield = preprocess_text(original_text, &dict, Some("Azururu"), Some("あずるる"));
+
+        // Because the nickname is a direct string replacement (not a [P0] mask),
+        // we verify the text is immediately updated to Romaji so the LLM can read it.
+        assert!(shield.masked_text.contains("Azururu"));
+        assert!(!shield.masked_text.contains("あずるる"));
+        assert_eq!(shield.masked_text, "Azururuさん、こんにちは！");
+    }
+
+    #[test]
+    fn test_nickname_edge_cases() {
+        let dict = HashMap::new();
+
+        // Edge Case 1: Nickname provided, but does not exist in the chat message
+        let shield1 = preprocess_text("パーティー 구합니다", &dict, Some("Azururu"), Some("あずるる"));
+        assert_eq!(shield1.masked_text, "パーティー 구합니다"); // Should remain unchanged
+
+        // Edge Case 2: Multiple occurrences of the nickname in one message
+        let shield2 = preprocess_text("あずるる! あずるる?", &dict, Some("Azururu"), Some("あずるる"));
+        assert_eq!(shield2.masked_text, "Azururu! Azururu?"); // Both should be replaced
+
+        // Edge Case 3: Empty strings provided as nicknames
+        let shield3 = preprocess_text(" ", &dict, Some(""), Some(""));
+        assert_eq!(shield3.masked_text, " "); // Should not panic or infinite loop
+
+        // Edge Case 4: Missing arguments (Romaji exists, but original doesn't, or vice versa)
+        let shield4 = preprocess_text("あずるるさん", &dict, None, Some("あずるる"));
+        assert_eq!(shield4.masked_text, "あずるるさん"); // No change
+
+        let shield5 = preprocess_text("あずるるさん", &dict, Some("Azururu"), None);
+        assert_eq!(shield5.masked_text, "あずるるさん"); // No change
+    }
 }

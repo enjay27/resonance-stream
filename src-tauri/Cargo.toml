@@ -37,7 +37,7 @@ is_elevated = "0.1"
 crossbeam-channel = "0.5"    # Blazing fast thread queues
 
 windows = { version = "0.62.2", features = [
-    "Win32_System_LibraryLoader", # [NEW] Required for SetDllDirectoryW
+    "Win32_System_LibraryLoader", # Required for SetDllDirectoryW
     "Win32_Foundation",           # Required for PCWSTR
 ] }
 

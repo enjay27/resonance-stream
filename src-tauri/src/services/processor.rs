@@ -130,19 +130,6 @@ pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
     extra_spaces.replace_all(&final_text, " ").trim().to_string()
 }
 
-// --- NATIVE RUST JOSA FIXER ---
-fn has_batchim(c: char) -> bool {
-    let u = c as u32;
-    // Check if character is within Hangul Syllables block
-    if (0xAC00..=0xD7A3).contains(&u) {
-        let code = u - 0xAC00;
-        return (code % 28) != 0; // True if it has a final consonant
-    }
-    // Fallback for English/Numbers (rough approximation based on your python code)
-    if "013678lmnLMN".contains(c) { return true; }
-    false
-}
-
 pub fn load_dictionary(path: &Path) -> HashMap<String, String> {
     let mut custom_dict = HashMap::new();
 
@@ -206,4 +193,104 @@ pub fn convert_to_romaji(ja_name: &str) -> String {
         })
         .collect::<Vec<String>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_shielding_pipeline() {
+        let mut custom_dict = HashMap::new();
+        custom_dict.insert("火力".to_string(), "딜러".to_string());
+        custom_dict.insert("完凸".to_string(), "풀돌".to_string());
+
+        let original_text = "【火力】@アズルル 完凸 3周 <think>LLM is thinking...</think>";
+
+        // 1. Test Preprocessor
+        let shield = preprocess_text(original_text, &custom_dict, Some("Azururu"), Some("アズルル"));
+
+        // Ensure the original terms are no longer in the masked text
+        assert!(!shield.masked_text.contains("火力"));
+        assert!(!shield.masked_text.contains("【"));
+        assert!(!shield.masked_text.contains("3周"));
+
+        // Ensure the dictionary captured the correct replacements
+        let vals: Vec<&String> = shield.replacements.values().collect();
+        assert!(vals.contains(&&"【".to_string()));
+        assert!(vals.contains(&&"딜러".to_string()));
+        assert!(vals.contains(&&"풀돌".to_string()));
+        assert!(vals.contains(&&"3주".to_string())); // 3周 -> 3주
+
+        // 2. Test Postprocessor (Simulating LLM output)
+        // We pretend the LLM translated the text but left the [P0] tags intact
+        let simulated_llm_output = shield.masked_text.clone();
+        let final_result = postprocess_text(&simulated_llm_output, &shield);
+
+        // The <think> tag should be stripped, and placeholders restored
+        assert_eq!(final_result, "【딜러】@Azururu 풀돌 3주");
+    }
+
+    #[test]
+    fn test_processor_edge_cases() {
+        let dict = HashMap::new();
+
+        // Edge Case 1: Completely empty input
+        let shield1 = preprocess_text("", &dict, None, None);
+        assert_eq!(shield1.masked_text, "");
+        assert!(shield1.replacements.is_empty());
+
+        // Edge Case 2: Unmatched / Broken <think> tags from LLM
+        // If the AI starts a think tag but never finishes it, the regex won't match.
+        // It should gracefully ignore it rather than crashing.
+        let broken_llm_output = "안녕하세요 <think>this is a broken thought...";
+        let final_text = postprocess_text(broken_llm_output, &shield1);
+        assert_eq!(final_text, "안녕하세요 <think>this is a broken thought...");
+
+        // Edge Case 3: Only brackets, no text
+        let shield2 = preprocess_text("【】", &dict, None, None);
+        // It should mask the brackets themselves to protect them
+        assert!(shield2.masked_text.contains("[P0]"));
+        assert!(shield2.masked_text.contains("[P1]"));
+    }
+
+    #[test]
+    fn test_nickname_replacement() {
+        let dict = HashMap::new();
+
+        // Standard Case: The player's Japanese name is in the chat
+        let original_text = "あずるるさん、こんにちは！";
+        let shield = preprocess_text(original_text, &dict, Some("Azururu"), Some("あずるる"));
+
+        // Because the nickname is a direct string replacement (not a [P0] mask),
+        // we verify the text is immediately updated to Romaji so the LLM can read it.
+        assert!(shield.masked_text.contains("Azururu"));
+        assert!(!shield.masked_text.contains("あずるる"));
+        assert_eq!(shield.masked_text, "Azururuさん、こんにちは！");
+    }
+
+    #[test]
+    fn test_nickname_edge_cases() {
+        let dict = HashMap::new();
+
+        // Edge Case 1: Nickname provided, but does not exist in the chat message
+        let shield1 = preprocess_text("パーティー 구합니다", &dict, Some("Azururu"), Some("あずるる"));
+        assert_eq!(shield1.masked_text, "パーティー 구합니다"); // Should remain unchanged
+
+        // Edge Case 2: Multiple occurrences of the nickname in one message
+        let shield2 = preprocess_text("あずるる! あずるる?", &dict, Some("Azururu"), Some("あずるる"));
+        assert_eq!(shield2.masked_text, "Azururu! Azururu?"); // Both should be replaced
+
+        // Edge Case 3: Empty strings provided as nicknames
+        let shield3 = preprocess_text(" ", &dict, Some(""), Some(""));
+        assert_eq!(shield3.masked_text, " "); // Should not panic or infinite loop
+
+        // Edge Case 4: Missing arguments (Romaji exists, but original doesn't, or vice versa)
+        let shield4 = preprocess_text("あずるるさん", &dict, None, Some("あずるる"));
+        assert_eq!(shield4.masked_text, "あずるるさん"); // No change
+
+        let shield5 = preprocess_text("あずるるさん", &dict, Some("Azururu"), None);
+        assert_eq!(shield5.masked_text, "あずるるさん"); // No change
+    }
 }

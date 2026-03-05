@@ -310,6 +310,26 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                     }>
                                     "🔍 Filter Chat"
                                 </button>
+
+                                <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2 text-error"
+                                    on:click=move |_| {
+                                        let target_uid = sig.get_untracked().uid;
+                                        let target_name = sig.get_untracked().nickname.clone();
+                                        let blocked_name = sig.get_untracked().nickname.clone();
+
+                                        spawn_local(async move {
+                                            let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                                "uid": target_uid,
+                                                "nickname": target_name
+                                            })).unwrap();
+                                            let _ = invoke("block_user_command", args).await;
+                                        });
+
+                                        signals.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
+                                        signals.set_active_menu_id.set(None);
+                                    }>
+                                    "🚫 Block User"
+                                </button>
                             </div>
                         </Portal>
                     </Show>

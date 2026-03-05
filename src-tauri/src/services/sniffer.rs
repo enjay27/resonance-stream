@@ -1,51 +1,36 @@
-use crate::packet_buffer::PacketBuffer;
-use crate::{config, get_model_path, inject_system_message, parsing_pipeline, store_and_emit, NetworkInterface, SnifferStatePayload};
-use lazy_static::lazy_static;
-use std::collections::{HashMap, HashSet};
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{env, thread};
-use tauri::{AppHandle, Emitter, Manager, State, Window};
+mod stream_traacker;
+mod message_processor;
+mod pipeline;
 
-use crate::config::AppConfig;
-use crate::protocol::parser::{self, Port5003Event};
+use crate::{inject_system_message, parsing_pipeline, store_and_emit, NetworkInterface, SnifferStatePayload};
+use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{env, thread};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::protocol::parser::Port5003Event;
 use crate::protocol::types::{
     AppState, SystemLogLevel
 };
+use crate::services::processor::convert_to_romaji;
+use crate::services::sniffer::message_processor::{MessageProcessor, ProcessAction};
+use crate::services::sniffer::stream_traacker::StreamTracker;
 use crate::services::translator::{contains_japanese, TranslationJob};
 use crossbeam_channel::Sender;
 use etherparse::{NetHeaders, PacketHeaders, TransportHeader};
-use local_ip_address::{list_afinet_netifas, local_ip};
+use local_ip_address::list_afinet_netifas;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::Ipv4Addr;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
-use crate::services::processor::convert_to_romaji;
-// --- DATA STRUCTURES ---
-// 1. Standard Chat: Focuses on player communication
-
-lazy_static! {
-    // Tracks already seen fields to prevent log flooding
-    static ref DISCOVERED_FIELDS: Mutex<HashSet<u32>> = Mutex::new(HashSet::from([
-        1, 2, 3, 7, 10, 11, 13, 15, 18, 20, 25, 34, 35
-    ]));
-
-    static ref DISCOVERED_FIELDS_5003: Mutex<HashSet<u32>> = Mutex::new(HashSet::from([
-        0, 1, 2, 3, 4, 5, 6, 7, 12, 16, 17, 18, 21, 22, 23, 24, 25, 26, 29, 30, 31
-    ]));
-}
+use crate::services::sniffer::pipeline::PipelineAction;
 
 // --- GLOBAL STATE ---
-// Watchdog Timer (Last time we saw a packet)
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
 
-// Generation Counter: Allows us to "soft kill" old threads safely
-static SNIFFER_GENERATION: AtomicU64 = AtomicU64::new(0);
-
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const RULE_NAME: &str = "BPSR Translator (Game Data)";
+const RULE_NAME: &str = "Resonance Stream (Packet Sniffing)";
 
 // Helper to "Kick" or "Feed" the Watchdog
 fn feed_watchdog() {
@@ -69,34 +54,10 @@ pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State
 pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
     // We use a blank channel just for its lifecycle dropping properties
     let (tx, rx) = crossbeam_channel::unbounded::<()>();
-
     let config = crate::config::load_config(app.clone());
+
     feed_watchdog();
-
-    // --- WATCHDOG THREAD ---
-    let app_handle_watchdog = app.clone();
-    let rx_watchdog = rx.clone();
-    thread::spawn(move || {
-        loop {
-            // Wait 5 seconds. If the sender drops during this sleep, it breaks immediately!
-            match rx_watchdog.recv_timeout(Duration::from_secs(5)) {
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
-                _ => {} // Continue running on Timeout or Empty
-            }
-
-            let last = LAST_TRAFFIC_TIME.load(Ordering::Relaxed);
-            if last == 0 { continue; }
-
-            let start = SystemTime::now();
-            let now = start.duration_since(UNIX_EPOCH).unwrap().as_secs();
-
-            if now.saturating_sub(last) > 15 {
-                inject_system_message(&app_handle_watchdog, SystemLogLevel::Warning, "Sniffer", "Watchdog: No game traffic for 15s.");
-                let _ = app_handle_watchdog.emit("sniffer-status", "warning");
-                feed_watchdog();
-            }
-        }
-    });
+    spawn_watchdog(app.clone(), rx.clone());
 
     // --- MAIN SNIFFER THREAD ---
     let app_handle = app.clone();
@@ -106,102 +67,162 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
         inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "Engine Active");
         emit_sniffer_state(&app_handle, "Starting", "Engine Active");
 
-        if config.log_level.to_lowercase() == "debug" || config.log_level.to_lowercase() == "info" {
-            if let Ok(network_interfaces) = list_afinet_netifas() {
-                for (name, ip) in network_interfaces {
-                    inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("Active Interface: {} ({:?})", name, ip));
-                }
-            }
-        }
-
-        ensure_firewall_rule(&app_handle);
-
-        let local_ip = if !config.network_interface.is_empty() {
-            match config.network_interface.parse::<std::net::Ipv4Addr>() {
-                Ok(ip) => {
-                    inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", format!("Using manually selected Interface: {}", ip));
-                    ip
-                },
-                Err(_) => {
-                    inject_system_message(&app_handle, SystemLogLevel::Error, "Sniffer", "Invalid manual IP format. Falling back to Auto-Detect.");
-                    find_game_interface_ip().unwrap_or(std::net::Ipv4Addr::new(127, 0, 0, 1))
-                }
-            }
-        } else {
-            match find_game_interface_ip() {
-                Some(ip) => {
-                    inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", format!("Auto-Targeting Network Interface: {}", ip));
-                    emit_sniffer_state(&app_handle, "Binding", &format!("Auto-Targeting Network Interface: {}", ip));
-                    ip
-                },
-                None => {
-                    inject_system_message(&app_handle, SystemLogLevel::Error, "Sniffer", "NETWORK_ERROR: Could not find a valid local IPv4 network interface.");
-                    return;
-                }
-            }
+        // Abstracted Network Setup
+        let socket = match initialize_network_socket(&app_handle, &config) {
+            Some(s) => s,
+            None => return,
         };
-
-        let socket = match setup_raw_socket(local_ip, &app_handle) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-
-        // [CRITICAL] Set a timeout so socket.recv doesn't permanently block thread shutdown!
-        if let Err(e) = socket.set_read_timeout(Some(Duration::from_millis(500))) {
-            inject_system_message(&app_handle, SystemLogLevel::Error, "Sniffer", &format!("Failed to set socket timeout: {:?}", e));
-            return;
-        }
 
         inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "Raw Socket active. Listening for game traffic...");
         emit_sniffer_state(&app_handle, "Active", "Listening for game traffic...");
 
         let mut buf = [0u8; 65535];
-        let uninit_buf = unsafe {
-            std::mem::transmute::<&mut [u8], &mut [std::mem::MaybeUninit<u8>]>(buf.as_mut_slice())
-        };
-
-        let mut streams: HashMap<[u8; 6], PacketBuffer> = HashMap::new();
+        let mut pipeline = crate::services::sniffer::pipeline::ChatPipeline::new();
 
         loop {
-            // Check if the Config changed and the thread should commit suicide
             if let Err(crossbeam_channel::TryRecvError::Disconnected) = rx_main.try_recv() {
                 inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", "Sniffer thread shutting down.");
                 break;
             }
 
+            let uninit_buf = unsafe { std::mem::transmute::<&mut [u8], &mut [std::mem::MaybeUninit<u8>]>(buf.as_mut_slice()) };
             let n = match socket.recv(uninit_buf) {
                 Ok(n) => n,
-                // Loop back to check the channel if the 500ms timeout occurs
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => continue,
                 Err(_) => continue,
             };
 
-            let packet = &buf[..n];
-            let headers = match PacketHeaders::from_ip_slice(packet) {
-                Ok(h) => h,
-                Err(_) => continue,
-            };
+            feed_watchdog();
 
-            if let Some(TransportHeader::Tcp(tcp)) = headers.transport {
-                let src_port = tcp.source_port;
-                if src_port == 5003 {
-                    let payload = headers.payload.slice();
-                    if payload.is_empty() { continue; }
+            let state = app_handle.state::<AppState>();
+            let blocked_users = state.blocked_users.lock().unwrap().clone();
 
-                    let mut stream_key = [0u8; 6];
-                    if let Some(NetHeaders::Ipv4(ipv4, _extensions)) = headers.net {
-                        stream_key[0..4].copy_from_slice(&ipv4.source);
-                    }
-                    stream_key[4..6].copy_from_slice(&src_port.to_be_bytes());
+            // 1. Feed the Pure Pipeline
+            let actions = pipeline.feed_network_packet(&buf[..n], &blocked_users, || {
+                state.next_pid.fetch_add(1, Ordering::SeqCst)
+            });
 
-                    feed_watchdog();
-                    process_game_stream(&app_handle, &mut streams, stream_key, payload, src_port);
-                }
-            }
+            // 2. Dispatch Side Effects
+            dispatch_pipeline_actions(&app_handle, actions);
         }
     });
 
     tx // Return the Sender to AppState!
+}
+
+// --- 2. WATCHDOG THREAD ---
+fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
+    thread::spawn(move || {
+        loop {
+            match rx.recv_timeout(Duration::from_secs(5)) {
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                _ => {}
+            }
+
+            let last = LAST_TRAFFIC_TIME.load(Ordering::Relaxed);
+            if last == 0 { continue; }
+
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+            if now.saturating_sub(last) > 15 {
+                inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Watchdog: No game traffic for 15s.");
+                let _ = app.emit("sniffer-status", "warning");
+                feed_watchdog();
+            }
+        }
+    });
+}
+
+// --- 3. NETWORK INITIALIZATION ---
+fn initialize_network_socket(app: &AppHandle, config: &crate::config::AppConfig) -> Option<Socket> {
+    if config.log_level.to_lowercase() == "debug" || config.log_level.to_lowercase() == "info" {
+        if let Ok(network_interfaces) = list_afinet_netifas() {
+            for (name, ip) in network_interfaces {
+                inject_system_message(app, SystemLogLevel::Debug, "Sniffer", format!("Active Interface: {} ({:?})", name, ip));
+            }
+        }
+    }
+
+    ensure_firewall_rule(app);
+
+    let local_ip = if !config.network_interface.is_empty() {
+        match config.network_interface.parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => {
+                inject_system_message(app, SystemLogLevel::Info, "Sniffer", format!("Using manually selected Interface: {}", ip));
+                ip
+            },
+            Err(_) => {
+                inject_system_message(app, SystemLogLevel::Error, "Sniffer", "Invalid manual IP format. Falling back to Auto-Detect.");
+                find_game_interface_ip().unwrap_or(std::net::Ipv4Addr::new(127, 0, 0, 1))
+            }
+        }
+    } else {
+        match find_game_interface_ip() {
+            Some(ip) => {
+                inject_system_message(app, SystemLogLevel::Info, "Sniffer", format!("Auto-Targeting Network Interface: {}", ip));
+                emit_sniffer_state(app, "Binding", &format!("Auto-Targeting Network Interface: {}", ip));
+                ip
+            },
+            None => {
+                inject_system_message(app, SystemLogLevel::Error, "Sniffer", "NETWORK_ERROR: Could not find a valid local IPv4 network interface.");
+                return None;
+            }
+        }
+    };
+
+    let socket = setup_raw_socket(local_ip, app).ok()?;
+
+    if let Err(e) = socket.set_read_timeout(Some(Duration::from_millis(500))) {
+        inject_system_message(app, SystemLogLevel::Error, "Sniffer", &format!("Failed to set socket timeout: {:?}", e));
+        return None;
+    }
+
+    Some(socket)
+}
+
+// --- 4. SIDE EFFECT DISPATCHER ---
+fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
+    let state = app.state::<AppState>();
+    let config = crate::config::load_config(app.clone());
+
+    for action in actions {
+        match action {
+            PipelineAction::UpdateBlockedMessage(chat) => {
+                let mut history = state.chat_history.lock().unwrap();
+                if let Some(existing_msg) = history.get_mut(&chat.pid) {
+                    if !existing_msg.is_blocked {
+                        existing_msg.is_blocked = true;
+                        let _ = app.emit("chat-message-update", existing_msg.clone());
+                    }
+                }
+            },
+            PipelineAction::EmitNewMessage(mut chat) => {
+                // Apply Romaji Swap
+                if contains_japanese(&chat.nickname) {
+                    let mut nick_cache = state.nickname_cache.lock().unwrap();
+                    chat.nickname_romaji = Some(nick_cache.entry(chat.nickname.clone())
+                        .or_insert_with(|| convert_to_romaji(&chat.nickname)).clone());
+                }
+
+                // Dispatch Side Effects
+                store_and_emit(app, chat.clone());
+
+                if config.use_translation && contains_japanese(&chat.message) {
+                    if let Some(tx) = state.translator_tx.lock().unwrap().as_ref() {
+                        let _ = tx.send(TranslationJob { chat: chat.clone() });
+                    }
+                } else if config.archive_chat {
+                    if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
+                        let _ = df_tx.send(crate::io::DataFactoryJob {
+                            pid: chat.pid,
+                            original: chat.message.clone(),
+                            translated: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, String> {
@@ -317,147 +338,6 @@ pub fn ensure_firewall_rule(app: &AppHandle) {
             }
         }
     }
-}
-
-fn process_game_stream(
-    app_handle: &AppHandle,
-    streams: &mut HashMap<[u8; 6], PacketBuffer>,
-    stream_key: [u8; 6],
-    payload: &[u8],
-    src_port: u16,
-) {
-    // 1. Strip the 5003 application header
-    inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("process game stream {:?}", payload));
-    if let Some(game_data) = parser::strip_application_header(payload, 5003) {
-        inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("game data {:?}", game_data));
-        // 2. Append the bytes to the correct player/server stream buffer
-        let p_buf = streams.entry(stream_key).or_insert_with(PacketBuffer::new);
-        p_buf.add(game_data);
-
-        // 3. Extract fully assembled Protobuf packets
-        while let Some(full_packet) = p_buf.next() {
-            // We double-check the port to ensure we only emit 5003 data
-            inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", format!("full packet {:?}", full_packet));
-            if src_port == 5003 {
-                inject_system_message(&app_handle, SystemLogLevel::Debug, "Sniffer", "request parse for 5003 port packet");
-                emit_parsed_message(&full_packet, app_handle);
-            }
-        }
-    }
-}
-
-// --- STAGE 3: EMIT ---
-// Filters out duplicates and dispatches the final events to Tauri.
-pub fn emit_parsed_message(data: &[u8], app: &AppHandle) {
-    let events = parsing_pipeline(data, app);
-
-    for event in events {
-        match event {
-            Port5003Event::Chat(mut c) => {
-                let state = app.state::<AppState>();
-
-                {
-                    let blocked = state.blocked_users.lock().unwrap();
-                    if blocked.contains_key(&c.uid) {
-                        c.is_blocked = true;
-                    }
-                }
-
-                // 1. Create a bulletproof unique signature
-                let signature = (c.uid, c.timestamp, c.sequence_id);
-                let mut cache = state.dedup_cache.lock().unwrap();
-
-                // 2. Check for Duplicates (Multi-client support)
-                if let Some(&existing_pid) = cache.get(&signature) {
-                    if c.is_blocked {
-                        let mut history = state.chat_history.lock().unwrap();
-                        if let Some(existing_msg) = history.get_mut(&existing_pid) {
-                            if !existing_msg.is_blocked {
-                                existing_msg.is_blocked = true;
-                                let _ = app.emit("chat-message-update", existing_msg.clone());
-                            }
-                        }
-                    }
-                    continue;
-                }
-
-                // 3. NEW MESSAGE LOGIC (Bug fix: Only fetch PID once!)
-                let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
-                c.pid = current_pid;
-                cache.insert(signature, current_pid);
-
-                // --- 4. NICKNAME CACHE & ROMAJI SWAP ---
-                if contains_japanese(&c.nickname) {
-                    let mut nick_cache = state.nickname_cache.lock().unwrap();
-                    let romaji = nick_cache.entry(c.nickname.clone()).or_insert_with(|| {
-                        convert_to_romaji(&c.nickname)
-                    }).clone();
-                    c.nickname_romaji = Some(romaji);
-                }
-
-                // --- 5. EMIT TO UI ---
-                store_and_emit(app, c.clone());
-
-                // --- 6. TRANSLATE & ARCHIVE ROUTING ---
-                let config = crate::config::load_config(app.clone());
-                let requires_translation = config.use_translation && contains_japanese(&c.message);
-
-                if requires_translation {
-                    if let Some(tx) = state.translator_tx.lock().unwrap().as_ref() {
-                        let _ = tx.send(crate::services::translator::TranslationJob { chat: c.clone() });
-                    };
-                } else if config.archive_chat {
-                    if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
-                        let _ = df_tx.send(crate::io::DataFactoryJob {
-                            pid: current_pid,
-                            original: c.message.clone(),
-                            translated: None,
-                        });
-                    };
-                }
-            }
-        }
-    }
-}
-
-/// Logs a warning with full packet data when a new protocol field is found
-fn log_missing_field_5003(app: &AppHandle, field_num: u32, wire_type: u8, data: &[u8]) {
-    let mut discovered = DISCOVERED_FIELDS_5003.lock().unwrap();
-    if discovered.insert(field_num) {
-        inject_system_message(
-            app,
-            SystemLogLevel::Warning,
-            "Discovery-5003",
-            format!("New Chat/Party Field #{} (Wire {}). Packet: {:?}", field_num, wire_type, data)
-        );
-    }
-}
-
-fn split_port_5003_fields(data: &[u8]) -> HashMap<u32, Vec<u8>> {
-    let mut fields = HashMap::new();
-    if data.len() < 2 || data[0] != 0x0A { return fields; }
-
-    let (total_len, header_read) = crate::protocol::parser::read_varint(&data[1..]);
-    let mut i = 1 + header_read;
-    let safe_end = (i + total_len as usize).min(data.len());
-
-    while i < safe_end {
-        let tag = data[i];
-        let wire_type = tag & 0x07;
-        let field_num = (tag >> 3) as u32;
-        i += 1;
-
-        let start = i;
-        let consumed = crate::protocol::parser::skip_field(wire_type, &data[i..safe_end]);
-        i += consumed;
-        let end = i.min(safe_end);
-
-        if let Some(payload) = data.get(start..end) {
-            // Use entry to handle repeated fields if necessary
-            fields.insert(field_num, payload.to_vec());
-        }
-    }
-    fields
 }
 
 pub fn remove_firewall_rule() {

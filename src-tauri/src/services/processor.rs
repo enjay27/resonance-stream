@@ -260,4 +260,44 @@ mod tests {
         // The <think> tag should be stripped, and placeholders restored
         assert_eq!(final_result, "【딜러】@azururu 풀돌 3주");
     }
+
+    #[test]
+    fn test_processor_edge_cases() {
+        let dict = HashMap::new();
+
+        // Edge Case 1: Completely empty input
+        let shield1 = preprocess_text("", &dict, None, None);
+        assert_eq!(shield1.masked_text, "");
+        assert!(shield1.replacements.is_empty());
+
+        // Edge Case 2: Unmatched / Broken <think> tags from LLM
+        // If the AI starts a think tag but never finishes it, the regex won't match.
+        // It should gracefully ignore it rather than crashing.
+        let broken_llm_output = "안녕하세요 <think>this is a broken thought...";
+        let final_text = postprocess_text(broken_llm_output, &shield1);
+        assert_eq!(final_text, "안녕하세요 <think>this is a broken thought...");
+
+        // Edge Case 3: Only brackets, no text
+        let shield2 = preprocess_text("【】", &dict, None, None);
+        // It should mask the brackets themselves to protect them
+        assert!(shield2.masked_text.contains("[P0]"));
+        assert!(shield2.masked_text.contains("[P1]"));
+    }
+
+    #[test]
+    fn test_batchim_edge_cases() {
+        // Edge Case: English letters and numbers that act like they have a batchim
+        assert_eq!(has_batchim('3'), true); // 삼 (Sam) -> Has batchim
+        assert_eq!(has_batchim('7'), true); // 칠 (Chil) -> Has batchim
+        assert_eq!(has_batchim('4'), false); // 사 (Sa) -> No batchim
+
+        // Edge Case: English consonants
+        assert_eq!(has_batchim('m'), true);
+        assert_eq!(has_batchim('N'), true);
+        assert_eq!(has_batchim('A'), false);
+
+        // Edge Case: Symbols should return false to prevent panic
+        assert_eq!(has_batchim('!'), false);
+        assert_eq!(has_batchim(' '), false);
+    }
 }

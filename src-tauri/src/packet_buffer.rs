@@ -153,4 +153,34 @@ mod tests {
         // Buffer should now be empty
         assert_eq!(pb.next(), None);
     }
+
+    #[test]
+    fn test_buffer_edge_cases() {
+        let mut pb = PacketBuffer::new();
+
+        // Edge Case 1: 0x0A Spam (Multiple fake packet starts)
+        // Buffer receives a bunch of 0x0A bytes before a real packet
+        pb.add(&[0x0A, 0x0A, 0x0A, 0x03, 0x01, 0x02, 0x03]);
+
+        // The first two 0x0A bytes will yield "incomplete" or fake lengths,
+        // but the buffer should eventually recover and find the real packet
+        // because of the sanity check dropping fake 0x0As.
+        let mut attempts = 0;
+        let mut found_packet = None;
+        while let Some(p) = pb.next() {
+            found_packet = Some(p);
+            attempts += 1;
+            if attempts > 5 { break; }
+        }
+        assert_eq!(found_packet.unwrap(), vec![0x0A, 0x03, 0x01, 0x02, 0x03]);
+
+        // Edge Case 2: Insanely large fake Varint length
+        pb.buffer.clear();
+        // 0x0A followed by a varint that decodes to ~2 million bytes
+        pb.add(&[0x0A, 0xFF, 0xFF, 0x7F, 0x00, 0x00]);
+
+        // Our safety check `if total_len > 65535` should catch this,
+        // drain the bad 0x0A, and prevent the app from trying to allocate 2MB of memory.
+        assert_eq!(pb.next(), None);
+    }
 }

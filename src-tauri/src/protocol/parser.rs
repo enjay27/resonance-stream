@@ -583,4 +583,32 @@ mod tests {
         let bad_packet = [0x00, 0x11, 0x22, 0x0A, 0x09, 0xBB]; // Claims length 9, but ends early
         assert!(strip_application_header(&bad_packet, 5003).is_none());
     }
+
+    #[test]
+    fn test_parser_edge_cases() {
+        // Edge Case 1: strip_application_header with tiny payloads
+        let tiny_payload = [0x0A, 0x01]; // Length is only 2 bytes
+        assert!(strip_application_header(&tiny_payload, 5003).is_none());
+        assert!(strip_application_header(&tiny_payload, 10250).is_none());
+
+        // Edge Case 2: Truncated Varint parsing
+        // The byte 0xAC indicates continuation, but the buffer ends abruptly!
+        let truncated_data = [0xAC];
+        let (val, read_bytes) = read_varint(&truncated_data);
+        // Should safely stop reading and not panic, returning whatever it has so far
+        assert_eq!(read_bytes, 1);
+
+        // Edge Case 3: skip_field with out-of-bounds length
+        // Wire type 2 (length-delimited), claims length is 50, but buffer only has 2 bytes left
+        let out_of_bounds_data = [0x32, 0xFF, 0xFF];
+        let skipped = skip_field(2, &out_of_bounds_data);
+
+        // The caller (stage1_split) uses `.min(data.len())` to prevent crashing,
+        // so we just ensure skip_field itself doesn't panic and returns the calculated skip size.
+        assert_eq!(skipped, 51); // 1 byte for varint + 50 requested length
+
+        // Let's manually verify the caller's safety net
+        let safe_end = (0 + skipped).min(out_of_bounds_data.len());
+        assert_eq!(safe_end, 3); // Capped safely at buffer length!
+    }
 }

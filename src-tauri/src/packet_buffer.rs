@@ -1,11 +1,9 @@
-// src-tauri/src/packet_buffer.rs
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
 pub struct PacketBuffer {
     buffer: Vec<u8>,
-    last_success_ms: u64, // [NEW] Timestamp of last successful parse
+    last_success_ms: u64, // Timestamp of last successful parse
 }
 
 impl PacketBuffer {
@@ -19,7 +17,7 @@ impl PacketBuffer {
     pub fn add(&mut self, data: &[u8]) {
         let now = get_timestamp();
 
-        // [NEW] WATCHDOG LOGIC
+        // WATCHDOG LOGIC
         // If the buffer is NOT empty (meaning we are accumulating data)
         // AND it has been > 500 ms since we successfully parsed a packet...
         if !self.buffer.is_empty() {

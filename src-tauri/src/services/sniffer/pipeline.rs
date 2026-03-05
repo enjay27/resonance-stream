@@ -32,46 +32,46 @@ impl ChatPipeline {
     ) -> Vec<PipelineAction> {
         let mut actions = Vec::new();
 
-        let headers = match PacketHeaders::from_ip_slice(packet) {
-            Ok(h) => h,
-            Err(_) => return actions,
-        };
+        // 1. Guard clauses: Fail fast if it's not the exact IPv4/TCP/5003 packet we want
+        let Ok(headers) = PacketHeaders::from_ip_slice(packet) else { return actions; };
+        let Some(TransportHeader::Tcp(tcp)) = headers.transport else { return actions; };
+        if tcp.source_port != 5003 { return actions; }
 
-        if let Some(TransportHeader::Tcp(tcp)) = headers.transport {
-            let src_port = tcp.source_port;
-            if src_port == 5003 {
-                let payload = headers.payload.slice();
-                if payload.is_empty() { return actions; }
+        let payload = headers.payload.slice();
+        if payload.is_empty() { return actions; }
 
-                let mut stream_key = [0u8; 6];
-                if let Some(NetHeaders::Ipv4(ipv4, _)) = headers.net {
-                    stream_key[0..4].copy_from_slice(&ipv4.source);
-                }
-                stream_key[4..6].copy_from_slice(&src_port.to_be_bytes());
+        let Some(NetHeaders::Ipv4(ipv4, _)) = headers.net else { return actions; };
 
-                let assembled_packets = self.tracker.process_bytes(stream_key, payload);
+        // 2. Build the unique TCP stream key
+        let mut stream_key = [0u8; 6];
+        stream_key[0..4].copy_from_slice(&ipv4.source);
+        stream_key[4..6].copy_from_slice(&tcp.source_port.to_be_bytes());
 
-                for packet_data in assembled_packets {
-                    let events = parsing_pipeline(&packet_data);
+        // 3. Assemble fragmented bytes into complete Protobuf packets
+        let assembled_packets = self.tracker.process_bytes(stream_key, payload);
 
-                    for event in events {
-                        if let Port5003Event::Chat(mut chat) = event {
-                            match self.processor.process(&mut chat, blocked_users) {
-                                ProcessAction::IgnoreDuplicate => continue,
-                                ProcessAction::UpdateBlockedMessage => {
-                                    actions.push(PipelineAction::UpdateBlockedMessage(chat));
-                                },
-                                ProcessAction::EmitNewMessage => {
-                                    chat.pid = assign_pid();
-                                    self.processor.commit_new_message(&chat);
-                                    actions.push(PipelineAction::EmitNewMessage(chat));
-                                }
-                            }
-                        }
+        // 4. Process the fully assembled packets
+        for packet_data in assembled_packets {
+            for event in parsing_pipeline(&packet_data) {
+
+                // Guard clause for the event loop using let-else
+                let Port5003Event::Chat(mut chat) = event;
+
+                // 5. Apply duplicate and blocking rules
+                match self.processor.process(&mut chat, blocked_users) {
+                    ProcessAction::IgnoreDuplicate => continue,
+                    ProcessAction::UpdateBlockedMessage => {
+                        actions.push(PipelineAction::UpdateBlockedMessage(chat));
+                    },
+                    ProcessAction::EmitNewMessage => {
+                        chat.pid = assign_pid();
+                        self.processor.commit_new_message(&chat);
+                        actions.push(PipelineAction::EmitNewMessage(chat));
                     }
                 }
             }
         }
+
         actions
     }
 }

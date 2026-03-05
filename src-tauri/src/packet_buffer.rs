@@ -158,20 +158,27 @@ mod tests {
     fn test_buffer_edge_cases() {
         let mut pb = PacketBuffer::new();
 
-        // Edge Case 1: 0x0A Spam (Multiple fake packet starts)
-        // Buffer receives a bunch of 0x0A bytes before a real packet
-        pb.add(&[0x0A, 0x0A, 0x0A, 0x03, 0x01, 0x02, 0x03]);
+        // Edge Case 1: 0x0A Spam with recovery
+        // 1. We start with a fake 0x0A and a length byte (0xFF 0x08) that decodes to 1151.
+        // 2. We add 1100 bytes of padding.
+        // 3. We add the real packet [0x0A, 0x03, 0x01, 0x02, 0x03].
+        let mut data = vec![0x0A, 0xFF, 0x08]; // Total packet length will be 1154
+        data.extend(vec![0; 1100]);           // Current buffer size becomes ~1108
+        data.extend(&[0x0A, 0x03, 0x01, 0x02, 0x03]);
 
-        // The first two 0x0A bytes will yield "incomplete" or fake lengths,
-        // but the buffer should eventually recover and find the real packet
-        // because of the sanity check dropping fake 0x0As.
-        let mut attempts = 0;
+        pb.add(&data);
+
+        // Now, next() will:
+        // - Find the first 0x0A.
+        // - Calculate total_len = 1154.
+        // - See that total_len (1154) > buffer.len() (1108) AND buffer.len() > 1024.
+        // - Trigger the sanity check, drain(0..1), and retry!
         let mut found_packet = None;
         while let Some(p) = pb.next() {
             found_packet = Some(p);
-            attempts += 1;
-            if attempts > 5 { break; }
         }
+
+        // Assert that we successfully recovered and found the real packet
         assert_eq!(found_packet.unwrap(), vec![0x0A, 0x03, 0x01, 0x02, 0x03]);
 
         // Edge Case 2: Insanely large fake Varint length
@@ -179,8 +186,7 @@ mod tests {
         // 0x0A followed by a varint that decodes to ~2 million bytes
         pb.add(&[0x0A, 0xFF, 0xFF, 0x7F, 0x00, 0x00]);
 
-        // Our safety check `if total_len > 65535` should catch this,
-        // drain the bad 0x0A, and prevent the app from trying to allocate 2MB of memory.
+        // This triggers the `total_len > 65535` check immediately.
         assert_eq!(pb.next(), None);
     }
 }

@@ -54,7 +54,7 @@ pub fn parsing_pipeline(data: &[u8]) -> Vec<Port5003Event> {
 
 // --- STAGE 1: SPLIT ---
 // Separates the raw Protobuf packet into categorized byte blocks.
-pub(crate) fn stage1_split<'a>(data: &'a [u8]) -> Option<SplitPayload<'a>> {
+pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
     let mut payload = SplitPayload {
         channel: "WORLD".to_string(),
         chat_blocks: Vec::new(),

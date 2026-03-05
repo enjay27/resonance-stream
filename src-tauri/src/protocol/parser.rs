@@ -30,17 +30,18 @@ pub struct SenderInfo {
     pub unknown_fields: HashMap<String, Vec<u8>>,
 }
 
-pub fn parsing_pipeline(data: &[u8], app: &AppHandle) -> Vec<Port5003Event>{
+pub fn parsing_pipeline(data: &[u8]) -> Vec<Port5003Event> {
     let raw_payload = match stage1_split(data) {
         Some(p) => p,
         None => return Vec::new(),
     };
 
-    inject_system_message(app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 1 completed {:?}", raw_payload));
+    // Use standard log::trace! instead of Tauri's inject_system_message
+    log::trace!("[5003] stage 1 completed {:?}", raw_payload);
 
     let events = stage2_process(raw_payload);
 
-    inject_system_message(app, SystemLogLevel::Trace, "Sniffer", format!("[5003] stage 2 completed {:?}", events));
+    log::trace!("[5003] stage 2 completed {:?}", events);
 
     events
 }

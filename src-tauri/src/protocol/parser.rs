@@ -584,4 +584,66 @@ mod tests {
         // It should perfectly stitch the text and the mapped item link together!
         assert_eq!(result, "Look at this: [아이템 링크]");
     }
+
+    #[test]
+    fn test_parse_message_block() {
+        let mut payload = ChatPayload::default();
+
+        // Simulate the inner bytes of Tag 34 (Message Block)
+        // It contains a Normal Text block (Tag 26) followed by a Rich Content block (Tag 58)
+        let message_data = [
+            // --- Tag 26: Normal Text ---
+            26, 6, // Tag 26, Length 6
+            b'H', b'e', b'l', b'l', b'o', b' ',
+
+            // --- Tag 58: Rich Content (Item Link) ---
+            58, 4, // Tag 58, Length 4
+            18, 2, // Array Wrapper: Tag 18, Length 2
+            8, 3, // Chunk Type: 3 (Item Link)
+
+            // --- Tag 26: Normal Text Again ---
+            26, 1, // Tag 26, Length 1
+            b'!'
+        ];
+
+        // Process the block
+        parse_message_block(&message_data, &mut payload);
+
+        // It should perfectly stitch all 3 pieces together in order!
+        assert_eq!(payload.message, "Hello [아이템 링크]!");
+        // Ensure no garbage fell into unknown_fields because of bad pointer math
+        assert!(payload.unknown_fields.is_empty());
+    }
+
+    #[test]
+    fn test_parse_chat_payload_flattened() {
+        // Construct the full ChatPayload byte array (what resides inside the outer Tag 18)
+        let chat_payload_data = vec![
+            // 1. Session ID (Tag 8 -> 0x08)
+            8, 0xE7, 0x07, // Value: 999
+
+            // 2. Sender Info (Tag 18 -> 0x12)
+            18, 7, // Tag 18, Length 7
+            8, 100, // UID: 100
+            18, 3, b'B', b'o', b'b', // Nickname: "Bob"
+
+            // 3. Timestamp (Tag 24 -> 0x18)
+            24, 0x80, 0x01, // Value: 128
+
+            // 4. Message Block (Tag 34 -> 0x22)
+            34, 7, // Tag 34, Length 7
+            26, 5, b'G', b'r', b'e', b'a', b't' // Tag 26, Length 5, "Great"
+        ];
+
+        let parsed = parse_chat_payload(&chat_payload_data);
+
+        // Verify the top-level fields
+        assert_eq!(parsed.session_id, 999);
+        assert_eq!(parsed.timestamp, 128);
+        assert_eq!(parsed.message, "Great");
+
+        // Verify the nested Sender Info was delegated correctly
+        assert_eq!(parsed.sender.uid, 100);
+        assert_eq!(parsed.sender.nickname, "Bob");
+    }
 }

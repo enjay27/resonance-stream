@@ -22,15 +22,17 @@ lazy_static! {
 
 pub mod config;
 pub mod io;
-pub mod packet_buffer;
 
 pub mod protocol;
 pub mod services;
 
+pub use io::*;
+pub use config::*;
 pub use protocol::parser::*;
 pub use protocol::types::*;
 pub use services::downloader::*;
 pub use services::sniffer::*;
+pub use services::translator::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -161,8 +163,9 @@ pub fn run() {
             start_sniffer_command,
             get_chat_history,
             get_system_history,
-            check_dict_update,
-            sync_dictionary,
+            check_all_updates,
+            ignore_update,
+            apply_dictionary_update,
             clear_chat_history,
             set_always_on_top,
             load_config,
@@ -177,7 +180,7 @@ pub fn run() {
             update_tray_menu,
             launch_translator,
             block_user_command,
-            unblock_user_command
+            unblock_user_command,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

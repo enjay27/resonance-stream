@@ -1,4 +1,5 @@
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::protocol::decoder::read_varint;
 
 #[derive(Debug)]
 pub struct PacketBuffer {
@@ -45,7 +46,7 @@ impl PacketBuffer {
                 if idx > 0 { self.buffer.drain(0..idx); }
 
                 // 2. Read the Varint length
-                let (msg_len, varint_size) = read_varint_safe(&self.buffer[1..]);
+                let (msg_len, varint_size) = read_varint(&self.buffer[1..]);
                 if varint_size == 0 { return None; } // Need more data
 
                 let total_len = 1 + varint_size + msg_len as usize;
@@ -81,54 +82,9 @@ fn get_timestamp() -> u64 {
         .as_millis() as u64
 }
 
-/// A safe Varint reader that returns (0,0) if the buffer ends before the Varint is finished
-pub(crate) fn read_varint_safe(data: &[u8]) -> (u64, usize) {
-    let mut value = 0u64;
-    let mut shift = 0;
-    let mut pos = 0;
-
-    while pos < data.len() {
-        let byte = data[pos];
-        value |= ((byte & 0x7F) as u64) << shift;
-        pos += 1;
-
-        if (byte & 0x80) == 0 {
-            return (value, pos);
-        }
-
-        shift += 7;
-        if shift >= 64 { break; } // Prevent panic on corrupted data
-    }
-
-    // If we exit the loop but the last byte had the continuation bit set,
-    // we don't have the full Varint yet.
-    (0, 0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_read_varint_safe() {
-        // Test valid 1-byte varint (Value: 5)
-        let data1 = [0x05];
-        let (val1, len1) = read_varint_safe(&data1);
-        assert_eq!(val1, 5);
-        assert_eq!(len1, 1);
-
-        // Test valid 2-byte varint (Value: 150 -> 0x96 0x01)
-        let data2 = [0x96, 0x01];
-        let (val2, len2) = read_varint_safe(&data2);
-        assert_eq!(val2, 150);
-        assert_eq!(len2, 2);
-
-        // Test INCOMPLETE varint (Missing the second byte)
-        let data3 = [0x96];
-        let (val3, len3) = read_varint_safe(&data3);
-        assert_eq!(val3, 0);
-        assert_eq!(len3, 0); // Should return 0 length indicating "need more data"
-    }
 
     #[test]
     fn test_packet_buffer_reassembly() {

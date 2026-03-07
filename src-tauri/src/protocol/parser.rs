@@ -1,9 +1,8 @@
 use std::collections::HashMap;
-use crate::packet_buffer::read_varint_safe;
 use crate::{inject_system_message, SystemLogLevel};
 pub(crate) use crate::{ChatMessage};
 use tauri::AppHandle;
-
+use crate::protocol::decoder::{find_int_by_tag, find_string_by_tag, read_varint, skip_field};
 
 #[derive(Debug)]
 pub enum Port5003Event {
@@ -387,7 +386,7 @@ pub(crate) fn strip_application_header(payload: &[u8], port: u16) -> Option<&[u8
             // Search for the 0x0A that correctly describes the rest of the payload
             for i in 0..payload.len().saturating_sub(3) {
                 if payload[i] == 0x0A {
-                    let (msg_len, varint_size) = read_varint_safe(&payload[i+1..]);
+                    let (msg_len, varint_size) = read_varint(&payload[i+1..]);
                     // If this 0x0A + its length exactly matches the end of the TCP packet, it's real
                     if varint_size > 0 && (i + 1 + varint_size + msg_len as usize) == payload.len() {
                         return Some(&payload[i..]);
@@ -397,66 +396,6 @@ pub(crate) fn strip_application_header(payload: &[u8], port: u16) -> Option<&[u8
             None
         },
         _ => if payload[0] == 0x0A { Some(payload) } else { None }
-    }
-}
-
-fn find_string_by_tag(data: &[u8], target_tag: u8) -> Option<String> {
-    let mut i = 0;
-    while i < data.len() {
-        let tag = data[i];
-        if tag == target_tag {
-            let (len, read) = read_varint(&data[i+1..]);
-            let start = i + 1 + read;
-            let end = (start + len as usize).min(data.len());
-            if start < end {
-                return Some(String::from_utf8_lossy(&data[start..end]).into_owned());
-            }
-        }
-        let wire_type = tag & 0x07;
-        i += 1 + skip_field(wire_type, &data[i+1..]);
-    }
-    None
-}
-
-fn find_int_by_tag(data: &[u8], target_tag: u8) -> Option<u64> {
-    let mut i = 0;
-    while i < data.len() {
-        let tag = data[i];
-        if tag == target_tag {
-            let (val, _) = read_varint(&data[i+1..]);
-            return Some(val);
-        }
-        let wire_type = tag & 0x07;
-        i += 1 + skip_field(wire_type, &data[i+1..]);
-    }
-    None
-}
-
-pub(crate) fn read_varint(data: &[u8]) -> (u64, usize) {
-    let mut value = 0u64;
-    let mut shift = 0;
-    let mut pos = 0;
-    while pos < data.len() {
-        let byte = data[pos];
-        if shift >= 64 { return (value, pos); }
-        value |= ((byte & 0x7F) as u64) << shift;
-        pos += 1;
-        if (byte & 0x80) == 0 { break; }
-        shift += 7;
-    }
-    (value, pos)
-}
-
-pub(crate) fn skip_field(wire_type: u8, data: &[u8]) -> usize {
-    match wire_type {
-        0 => read_varint(data).1,
-        1 => 8,
-        2 => {
-            let (len, read) = read_varint(data);
-            read + len as usize
-        }
-        5 => 4,
-        _ => 1,
     }
 }
 
@@ -517,17 +456,20 @@ mod tests {
         // The byte 0xAC indicates continuation, but the buffer ends abruptly!
         let truncated_data = [0xAC];
         let (val, read_bytes) = read_varint(&truncated_data);
-        // Should safely stop reading and not panic, returning whatever it has so far
-        assert_eq!(read_bytes, 1);
+
+        // UPDATED: Our new safe decoder correctly identifies this as incomplete
+        // and returns 0 bytes read to signal "Wait for more data".
+        assert_eq!(read_bytes, 0);
+        assert_eq!(val, 0);
 
         // Edge Case 3: skip_field with out-of-bounds length
-        // Wire type 2 (length-delimited), claims length is 50, but buffer only has 2 bytes left
+        // Wire type 2 (length-delimited). The byte 0x32 decodes to length 50,
+        // but the buffer only has 2 bytes left after it.
         let out_of_bounds_data = [0x32, 0xFF, 0xFF];
         let skipped = skip_field(2, &out_of_bounds_data);
 
-        // The caller (stage1_split) uses `.min(data.len())` to prevent crashing,
-        // so we just ensure skip_field itself doesn't panic and returns the calculated skip size.
-        assert_eq!(skipped, 51); // 1 byte for varint + 50 requested length
+        // skip_field correctly parses the varint (1 byte) and adds the requested length (50).
+        assert_eq!(skipped, 51);
 
         // Let's manually verify the caller's safety net
         let safe_end = (0 + skipped).min(out_of_bounds_data.len());

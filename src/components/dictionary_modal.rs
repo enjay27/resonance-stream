@@ -25,6 +25,10 @@ pub fn DictionaryModal() -> impl IntoView {
     let (is_adding_category, set_is_adding_category) = signal(false);
     let (new_category_name, set_new_category_name) = signal(String::new());
 
+    let (is_editing_categories, set_is_editing_categories) = signal(false);
+    let (renaming_category, set_renaming_category) = signal(None::<String>);
+    let (edit_category_name, set_edit_category_name) = signal(String::new());
+
     // Fetch the dictionary data when the modal opens
     Effect::new(move |_| {
         if signals.show_dictionary.get() {
@@ -126,6 +130,46 @@ pub fn DictionaryModal() -> impl IntoView {
         set_is_adding_category.set(false);
     };
 
+    let delete_category = move |cat: String| {
+        if let Some(w) = web_sys::window() {
+            if !w.confirm_with_message(&format!("'{}' 카테고리와 내부의 모든 단어를 삭제하시겠습니까?", cat)).unwrap_or(false) {
+                return;
+            }
+        }
+        set_dict.update(|d| { d.remove(&cat); });
+
+        // Ensure we don't stay on a deleted category
+        if active_category.get_untracked() == cat {
+            let first_cat = dict.get_untracked().keys().next().cloned().unwrap_or_else(|| "chat".to_string());
+            set_active_category.set(first_cat);
+        }
+    };
+
+    let commit_category_rename = move || {
+        if let Some(old_cat) = renaming_category.get_untracked() {
+            let new_cat = edit_category_name.get_untracked().trim().to_string();
+            set_renaming_category.set(None);
+
+            if new_cat.is_empty() || new_cat == old_cat { return; }
+
+            set_dict.update(|d| {
+                // Prevent merging or overwriting an existing category
+                if !d.contains_key(&new_cat) {
+                    if let Some(vals) = d.remove(&old_cat) {
+                        d.insert(new_cat.clone(), vals);
+                    }
+                }
+            });
+
+            // Keep the user on the category they just renamed
+            if active_category.get_untracked() == old_cat {
+                if dict.get_untracked().contains_key(&new_cat) {
+                    set_active_category.set(new_cat);
+                }
+            }
+        }
+    };
+
     view! {
         <Show when=move || signals.show_dictionary.get()>
             <div class="modal modal-open backdrop-blur-sm transition-all duration-300 z-[30000]">
@@ -143,37 +187,104 @@ pub fn DictionaryModal() -> impl IntoView {
 
                     // --- MAIN CONTENT AREA ---
                     <div class="flex flex-1 overflow-hidden">
-                        // SIDEBAR: Categories
-                        <div class="w-40 bg-base-200/50 border-r border-base-content/5 overflow-y-auto p-2">
-                            <ul class="menu menu-xs w-full gap-1">
-                                <For
-                                    each={move || dict.get().keys().cloned().collect::<Vec<_>>()}
-                                    key=|cat| cat.clone()
-                                    children=move |cat| {
-                                        let cat_clone = cat.clone();
-                                        let click_clone = cat.clone();
-                                        let display_name = cat.clone().to_uppercase();
-                                        view! {
-                                            <li>
-                                                <a
-                                                    class:active=move || active_category.get() == cat_clone
-                                                    class="font-bold tracking-widest text-[10px]"
-                                                    on:click=move |_| set_active_category.set(click_clone.clone())
-                                                >
-                                                    {display_name}
-                                                </a>
-                                            </li>
-                                        }
-                                    }
-                                />
-                            </ul>
+                        // --- SIDEBAR: CATEGORIES ---
+                        <div class="w-48 bg-base-200/50 border-r border-base-content/5 flex flex-col p-2">
+                            <div class="flex-1 overflow-y-auto custom-scrollbar">
+                                <ul class="menu menu-xs w-full gap-1 p-0">
+                                    <For
+                                        each={move || dict.get().keys().cloned().collect::<Vec<_>>()}
+                                        key=|cat| cat.clone()
+                                        children=move |cat| {
+                                            let cat_clone = cat.clone();
+                                            let display_name = cat.clone().to_uppercase();
 
-                            // Bottom Action Area: Add Category Button
-                            <div class="mt-2 pt-2 border-t border-base-content/10">
+                                            let is_edit_mode = move || is_editing_categories.get();
+
+                                            view! {
+                                                <li>
+                                                    <Show when=is_edit_mode fallback={
+                                                        let cat_fallback = cat_clone.clone();
+                                                        let display_fallback = display_name.clone();
+                                                        move || {
+                                                            let c_click = cat_fallback.clone();
+                                                            let c_active = cat_fallback.clone();
+                                                            view! {
+                                                                // Standard View
+                                                                <a class:active=move || active_category.get() == c_active
+                                                                   class="font-bold tracking-widest text-[10px]"
+                                                                   on:click=move |_| set_active_category.set(c_click.clone())>
+                                                                    {display_fallback.clone()}
+                                                                </a>
+                                                            }.into_any()
+                                                        }
+                                                    }>
+                                                        // Edit View
+                                                        <Show when={
+                                                            let c_rename_check = cat_clone.clone();
+                                                            move || renaming_category.get().as_ref() == Some(&c_rename_check)
+                                                        } fallback={
+                                                            let cat_edit_fb = cat_clone.clone();
+                                                            let display_edit_fb = display_name.clone();
+                                                            move || {
+                                                                let c_rename = cat_edit_fb.clone();
+                                                                let c_del = cat_edit_fb.clone();
+                                                                view! {
+                                                                    // Renaming Action Buttons
+                                                                    <div class="flex justify-between items-center w-full pr-1 bg-base-content/5">
+                                                                        <span class="font-bold tracking-widest text-[10px] truncate">{display_edit_fb.clone()}</span>
+                                                                        <div class="flex gap-1">
+                                                                            <button class="btn btn-ghost btn-xs h-5 min-h-0 px-1 hover:bg-info/20 hover:text-info"
+                                                                                title="이름 변경"
+                                                                                on:click=move |_| {
+                                                                                set_edit_category_name.set(c_rename.clone());
+                                                                                set_renaming_category.set(Some(c_rename.clone()));
+                                                                            }>"✏️"</button>
+                                                                            <button class="btn btn-ghost btn-xs h-5 min-h-0 px-1 text-error/70 hover:bg-error/20 hover:text-error"
+                                                                                title="삭제"
+                                                                                on:click=move |_| delete_category(c_del.clone())>"🗑️"</button>
+                                                                        </div>
+                                                                    </div>
+                                                                }.into_any()
+                                                            }
+                                                        }>
+                                                            // Renaming Input Field
+                                                            <input type="text" class="input input-xs input-bordered w-full bg-base-100 font-bold text-[10px]"
+                                                                autofocus
+                                                                prop:value=move || edit_category_name.get()
+                                                                on:input=move |ev| set_edit_category_name.set(event_target_value(&ev))
+                                                                on:blur=move |_| commit_category_rename()
+                                                                on:keydown=move |ev| {
+                                                                    if ev.key() == "Enter" { commit_category_rename(); }
+                                                                    else if ev.key() == "Escape" { set_renaming_category.set(None); }
+                                                                }
+                                                            />
+                                                        </Show>
+                                                    </Show>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                </ul>
+                            </div>
+
+                            // Bottom Action Area: Category Controls
+                            <div class="mt-2 pt-2 border-t border-base-content/10 flex flex-col gap-1">
                                 <Show when=move || is_adding_category.get() fallback=move || view! {
                                     <button class="btn btn-ghost btn-xs w-full text-base-content/70 hover:text-success border border-dashed border-base-content/20"
+                                        disabled=move || is_editing_categories.get()
                                         on:click=move |_| set_is_adding_category.set(true)>
                                         "+ 카테고리 추가"
+                                    </button>
+                                    <button class="btn btn-ghost btn-xs w-full text-base-content/70 hover:text-warning border border-dashed border-base-content/20"
+                                        class:bg-warning=move || is_editing_categories.get()
+                                        class:text-warning-content=move || is_editing_categories.get()
+                                        class:hover:text-warning-content=move || is_editing_categories.get()
+                                        on:click=move |_| {
+                                            let current = is_editing_categories.get_untracked();
+                                            set_is_editing_categories.set(!current);
+                                            set_renaming_category.set(None); // Ensure inline edits are closed when toggling
+                                        }>
+                                        {move || if is_editing_categories.get() { "편집 완료" } else { "카테고리 편집" }}
                                     </button>
                                 }>
                                     <input type="text" class="input input-xs input-bordered w-full bg-base-100"

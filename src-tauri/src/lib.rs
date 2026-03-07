@@ -31,6 +31,7 @@ pub use protocol::parser::*;
 pub use protocol::types::*;
 pub use services::downloader::*;
 pub use services::sniffer::*;
+pub use services::translator::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

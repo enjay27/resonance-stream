@@ -2,29 +2,25 @@ mod stream_traacker;
 mod message_processor;
 mod pipeline;
 
-use crate::{inject_system_message, parsing_pipeline, store_and_emit, NetworkInterface, SnifferStatePayload};
+use crate::{inject_system_message, store_and_emit, NetworkInterface, SnifferStatePayload, TranslationJob};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, thread};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::protocol::parser::Port5003Event;
 use crate::protocol::types::{
     AppState, SystemLogLevel
 };
-use crate::services::processor::convert_to_romaji;
-use crate::services::sniffer::message_processor::{MessageProcessor, ProcessAction};
-use crate::services::sniffer::stream_traacker::StreamTracker;
-use crate::services::translator::{contains_japanese, TranslationJob};
+use crate::services::sniffer::pipeline::PipelineAction;
+use crate::services::translator::core::contains_japanese;
+use crate::services::translator::processor::convert_to_romaji;
 use crossbeam_channel::Sender;
-use etherparse::{NetHeaders, PacketHeaders, TransportHeader};
 use local_ip_address::list_afinet_netifas;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::Ipv4Addr;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
-use crate::services::sniffer::pipeline::PipelineAction;
 
 // --- GLOBAL STATE ---
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);

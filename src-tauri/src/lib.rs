@@ -27,6 +27,7 @@ pub mod packet_buffer;
 pub mod protocol;
 pub mod services;
 
+pub use io::*;
 pub use protocol::parser::*;
 pub use protocol::types::*;
 pub use services::downloader::*;

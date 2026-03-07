@@ -179,6 +179,7 @@ pub fn run() {
             launch_translator,
             block_user_command,
             unblock_user_command,
+            ai_server_health_check,
             ui_system_message,
         ])
         .build(tauri::generate_context!())

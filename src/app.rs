@@ -533,8 +533,14 @@ pub fn App() -> impl IntoView {
                                             let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
                                             set_model_ready.set(true);
                                             set_status_text.set("AI Engine Starting...".to_string());
+                                            if let Ok(st) = invoke("ai_server_health_check", JsValue::NULL).await {
+                                                let payload = st.as_bool().unwrap();
+                                                if payload {
+                                                    signals.set_translator_state.set("Active".to_string());
+                                                }
+                                            }
                                         } else {
-                                            add_system_log("warn", "Sidecar", "Model missing. AI is disabled.");
+                                            add_system_log("warn", "Sidecar", "AI Server missing. AI is disabled.");
                                             set_model_ready.set(false);
                                         }
                                     }

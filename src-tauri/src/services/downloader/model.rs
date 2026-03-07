@@ -52,11 +52,8 @@ pub async fn check_model_status(app: tauri::AppHandle) -> Result<FolderStatus, S
 }
 
 #[tauri::command]
-pub async fn download_model(app: AppHandle) -> Result<(), String> {
+pub async fn download_model(app: AppHandle, download_url: String, version: String) -> Result<(), String> {
     let model_dir = get_model_dir(&app)?;
-    // TODO: fix download_url and version from Gist app-metadata
-    let download_url = String::new();
-    let version = String::new();
 
     // 1. Cleanup: If the folder exists, delete it first to remove old 4GB model files
     if model_dir.exists() {

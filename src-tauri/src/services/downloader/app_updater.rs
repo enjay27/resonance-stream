@@ -56,7 +56,7 @@ pub async fn download_app_update(app: AppHandle, download_url: String) -> Result
 }
 
 #[tauri::command]
-pub fn apply_app_update_and_restart(app: AppHandle) -> Result<(), String> {
+pub fn restart_to_apply_update(app: AppHandle) -> Result<(), String> {
     info!("Applying application update and restarting...");
 
     let current_exe = env::current_exe().map_err(|e| e.to_string())?;

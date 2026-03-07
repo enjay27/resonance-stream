@@ -2,10 +2,11 @@ use tauri::{AppHandle, Manager};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use crate::inject_system_message;
+use crate::{inject_system_message, AppState};
 use crate::protocol::types::SystemLogLevel;
 
-const GIST_URL: &str = "https://gist.githubusercontent.com/enjay27/ae9c1e66f903c9ea74442753bcba0df2/raw/170f6628b7504a84e0c584556ec138034353039e/bpsr_meta.json";
+const METADATA_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/4bc13d890e464cc4849b91c6f1c6d1da5a983255/metadata.json";
+const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/4bc13d890e464cc4849b91c6f1c6d1da5a983255/custom_dict.json";
 
 // --- 1. Structs matching your new unified Gist JSON ---
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -42,7 +43,7 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
     // Paste your PERMANENT RAW URL here
 
     let client = reqwest::Client::new();
-    let remote_data: GistMetadata = client.get(GIST_URL)
+    let remote_data: GistMetadata = client.get(METADATA_URL)
         .send().await.map_err(|e| format!("Network error: {}", e))?
         .json().await.map_err(|e| format!("JSON parsing error: {}", e))?;
 
@@ -72,31 +73,31 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
     })
 }
 
-// --- 3. Applying the Dictionary Update (No HTTP request needed!) ---
 #[tauri::command]
-pub fn apply_dictionary_update(app: AppHandle, new_dict: RemoteDictionary) -> Result<String, String> {
+pub async fn sync_dictionary(app: AppHandle) -> Result<String, String> {
+    // 1. Resolve Local Path: %APPDATA%/your.bundle.id/custom_dict.json
     let dict_path = app.path().app_data_dir()
         .map_err(|e| e.to_string())?
         .join("custom_dict.json");
 
-    // Re-wrap the dictionary so it perfectly matches what processor.rs expects
-    let json_wrapper = serde_json::json!({
-        "version": new_dict.version,
-        "data": new_dict.data
-    });
+    // 2. Fetch from Remote
+    let client = reqwest::Client::new();
+    let response = client.get(DICT_URL).send().await.map_err(|e| e.to_string())?;
+    let json_content = response.text().await.map_err(|e| e.to_string())?;
 
-    // Save the file
-    if let Some(parent) = dict_path.parent() {
-        let _ = fs::create_dir_all(parent);
+    // Validate JSON before saving
+    if serde_json::from_str::<serde_json::Value>(&json_content).is_err() {
+        return Err("Invalid JSON received from Gist".to_string());
     }
-    fs::write(&dict_path, json_wrapper.to_string()).map_err(|e| e.to_string())?;
 
-    // Update Local Metadata Tracker
-    let mut metadata = crate::config::load_metadata(&app);
-    metadata.current_dict_version = new_dict.version;
-    crate::config::save_metadata(&app, &metadata);
+    // 3. Save Locally
+    fs::create_dir_all(dict_path.parent().unwrap()).map_err(|e| e.to_string())?;
+    fs::write(&dict_path, &json_content).map_err(|e| e.to_string())?;
+
+    inject_system_message(&app, SystemLogLevel::Success, "ModelManager", "Dictionary saved to AppData.");
 
     inject_system_message(&app, SystemLogLevel::Success, "Translator", "Dictionary successfully synchronized.");
+
     Ok("Dictionary updated and reloaded!".to_string())
 }
 

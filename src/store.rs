@@ -124,6 +124,8 @@ pub struct AppSignals {
     pub set_show_dictionary: WriteSignal<bool>,
     pub auto_sync_latest_dict: ReadSignal<bool>,
     pub set_auto_sync_latest_dict: WriteSignal<bool>,
+    pub unread_counts: ReadSignal<HashMap<String, usize>>,
+    pub set_unread_counts: WriteSignal<HashMap<String, usize>>,
 }
 
 #[derive(Copy, Clone)]

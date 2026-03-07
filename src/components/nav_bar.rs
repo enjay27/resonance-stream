@@ -86,8 +86,23 @@ pub fn NavBar() -> impl IntoView {
                     tabs.into_iter().map(|(full, icon)| {
                         let t_full = full.to_string();
                         let t_click = t_full.clone();
+                        let f_unread = full.to_string();
                         let is_custom = full == "커스텀";
                         let is_active = move || signals.active_tab.get() == t_full;
+
+                        let unread = Memo::new(move |_| {
+                            let counts = signals.unread_counts.get();
+                            match f_unread.as_str() {
+                                "전체" => 0,
+                                "커스텀" => 0,
+                                "월드" => *counts.get("WORLD").unwrap_or(&0),
+                                "길드" => *counts.get("GUILD").unwrap_or(&0),
+                                "파티" => *counts.get("PARTY").unwrap_or(&0),
+                                "로컬" => *counts.get("LOCAL").unwrap_or(&0),
+                                "시스템" => *counts.get("SYSTEM").unwrap_or(&0),
+                                _ => 0,
+                            }
+                        });
 
                         let (text_color, border_color) = match full {
                             "전체" => ("text-base-content", "border-base-content"),
@@ -115,16 +130,45 @@ pub fn NavBar() -> impl IntoView {
                                     on:click=move |_| {
                                         signals.set_active_tab.set(t_click.clone());
                                         signals.set_unread_count.set(0);
+                                        signals.set_unread_counts.update(|counts| {
+                                            match t_click.as_str() {
+                                                "전체" => counts.clear(),
+                                                "커스텀" => {
+                                                    let filters = signals.custom_filters.get_untracked();
+                                                    for f in filters { counts.remove(&f); }
+                                                },
+                                                "월드" => { counts.remove("WORLD"); },
+                                                "길드" => { counts.remove("GUILD"); },
+                                                "파티" => { counts.remove("PARTY"); },
+                                                "로컬" => { counts.remove("LOCAL"); },
+                                                "시스템" => { counts.remove("SYSTEM"); },
+                                                _ => {}
+                                            }
+                                        });
                                         signals.set_is_at_bottom.set(true);
                                         signals.set_system_at_bottom.set(true);
                                         actions.save_config.dispatch(());
                                     }
                                 >
-                                    // Text only (Shows when narrower than 400px)
-                                    <span class="min-[460px]:hidden">{full}</span>
+                                    // Text only (Shows when narrower than 460px)
+                                    <span class="min-[460px]:hidden flex items-center">
+                                        {full}
+                                        <Show when={move || unread.get() > 0}>
+                                            <span class="badge badge-error min-w-[14px] h-[14px] px-1 ml-0.5 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200">
+                                                {move || if unread.get() > 9 { "9+".to_string() } else { unread.get().to_string() }}
+                                            </span>
+                                        </Show>
+                                    </span>
 
                                     // Text + Emoji (Shows when wider than 400px)
-                                    <span class="hidden min-[460px]:inline">{full} " " {icon}</span>
+                                    <span class="hidden min-[460px]:flex items-center">
+                                        {full} " " {icon}
+                                        <Show when={move || unread.get() > 0}>
+                                            <span class="badge badge-error min-w-[14px] h-[14px] px-1 ml-1 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200">
+                                                {move || if unread.get() > 9 { "9+".to_string() } else { unread.get().to_string() }}
+                                            </span>
+                                        </Show>
+                                    </span>
                                 </button>
 
                                 // NEW: Dropdown Menu that appears when hovering the '커스텀' tab

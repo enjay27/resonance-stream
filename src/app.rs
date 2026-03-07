@@ -93,6 +93,7 @@ pub fn App() -> impl IntoView {
 
     let (auto_sync_latest_dict, set_auto_sync_latest_dict) = signal(true);
     let (show_dictionary, set_show_dictionary) = signal(false);
+    let (unread_counts, set_unread_counts) = signal::<std::collections::HashMap<String, usize>>(HashMap::new());
 
     let signals = AppSignals {
         init_done, set_init_done,
@@ -155,6 +156,7 @@ pub fn App() -> impl IntoView {
         pending_update_data, set_pending_update_data,
         auto_sync_latest_dict, set_auto_sync_latest_dict,
         show_dictionary, set_show_dictionary,
+        unread_counts, set_unread_counts,
     };
 
     provide_context(signals);
@@ -204,6 +206,10 @@ pub fn App() -> impl IntoView {
                 crate::hooks::use_events::clear_backend_history().await;
                 set_chat_log.set(IndexMap::new());
                 set_system_log.set(Vec::new());
+
+                // NEW: Clear the badges when history is wiped
+                set_unread_count.set(0);
+                set_unread_counts.set(HashMap::new());
             }
         }.boxed_local()
     });

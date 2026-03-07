@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde_with::DisplayFromStr;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -110,4 +111,32 @@ pub struct TranslatorStatePayload {
 pub struct SnifferStatePayload {
     pub state: String,   // "Starting", "Firewall", "Binding", "Active", "Error", "Off"
     pub message: String, // Context or Error message
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VersionInfo {
+    pub latest_version: String,
+    pub download_url: String,
+    pub release_notes: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RemoteDictionary {
+    pub version: String,
+    pub data: HashMap<String, serde_json::Value>, // Using Value to handle nested categories safely
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GistMetadata {
+    pub app: VersionInfo,
+    pub model: VersionInfo,
+    pub dictionary: RemoteDictionary,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UpdateCheckResult {
+    pub app_update_available: bool,
+    pub model_update_available: bool,
+    pub dict_update_available: bool,
+    pub remote_data: GistMetadata,
 }

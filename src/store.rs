@@ -106,6 +106,20 @@ pub struct AppSignals {
     pub set_blocked_users: WriteSignal<HashMap<u64, String>>,
     pub min_sender_level: ReadSignal<u64>,
     pub set_min_sender_level: WriteSignal<u64>,
+    pub show_app_update_modal: ReadSignal<bool>,
+    pub set_show_app_update_modal: WriteSignal<bool>,
+    pub show_model_update_modal: ReadSignal<bool>,
+    pub set_show_model_update_modal: WriteSignal<bool>,
+    pub pending_update_data: ReadSignal<Option<crate::ui_types::GistMetadata>>,
+    pub set_pending_update_data: WriteSignal<Option<crate::ui_types::GistMetadata>>,
+    pub app_update_step: ReadSignal<i32>,
+    pub set_app_update_step: WriteSignal<i32>,
+    pub app_update_progress: ReadSignal<u8>,
+    pub set_app_update_progress: WriteSignal<u8>,
+    pub model_update_step: ReadSignal<i32>,
+    pub set_model_update_step: WriteSignal<i32>,
+    pub model_update_progress: ReadSignal<u8>,
+    pub set_model_update_progress: WriteSignal<u8>,
 }
 
 #[derive(Copy, Clone)]

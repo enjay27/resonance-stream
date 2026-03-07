@@ -13,10 +13,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
 
     Effect::new(move |_| {
-        // By calling sig.get(), we track any changes to this specific message.
         if sig.get().translated.is_some() {
-            // If the user is currently looking at the bottom of the chat,
-            // push the scrollbar down so the expanded translation isn't hidden.
             if signals.is_at_bottom.get_untracked() {
                 request_animation_frame(move || {
                     if let Some(window) = web_sys::window() {
@@ -43,20 +40,13 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
         _ => ("text-base-content", "border-l-base-content"),
     };
 
-    // --- DYNAMIC TIME FORMATTER ---
     let display_time = move || {
         let raw_ts = sig.get().timestamp;
-
-        // 1. Auto-detect Unit Mismatch
-        // If the timestamp is > 10 billion (13 digits), it is in milliseconds.
-        // Otherwise (10 digits), it is already in seconds.
         let msg_secs = if raw_ts > 10_000_000_000 { raw_ts / 1000 } else { raw_ts };
 
         if signals.use_relative_time.get() {
             let current_raw = signals.current_time.get();
             let current_secs = if current_raw > 10_000_000_000 { current_raw / 1000 } else { current_raw };
-
-            // 2. Calculate difference safely
             let diff_secs = if current_secs > msg_secs { current_secs - msg_secs } else { 0 };
 
             if diff_secs < 10 {
@@ -74,11 +64,9 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                     format!("{}h", hours)
                 }
             } else {
-                // If the message is incredibly old, show days
                 format!("{}d", diff_secs / 86400)
             }
         } else {
-            // Fallback to absolute mm:ss format
             format_time(raw_ts)
         }
     };
@@ -93,6 +81,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                     // ==========================================
                     <div class="flex flex-col items-start px-2 py-1 group transition-colors hover:bg-base-content/5">
                         <div class="opacity-90 mb-1 flex gap-2 items-center">
+                            // 1. NICKNAME BUBBLE
                             <span
                                 class=move || {
                                     let color_class = if signals.search_term.get() == sig.get().nickname {
@@ -100,12 +89,10 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                     } else {
                                         channel_colors().0
                                     };
-                                    format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide {}", color_class)
+                                    // ADDED: bg-base-200 and padding to create a solid pill shape!
+                                    format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border border-base-content/5 {}", color_class)
                                 }
-                                style=move || format!(
-                                    "font-size: {}px; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;",
-                                    signals.font_size.get().saturating_sub(1).max(10)
-                                )
+                                style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(1).max(10))
                                 on:click=move |ev| {
                                     ev.stop_propagation();
                                     if is_active.get() {
@@ -178,16 +165,16 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                 </Portal>
                             </Show>
 
-                            <span class="text-base-content/50 font-bold text-[10px]">
+                            <span class="text-base-content/50 font-bold text-[10px] bg-base-200 px-1 rounded border border-base-content/5">
                                 "Lv." {move || sig.get().level}
                             </span>
-                            // 1. Time string replaced here
-                            <time class="ml-2 text-base-content/50 opacity-70 text-[10px]">
+                            <time class="ml-1 text-base-content/50 opacity-70 text-[10px] bg-base-200 px-1 rounded border border-base-content/5">
                                 {display_time}
                             </time>
                         </div>
 
-                        <div class="flex items-center gap-2 w-full">
+                        // 2. MESSAGE BUBBLE
+                        <div class="flex items-center gap-2 w-full mt-0.5">
                             <div class=move || format!(
                                 "px-3 py-2 w-fit max-w-[85%] bg-base-200 border-y border-r border-base-content/5 border-l-[3px] rounded-md text-base-content shadow-sm transition-all {}",
                                 channel_colors().1
@@ -196,7 +183,6 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                     let msg = sig.get();
 
                                     if msg.is_blocked {
-                                        // Blocked Message UI
                                         view! {
                                             <div class="italic opacity-50 text-base-content/50 font-bold"
                                                 style=move || format!("font-size: {}px;", signals.font_size.get())>
@@ -204,7 +190,6 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                             </div>
                                         }.into_any()
                                     } else {
-                                        // Normal Message UI
                                         view! {
                                             <>
                                                 <div class="leading-relaxed font-bold"
@@ -212,7 +197,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                                     {
                                                         let show_original_prefix = is_japanese(&msg.message) && signals.use_translation.get();
                                                         if show_original_prefix {
-                                                            view! { <span class="text-base-content/50 mr-1.5 font-bold">[원문]</span> }.into_any()
+                                                            view! { <span class="text-base-content/50 mr-1.5 font-bold">"[원문]"</span> }.into_any()
                                                         } else {
                                                             view! {}.into_any()
                                                         }
@@ -223,7 +208,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                                 {msg.translated.clone().map(|text| view! {
                                                     <div class="mt-1.5 pt-1.5 border-t border-base-content/10 text-success font-bold animate-in slide-in-from-top-1 duration-200"
                                                         style=move || format!("font-size: {}px;", signals.font_size.get())>
-                                                         <span class="opacity-70 mr-1.5 font-bold">[번역]</span>
+                                                         <span class="opacity-70 mr-1.5 font-bold">"[번역]"</span>
                                                          {render_emphasized(&text, &signals.emphasis_keywords.get())}
                                                     </div>
                                                 })}
@@ -234,7 +219,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                             </div>
 
                             <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                                <button class="btn btn-ghost btn-xs text-[10px] text-base-content/50 h-6 min-h-0 px-2 hover:bg-base-content/10 hover:text-base-content"
+                                <button class="btn btn-ghost btn-xs text-[10px] text-base-content/50 h-6 min-h-0 px-2 hover:bg-base-content/10 hover:text-base-content bg-base-200 rounded-md shadow-sm"
                                     on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
                                     "COPY"
                                 </button>
@@ -244,11 +229,12 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                 }
             >
                 // ==========================================
-                // COMPACT VIEW (Inline Flattened)
+                // COMPACT VIEW (Inline Wrapping)
                 // ==========================================
-                <div class="flex flex-row items-baseline gap-2 px-2 py-0.5 group transition-colors hover:bg-base-content/5 w-full">
+                // 1. Parent is now a standard block with generous line-height for wrapping bubbles
+                <div class="block px-2 py-1 group transition-colors hover:bg-base-content/5 w-full leading-[1.7] text-left break-words">
 
-                    // 1. Nickname
+                    // 2. NICKNAME BUBBLE (inline-block so it flows like text)
                     <span
                         class=move || {
                             let color_class = if signals.search_term.get() == sig.get().nickname {
@@ -256,12 +242,9 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                             } else {
                                 channel_colors().0
                             };
-                            format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide flex-shrink-0 {}", color_class)
+                            format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border border-base-content/5 inline-block align-baseline mr-1.5 {}", color_class)
                         }
-                        style=move || format!(
-                            "font-size: {}px; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;",
-                            signals.font_size.get().saturating_sub(2).max(10)
-                        )
+                        style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))
                         on:click=move |ev| {
                             ev.stop_propagation();
                             if is_active.get() {
@@ -334,82 +317,77 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                         </Portal>
                     </Show>
 
-                    // 2. Message Body & Actions
-                    <div class="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5 group/msg">
-                        {move || {
-                            let msg = sig.get();
+                    // 3. MESSAGE BODY (Inline and wrapping)
+                    {move || {
+                        let msg = sig.get();
 
-                            if msg.is_blocked {
-                                // Blocked Message UI
+                        if msg.is_blocked {
+                            view! {
+                                <span class="italic opacity-50 text-base-content/50 font-bold inline align-baseline"
+                                      style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
+                                    "(차단된 사용자의 메시지입니다)"
+                                </span>
+                            }.into_any()
+                        } else {
+                            let emphasized_msg = msg.clone();
+                            let has_translation = msg.translated.is_some();
+                            let hide_orig_pref = signals.hide_original_in_compact.get();
+
+                            // Original message view (inline, with box-decoration-clone to wrap backgrounds beautifully)
+                            let original_view = view! {
+                                <span class=move || format!(
+                                    "text-base-content font-bold opacity-90 box-decoration-clone bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border-y border-r border-base-content/5 border-l-[3px] inline align-baseline {} {}",
+                                    if hide_orig_pref && has_translation { "hidden group-hover:inline" } else { "inline" },
+                                    channel_colors().1
+                                )
+                                style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
+                                    {
+                                        if !hide_orig_pref && is_japanese(&msg.message) && signals.use_translation.get() {
+                                            view! { <span class="text-base-content/50 mr-1 font-bold">"[원문]"</span> }.into_any()
+                                        } else {
+                                            view! {}.into_any()
+                                        }
+                                    }
+                                    {render_emphasized(&emphasized_msg.message, &signals.emphasis_keywords.get())}
+                                </span>
+                            };
+
+                            // Translated message view
+                            let translated_view = msg.translated.clone().map(|text| {
                                 view! {
-                                    <span class="italic opacity-50 text-base-content/50 font-bold leading-snug break-words"
-                                          style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
-                                        "(차단된 사용자의 메시지입니다)"
-                                    </span>
-                                }.into_any()
-                            } else {
-                                // Normal Message UI
-                                let emphasized_msg = msg.clone();
-                                let has_translation = msg.translated.is_some();
-                                let hide_orig_pref = signals.hide_original_in_compact.get();
-
-                                // Define the original message view
-                                let original_view = view! {
                                     <span class=move || format!(
-                                        "text-base-content font-bold leading-snug break-words opacity-90 {}",
-                                        if hide_orig_pref && has_translation { "hidden group-hover/msg:inline" } else { "inline" }
+                                        "text-success font-bold box-decoration-clone bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border border-base-content/5 inline align-baseline ml-1 {}",
+                                        if hide_orig_pref { "inline group-hover:hidden" } else { "inline" }
                                     )
                                     style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
-                                        {
-                                            // Only show the [원문] badge if we are NOT in the "Hide Original" mode
-                                            if !hide_orig_pref && is_japanese(&msg.message) && signals.use_translation.get() {
-                                                view! { <span class="text-base-content/50 mr-1 font-bold">[원문]</span> }.into_any()
-                                            } else {
-                                                view! {}.into_any()
-                                            }
-                                        }
-                                        {render_emphasized(&emphasized_msg.message, &signals.emphasis_keywords.get())}
+                                        <Show when=move || !hide_orig_pref>
+                                            <span class="opacity-70 mr-1 font-bold">"[번역]"</span>
+                                        </Show>
+                                        {render_emphasized(&text, &signals.emphasis_keywords.get())}
                                     </span>
-                                };
+                                }
+                            });
 
-                                // Define the translated message view
-                                let translated_view = msg.translated.clone().map(|text| {
-                                    view! {
-                                        <span class=move || format!(
-                                            "text-success font-bold leading-snug break-words {}",
-                                            if hide_orig_pref { "inline group-hover/msg:hidden" } else { "inline" }
-                                        )
-                                        style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
-                                            // Only show the [번역] badge if we are NOT in the "Hide Original" mode
-                                            <Show when=move || !hide_orig_pref>
-                                                <span class="opacity-70 mr-1 font-bold">[번역]</span>
-                                            </Show>
-                                            {render_emphasized(&text, &signals.emphasis_keywords.get())}
-                                        </span>
-                                    }
-                                });
+                            view! {
+                                {original_view}
+                                {translated_view}
+                            }.into_any()
+                        }
+                    }}
 
-                                view! {
-                                    {original_view}
-                                    {translated_view}
-                                }.into_any()
-                            }
-                        }}
+                    // 4. TIMESTAMP & COPY BUTTON (Inline-block at the end of the text)
+                    <div class="inline-block align-baseline ml-2 opacity-90 bg-base-200 rounded-md shadow-sm">
+                        <time class="text-[10px] text-base-content/50 whitespace-nowrap block group-hover:hidden min-h-0 px-1.5 py-0">
+                            {display_time}
+                        </time>
 
-                        // 3. Time / Copy Action Swapper (Inline with text)
-                        <div class="inline-flex items-center self-center flex-shrink-0 ml-1">
-                            <time class="text-[10px] text-base-content/40 whitespace-nowrap block group-hover:hidden">
-                                {display_time}
-                            </time>
-
-                            // --- NEW: HIDE COPY BUTTON ON BLOCKED MESSAGES ---
-                            <Show when=move || !sig.get().is_blocked>
-                                <button class="hidden group-hover:flex btn btn-ghost btn-xs text-[10px] font-bold text-base-content/50 h-5 min-h-0 px-1.5 py-0 hover:bg-base-content/10 hover:text-base-content leading-none"
-                                    on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
-                                    "COPY"
-                                </button>
-                            </Show>
-                        </div>
+                        // --- NEW: HIDE COPY BUTTON ON BLOCKED MESSAGES ---
+                        <Show when=move || !sig.get().is_blocked>
+                            <button class="hidden group-hover:flex btn btn-ghost btn-xs text-[10px] font-bold text-base-content/50 h-5 min-h-0 px-1.5 py-0 hover:bg-base-content/10 hover:text-base-content leading-none"
+                                on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
+                                "COPY"
+                            </button>
+                        </Show>
                     </div>
                 </div>
             </Show>
@@ -417,11 +395,10 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
     }
 }
 
+// CLEANED UP: No more messy text-shadows needed!
 fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
-    let shadow_style = "text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;";
-
     if keywords.is_empty() || text.is_empty() {
-        return view! { <span class="font-bold" style=shadow_style>{text.to_string()}</span> }.into_any();
+        return view! { <span class="font-bold">{text.to_string()}</span> }.into_any();
     }
 
     let mut views = Vec::new();
@@ -443,12 +420,12 @@ fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
                 let before = &current_text[..idx];
                 if !before.is_empty() {
                     views.push(view! {
-                        <span class="font-bold" style=shadow_style>{before.to_string()}</span>
+                        <span class="font-bold">{before.to_string()}</span>
                     }.into_any());
                 }
-                // Emphasis keywords keep their specific color but gain the shadow
+                // Emphasis keywords keep their warning color, but no shadow needed.
                 views.push(view! {
-                    <span class="text-warning font-black drop-shadow-md mx-0.5" style=shadow_style>
+                    <span class="text-warning font-black mx-0.5">
                         {kw.to_string()}
                     </span>
                 }.into_any());
@@ -456,7 +433,7 @@ fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
             },
             None => {
                 views.push(view! {
-                    <span class="font-bold" style=shadow_style>{current_text.to_string()}</span>
+                    <span class="font-bold">{current_text.to_string()}</span>
                 }.into_any());
                 break;
             }

@@ -165,6 +165,7 @@ pub fn run() {
             get_system_history,
             check_all_updates,
             ignore_update,
+            update_application,
             apply_dictionary_update,
             clear_chat_history,
             set_always_on_top,

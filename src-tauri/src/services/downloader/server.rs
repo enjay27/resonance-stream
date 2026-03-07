@@ -3,23 +3,11 @@ use std::io::Write;
 use tauri::{AppHandle, Emitter, Manager};
 use futures_util::StreamExt;
 use serde::Serialize;
+use crate::{FolderStatus, ProgressPayload};
 
 pub const AI_SERVER_FOLDER: &str = "ai-server";
 pub const AI_SERVER_ZIP_URL: &str = "https://github.com/enjay27/resonance-stream/releases/download/v0.2.0/llama-b8157-bin-win-vulkan-x64.zip";
 pub const AI_SERVER_FILENAME: &str = "llama-server.exe";
-
-#[derive(Serialize, Clone)]
-pub struct FolderStatus {
-    pub exists: bool,
-    pub path: String,
-}
-
-#[derive(Serialize, Clone)]
-pub struct ProgressPayload {
-    pub current_file: String,
-    pub percent: u8,
-    pub total_percent: u8,
-}
 
 #[tauri::command]
 pub async fn check_ai_server_status(app: tauri::AppHandle) -> Result<FolderStatus, String> {

@@ -5,7 +5,7 @@ use std::fs;
 use crate::{inject_system_message, AppState};
 use crate::protocol::types::SystemLogLevel;
 
-const METADATA_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/4bc13d890e464cc4849b91c6f1c6d1da5a983255/metadata.json";
+const METADATA_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/8a88850437be4331c9c12b79ef445350fd33543f/metadata.json";
 const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/4bc13d890e464cc4849b91c6f1c6d1da5a983255/custom_dict.json";
 
 // --- 1. Structs matching your new unified Gist JSON ---
@@ -19,7 +19,7 @@ pub struct VersionInfo {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct RemoteDictionary {
     pub version: String,
-    pub data: HashMap<String, String>,
+    pub updated_at: String,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -29,7 +29,7 @@ pub struct GistMetadata {
     pub dictionary: RemoteDictionary,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UpdateCheckResult {
     pub app_update_available: bool,
     pub model_update_available: bool,

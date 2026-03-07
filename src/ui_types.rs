@@ -67,6 +67,8 @@ pub struct AppConfig {
     pub blocked_users: std::collections::HashMap<u64, String>,
     #[serde(default)]
     pub min_sender_level: u64,
+    #[serde(default)]
+    pub auto_sync_latest_dict: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -123,7 +125,7 @@ pub struct VersionInfo {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RemoteDictionary {
     pub version: String,
-    pub data: HashMap<String, serde_json::Value>, // Using Value to handle nested categories safely
+    pub updated_at: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

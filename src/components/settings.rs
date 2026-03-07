@@ -655,6 +655,26 @@ pub fn Settings() -> impl IntoView {
                                 <div class="divider m-0 opacity-10"></div>
 
                                 <div class="flex items-center justify-between">
+                                    <label class="label cursor-pointer px-0">
+                                        <div class="flex flex-col">
+                                            <span class="text-xs font-bold text-base-content/80">"사전 자동 동기화"</span>
+                                            <span class="text-[9px] opacity-60">"시작 시 사용자 사전 최신 버전을 체크하고 다운받습니다."</span>
+                                            <span class="text-[9px] opacity-60">"(사용자 사전 직접 수정 시 체크 해제해주세요)"</span>
+                                        </div>
+                                        <input type="checkbox" class="toggle toggle-warning toggle-sm"
+                                            prop:checked=move || signals.auto_sync_latest_dict.get()
+                                            on:change=move |ev| {
+                                                let checked = event_target_checked(&ev);
+                                                signals.set_auto_sync_latest_dict.set(checked);
+                                                actions.save_config.dispatch(());
+                                            }
+                                        />
+                                    </label>
+                                </div>
+
+                                <div class="divider m-0 opacity-10"></div>
+
+                                <div class="flex items-center justify-between">
                                     <div class="flex flex-col">
                                         <span class="text-xs font-bold text-base-content/80">"대화 기록 저장"</span>
                                         <span class="text-[9px] opacity-60">"현재 대화 내용을 텍스트로 내보냅니다."</span>

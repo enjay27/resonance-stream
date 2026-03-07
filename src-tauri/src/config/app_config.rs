@@ -37,6 +37,8 @@ pub struct AppConfig {
     pub blocked_users: std::collections::HashMap<u64, String>,
     #[serde(default)]
     pub min_sender_level: u64,
+    #[serde(default)]
+    pub auto_sync_latest_dict: bool,
 }
 
 impl Default for AppConfig {
@@ -67,6 +69,7 @@ impl Default for AppConfig {
             hide_blocked_messages: false,
             blocked_users: std::collections::HashMap::new(),
             min_sender_level: 1,
+            auto_sync_latest_dict: true,
         }
     }
 }

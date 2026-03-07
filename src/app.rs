@@ -91,6 +91,7 @@ pub fn App() -> impl IntoView {
     let (model_update_step, set_model_update_step) = signal(0); // 0: Info, 1: Downloading, 2: Ready
     let (model_update_progress, set_model_update_progress) = signal(0u8);
 
+    let (auto_sync_latest_dict, set_auto_sync_latest_dict) = signal(true);
     let (show_dictionary, set_show_dictionary) = signal(false);
 
     let signals = AppSignals {
@@ -152,6 +153,7 @@ pub fn App() -> impl IntoView {
         show_app_update_modal, set_show_app_update_modal,
         show_model_update_modal, set_show_model_update_modal,
         pending_update_data, set_pending_update_data,
+        auto_sync_latest_dict, set_auto_sync_latest_dict,
         show_dictionary, set_show_dictionary,
     };
 
@@ -185,6 +187,7 @@ pub fn App() -> impl IntoView {
             hide_blocked_messages: hide_blocked_messages.get_untracked(),
             blocked_users: blocked_users.get_untracked(),
             min_sender_level: min_sender_level.get_untracked(),
+            auto_sync_latest_dict: auto_sync_latest_dict.get_untracked(),
         };
 
         async move {
@@ -445,6 +448,7 @@ pub fn App() -> impl IntoView {
                         set_hide_blocked_messages.set(config.hide_blocked_messages);
                         set_blocked_users.set(config.blocked_users);
                         set_min_sender_level.set(config.min_sender_level);
+                        set_auto_sync_latest_dict.set(config.auto_sync_latest_dict);
 
                         let mut safe_op = config.overlay_opacity;
                         if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85
@@ -551,27 +555,35 @@ pub fn App() -> impl IntoView {
                             }
 
                             add_system_log("info", "Updater", "Checking for remote updates...");
-                            if let Ok(update_res) = invoke("check_all_updates", JsValue::NULL).await {
-                                if let Ok(update_data) = serde_wasm_bindgen::from_value::<crate::ui_types::UpdateCheckResult>(update_res) {
+                            match invoke("check_all_updates", JsValue::NULL).await {
+                                Ok(update_res) => {
+                                    if let Ok(update_data) = serde_wasm_bindgen::from_value::<crate::ui_types::UpdateCheckResult>(update_res) {
+                                        log!("data {:?}", update_data);
 
-                                    // 1. Silent Dictionary Update
-                                    if update_data.dict_update_available {
-                                        add_system_log("info", "Updater", "New dictionary found. Applying silently...");
-                                        if let Ok(dict_args) = serde_wasm_bindgen::to_value(&serde_json::json!({ "newDict": update_data.remote_data.dictionary })) {
-                                            let _ = invoke("apply_dictionary_update", dict_args).await;
+
+                                        // 1. Silent Dictionary Update
+                                        if update_data.dict_update_available {
+                                            add_system_log("info", "Updater", "New dictionary found. Applying silently...");
+                                            if let Ok(dict_args) = serde_wasm_bindgen::to_value(&serde_json::json!({ "newDict": update_data.remote_data.dictionary })) {
+                                                let _ = invoke("apply_dictionary_update", dict_args).await;
+                                            }
+                                        }
+
+                                        // 2. Save metadata for the modals to use
+                                        set_pending_update_data.set(Some(update_data.remote_data.clone()));
+
+                                        // 3. Trigger Popups
+                                        if update_data.app_update_available {
+                                            set_show_app_update_modal.set(true);
+                                        }
+                                        if update_data.model_update_available && config.use_translation {
+                                            set_show_model_update_modal.set(true);
                                         }
                                     }
-
-                                    // 2. Save metadata for the modals to use
-                                    set_pending_update_data.set(Some(update_data.remote_data.clone()));
-
-                                    // 3. Trigger Popups
-                                    if update_data.app_update_available {
-                                        set_show_app_update_modal.set(true);
-                                    }
-                                    if update_data.model_update_available && config.use_translation {
-                                        set_show_model_update_modal.set(true);
-                                    }
+                                },
+                                Err(e) => {
+                                    log!("FATAL: check_all_updates failed: {:?}", e);
+                                    add_system_log("error", "Updater", &format!("Check failed: {:?}", e));
                                 }
                             }
 

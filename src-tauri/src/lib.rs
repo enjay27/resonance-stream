@@ -22,7 +22,6 @@ lazy_static! {
 
 pub mod config;
 pub mod io;
-pub mod packet_buffer;
 
 pub mod protocol;
 pub mod services;

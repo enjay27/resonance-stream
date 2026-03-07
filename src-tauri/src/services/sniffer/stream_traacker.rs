@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::packet_buffer::PacketBuffer;
+use crate::protocol::packet_buffer::PacketBuffer;
 
 pub struct StreamTracker {
     streams: HashMap<[u8; 6], PacketBuffer>,

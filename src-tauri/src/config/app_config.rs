@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use serde_with::serde_as;
 use tauri::{AppHandle, Manager, State};
 use crate::{inject_system_message, AppState, SystemLogLevel};
-// Import Manager trait
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -72,9 +71,6 @@ impl Default for AppConfig {
     }
 }
 
-// Helper to get the correct path:
-// Windows: C:\Users\Name\AppData\Roaming\com.your.identifier\config.json
-// Mac: /Users/Name/Library/Application Support/com.your.identifier/config.json
 fn get_config_path(app: &AppHandle) -> PathBuf {
     let config_dir = app.path().app_config_dir().expect("Could not resolve app config dir");
 

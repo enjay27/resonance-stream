@@ -163,8 +163,9 @@ pub fn run() {
             start_sniffer_command,
             get_chat_history,
             get_system_history,
-            check_dict_update,
-            sync_dictionary,
+            check_all_updates,
+            ignore_update,
+            apply_dictionary_update,
             clear_chat_history,
             set_always_on_top,
             load_config,
@@ -180,8 +181,6 @@ pub fn run() {
             launch_translator,
             block_user_command,
             unblock_user_command,
-            check_for_updates,
-            ignore_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

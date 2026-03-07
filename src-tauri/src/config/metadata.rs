@@ -6,6 +6,7 @@ use tauri::{AppHandle, Manager};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppMetadata {
     pub current_model_version: String,
+    pub current_dict_version: String,
     pub ignored_app_version: Option<String>,
     pub ignored_model_version: Option<String>,
     pub last_update_check: u64,
@@ -15,6 +16,7 @@ impl Default for AppMetadata {
     fn default() -> Self {
         Self {
             current_model_version: "0.0.0".to_string(),
+            current_dict_version: "0.0.0".to_string(),
             ignored_app_version: None,
             ignored_model_version: None,
             last_update_check: 0,

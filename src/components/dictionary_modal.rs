@@ -22,6 +22,9 @@ pub fn DictionaryModal() -> impl IntoView {
     let (editing_target, set_editing_target) = signal(None::<(String, String, String)>);
     let (edit_value, set_edit_value) = signal(String::new());
 
+    let (is_adding_category, set_is_adding_category) = signal(false);
+    let (new_category_name, set_new_category_name) = signal(String::new());
+
     // Fetch the dictionary data when the modal opens
     Effect::new(move |_| {
         if signals.show_dictionary.get() {
@@ -108,6 +111,21 @@ pub fn DictionaryModal() -> impl IntoView {
         }
     };
 
+    let add_category = move || {
+        let name = new_category_name.get_untracked().trim().to_string();
+        if !name.is_empty() {
+            set_dict.update(|d| {
+                // If the category doesn't exist, insert it with an empty BTreeMap
+                d.entry(name.clone()).or_insert_with(BTreeMap::new);
+            });
+            // Automatically switch to the newly created category
+            set_active_category.set(name);
+        }
+        // Reset the input state
+        set_new_category_name.set(String::new());
+        set_is_adding_category.set(false);
+    };
+
     view! {
         <Show when=move || signals.show_dictionary.get()>
             <div class="modal modal-open backdrop-blur-sm transition-all duration-300 z-[30000]">
@@ -149,6 +167,28 @@ pub fn DictionaryModal() -> impl IntoView {
                                     }
                                 />
                             </ul>
+
+                            // Bottom Action Area: Add Category Button
+                            <div class="mt-2 pt-2 border-t border-base-content/10">
+                                <Show when=move || is_adding_category.get() fallback=move || view! {
+                                    <button class="btn btn-ghost btn-xs w-full text-base-content/70 hover:text-success border border-dashed border-base-content/20"
+                                        on:click=move |_| set_is_adding_category.set(true)>
+                                        "+ 카테고리 추가"
+                                    </button>
+                                }>
+                                    <input type="text" class="input input-xs input-bordered w-full bg-base-100"
+                                        autofocus
+                                        placeholder="이름 (Enter)"
+                                        prop:value=move || new_category_name.get()
+                                        on:input=move |ev| set_new_category_name.set(event_target_value(&ev))
+                                        on:blur=move |_| set_is_adding_category.set(false)
+                                        on:keydown=move |ev| {
+                                            if ev.key() == "Enter" { add_category(); }
+                                            else if ev.key() == "Escape" { set_is_adding_category.set(false); }
+                                        }
+                                    />
+                                </Show>
+                            </div>
                         </div>
 
                         // MAIN PANEL: Words List

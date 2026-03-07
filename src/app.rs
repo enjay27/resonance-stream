@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlDivElement;
-use crate::components::{ChatContainer, ChatRow, NavBar, SetupWizard};
+use crate::components::{ChatContainer, ChatRow, DictionaryModal, NavBar, SetupWizard};
 use crate::components::settings::Settings;
 use crate::components::title_bar::TitleBar;
 use crate::hooks::use_config::save_app_config;
@@ -91,6 +91,8 @@ pub fn App() -> impl IntoView {
     let (model_update_step, set_model_update_step) = signal(0); // 0: Info, 1: Downloading, 2: Ready
     let (model_update_progress, set_model_update_progress) = signal(0u8);
 
+    let (show_dictionary, set_show_dictionary) = signal(false);
+
     let signals = AppSignals {
         init_done, set_init_done,
         use_translation, set_use_translation,
@@ -147,12 +149,10 @@ pub fn App() -> impl IntoView {
         app_update_progress, set_app_update_progress,
         model_update_step, set_model_update_step,
         model_update_progress, set_model_update_progress,
-        show_app_update_modal,
-        set_show_app_update_modal,
-        show_model_update_modal,
-        set_show_model_update_modal,
-        pending_update_data,
-        set_pending_update_data,
+        show_app_update_modal, set_show_app_update_modal,
+        show_model_update_modal, set_show_model_update_modal,
+        pending_update_data, set_pending_update_data,
+        show_dictionary, set_show_dictionary,
     };
 
     provide_context(signals);
@@ -804,6 +804,9 @@ pub fn App() -> impl IntoView {
                     </div>
                 </div>
             </Show>
+
+            // Dictionary Modal
+            <DictionaryModal />
 
             // Settings Modal
             <Settings />

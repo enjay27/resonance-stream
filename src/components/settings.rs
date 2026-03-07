@@ -637,6 +637,23 @@ pub fn Settings() -> impl IntoView {
 
                                 <div class="divider m-0 opacity-10"></div>
 
+                                // Dictionary Modal
+                                <div class="flex items-center justify-between">
+                                    <div class="flex flex-col">
+                                        <span class="text-xs font-bold text-base-content/80">"사용자 사전 편집"</span>
+                                        <span class="text-[9px] opacity-60">"번역 사전을 확인하고 직접 수정합니다."</span>
+                                    </div>
+                                    <button class="btn btn-xs btn-outline"
+                                        on:click=move |_| {
+                                            signals.set_show_dictionary.set(true);
+                                        }
+                                    >
+                                        "사전 열기"
+                                    </button>
+                                </div>
+
+                                <div class="divider m-0 opacity-10"></div>
+
                                 <div class="flex items-center justify-between">
                                     <div class="flex flex-col">
                                         <span class="text-xs font-bold text-base-content/80">"대화 기록 저장"</span>

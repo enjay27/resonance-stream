@@ -120,6 +120,8 @@ pub struct AppSignals {
     pub set_model_update_step: WriteSignal<i32>,
     pub model_update_progress: ReadSignal<u8>,
     pub set_model_update_progress: WriteSignal<u8>,
+    pub show_dictionary: ReadSignal<bool>,
+    pub set_show_dictionary: WriteSignal<bool>,
 }
 
 #[derive(Copy, Clone)]

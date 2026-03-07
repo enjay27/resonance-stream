@@ -102,6 +102,36 @@ pub async fn sync_dictionary(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn get_dict_version(app: tauri::AppHandle) -> String {
+    let metadata = crate::config::load_metadata(&app);
+    metadata.current_dict_version
+}
+
+#[tauri::command]
+pub fn get_local_dictionary(app: tauri::AppHandle) -> Result<String, String> {
+    println!("call dictionary get_local_dictionary");
+
+    let dict_path = app.path().app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("custom_dict.json");
+
+    if !dict_path.exists() {
+        return Ok("{}".to_string());
+    }
+
+    std::fs::read_to_string(&dict_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn save_local_dictionary(app: tauri::AppHandle, content: String) -> Result<(), String> {
+    let dict_path = app.path().app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("custom_dict.json");
+
+    std::fs::write(&dict_path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn ignore_update(app: AppHandle, target: String, version: String) {
     let mut metadata = crate::config::load_metadata(&app);
     if target == "app" { metadata.ignored_app_version = Some(version); }

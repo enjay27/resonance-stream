@@ -179,7 +179,9 @@ pub fn run() {
             update_tray_menu,
             launch_translator,
             block_user_command,
-            unblock_user_command
+            unblock_user_command,
+            check_for_updates,
+            ignore_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

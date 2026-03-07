@@ -38,11 +38,6 @@ pub use services::translator::*;
 pub fn run() {
     env_logger::builder()
         .format(|buf, record| {
-            let target = record.target();
-            let short_target = target
-                .strip_prefix("resonance_stream_lib::")
-                .unwrap_or(target);
-
             // 1. Get the default ANSI style for the log level (Info=Green, Warn=Yellow, etc.)
             let level_style = buf.default_level_style(record.level());
 
@@ -54,13 +49,11 @@ pub fn run() {
             // 3. Apply the styles using the 0.11 `{style}text{style:#}` pattern
             writeln!(
                 buf,
-                "[{timestamp} {level_style}{level}{level_style:#} {target_style}{target}{target_style:#}] {message}",
+                "[{timestamp} {level_style}{level}{level_style:#}] {message}",
                 timestamp = buf.timestamp(),
                 level_style = level_style,   // Turns level color ON
                 level = record.level(),
                 // {level_style:#} magically turns the color OFF
-                target_style = target_style, // Turns target color ON
-                target = short_target,
                 // {target_style:#} turns target color OFF
                 message = record.args()
             )
@@ -186,6 +179,7 @@ pub fn run() {
             launch_translator,
             block_user_command,
             unblock_user_command,
+            ui_system_message,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -218,16 +212,33 @@ pub fn inject_system_message<S: Into<String>>(
         let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
 
         // Map the Enum to the string expected by the frontend SystemMessage struct
+        let log_message = format!("[{}] {}", source, msg);
         let level_str = match level {
-            SystemLogLevel::Info => "info",
-            SystemLogLevel::Warning => "warn",
-            SystemLogLevel::Error => "error",
-            SystemLogLevel::Success => "success",
-            SystemLogLevel::Debug => "debug",
-            SystemLogLevel::Trace => "trace",
+            SystemLogLevel::Info => {
+                log::info!("{}", log_message);
+                "info"
+            },
+            SystemLogLevel::Warning => {
+                log::warn!("{}", log_message);
+                "warn"
+            },
+            SystemLogLevel::Error => {
+                log::error!("{}", log_message);
+                "error"
+            },
+            SystemLogLevel::Success => {
+                log::info!("{}", log_message);
+                "success"
+            },
+            SystemLogLevel::Debug => {
+                log::debug!("{}", log_message);
+                "debug"
+            },
+            SystemLogLevel::Trace => {
+                log::trace!("{}", log_message);
+                "trace"
+            },
         };
-
-        println!("[{}] [{}] [{:?}] {}", current_pid, source, level, msg);
 
         let system_message = SystemMessage {
             pid: current_pid,
@@ -324,6 +335,24 @@ fn clear_chat_history(state: tauri::State<AppState>) {
     // 2. Clear System Logs (Optional, but good for a full reset)
     let mut sys_history = state.system_history.lock().unwrap();
     sys_history.clear();
+}
+
+#[tauri::command]
+fn ui_system_message(app: tauri::AppHandle, // Tauri prefers AppHandle passed by value in commands
+                       level: String,
+                       source: String,        // Use concrete String for frontend IPC
+                       message: String        // Use concrete String for frontend IPC
+                       ) {
+    let sys_level = match level.to_lowercase().as_str() {
+        "warn" | "warning" => SystemLogLevel::Warning,
+        "error" => SystemLogLevel::Error,
+        "success" => SystemLogLevel::Success,
+        "debug" => SystemLogLevel::Debug,
+        "trace" => SystemLogLevel::Trace,
+        _ => SystemLogLevel::Info, // Default fallback
+    };
+
+    inject_system_message(&app, sys_level, &source, message);
 }
 
 #[tauri::command]

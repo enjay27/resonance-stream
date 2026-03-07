@@ -514,7 +514,7 @@ pub fn Settings() -> impl IntoView {
                                     <span class="text-base-content/50 uppercase">"Background Opacity"</span>
                                     <span class="text-success">{move || format!("{:.0}%", signals.opacity.get() * 100.0)}</span>
                                 </div>
-                                <input type="range" min="0.1" max="1.0" step="0.05"
+                                <input type="range" min="0.0" max="1.0" step="0.05"
                                     class="range range-xs range-success"
                                     prop:value=move || signals.opacity.get().to_string()
                                     on:input=move |ev| {

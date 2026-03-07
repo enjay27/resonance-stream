@@ -266,7 +266,7 @@ pub fn NavBar() -> impl IntoView {
                         </button>
                     </div>
 
-                    // NEW: Background Opacity Control
+                    // Background Opacity Control
                     <div class="relative group flex items-center justify-center">
                         <div class="tooltip tooltip-bottom" data-tip="Background Opacity">
                             <button class="btn btn-ghost btn-xs text-lg">
@@ -280,7 +280,7 @@ pub fn NavBar() -> impl IntoView {
                                 <span class="text-[9px] font-black text-success uppercase tracking-widest opacity-80">
                                     {move || format!("투명도: {:.0}%", signals.opacity.get() * 100.0)}
                                 </span>
-                                <input type="range" min="0.1" max="1.0" step="0.05"
+                                <input type="range" min="0.0" max="1.0" step="0.05"
                                     class="range range-xs range-success w-full"
                                     prop:value=move || signals.opacity.get().to_string()
                                     on:input=move |ev| {

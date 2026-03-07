@@ -450,11 +450,6 @@ pub fn App() -> impl IntoView {
                         set_min_sender_level.set(config.min_sender_level);
                         set_auto_sync_latest_dict.set(config.auto_sync_latest_dict);
 
-                        let mut safe_op = config.overlay_opacity;
-                        if safe_op > 1.0 { safe_op = safe_op / 100.0; } // Fixes older configs that saved 85 instead of 0.85
-                        if safe_op <= 0.0 { safe_op = 0.85; } // Safety fallback
-                        set_opacity.set(safe_op);
-
                         // 2. If the user hasn't finished the wizard, stop here
                         if config.init_done {
                             log!("Existing user detected. Auto-starting services.");

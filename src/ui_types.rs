@@ -69,6 +69,10 @@ pub struct AppConfig {
     pub min_sender_level: u64,
     #[serde(default)]
     pub auto_sync_latest_dict: bool,
+    #[serde(default)]
+    pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
+    #[serde(default)]
+    pub tab_switch_key: String,     // e.g., "Tab", "ArrowRight", etc.
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

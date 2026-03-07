@@ -126,6 +126,10 @@ pub struct AppSignals {
     pub set_auto_sync_latest_dict: WriteSignal<bool>,
     pub unread_counts: ReadSignal<HashMap<String, usize>>,
     pub set_unread_counts: WriteSignal<HashMap<String, usize>>,
+    pub tab_switch_modifier: ReadSignal<String>,
+    pub set_tab_switch_modifier: WriteSignal<String>,
+    pub tab_switch_key: ReadSignal<String>,
+    pub set_tab_switch_key: WriteSignal<String>,
 }
 
 #[derive(Copy, Clone)]

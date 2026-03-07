@@ -39,6 +39,10 @@ pub struct AppConfig {
     pub min_sender_level: u64,
     #[serde(default)]
     pub auto_sync_latest_dict: bool,
+    #[serde(default)]
+    pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
+    #[serde(default)]
+    pub tab_switch_key: String,     // e.g., "Tab", "ArrowRight", etc.
 }
 
 impl Default for AppConfig {
@@ -70,6 +74,8 @@ impl Default for AppConfig {
             blocked_users: std::collections::HashMap::new(),
             min_sender_level: 1,
             auto_sync_latest_dict: true,
+            tab_switch_modifier: "Ctrl".to_string(),
+            tab_switch_key: "Tab".to_string(),
         }
     }
 }

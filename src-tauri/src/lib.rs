@@ -13,6 +13,7 @@ use lazy_static::lazy_static;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_shell::ShellExt;
 
 lazy_static! {
@@ -148,6 +149,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             check_model_status,
             download_model,
@@ -181,6 +183,7 @@ pub fn run() {
             unblock_user_command,
             ai_server_health_check,
             ui_system_message,
+            update_global_tab_shortcut,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -424,4 +427,39 @@ fn launch_translator(app: AppHandle, state: State<'_, AppState>) {
     let model_path = crate::get_model_path(&app);
     let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
     *state.translator_tx.lock().unwrap() = Some(tx);
+}
+
+#[tauri::command]
+fn update_global_tab_shortcut(app: tauri::AppHandle, modifier: String, key: String) {
+    // 1. Unregister all existing shortcuts so we don't have duplicates
+    let _ = app.global_shortcut().unregister_all();
+
+    // 2. Format the string for Tauri (e.g., "Ctrl+Tab", "Alt+A")
+    // Tauri expects "CommandOrControl" instead of "Ctrl"
+    let tauri_mod = match modifier.as_str() {
+        "Ctrl" => "CommandOrControl",
+        "None" | "" => "",
+        other => other,
+    };
+
+    // Tauri expects uppercase letters for standard keys
+    let tauri_key = key.to_uppercase();
+
+    let shortcut_str = if tauri_mod.is_empty() {
+        tauri_key
+    } else {
+        format!("{}+{}", tauri_mod, tauri_key)
+    };
+
+    // 3. Register the new global shortcut
+    if let Ok(shortcut) = shortcut_str.parse::<Shortcut>() {
+        let _ = app.global_shortcut().on_shortcut(shortcut, move |app_handle, shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                // When the global shortcut is pressed, tell the frontend to switch tabs!
+                let _ = app_handle.emit("global-tab-switch", ());
+            }
+        });
+    } else {
+        inject_system_message(&app, SystemLogLevel::Error, "Shortcut", format!("Failed to parse global shortcut: {}", shortcut_str));
+    }
 }

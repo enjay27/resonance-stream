@@ -95,6 +95,9 @@ pub fn App() -> impl IntoView {
     let (show_dictionary, set_show_dictionary) = signal(false);
     let (unread_counts, set_unread_counts) = signal::<std::collections::HashMap<String, usize>>(HashMap::new());
 
+    let (tab_switch_modifier, set_tab_switch_modifier) = signal("Ctrl".to_string());
+    let (tab_switch_key, set_tab_switch_key) = signal("Tab".to_string());
+
     let signals = AppSignals {
         init_done, set_init_done,
         use_translation, set_use_translation,
@@ -157,6 +160,10 @@ pub fn App() -> impl IntoView {
         auto_sync_latest_dict, set_auto_sync_latest_dict,
         show_dictionary, set_show_dictionary,
         unread_counts, set_unread_counts,
+        tab_switch_modifier,
+        set_tab_switch_modifier,
+        tab_switch_key,
+        set_tab_switch_key,
     };
 
     provide_context(signals);
@@ -190,6 +197,8 @@ pub fn App() -> impl IntoView {
             blocked_users: blocked_users.get_untracked(),
             min_sender_level: min_sender_level.get_untracked(),
             auto_sync_latest_dict: auto_sync_latest_dict.get_untracked(),
+            tab_switch_modifier: tab_switch_modifier.get_untracked(),
+            tab_switch_key: tab_switch_key.get_untracked(),
         };
 
         async move {
@@ -455,6 +464,8 @@ pub fn App() -> impl IntoView {
                         set_blocked_users.set(config.blocked_users);
                         set_min_sender_level.set(config.min_sender_level);
                         set_auto_sync_latest_dict.set(config.auto_sync_latest_dict);
+                        set_tab_switch_modifier.set(if config.tab_switch_modifier.is_empty() { "Ctrl".to_string() } else { config.tab_switch_modifier });
+                        set_tab_switch_key.set(if config.tab_switch_key.is_empty() { "Tab".to_string() } else { config.tab_switch_key });
 
                         // 2. If the user hasn't finished the wizard, stop here
                         if config.init_done {

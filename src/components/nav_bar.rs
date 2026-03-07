@@ -4,7 +4,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::JsValue;
 use leptos::html::{Input, Div, Button}; // ADDED: Div and Button for our new refs
-use leptos::ev::{keydown, click}; // ADDED: click event
+use leptos::ev::{keydown, click};
+use wasm_bindgen::closure::Closure;
+// ADDED: click event
 use web_sys::Node; // ADDED: Node to verify click targets
 
 #[component]
@@ -37,6 +39,45 @@ pub fn NavBar() -> impl IntoView {
                 }
             });
         }
+    });
+
+    Effect::new(move |_| {
+        spawn_local(async move {
+            let closure = Closure::wrap(Box::new(move |_: JsValue| {
+                // This triggers ANYTIME the global shortcut is pressed, even during gameplay!
+                let sequence = vec!["커스텀", "월드", "길드", "파티", "로컬"];
+                let current = signals.active_tab.get_untracked();
+
+                let next_tab = if let Some(idx) = sequence.iter().position(|&x| x == current) {
+                    sequence[(idx + 1) % sequence.len()].to_string()
+                } else {
+                    "커스텀".to_string()
+                };
+
+                signals.set_active_tab.set(next_tab.clone());
+                signals.set_unread_count.set(0);
+
+                signals.set_unread_counts.update(|counts| {
+                    match next_tab.as_str() {
+                        "커스텀" => {
+                            let filters = signals.custom_filters.get_untracked();
+                            for f in filters { counts.remove(&f); }
+                        },
+                        "월드" => { counts.remove("WORLD"); },
+                        "길드" => { counts.remove("GUILD"); },
+                        "파티" => { counts.remove("PARTY"); },
+                        "로컬" => { counts.remove("LOCAL"); },
+                        _ => {}
+                    }
+                });
+
+                signals.set_is_at_bottom.set(true);
+                actions.save_config.dispatch(());
+            }) as Box<dyn FnMut(JsValue)>);
+
+            let _ = crate::tauri_bridge::listen("global-tab-switch", &closure).await;
+            closure.forget();
+        });
     });
 
     // ==========================================

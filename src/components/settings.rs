@@ -508,22 +508,119 @@ pub fn Settings() -> impl IntoView {
                                 </label>
                             </div>
 
-                            // Opacity Slider
-                            <div class="space-y-2 px-1">
-                                <div class="flex justify-between text-[11px] font-bold">
-                                    <span class="text-base-content/50 uppercase">"Background Opacity"</span>
-                                    <span class="text-success">{move || format!("{:.0}%", signals.opacity.get() * 100.0)}</span>
+                            // Tab Switch Shortcut
+                            <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
+                                <label class="label p-0 mb-2">
+                                    <div class="flex flex-col">
+                                        <span class="label-text text-xs font-bold text-base-content/80">"탭 전환 단축키 (Tab Switch Shortcut)"</span>
+                                        <span class="text-[9px] text-base-content/60 mt-1">"버튼을 클릭하고 원하는 단축키 조합(예: Ctrl + Tab)을 누르세요."</span>
+                                    </div>
+                                </label>
+                                <div class="w-full flex justify-center items-center gap-1 mt-1">
+                                    <button class="btn btn-outline btn-sm w-48 font-bold focus:border-success focus:text-success focus:bg-success/10"
+                                        on:keydown=move |ev| {
+                                            ev.prevent_default();
+                                            let key_str = ev.key();
+
+                                            let ignored = ["Control", "Alt", "Shift", "Meta", "Escape", "CapsLock", "Process", "HangulMode", "HanjaMode"];
+
+                                            // Let users also press "Escape" to cancel/unbind!
+                                            if key_str == "Escape" {
+                                                signals.set_tab_switch_modifier.set("None".to_string());
+                                                signals.set_tab_switch_key.set("".to_string());
+                                                actions.save_config.dispatch(());
+
+                                                spawn_local(async move {
+                                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                                        "modifier": "None",
+                                                        "key": ""
+                                                    })).unwrap();
+                                                    let _ = invoke("update_global_tab_shortcut", args).await;
+                                                });
+                                                return;
+                                            }
+
+                                            if !ignored.contains(&key_str.as_str()) {
+                                                let modifier_str = if ev.ctrl_key() || ev.meta_key() {
+                                                    "Ctrl"
+                                                } else if ev.alt_key() {
+                                                    "Alt"
+                                                } else if ev.shift_key() {
+                                                    "Shift"
+                                                } else {
+                                                    "None"
+                                                };
+
+                                                signals.set_tab_switch_modifier.set(modifier_str.to_string());
+                                                signals.set_tab_switch_key.set(key_str.clone());
+                                                actions.save_config.dispatch(());
+
+                                                let rust_mod = modifier_str.to_string();
+                                                let rust_key = key_str.clone();
+
+                                                spawn_local(async move {
+                                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                                        "modifier": rust_mod,
+                                                        "key": rust_key
+                                                    })).unwrap();
+                                                    let _ = invoke("update_global_tab_shortcut", args).await;
+                                                });
+                                            }
+                                        }
+                                    >
+                                        {move || {
+                                            let m = signals.tab_switch_modifier.get();
+                                            let k = signals.tab_switch_key.get();
+
+                                            let key_display = match k.as_str() {
+                                                " " => "Space".to_string(),
+                                                "ArrowRight" => "→ (Right)".to_string(),
+                                                "ArrowLeft" => "← (Left)".to_string(),
+                                                "ArrowUp" => "↑ (Up)".to_string(),
+                                                "ArrowDown" => "↓ (Down)".to_string(),
+                                                "" => "지정되지 않음".to_string(), // Better text for empty state
+                                                other => {
+                                                    let mut c = other.chars();
+                                                    match c.next() {
+                                                        None => String::new(),
+                                                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                                                    }
+                                                }
+                                            };
+
+                                            if m == "None" || m.is_empty() {
+                                                key_display
+                                            } else {
+                                                format!("{} + {}", m, key_display)
+                                            }
+                                        }}
+                                    </button>
+
+                                    // --- NEW: DEDICATED UNBIND BUTTON ---
+                                    <div class="tooltip tooltip-top" data-tip="단축키 해제">
+                                        <button class="btn btn-outline btn-sm btn-error w-8 p-0 font-black focus:outline-none"
+                                            on:click=move |_| {
+                                                signals.set_tab_switch_modifier.set("None".to_string());
+                                                signals.set_tab_switch_key.set("".to_string());
+                                                actions.save_config.dispatch(());
+
+                                                spawn_local(async move {
+                                                    // Sending empty strings unregisters the current key without adding a new one
+                                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                                        "modifier": "None",
+                                                        "key": ""
+                                                    })).unwrap();
+                                                    let _ = invoke("update_global_tab_shortcut", args).await;
+                                                });
+                                            }
+                                        >
+                                            "✕"
+                                        </button>
+                                    </div>
                                 </div>
-                                <input type="range" min="0.0" max="1.0" step="0.05"
-                                    class="range range-xs range-success"
-                                    prop:value=move || signals.opacity.get().to_string()
-                                    on:input=move |ev| {
-                                        let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
-                                        signals.set_opacity.set(val);
-                                        log!("opacity {:?}", signals.opacity.get_untracked());
-                                        actions.save_config.dispatch(());
-                                    }
-                                />
+                                <div class="text-[9px] text-warning mt-2 bg-warning/10 p-1.5 rounded">
+                                    "⚠️ 주의: Ctrl+A, Ctrl+C 같은 윈도우 기본 단축키나 게임 내 필수 키를 등록하면, 해당 키의 원래 기능이 작동하지 않게 됩니다. (Ctrl + Tab 또는 Ctrl + `(1옆에) 조합을 권장합니다)"
+                                </div>
                             </div>
 
                             // Theme Toggle

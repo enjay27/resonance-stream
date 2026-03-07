@@ -251,9 +251,9 @@ fn server_health_check(app: &AppHandle) -> bool {
 
     if !is_ready {
         inject_system_message(app, SystemLogLevel::Error, "Translator", "AI Engine failed to initialize within 30s.");
-        return true;
+        return false;
     }
-    false
+    true
 }
 
 pub fn contains_japanese(text: &str) -> bool {

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::protocol::packet_buffer::PacketBuffer;
+use std::collections::HashMap;
 
 pub struct StreamTracker {
     streams: HashMap<[u8; 6], PacketBuffer>,
@@ -7,7 +7,9 @@ pub struct StreamTracker {
 
 impl StreamTracker {
     pub fn new() -> Self {
-        Self { streams: HashMap::new() }
+        Self {
+            streams: HashMap::new(),
+        }
     }
 
     /// Takes raw bytes from a specific connection and returns fully assembled packets
@@ -16,7 +18,10 @@ impl StreamTracker {
 
         // 1. Strip application header (5003)
         if let Some(game_data) = crate::protocol::parser::strip_application_header(payload, 5003) {
-            let p_buf = self.streams.entry(stream_key).or_insert_with(PacketBuffer::new);
+            let p_buf = self
+                .streams
+                .entry(stream_key)
+                .or_insert_with(PacketBuffer::new);
             p_buf.add(game_data);
 
             // 2. Extract all complete packets

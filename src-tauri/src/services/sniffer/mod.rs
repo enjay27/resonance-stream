@@ -1,33 +1,27 @@
-mod stream_traacker;
 mod message_processor;
-mod pipeline;
 mod network;
+mod pipeline;
+mod stream_traacker;
 
 pub use self::network::*;
 pub use self::pipeline::*;
 
-use crate::{inject_system_message, store_and_emit, NetworkInterface, SnifferStatePayload, TranslationJob};
+use crate::{
+    inject_system_message, store_and_emit, NetworkInterface, SnifferStatePayload, TranslationJob,
+};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{env, thread};
+use std::thread;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::protocol::types::{
-    AppState, SystemLogLevel
-};
+use crate::protocol::types::{AppState, SystemLogLevel};
+use crate::services::sniffer::network::initialize_network_socket;
 use crate::services::sniffer::pipeline::PipelineAction;
 use crate::services::translator::core::contains_japanese;
 use crate::services::translator::processor::convert_to_romaji;
 use crossbeam_channel::Sender;
-use local_ip_address::list_afinet_netifas;
-use socket2::{Domain, Protocol, Socket, Type};
-use std::net::Ipv4Addr;
 use std::os::windows::process::CommandExt;
-use std::process::Command;
-use etherparse::{PacketHeaders, TransportHeader};
-use log::trace;
-use crate::services::sniffer::network::initialize_network_socket;
 
 // --- GLOBAL STATE ---
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
@@ -41,17 +35,25 @@ fn feed_watchdog() {
 }
 
 pub fn emit_sniffer_state(app: &tauri::AppHandle, state: &str, message: &str) {
-    let _ = app.emit("sniffer-state", SnifferStatePayload {
-        state: state.to_string(),
-        message: message.to_string(),
-    });
+    let _ = app.emit(
+        "sniffer-state",
+        SnifferStatePayload {
+            state: state.to_string(),
+            message: message.to_string(),
+        },
+    );
 }
 
 #[tauri::command]
 pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State<'_, AppState>) {
     let mut tx_lock = state.sniffer_tx.lock().unwrap();
     if tx_lock.is_some() {
-        inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Sniffer restart blocked: already active.");
+        inject_system_message(
+            &app,
+            SystemLogLevel::Warning,
+            "Sniffer",
+            "Sniffer restart blocked: already active.",
+        );
         emit_sniffer_state(&app, "Pending", "Listening for game traffic...");
         IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
         return;
@@ -73,7 +75,12 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
     let rx_main = rx.clone();
 
     thread::spawn(move || {
-        inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "Engine Active");
+        inject_system_message(
+            &app_handle,
+            SystemLogLevel::Success,
+            "Sniffer",
+            "Engine Active",
+        );
         emit_sniffer_state(&app_handle, "Starting", "Engine Active");
         IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
 
@@ -83,7 +90,12 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
             None => return,
         };
 
-        inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "Raw Socket active. Listening for game traffic...");
+        inject_system_message(
+            &app_handle,
+            SystemLogLevel::Success,
+            "Sniffer",
+            "Raw Socket active. Listening for game traffic...",
+        );
         emit_sniffer_state(&app_handle, "Pending", "Listening for game traffic...");
 
         let mut buf = [0u8; 65535];
@@ -91,14 +103,28 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
 
         loop {
             if let Err(crossbeam_channel::TryRecvError::Disconnected) = rx_main.try_recv() {
-                inject_system_message(&app_handle, SystemLogLevel::Info, "Sniffer", "Sniffer thread shutting down.");
+                inject_system_message(
+                    &app_handle,
+                    SystemLogLevel::Info,
+                    "Sniffer",
+                    "Sniffer thread shutting down.",
+                );
                 break;
             }
 
-            let uninit_buf = unsafe { std::mem::transmute::<&mut [u8], &mut [std::mem::MaybeUninit<u8>]>(buf.as_mut_slice()) };
+            let uninit_buf = unsafe {
+                std::mem::transmute::<&mut [u8], &mut [std::mem::MaybeUninit<u8>]>(
+                    buf.as_mut_slice(),
+                )
+            };
             let n = match socket.recv(uninit_buf) {
                 Ok(n) => n,
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => continue,
+                Err(ref e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    continue
+                }
                 Err(_) => continue,
             };
 
@@ -117,7 +143,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
                         IS_SNIFFER_ACTIVE.store(true, Ordering::Relaxed);
                         emit_sniffer_state(&app_handle, "Active", "Listening for game traffic...");
                     }
-                }
+                },
             );
 
             // 2. Dispatch Side Effects
@@ -138,16 +164,30 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
             }
 
             let last = LAST_TRAFFIC_TIME.load(Ordering::Relaxed);
-            if last == 0 { continue; }
+            if last == 0 {
+                continue;
+            }
 
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
 
             if now.saturating_sub(last) > 15 {
                 // If it was previously active, throw the error state
-                inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Watchdog: No game traffic for 15s.");
+                inject_system_message(
+                    &app,
+                    SystemLogLevel::Warning,
+                    "Sniffer",
+                    "Watchdog: No game traffic for 15s.",
+                );
 
                 // Emitting "Error" changes the TitleBar badge to Red so the user can click it!
-                emit_sniffer_state(&app, "Error", "게임 트래픽 감지 안됨 (클릭하여 어댑터 복구)");
+                emit_sniffer_state(
+                    &app,
+                    "Error",
+                    "게임 트래픽 감지 안됨 (클릭하여 어댑터 복구)",
+                );
                 IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
 
                 // Kick the watchdog so we wait another 15s before checking again
@@ -172,13 +212,17 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                         let _ = app.emit("chat-message-update", existing_msg.clone());
                     }
                 }
-            },
+            }
             PipelineAction::EmitNewMessage(mut chat) => {
                 // Apply Romaji Swap
                 if contains_japanese(&chat.nickname) {
                     let mut nick_cache = state.nickname_cache.lock().unwrap();
-                    chat.nickname_romaji = Some(nick_cache.entry(chat.nickname.clone())
-                        .or_insert_with(|| convert_to_romaji(&chat.nickname)).clone());
+                    chat.nickname_romaji = Some(
+                        nick_cache
+                            .entry(chat.nickname.clone())
+                            .or_insert_with(|| convert_to_romaji(&chat.nickname))
+                            .clone(),
+                    );
                 }
 
                 // Dispatch Side Effects
@@ -203,9 +247,18 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
 }
 
 #[tauri::command]
-pub fn block_user_command(uid: u64, nickname: String, app: tauri::AppHandle, state: tauri::State<'_, AppState>) {
+pub fn block_user_command(
+    uid: u64,
+    nickname: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) {
     // 1. Add to In-Memory AppState
-    state.blocked_users.lock().unwrap().insert(uid, nickname.clone());
+    state
+        .blocked_users
+        .lock()
+        .unwrap()
+        .insert(uid, nickname.clone());
 
     // 2. Add to Disk Config
     let mut config = crate::config::load_config(app.clone());

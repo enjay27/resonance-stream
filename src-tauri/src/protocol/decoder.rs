@@ -1,5 +1,5 @@
 /// Safely reads a Protobuf Varint from a byte slice.
-/// Returns a tuple of (Value, Bytes Read). 
+/// Returns a tuple of (Value, Bytes Read).
 /// Returns (0, 0) if the varint is incomplete (waiting for more TCP data).
 pub fn read_varint(data: &[u8]) -> (u64, usize) {
     let mut value = 0u64;
@@ -16,7 +16,9 @@ pub fn read_varint(data: &[u8]) -> (u64, usize) {
         }
 
         shift += 7;
-        if shift >= 64 { break; } // Prevent panic on corrupted data
+        if shift >= 64 {
+            break;
+        } // Prevent panic on corrupted data
     }
 
     // If we exit the loop but the last byte had the continuation bit set,
@@ -44,7 +46,7 @@ pub fn find_string_by_tag(data: &[u8], target_tag: u8) -> Option<String> {
     while i < data.len() {
         let tag = data[i];
         if tag == target_tag {
-            let (len, read) = read_varint(&data[i+1..]);
+            let (len, read) = read_varint(&data[i + 1..]);
             let start = i + 1 + read;
             let end = (start + len as usize).min(data.len());
             if start < end {
@@ -52,7 +54,7 @@ pub fn find_string_by_tag(data: &[u8], target_tag: u8) -> Option<String> {
             }
         }
         let wire_type = tag & 0x07;
-        i += 1 + skip_field(wire_type, &data[i+1..]);
+        i += 1 + skip_field(wire_type, &data[i + 1..]);
     }
     None
 }
@@ -63,11 +65,11 @@ pub fn find_int_by_tag(data: &[u8], target_tag: u8) -> Option<u64> {
     while i < data.len() {
         let tag = data[i];
         if tag == target_tag {
-            let (val, _) = read_varint(&data[i+1..]);
+            let (val, _) = read_varint(&data[i + 1..]);
             return Some(val);
         }
         let wire_type = tag & 0x07;
-        i += 1 + skip_field(wire_type, &data[i+1..]);
+        i += 1 + skip_field(wire_type, &data[i + 1..]);
     }
     None
 }

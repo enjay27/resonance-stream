@@ -25,7 +25,10 @@ impl Default for AppMetadata {
 }
 
 fn get_metadata_path(app: &AppHandle) -> PathBuf {
-    let config_dir = app.path().app_config_dir().expect("Could not resolve app config dir");
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .expect("Could not resolve app config dir");
     if !config_dir.exists() {
         let _ = fs::create_dir_all(&config_dir);
     }

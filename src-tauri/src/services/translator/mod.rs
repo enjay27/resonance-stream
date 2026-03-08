@@ -1,30 +1,37 @@
 pub mod core;
-pub mod server_manager;
 pub mod processor;
+pub mod server_manager;
 
 pub use server_manager::*;
 
 use crossbeam_channel::{unbounded, Sender};
-use std::thread;
-use std::path::PathBuf;
-use tauri::{AppHandle, Manager, Emitter};
 use reqwest::blocking::Client;
+use std::path::PathBuf;
+use std::thread;
+use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{inject_system_message, kill_orphaned_servers};
 use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorStatePayload};
+use crate::{inject_system_message, kill_orphaned_servers};
 
 use self::core::{translate_text, AI_SERVER_URL};
-use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds, ServerGuard};
 use self::processor::{load_dictionary, postprocess_text, preprocess_text};
+use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds, ServerGuard};
 
-pub struct TranslationJob { pub chat: ChatMessage }
+pub struct TranslationJob {
+    pub chat: ChatMessage,
+}
 
 pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<TranslationJob> {
     let (tx, rx) = unbounded();
     let config = crate::config::load_config(app.clone());
 
     thread::spawn(move || {
-        inject_system_message(&app, SystemLogLevel::Info, "Translator", "Initializing HTTP AI Backend...");
+        inject_system_message(
+            &app,
+            SystemLogLevel::Info,
+            "Translator",
+            "Initializing HTTP AI Backend...",
+        );
         emit_translator_state(&app, "Starting", "Initializing AI Backend...");
 
         kill_orphaned_servers(&app);
@@ -39,7 +46,11 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         // 2. Wait for Health
         emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
         if !server_health_check_for_30_seconds(&app) {
-            emit_translator_state(&app, "Error", "AI Engine failed to start (OOM or missing model).");
+            emit_translator_state(
+                &app,
+                "Error",
+                "AI Engine failed to start (OOM or missing model).",
+            );
             return;
         }
 
@@ -48,7 +59,12 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         let dict_path = app.path().app_data_dir().unwrap().join("custom_dict.json");
         let custom_dict = load_dictionary(&dict_path);
 
-        inject_system_message(&app, SystemLogLevel::Success, "Translator", "AI Server running! Ready for translation.");
+        inject_system_message(
+            &app,
+            SystemLogLevel::Success,
+            "Translator",
+            "AI Server running! Ready for translation.",
+        );
         emit_translator_state(&app, "Active", "AI Engine Ready");
 
         // 4. Run the pure translation loop
@@ -60,7 +76,12 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
     tx
 }
 
-fn process_translation_job(job: TranslationJob, client: &Client, dict: &std::collections::HashMap<String, String>, app: &AppHandle) {
+fn process_translation_job(
+    job: TranslationJob,
+    client: &Client,
+    dict: &std::collections::HashMap<String, String>,
+    app: &AppHandle,
+) {
     let chat = job.chat;
     let state = app.state::<crate::AppState>();
     let nick_cache = state.nickname_cache.lock().unwrap();
@@ -87,17 +108,23 @@ fn process_translation_job(job: TranslationJob, client: &Client, dict: &std::col
         existing_chat.translated = Some(final_str.clone());
     }
 
-    let _ = app.emit("translation-event", &crate::protocol::types::TranslationResult {
-        pid: chat.pid,
-        translated: final_str,
-    });
+    let _ = app.emit(
+        "translation-event",
+        &crate::protocol::types::TranslationResult {
+            pid: chat.pid,
+            translated: final_str,
+        },
+    );
 }
 
 pub fn emit_translator_state(app: &tauri::AppHandle, state: &str, message: &str) {
-    let _ = app.emit("translator-state", TranslatorStatePayload {
-        state: state.to_string(),
-        message: message.to_string(),
-    });
+    let _ = app.emit(
+        "translator-state",
+        TranslatorStatePayload {
+            state: state.to_string(),
+            message: message.to_string(),
+        },
+    );
 }
 
 #[cfg(test)]
@@ -108,8 +135,8 @@ mod tests {
 
     #[test]
     fn test_full_translator_flow_with_mock() {
-        use std::net::TcpListener;
         use std::io::{Read, Write};
+        use std::net::TcpListener;
 
         // 1. Create a mock server on a random available port
         let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");

@@ -1,11 +1,11 @@
+use super::ProgressPayload;
+use futures_util::StreamExt;
+use log::info;
 use std::env;
 use std::fs;
 use std::io::Write;
 use std::process::Command;
 use tauri::{AppHandle, Emitter};
-use futures_util::StreamExt;
-use log::info;
-use super::ProgressPayload;
 
 #[tauri::command]
 pub async fn download_app_update(app: AppHandle, download_url: String) -> Result<(), String> {
@@ -18,10 +18,17 @@ pub async fn download_app_update(app: AppHandle, download_url: String) -> Result
 
     // 2. Download the new version
     let client = reqwest::Client::new();
-    let res = client.get(&download_url).send().await.map_err(|e| e.to_string())?;
+    let res = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if !res.status().is_success() {
-        return Err(format!("Failed to download update. Server returned: {}", res.status()));
+        return Err(format!(
+            "Failed to download update. Server returned: {}",
+            res.status()
+        ));
     }
 
     let total_size = res.content_length().unwrap_or(0);
@@ -37,20 +44,26 @@ pub async fn download_app_update(app: AppHandle, download_url: String) -> Result
 
         if total_size > 0 {
             let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
-            let _ = app.emit("download-progress", ProgressPayload {
-                current_file: "앱 업데이트".to_string(), // Keep this exact string, we check it in the UI!
-                percent,
-                total_percent: percent,
-            });
+            let _ = app.emit(
+                "download-progress",
+                ProgressPayload {
+                    current_file: "앱 업데이트".to_string(), // Keep this exact string, we check it in the UI!
+                    percent,
+                    total_percent: percent,
+                },
+            );
         }
     }
 
     // Explicit 100% signal
-    let _ = app.emit("download-progress", ProgressPayload {
-        current_file: "앱 업데이트 완료".to_string(),
-        percent: 100,
-        total_percent: 100,
-    });
+    let _ = app.emit(
+        "download-progress",
+        ProgressPayload {
+            current_file: "앱 업데이트 완료".to_string(),
+            percent: 100,
+            total_percent: 100,
+        },
+    );
 
     Ok(())
 }
@@ -72,7 +85,8 @@ pub fn restart_to_apply_update(app: AppHandle) -> Result<(), String> {
     }
 
     // The Windows Rename Trick
-    fs::rename(&current_exe, &old_exe).map_err(|e| format!("Failed to backup current exe: {}", e))?;
+    fs::rename(&current_exe, &old_exe)
+        .map_err(|e| format!("Failed to backup current exe: {}", e))?;
     fs::rename(&temp_exe, &current_exe).map_err(|e| format!("Failed to install new exe: {}", e))?;
 
     // Spawn the new executable

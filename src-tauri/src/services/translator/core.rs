@@ -28,10 +28,7 @@ pub fn translate_text(client: &Client, server_url: &str, jp_text: &str) -> Strin
     // Use /completion endpoint (llama.cpp native, not OpenAI-compatible)
     let endpoint = format!("{}/completion", server_url);
 
-    let response = match client.post(&endpoint)
-        .json(&payload)
-        .send()
-    {
+    let response = match client.post(&endpoint).json(&payload).send() {
         Ok(res) => res,
         Err(_) => return "[AI Server Connection Error]".to_string(),
     };
@@ -51,8 +48,8 @@ pub fn contains_japanese(text: &str) -> bool {
         // Hiragana: 0x3040 - 0x309F
         // Katakana: 0x30A0 - 0x30FF
         // CJK Unified Ideographs (Kanji): 0x4E00 - 0x9FAF
-        (0x3040..=0x309F).contains(&u) ||
-            (0x30A0..=0x30FF).contains(&u) ||
-            (0x4E00..=0x9FAF).contains(&u)
+        (0x3040..=0x309F).contains(&u)
+            || (0x30A0..=0x30FF).contains(&u)
+            || (0x4E00..=0x9FAF).contains(&u)
     })
 }

@@ -1,8 +1,8 @@
-use std::io::Write;
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crossbeam_channel::{unbounded, Receiver, Sender};
 use tauri::{AppHandle, Manager};
 
 pub struct DataFactoryJob {
@@ -24,9 +24,17 @@ pub fn start_data_factory_worker(app: AppHandle) -> Sender<DataFactoryJob> {
     tx
 }
 
-pub fn save_to_data_factory(app: &AppHandle, pid: u64, original: &str, translated: &str) -> std::io::Result<()> {
+pub fn save_to_data_factory(
+    app: &AppHandle,
+    pid: u64,
+    original: &str,
+    translated: &str,
+) -> std::io::Result<()> {
     // 1. Get the AppData directory for your app
-    let mut path = app.path().app_data_dir().expect("Failed to get AppData dir");
+    let mut path = app
+        .path()
+        .app_data_dir()
+        .expect("Failed to get AppData dir");
 
     // 2. Ensure the directory exists
     if !path.exists() {
@@ -43,10 +51,7 @@ pub fn save_to_data_factory(app: &AppHandle, pid: u64, original: &str, translate
         "timestamp": now_ms()
     });
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
 
     // 4. Write with a newline
     writeln!(file, "{}", entry.to_string())?;
@@ -54,8 +59,16 @@ pub fn save_to_data_factory(app: &AppHandle, pid: u64, original: &str, translate
     Ok(())
 }
 
-fn append_to_file(app: &AppHandle, pid: u64, original: &str, translated: Option<&str>) -> std::io::Result<()> {
-    let mut path = app.path().app_data_dir().expect("Failed to get AppData dir");
+fn append_to_file(
+    app: &AppHandle,
+    pid: u64,
+    original: &str,
+    translated: Option<&str>,
+) -> std::io::Result<()> {
+    let mut path = app
+        .path()
+        .app_data_dir()
+        .expect("Failed to get AppData dir");
     if !path.exists() {
         std::fs::create_dir_all(&path)?;
     }
@@ -68,15 +81,15 @@ fn append_to_file(app: &AppHandle, pid: u64, original: &str, translated: Option<
         "timestamp": now_ms()
     });
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
 
     writeln!(file, "{}", entry.to_string())?;
     Ok(())
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
 }

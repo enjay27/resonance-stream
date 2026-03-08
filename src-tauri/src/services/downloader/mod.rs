@@ -1,13 +1,13 @@
+mod app_updater;
+mod gist;
 pub mod model;
 pub mod server;
-mod gist;
-mod app_updater;
 
-use serde::Serialize;
+pub use self::app_updater::*;
+pub use self::gist::*;
 pub use self::model::*;
 pub use self::server::*;
-pub use self::gist::*;
-pub use self::app_updater::*;
+use serde::Serialize;
 
 #[derive(Serialize, Clone)]
 pub struct FolderStatus {

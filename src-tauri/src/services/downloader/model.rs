@@ -1,15 +1,16 @@
+use super::{FolderStatus, ProgressPayload};
+use futures_util::StreamExt;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
-use futures_util::StreamExt;
-use super::{FolderStatus, ProgressPayload};
 
 pub const MODEL_FOLDER: &str = "translation-model";
 pub const MODEL_FILENAME: &str = "model.gguf";
 
 fn get_model_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let base_models_dir = app.path()
+    let base_models_dir = app
+        .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("models");
@@ -52,7 +53,11 @@ pub async fn check_model_status(app: tauri::AppHandle) -> Result<FolderStatus, S
 }
 
 #[tauri::command]
-pub async fn download_model(app: AppHandle, download_url: String, version: String) -> Result<(), String> {
+pub async fn download_model(
+    app: AppHandle,
+    download_url: String,
+    version: String,
+) -> Result<(), String> {
     let model_dir = get_model_dir(&app)?;
 
     // 1. Cleanup: If the folder exists, delete it first to remove old 4GB model files
@@ -65,10 +70,17 @@ pub async fn download_model(app: AppHandle, download_url: String, version: Strin
 
     // 2. Download from the dynamic URL provided by the Gist
     let client = reqwest::Client::new();
-    let res = client.get(&download_url).send().await.map_err(|e| e.to_string())?;
+    let res = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if !res.status().is_success() {
-        return Err(format!("Failed to download model. Server returned: {}", res.status()));
+        return Err(format!(
+            "Failed to download model. Server returned: {}",
+            res.status()
+        ));
     }
 
     let total_size = res.content_length().unwrap_or(0);
@@ -83,19 +95,25 @@ pub async fn download_model(app: AppHandle, download_url: String, version: Strin
 
         if total_size > 0 {
             let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
-            let _ = app.emit("download-progress", ProgressPayload {
-                current_file: "AI 모델 다운로드 중...".to_string(),
-                percent,
-                total_percent: percent,
-            });
+            let _ = app.emit(
+                "download-progress",
+                ProgressPayload {
+                    current_file: "AI 모델 다운로드 중...".to_string(),
+                    percent,
+                    total_percent: percent,
+                },
+            );
         }
     }
 
-    let _ = app.emit("download-progress", ProgressPayload {
-        current_file: "완료".into(),
-        percent: 100,
-        total_percent: 100,
-    });
+    let _ = app.emit(
+        "download-progress",
+        ProgressPayload {
+            current_file: "완료".into(),
+            percent: 100,
+            total_percent: 100,
+        },
+    );
 
     // 3. Commit the new version to metadata so the update checker knows we have it
     let mut metadata = crate::config::load_metadata(&app);

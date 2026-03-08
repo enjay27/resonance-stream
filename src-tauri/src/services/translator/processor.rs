@@ -1,9 +1,8 @@
+use lazy_static::lazy_static;
+use regex::{Captures, Regex};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::sync::MutexGuard;
-use regex::{Regex, Captures};
-use lazy_static::lazy_static;
 
 pub struct ShieldData {
     pub masked_text: String,
@@ -23,7 +22,7 @@ lazy_static! {
 pub fn preprocess_text(
     input: &str,
     custom_dict: &HashMap<String, String>,
-    nickname_cache: Option<&HashMap<String, String>>
+    nickname_cache: Option<&HashMap<String, String>>,
 ) -> ShieldData {
     let mut current_text = input.to_string();
     let mut replacements = HashMap::new();
@@ -39,7 +38,7 @@ pub fn preprocess_text(
 
     // 1. Mask Japanese Brackets
     let jp_brackets = [
-        "【", "】", "「", "」", "『", "』", "（", "）", "〈", "〉", "《", "》", "［", "］"
+        "【", "】", "「", "」", "『", "』", "（", "）", "〈", "〉", "《", "》", "［", "］",
     ];
     for bracket in jp_brackets {
         if current_text.contains(bracket) {
@@ -63,7 +62,10 @@ pub fn preprocess_text(
     }
 
     // 3. Recruitment & @-Tag (Find all matches first, then replace)
-    let recruit_matches: Vec<String> = RECRUIT_PATTERN.find_iter(&current_text).map(|m| m.as_str().to_string()).collect();
+    let recruit_matches: Vec<String> = RECRUIT_PATTERN
+        .find_iter(&current_text)
+        .map(|m| m.as_str().to_string())
+        .collect();
     for m in recruit_matches {
         mask_term(&m, &m, &mut current_text);
     }
@@ -79,35 +81,46 @@ pub fn preprocess_text(
     }
 
     // 5. Numeric Units
-    current_text = NUM_PATTERN_1.replace_all(&current_text, |caps: &Captures| {
-        let placeholder = format!("[P{}]", p_count);
-        replacements.insert(placeholder.clone(), format!("{}종", &caps[1]));
-        p_count += 1;
-        placeholder
-    }).to_string();
+    current_text = NUM_PATTERN_1
+        .replace_all(&current_text, |caps: &Captures| {
+            let placeholder = format!("[P{}]", p_count);
+            replacements.insert(placeholder.clone(), format!("{}종", &caps[1]));
+            p_count += 1;
+            placeholder
+        })
+        .to_string();
 
-    current_text = NUM_PATTERN_2.replace_all(&current_text, |caps: &Captures| {
-        let placeholder = format!("[P{}]", p_count);
-        replacements.insert(placeholder.clone(), format!("{}인", &caps[1]));
-        p_count += 1;
-        placeholder
-    }).to_string();
+    current_text = NUM_PATTERN_2
+        .replace_all(&current_text, |caps: &Captures| {
+            let placeholder = format!("[P{}]", p_count);
+            replacements.insert(placeholder.clone(), format!("{}인", &caps[1]));
+            p_count += 1;
+            placeholder
+        })
+        .to_string();
 
-    current_text = NUM_PATTERN_3.replace_all(&current_text, |caps: &Captures| {
-        let placeholder = format!("[P{}]", p_count);
-        replacements.insert(placeholder.clone(), format!("{}주", &caps[1]));
-        p_count += 1;
-        placeholder
-    }).to_string();
+    current_text = NUM_PATTERN_3
+        .replace_all(&current_text, |caps: &Captures| {
+            let placeholder = format!("[P{}]", p_count);
+            replacements.insert(placeholder.clone(), format!("{}주", &caps[1]));
+            p_count += 1;
+            placeholder
+        })
+        .to_string();
 
-    current_text = NUM_PATTERN_4.replace_all(&current_text, |caps: &Captures| {
-        let placeholder = format!("[P{}]", p_count);
-        replacements.insert(placeholder.clone(), format!("{}회", &caps[1]));
-        p_count += 1;
-        placeholder
-    }).to_string();
+    current_text = NUM_PATTERN_4
+        .replace_all(&current_text, |caps: &Captures| {
+            let placeholder = format!("[P{}]", p_count);
+            replacements.insert(placeholder.clone(), format!("{}회", &caps[1]));
+            p_count += 1;
+            placeholder
+        })
+        .to_string();
 
-    ShieldData { masked_text: current_text, replacements }
+    ShieldData {
+        masked_text: current_text,
+        replacements,
+    }
 }
 
 // --- POSTPROCESSOR ---
@@ -134,7 +147,10 @@ pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
 
     // Collapse extra spaces
     let extra_spaces = Regex::new(r"\s+").unwrap();
-    extra_spaces.replace_all(&final_text, " ").trim().to_string()
+    extra_spaces
+        .replace_all(&final_text, " ")
+        .trim()
+        .to_string()
 }
 
 pub fn load_dictionary(path: &Path) -> HashMap<String, String> {
@@ -180,10 +196,17 @@ pub fn load_dictionary(path: &Path) -> HashMap<String, String> {
                     }
                 }
             } else {
-                println!("[Dictionary] Warning: Category '{}' is not a valid object.", category);
+                println!(
+                    "[Dictionary] Warning: Category '{}' is not a valid object.",
+                    category
+                );
             }
         }
-        println!("[Dictionary] Successfully loaded {} terms across {} categories.", custom_dict.len(), root_obj.len());
+        println!(
+            "[Dictionary] Successfully loaded {} terms across {} categories.",
+            custom_dict.len(),
+            root_obj.len()
+        );
     } else {
         println!("[Dictionary] Warning: Root JSON is not an object.");
     }
@@ -354,9 +377,18 @@ mod tests {
         // 4. Assert Edge Case: Ignored Brackets
 
         // 5. Assert Edge Case: Non-String Values & Invalid Categories
-        assert!(!dict.contains_key("number"), "Numeric values should be skipped");
-        assert!(!dict.contains_key("nested"), "Nested objects should be skipped");
-        assert!(!dict.contains_key("invalid_category"), "Invalid categories should be skipped");
+        assert!(
+            !dict.contains_key("number"),
+            "Numeric values should be skipped"
+        );
+        assert!(
+            !dict.contains_key("nested"),
+            "Nested objects should be skipped"
+        );
+        assert!(
+            !dict.contains_key("invalid_category"),
+            "Invalid categories should be skipped"
+        );
 
         // 6. Clean up the temp file
         let _ = fs::remove_file(&file_path);
@@ -373,17 +405,26 @@ mod tests {
         // Edge Case 1: Empty File
         fs::write(&file_path, "   ").unwrap();
         let dict_empty = load_dictionary(&file_path);
-        assert!(dict_empty.is_empty(), "Empty file should return empty HashMap");
+        assert!(
+            dict_empty.is_empty(),
+            "Empty file should return empty HashMap"
+        );
 
         // Edge Case 2: Invalid JSON Syntax
         fs::write(&file_path, "{ broken json...").unwrap();
         let dict_broken = load_dictionary(&file_path);
-        assert!(dict_broken.is_empty(), "Broken JSON should return empty HashMap");
+        assert!(
+            dict_broken.is_empty(),
+            "Broken JSON should return empty HashMap"
+        );
 
         // Edge Case 3: Missing File Path
         let missing_path = temp_dir.join("does_not_exist_12345.json");
         let dict_missing = load_dictionary(&missing_path);
-        assert!(dict_missing.is_empty(), "Missing file should return empty HashMap");
+        assert!(
+            dict_missing.is_empty(),
+            "Missing file should return empty HashMap"
+        );
 
         // Clean up
         let _ = fs::remove_file(&file_path);

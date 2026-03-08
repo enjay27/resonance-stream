@@ -1,9 +1,8 @@
-use tauri::{AppHandle, Manager};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs;
-use crate::{inject_system_message, AppState};
 use crate::protocol::types::SystemLogLevel;
+use crate::inject_system_message;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use tauri::{AppHandle, Manager};
 
 const METADATA_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/8a88850437be4331c9c12b79ef445350fd33543f/metadata.json";
 const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/4bc13d890e464cc4849b91c6f1c6d1da5a983255/custom_dict.json";
@@ -43,9 +42,14 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
     // Paste your PERMANENT RAW URL here
 
     let client = reqwest::Client::new();
-    let remote_data: GistMetadata = client.get(METADATA_URL)
-        .send().await.map_err(|e| format!("Network error: {}", e))?
-        .json().await.map_err(|e| format!("JSON parsing error: {}", e))?;
+    let remote_data: GistMetadata = client
+        .get(METADATA_URL)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("JSON parsing error: {}", e))?;
 
     let metadata = crate::config::load_metadata(&app);
     let current_app_version = app.package_info().version.to_string();
@@ -53,13 +57,18 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
     // App Check
     let mut app_update_available = remote_data.app.latest_version != current_app_version;
     if let Some(ignored) = &metadata.ignored_app_version {
-        if ignored == &remote_data.app.latest_version { app_update_available = false; }
+        if ignored == &remote_data.app.latest_version {
+            app_update_available = false;
+        }
     }
 
     // Model Check
-    let mut model_update_available = remote_data.model.latest_version != metadata.current_model_version;
+    let mut model_update_available =
+        remote_data.model.latest_version != metadata.current_model_version;
     if let Some(ignored) = &metadata.ignored_model_version {
-        if ignored == &remote_data.model.latest_version { model_update_available = false; }
+        if ignored == &remote_data.model.latest_version {
+            model_update_available = false;
+        }
     }
 
     // Dictionary Check
@@ -76,13 +85,19 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
 #[tauri::command]
 pub async fn sync_dictionary(app: AppHandle) -> Result<String, String> {
     // 1. Resolve Local Path: %APPDATA%/your.bundle.id/custom_dict.json
-    let dict_path = app.path().app_data_dir()
+    let dict_path = app
+        .path()
+        .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("custom_dict.json");
 
     // 2. Fetch from Remote
     let client = reqwest::Client::new();
-    let response = client.get(DICT_URL).send().await.map_err(|e| e.to_string())?;
+    let response = client
+        .get(DICT_URL)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     let json_content = response.text().await.map_err(|e| e.to_string())?;
 
     // Validate JSON before saving
@@ -94,9 +109,19 @@ pub async fn sync_dictionary(app: AppHandle) -> Result<String, String> {
     fs::create_dir_all(dict_path.parent().unwrap()).map_err(|e| e.to_string())?;
     fs::write(&dict_path, &json_content).map_err(|e| e.to_string())?;
 
-    inject_system_message(&app, SystemLogLevel::Success, "ModelManager", "Dictionary saved to AppData.");
+    inject_system_message(
+        &app,
+        SystemLogLevel::Success,
+        "ModelManager",
+        "Dictionary saved to AppData.",
+    );
 
-    inject_system_message(&app, SystemLogLevel::Success, "Translator", "Dictionary successfully synchronized.");
+    inject_system_message(
+        &app,
+        SystemLogLevel::Success,
+        "Translator",
+        "Dictionary successfully synchronized.",
+    );
 
     Ok("Dictionary updated and reloaded!".to_string())
 }
@@ -109,7 +134,9 @@ pub fn get_dict_version(app: tauri::AppHandle) -> String {
 
 #[tauri::command]
 pub fn get_local_dictionary(app: tauri::AppHandle) -> Result<String, String> {
-    let dict_path = app.path().app_data_dir()
+    let dict_path = app
+        .path()
+        .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("custom_dict.json");
 
@@ -122,7 +149,9 @@ pub fn get_local_dictionary(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 pub fn save_local_dictionary(app: tauri::AppHandle, content: String) -> Result<(), String> {
-    let dict_path = app.path().app_data_dir()
+    let dict_path = app
+        .path()
+        .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("custom_dict.json");
 
@@ -132,7 +161,10 @@ pub fn save_local_dictionary(app: tauri::AppHandle, content: String) -> Result<(
 #[tauri::command]
 pub fn ignore_update(app: AppHandle, target: String, version: String) {
     let mut metadata = crate::config::load_metadata(&app);
-    if target == "app" { metadata.ignored_app_version = Some(version); }
-    else if target == "model" { metadata.ignored_model_version = Some(version); }
+    if target == "app" {
+        metadata.ignored_app_version = Some(version);
+    } else if target == "model" {
+        metadata.ignored_model_version = Some(version);
+    }
     crate::config::save_metadata(&app, &metadata);
 }

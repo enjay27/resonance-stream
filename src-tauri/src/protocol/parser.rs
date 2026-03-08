@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use crate::{inject_system_message, SystemLogLevel};
-pub(crate) use crate::{ChatMessage};
-use tauri::AppHandle;
 use crate::protocol::decoder::{find_int_by_tag, find_string_by_tag, read_varint, skip_field};
+pub(crate) use crate::ChatMessage;
+use crate::{inject_system_message, SystemLogLevel};
+use std::collections::HashMap;
+use tauri::AppHandle;
 
 #[derive(Debug)]
 pub enum Port5003Event {
@@ -17,20 +17,20 @@ pub struct SplitPayload<'a> {
 
 #[derive(Debug, Default)]
 pub struct ChatPayload {
-    pub session_id: u64,        // Tag 8 (Field 1): 20
-    pub sender: SenderInfo,     // Tag 18 (Field 2): Player info block
-    pub timestamp: u64,         // Tag 24 (Field 3): 1772343736
-    pub message: String,        // Tag 34 (Field 4): Message string block
+    pub session_id: u64,    // Tag 8 (Field 1): 20
+    pub sender: SenderInfo, // Tag 18 (Field 2): Player info block
+    pub timestamp: u64,     // Tag 24 (Field 3): 1772343736
+    pub message: String,    // Tag 34 (Field 4): Message string block
     pub unknown_fields: HashMap<String, Vec<u8>>,
 }
 
 #[derive(Debug, Default)]
 pub struct SenderInfo {
-    pub uid: u64,             // Tag 8 (Field 1): 37276266
-    pub nickname: String,     // Tag 18 (Field 2): "あずるる"
-    pub class_id: u64,        // Tag 24 (Field 3): 2 (e.g., Twin Striker)
-    pub status: u64,          // Tag 32 (Field 4): 1 (Online/Normal flag)
-    pub level: u64,           // Tag 40 (Field 5): 60
+    pub uid: u64,         // Tag 8 (Field 1): 37276266
+    pub nickname: String, // Tag 18 (Field 2): "あずるる"
+    pub class_id: u64,    // Tag 24 (Field 3): 2 (e.g., Twin Striker)
+    pub status: u64,      // Tag 32 (Field 4): 1 (Online/Normal flag)
+    pub level: u64,       // Tag 40 (Field 5): 60
     pub is_blocked: bool,
     pub unknown_fields: HashMap<String, Vec<u8>>,
 }
@@ -59,7 +59,9 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
         chat_blocks: Vec::new(),
     };
 
-    if data.len() < 3 || data[0] != 0x0A { return None; }
+    if data.len() < 3 || data[0] != 0x0A {
+        return None;
+    }
 
     let (total_len, header_read) = read_varint(&data[1..]);
     let mut i = 1 + header_read;
@@ -83,7 +85,7 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
                     2 | 4 => {
                         payload.chat_blocks.push((field_num, sub_data));
                         is_valid_chat_packet = true;
-                    },
+                    }
                     _ => {}
                 }
             }
@@ -93,7 +95,10 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
 
             if field_num == 1 || field_num == 2 {
                 payload.channel = match val {
-                    2 => "LOCAL".into(), 3 => "PARTY".into(), 4 => "GUILD".into(), _ => "WORLD".into(),
+                    2 => "LOCAL".into(),
+                    3 => "PARTY".into(),
+                    4 => "GUILD".into(),
+                    _ => "WORLD".into(),
                 };
             }
             i += read;
@@ -116,7 +121,10 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
 
     // 1. Process Chat Blocks
     for (field_num, block) in raw.chat_blocks {
-        let mut chat = ChatMessage { channel: raw.channel.clone(), ..Default::default() };
+        let mut chat = ChatMessage {
+            channel: raw.channel.clone(),
+            ..Default::default()
+        };
 
         match field_num {
             2 => {
@@ -134,13 +142,18 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
                 chat.is_blocked = parsed_payload.sender.is_blocked;
 
                 chat.unknown_fields = parsed_payload.unknown_fields;
-                chat.unknown_fields.extend(parsed_payload.sender.unknown_fields);
+                chat.unknown_fields
+                    .extend(parsed_payload.sender.unknown_fields);
             }
             4 => {
                 if let Some(msg) = find_string_by_tag(block, 0x1A) {
                     chat.message = msg;
                     if let Some(chan_id) = find_int_by_tag(block, 0x10) {
-                        chat.channel = match chan_id { 3 => "PARTY".into(), 4 => "GUILD".into(), _ => chat.channel };
+                        chat.channel = match chan_id {
+                            3 => "PARTY".into(),
+                            4 => "GUILD".into(),
+                            _ => chat.channel,
+                        };
                     }
                 }
             }
@@ -172,12 +185,14 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
         i += 1;
 
         match tag {
-            8 => { // Session ID / Sequence ID
+            8 => {
+                // Session ID / Sequence ID
                 let (val, read) = read_varint(&data[i..]);
                 payload.session_id = val;
                 i += read;
             }
-            18 => { // SenderInfo Block
+            18 => {
+                // SenderInfo Block
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
@@ -186,12 +201,14 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
                 }
                 i = block_end;
             }
-            24 => { // Timestamp
+            24 => {
+                // Timestamp
                 let (val, read) = read_varint(&data[i..]);
                 payload.timestamp = val;
                 i += read;
             }
-            34 => { // Message Block -> Delegated to extracted function!
+            34 => {
+                // Message Block -> Delegated to extracted function!
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
@@ -200,10 +217,13 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
                 }
                 i = block_end;
             }
-            _ => { // Skip Unknown
+            _ => {
+                // Skip Unknown
                 let skipped = skip_field(wire_type, &data[i..]);
                 let safe_end = (i + skipped).min(data.len());
-                payload.unknown_fields.insert(format!("chat_{}", tag), data[i..safe_end].to_vec());
+                payload
+                    .unknown_fields
+                    .insert(format!("chat_{}", tag), data[i..safe_end].to_vec());
                 i += skipped;
             }
         }
@@ -221,7 +241,8 @@ fn parse_rich_content(data: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>
         let r_wire = r_tag & 0x07;
         k += 1;
 
-        if r_tag == 18 { // Chunk Block (Field 2)
+        if r_tag == 18 {
+            // Chunk Block (Field 2)
             let (clen, cr) = read_varint(&data[k..]);
             k += cr;
             let c_end = (k + clen as usize).min(data.len());
@@ -251,11 +272,13 @@ fn parse_chunk_block(chunk: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>
         let c_wire = c_tag & 0x07;
         l += 1;
 
-        if c_tag == 8 { // Chunk Type
+        if c_tag == 8 {
+            // Chunk Type
             let (val, vr) = read_varint(&chunk[l..]);
             chunk_type = val;
             l += vr;
-        } else if c_tag == 18 { // Chunk Payload
+        } else if c_tag == 18 {
+            // Chunk Payload
             let (plen, pr) = read_varint(&chunk[l..]);
             l += pr;
             let p_end = (l + plen as usize).min(chunk.len());
@@ -294,12 +317,14 @@ fn parse_sender_info(data: &[u8]) -> SenderInfo {
         i += 1;
 
         match tag {
-            8 => { // Tag 8 = Field 1 (UID)
+            8 => {
+                // Tag 8 = Field 1 (UID)
                 let (val, read) = read_varint(&data[i..]);
                 sender.uid = val;
                 i += read;
             }
-            18 => { // Tag 18 = Field 2 (Nickname)
+            18 => {
+                // Tag 18 = Field 2 (Nickname)
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
                 let block_end = (i + len as usize).min(data.len());
@@ -308,12 +333,14 @@ fn parse_sender_info(data: &[u8]) -> SenderInfo {
                 }
                 i = block_end;
             }
-            32 => { // Tag 32 = Field 4 (Status Flag)
+            32 => {
+                // Tag 32 = Field 4 (Status Flag)
                 let (val, read) = read_varint(&data[i..]);
                 sender.status = val;
                 i += read;
             }
-            40 => { // Tag 40 = Field 5 (Level)
+            40 => {
+                // Tag 40 = Field 5 (Level)
                 let (val, read) = read_varint(&data[i..]);
                 sender.level = val;
                 i += read;
@@ -323,7 +350,9 @@ fn parse_sender_info(data: &[u8]) -> SenderInfo {
             _ => {
                 let skipped = skip_field(wire_type, &data[i..]);
                 let safe_end = (i + skipped).min(data.len());
-                sender.unknown_fields.insert(format!("sender_{}", tag), data[i..safe_end].to_vec());
+                sender
+                    .unknown_fields
+                    .insert(format!("sender_{}", tag), data[i..safe_end].to_vec());
                 i += skipped;
             }
         }
@@ -340,7 +369,8 @@ fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
         j += 1;
 
         match sub_tag {
-            26 => { // Normal Chat Text
+            26 => {
+                // Normal Chat Text
                 let (slen, r) = read_varint(&data[j..]);
                 j += r;
                 let s_end = (j + slen as usize).min(data.len());
@@ -350,7 +380,8 @@ fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
                 }
                 j = s_end;
             }
-            58 => { // Rich Content Array (Item Links, Fishing, etc.)
+            58 => {
+                // Rich Content Array (Item Links, Fishing, etc.)
                 let (rlen, rr) = read_varint(&data[j..]);
                 j += rr;
                 let r_end = (j + rlen as usize).min(data.len());
@@ -362,10 +393,13 @@ fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
                 // [CRITICAL FIX]: Advance the pointer past the block so it doesn't parse garbage!
                 j = r_end;
             }
-            _ => { // Safely skip unknown inner tags
+            _ => {
+                // Safely skip unknown inner tags
                 let skipped = skip_field(sub_wire, &data[j..]);
                 let safe_end = (j + skipped).min(data.len());
-                payload.unknown_fields.insert(format!("msg_{}", sub_tag), data[j..safe_end].to_vec());
+                payload
+                    .unknown_fields
+                    .insert(format!("msg_{}", sub_tag), data[j..safe_end].to_vec());
                 j += skipped;
             }
         }
@@ -376,26 +410,39 @@ fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
 // PARSING & UTILITIES (Keep your existing functions below)
 // ==========================================
 pub(crate) fn strip_application_header(payload: &[u8], port: u16) -> Option<&[u8]> {
-    if payload.len() < 5 { return None; }
+    if payload.len() < 5 {
+        return None;
+    }
 
     match port {
         10250 => {
-            if payload.len() > 32 && payload[32] == 0x0A { Some(&payload[32..]) } else { None }
-        },
+            if payload.len() > 32 && payload[32] == 0x0A {
+                Some(&payload[32..])
+            } else {
+                None
+            }
+        }
         5003 => {
             // Search for the 0x0A that correctly describes the rest of the payload
             for i in 0..payload.len().saturating_sub(3) {
                 if payload[i] == 0x0A {
-                    let (msg_len, varint_size) = read_varint(&payload[i+1..]);
+                    let (msg_len, varint_size) = read_varint(&payload[i + 1..]);
                     // If this 0x0A + its length exactly matches the end of the TCP packet, it's real
-                    if varint_size > 0 && (i + 1 + varint_size + msg_len as usize) == payload.len() {
+                    if varint_size > 0 && (i + 1 + varint_size + msg_len as usize) == payload.len()
+                    {
                         return Some(&payload[i..]);
                     }
                 }
             }
             None
-        },
-        _ => if payload[0] == 0x0A { Some(payload) } else { None }
+        }
+        _ => {
+            if payload[0] == 0x0A {
+                Some(payload)
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -483,12 +530,18 @@ mod tests {
         // 1. Test Item Link (Chunk Type 3)
         // Tag 8 (0x08) -> Value 3 (0x03)
         let item_chunk = [0x08, 0x03];
-        assert_eq!(parse_chunk_block(&item_chunk, &mut unknown_fields), "[아이템 링크]");
+        assert_eq!(
+            parse_chunk_block(&item_chunk, &mut unknown_fields),
+            "[아이템 링크]"
+        );
 
         // 2. Test Fish Record (Chunk Type 9)
         // Tag 8 (0x08) -> Value 9 (0x09)
         let fish_chunk = [0x08, 0x09];
-        assert_eq!(parse_chunk_block(&fish_chunk, &mut unknown_fields), "[물고기 자랑]");
+        assert_eq!(
+            parse_chunk_block(&fish_chunk, &mut unknown_fields),
+            "[물고기 자랑]"
+        );
 
         // 3. Test Text Chunk (Chunk Type 7) with nested string
         // This simulates: Type = 7, Payload = { Tag 10 = "Hello" }
@@ -496,7 +549,7 @@ mod tests {
             0x08, 0x07, // Tag 8 (Type), Value 7
             0x12, 0x07, // Tag 18 (Payload), Length 7
             0x0A, 0x05, // Tag 10 (String), Length 5
-            b'H', b'e', b'l', b'l', b'o'
+            b'H', b'e', b'l', b'l', b'o',
         ];
         assert_eq!(parse_chunk_block(&text_chunk, &mut unknown_fields), "Hello");
     }
@@ -515,10 +568,9 @@ mod tests {
             0x12, 0x10, // Chunk Payload: Tag 18, Length 16
             0x0A, 0x0E, // String: Tag 10, Length 14
             b'L', b'o', b'o', b'k', b' ', b'a', b't', b' ', b't', b'h', b'i', b's', b':', b' ',
-
             // --- Second Element: Item Chunk ---
             0x12, 0x02, // Array Wrapper: Tag 18, Length 2
-            0x08, 0x03  // Chunk Type: 3
+            0x08, 0x03, // Chunk Type: 3
         ];
 
         let result = parse_rich_content(&rich_data, &mut unknown_fields);
@@ -537,15 +589,13 @@ mod tests {
             // --- Tag 26: Normal Text ---
             26, 6, // Tag 26, Length 6
             b'H', b'e', b'l', b'l', b'o', b' ',
-
             // --- Tag 58: Rich Content (Item Link) ---
             58, 4, // Tag 58, Length 4
             18, 2, // Array Wrapper: Tag 18, Length 2
             8, 3, // Chunk Type: 3 (Item Link)
-
             // --- Tag 26: Normal Text Again ---
             26, 1, // Tag 26, Length 1
-            b'!'
+            b'!',
         ];
 
         // Process the block
@@ -563,18 +613,15 @@ mod tests {
         let chat_payload_data = vec![
             // 1. Session ID (Tag 8 -> 0x08)
             8, 0xE7, 0x07, // Value: 999
-
             // 2. Sender Info (Tag 18 -> 0x12)
             18, 7, // Tag 18, Length 7
             8, 100, // UID: 100
             18, 3, b'B', b'o', b'b', // Nickname: "Bob"
-
             // 3. Timestamp (Tag 24 -> 0x18)
             24, 0x80, 0x01, // Value: 128
-
             // 4. Message Block (Tag 34 -> 0x22)
             34, 7, // Tag 34, Length 7
-            26, 5, b'G', b'r', b'e', b'a', b't' // Tag 26, Length 5, "Great"
+            26, 5, b'G', b'r', b'e', b'a', b't', // Tag 26, Length 5, "Great"
         ];
 
         let parsed = parse_chat_payload(&chat_payload_data);

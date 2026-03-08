@@ -37,6 +37,18 @@ pub fn emit_sniffer_state(app: &tauri::AppHandle, state: &str, message: &str) {
 
 #[tauri::command]
 pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
+    if !check_firewall_rule() {
+        inject_system_message(
+            &app,
+            SystemLogLevel::Warning,
+            "Sniffer",
+            "Firewall rule missing. Triggering Setup Wizard.",
+        );
+        emit_sniffer_state(&app, "Error", "방화벽 설정 필요 (Setup Required)");
+        let _ = app.emit("firewall-missing", ());
+        return;
+    }
+
     let mut tx_lock = state.sniffer_tx.lock();
     if tx_lock.is_some() {
         inject_system_message(

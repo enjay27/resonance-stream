@@ -149,7 +149,7 @@ pub fn ModelUpdateModal() -> impl IntoView {
     } = signals;
 
     // --- MODEL UPDATE LOGIC ---
-    let start_model_update = move |download_url: String, version: String| {
+    let start_model_update = move |download_url: String, version: String, expected_hash: String| {
         set_model_update_step.set(1);
         set_model_update_progress.set(0);
 
@@ -174,7 +174,8 @@ pub fn ModelUpdateModal() -> impl IntoView {
 
             let args = serde_wasm_bindgen::to_value(&serde_json::json!({
                 "downloadUrl": download_url,
-                "version": version
+                "version": version,
+                "expectedHash": expected_hash
             }))
             .unwrap();
             let _ = invoke("download_model", args).await;
@@ -222,8 +223,9 @@ pub fn ModelUpdateModal() -> impl IntoView {
                                                     // CLONE DATA BEFORE THE CLOSURE
                                                     let url = data.model.download_url.clone();
                                                     let version = data.model.latest_version.clone();
+                                                    let hash = data.model.sha256.clone();
                                                     move |_| {
-                                                        start_model_update(url.clone(), version.clone());
+                                                        start_model_update(url.clone(), version.clone(), hash.clone());
                                                     }
                                                 }>
                                                 "다운로드 시작 (약 2.4GB)"

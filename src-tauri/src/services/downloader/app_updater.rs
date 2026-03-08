@@ -21,7 +21,11 @@ pub async fn download_app_update(app: AppHandle, download_url: String) -> Result
         &download_url,
         &temp_exe,
         "앱 업데이트", // Keep this exact string, we check it in the UI!
-        super::gist::published_sha256(&download_url).as_deref(),
+        Some(
+            super::gist::published_sha256(&download_url)
+                .ok_or("No SHA-256 published for this update; refusing to install it")?
+                .as_str(),
+        ),
     )
     .await?;
 

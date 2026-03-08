@@ -184,18 +184,16 @@ pub fn run() {
             ai_server_health_check,
             ui_system_message,
             update_global_tab_shortcut,
+            ensure_firewall_rule_command,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
 
     app.run(|_app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
-            log::info!("Application closing. Cleaning up Firewall Rules & AI Server...");
+            log::info!("Application closing. Cleaning AI Server...");
 
-            // 1. Remove the firewall rule
-            services::sniffer::remove_firewall_rule();
-
-            // 2. Explicitly kill the llama-server to prevent zombie processes
+            // Explicitly kill the llama-server to prevent zombie processes
             #[cfg(target_os = "windows")]
             {
                 kill_orphaned_servers(&_app_handle);

@@ -9,6 +9,8 @@ use wasm_bindgen::prelude::*;
 pub fn SetupWizard(finalize: Callback<()>, start_download: Callback<web_sys::MouseEvent>) -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("Signals missing");
 
+    let (firewall_agreed, set_firewall_agreed) = signal(false);
+
     view! {
         <div class="flex items-center justify-center min-h-screen bg-base-100 p-6">
             <div class="card w-full max-w-md bg-base-200 shadow-2xl border border-white/5">
@@ -22,11 +24,73 @@ pub fn SetupWizard(finalize: Callback<()>, start_download: Callback<web_sys::Mou
 
                     {move || match signals.wizard_step.get() {
                         0 => view! {
-                            <div class="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-                                <h1 class="text-3xl font-black tracking-tighter text-bpsr-green">"RESONANCE STREAM"</h1>
-                                <p class="text-sm opacity-70">"블루 프로토콜의 게임 채팅을 실시간으로 분석하고 번역합니다."</p>
+                            <div class="space-y-4 animate-in fade-in slide-in-from-bottom-4 text-left">
+                                <h1 class="text-3xl font-black tracking-tighter text-success text-center">"RESONANCE STREAM"</h1>
+                                <p class="text-sm opacity-70 text-center">"블루 프로토콜의 게임 채팅을 실시간으로 분석하고 번역합니다."</p>
+
+                                // FIREWALL WARNING BOX
+                                <div class="bg-warning/10 border border-warning/30 p-4 rounded-xl mt-4 space-y-3">
+                                    <div class="flex items-center gap-2 text-warning font-bold text-sm">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                        <span>"필수 권한 안내 (방화벽 및 관리자 권한)"</span>
+                                    </div>
+                                    <p class="text-xs text-base-content/80 leading-relaxed break-keep">
+                                        "게임 채팅 데이터를 실시간으로 감지하기 위해 네트워크 패킷을 분석합니다. 이를 위해 실행 시 "<span class="text-warning font-bold">"Windows 방화벽 규칙 추가"</span>" 및 "<span class="text-warning font-bold">"관리자 권한"</span>"이 요구될 수 있습니다."
+                                    </p>
+
+                                    // Privacy Guarantee (Builds Trust)
+                                    <div class="bg-base-300/50 p-2 rounded flex gap-2 items-start mt-2">
+                                        <span class="text-success mt-0.5">"🔒"</span>
+                                        <span class="text-[10px] text-base-content/70">
+                                            <b>"프라이버시 보장:"</b> " 본 프로그램은 오직 '블루 프로토콜'의 채팅 패킷만을 읽어오며, 사용자의 개인 정보나 웹 브라우징 기록 등은 절대 수집하지 않습니다."
+                                        </span>
+                                    </div>
+
+                                    // Pre-Prompt Heads Up
+                                    <div class="text-[10px] font-bold text-error/80 italic">
+                                        "※ '다음' 버튼을 누른 후 나타나는 Windows 보안 경고창에서 반드시 '허용'을 눌러주세요."
+                                    </div>
+                                </div>
+
+                                // --- NEW: AGREEMENT CHECKBOX ---
+                                <div class="form-control mt-2">
+                                    <label class="label cursor-pointer justify-start gap-3 border border-base-content/10 p-3 rounded-lg hover:bg-base-content/5 transition-colors">
+                                        <input type="checkbox" class="checkbox checkbox-success checkbox-sm"
+                                            prop:checked=move || firewall_agreed.get()
+                                            on:change=move |ev| set_firewall_agreed.set(event_target_checked(&ev))
+                                        />
+                                        <span class="label-text font-bold text-sm">"방화벽 규칙 자동 변경에 동의합니다."</span>
+                                    </label>
+                                </div>
+
                                 <div class="card-actions justify-end mt-4">
-                                    <button class="btn btn-success btn-block" on:click=move |_| signals.set_wizard_step.set(1)>"시작하기"</button>
+                                    <button class="btn btn-success btn-block"
+                                        disabled=move || !firewall_agreed.get()
+                                        on:click=move |_| {
+                                            // 1. Temporarily show a loading state (optional, but good UX)
+                                            set_firewall_agreed.set(false);
+
+                                            // 2. Call the backend to trigger the UAC prompt
+                                            spawn_local(async move {
+                                                match invoke("ensure_firewall_rule_command", JsValue::NULL).await {
+                                                    Ok(_) => {
+                                                        // 3a. User clicked YES! Move to the next step.
+                                                        signals.set_wizard_step.set(1);
+                                                    },
+                                                    Err(_) => {
+                                                        // 3b. User clicked NO!
+                                                        // Inform them they must accept it, and leave them on Step 0
+                                                        if let Some(w) = web_sys::window() {
+                                                            let _ = w.alert_with_message("방화벽 설정 권한이 거부되었습니다. 게임 채팅을 가져오기 위해서는 방화벽 설정이 필요합니다.");
+                                                        }
+                                                        set_firewall_agreed.set(false);
+                                                    }
+                                                }
+                                            });
+                                        }>
+                                        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 1.944A11.954 11.954 0 012.166 5C2.056 5.649 2 6.319 2 7c0 5.225 3.34 9.67 8 11.317C14.66 16.67 18 12.225 18 7c0-.682-.057-1.35-.166-2.001A11.954 11.954 0 0110 1.944zM11 14a1 1 0 11-2 0 1 1 0 012 0zm0-7a1 1 0 10-2 0v3a1 1 0 102 0V7z" clip-rule="evenodd"></path></svg>
+                                        "동의하고 시작하기"
+                                    </button>
                                 </div>
                             </div>
                         }.into_any(),

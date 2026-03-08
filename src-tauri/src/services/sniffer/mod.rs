@@ -65,6 +65,18 @@ pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State
 pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
     // We use a blank channel just for its lifecycle dropping properties
     let (tx, rx) = crossbeam_channel::unbounded::<()>();
+
+    if !check_firewall_rule() {
+        inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Firewall rule missing. Triggering Setup Wizard.");
+        emit_sniffer_state(&app, "Error", "방화벽 설정 필요 (Setup Required)");
+
+        // Tell the frontend to show the Setup Wizard!
+        let _ = app.emit("firewall-missing", ());
+
+        // Return immediately without spawning the network thread
+        return tx;
+    }
+
     let config = crate::config::load_config(app.clone());
 
     feed_watchdog();

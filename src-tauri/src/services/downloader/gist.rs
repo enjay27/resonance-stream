@@ -1,5 +1,5 @@
 use crate::protocol::types::SystemLogLevel;
-use crate::inject_system_message;
+use crate::{inject_system_message, load_config};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::{AppHandle, Manager};
@@ -84,6 +84,11 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
 
 #[tauri::command]
 pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, String> {
+    let config = load_config(app.clone());
+    if config.auto_sync_latest_dict {
+        return Ok("Auto Sync Disabled".to_string());
+    }
+    
     // 1. Resolve Local Path: %APPDATA%/your.bundle.id/custom_dict.json
     let dict_path = app
         .path()

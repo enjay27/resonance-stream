@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::{AppHandle, Manager};
 
-const METADATA_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/8a88850437be4331c9c12b79ef445350fd33543f/metadata.json";
-const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/4bc13d890e464cc4849b91c6f1c6d1da5a983255/custom_dict.json";
+const METADATA_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/metadata.json";
+const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/custom_dict.json";
 
 // --- 1. Structs matching your new unified Gist JSON ---
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -83,7 +83,7 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
 }
 
 #[tauri::command]
-pub async fn sync_dictionary(app: AppHandle) -> Result<String, String> {
+pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, String> {
     // 1. Resolve Local Path: %APPDATA%/your.bundle.id/custom_dict.json
     let dict_path = app
         .path()
@@ -122,6 +122,12 @@ pub async fn sync_dictionary(app: AppHandle) -> Result<String, String> {
         "Translator",
         "Dictionary successfully synchronized.",
     );
+    println!("Dictionary successfully synchronized. version {:?}", version);
+
+    let mut metadata = crate::config::load_metadata(&app);
+    metadata.current_dict_version = version;
+    crate::config::save_metadata(&app, &metadata);
+
 
     Ok("Dictionary updated and reloaded!".to_string())
 }

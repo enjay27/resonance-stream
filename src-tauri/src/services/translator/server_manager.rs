@@ -49,7 +49,7 @@ pub fn launch_ai_server(app: &AppHandle, model_path: &PathBuf, config: &crate::c
     }
 }
 
-pub fn server_health_check(app: &AppHandle) -> bool {
+pub fn server_health_check_for_30_seconds(app: &AppHandle) -> bool {
     let client = Client::new();
     let start_wait = Instant::now();
 
@@ -69,4 +69,18 @@ pub fn server_health_check(app: &AppHandle) -> bool {
 
     inject_system_message(app, SystemLogLevel::Error, "Translator", "AI Engine failed to initialize within 30s.");
     false
+}
+
+#[tauri::command]
+pub fn ai_server_health_check(app: AppHandle) -> bool {
+    let client = Client::new();
+    match client.get(format!("{}/health", AI_SERVER_URL)).send() {
+        Ok(res) => {
+            res.status().is_success()
+        }
+        Err(e) => {
+            inject_system_message(&app, SystemLogLevel::Error, "Translator", "AI Engine is unavailable.");
+            false
+        }
+    }
 }

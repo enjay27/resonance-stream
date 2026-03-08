@@ -100,6 +100,11 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
                 // Only increment if the message belongs to the tab we are currently looking at
                 if is_visible && !signals.is_at_bottom.get_untracked() {
                     signals.set_unread_count.update(|c| *c += 1);
+                } else if !is_visible {
+                    // Inactive tab -> Increment Tab Badge
+                    signals.set_unread_counts.update(|counts| {
+                        *counts.entry(packet.channel.clone()).or_insert(0) += 1;
+                    });
                 }
 
                 let keywords = signals.alert_keywords.get_untracked();
@@ -146,11 +151,16 @@ fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
         if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
             if let Ok(packet) = serde_json::from_value::<SystemMessage>(ev["payload"].clone()) {
                 signals.set_system_log.update(|log| {
-                    if log.len() >= 200 {
-                        log.remove(0);
-                    }
+                    if log.len() >= 200 { log.remove(0); }
                     log.push(RwSignal::new(packet));
                 });
+
+                let active_tab = signals.active_tab.get_untracked();
+                if active_tab != "전체" && active_tab != "시스템" {
+                    signals.set_unread_counts.update(|counts| {
+                        *counts.entry("SYSTEM".to_string()).or_insert(0) += 1;
+                    });
+                }
             }
         }
     }) as Box<dyn FnMut(JsValue)>)

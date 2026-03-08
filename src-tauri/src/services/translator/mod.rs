@@ -2,6 +2,8 @@ pub mod core;
 pub mod server_manager;
 pub mod processor;
 
+pub use server_manager::*;
+
 use crossbeam_channel::{unbounded, Sender};
 use std::thread;
 use std::path::PathBuf;
@@ -12,7 +14,7 @@ use crate::{inject_system_message, kill_orphaned_servers};
 use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorStatePayload};
 
 use self::core::{translate_text, AI_SERVER_URL};
-use self::server_manager::{launch_ai_server, server_health_check, ServerGuard};
+use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds, ServerGuard};
 use self::processor::{load_dictionary, postprocess_text, preprocess_text};
 
 pub struct TranslationJob { pub chat: ChatMessage }
@@ -36,7 +38,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
         // 2. Wait for Health
         emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
-        if !server_health_check(&app) {
+        if !server_health_check_for_30_seconds(&app) {
             emit_translator_state(&app, "Error", "AI Engine failed to start (OOM or missing model).");
             return;
         }

@@ -13,6 +13,7 @@ use lazy_static::lazy_static;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_shell::ShellExt;
 
 lazy_static! {
@@ -38,11 +39,6 @@ pub use services::translator::*;
 pub fn run() {
     env_logger::builder()
         .format(|buf, record| {
-            let target = record.target();
-            let short_target = target
-                .strip_prefix("resonance_stream_lib::")
-                .unwrap_or(target);
-
             // 1. Get the default ANSI style for the log level (Info=Green, Warn=Yellow, etc.)
             let level_style = buf.default_level_style(record.level());
 
@@ -54,13 +50,11 @@ pub fn run() {
             // 3. Apply the styles using the 0.11 `{style}text{style:#}` pattern
             writeln!(
                 buf,
-                "[{timestamp} {level_style}{level}{level_style:#} {target_style}{target}{target_style:#}] {message}",
+                "[{timestamp} {level_style}{level}{level_style:#}] {message}",
                 timestamp = buf.timestamp(),
                 level_style = level_style,   // Turns level color ON
                 level = record.level(),
                 // {level_style:#} magically turns the color OFF
-                target_style = target_style, // Turns target color ON
-                target = short_target,
                 // {target_style:#} turns target color OFF
                 message = record.args()
             )
@@ -155,6 +149,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             check_model_status,
             download_model,
@@ -165,7 +160,12 @@ pub fn run() {
             get_system_history,
             check_all_updates,
             ignore_update,
-            apply_dictionary_update,
+            download_app_update,
+            restart_to_apply_update,
+            sync_dictionary,
+            get_dict_version,
+            get_local_dictionary,
+            save_local_dictionary,
             clear_chat_history,
             set_always_on_top,
             load_config,
@@ -181,6 +181,9 @@ pub fn run() {
             launch_translator,
             block_user_command,
             unblock_user_command,
+            ai_server_health_check,
+            ui_system_message,
+            update_global_tab_shortcut,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -213,16 +216,33 @@ pub fn inject_system_message<S: Into<String>>(
         let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
 
         // Map the Enum to the string expected by the frontend SystemMessage struct
+        let log_message = format!("[{}] {}", source, msg);
         let level_str = match level {
-            SystemLogLevel::Info => "info",
-            SystemLogLevel::Warning => "warn",
-            SystemLogLevel::Error => "error",
-            SystemLogLevel::Success => "success",
-            SystemLogLevel::Debug => "debug",
-            SystemLogLevel::Trace => "trace",
+            SystemLogLevel::Info => {
+                log::info!("{}", log_message);
+                "info"
+            },
+            SystemLogLevel::Warning => {
+                log::warn!("{}", log_message);
+                "warn"
+            },
+            SystemLogLevel::Error => {
+                log::error!("{}", log_message);
+                "error"
+            },
+            SystemLogLevel::Success => {
+                log::info!("{}", log_message);
+                "success"
+            },
+            SystemLogLevel::Debug => {
+                log::debug!("{}", log_message);
+                "debug"
+            },
+            SystemLogLevel::Trace => {
+                log::trace!("{}", log_message);
+                "trace"
+            },
         };
-
-        println!("[{}] [{}] [{:?}] {}", current_pid, source, level, msg);
 
         let system_message = SystemMessage {
             pid: current_pid,
@@ -322,6 +342,24 @@ fn clear_chat_history(state: tauri::State<AppState>) {
 }
 
 #[tauri::command]
+fn ui_system_message(app: tauri::AppHandle, // Tauri prefers AppHandle passed by value in commands
+                       level: String,
+                       source: String,        // Use concrete String for frontend IPC
+                       message: String        // Use concrete String for frontend IPC
+                       ) {
+    let sys_level = match level.to_lowercase().as_str() {
+        "warn" | "warning" => SystemLogLevel::Warning,
+        "error" => SystemLogLevel::Error,
+        "success" => SystemLogLevel::Success,
+        "debug" => SystemLogLevel::Debug,
+        "trace" => SystemLogLevel::Trace,
+        _ => SystemLogLevel::Info, // Default fallback
+    };
+
+    inject_system_message(&app, sys_level, &source, message);
+}
+
+#[tauri::command]
 fn set_always_on_top(window: tauri::Window, on_top: bool) {
     // This simple method toggles the window state
     let _ = window.set_always_on_top(on_top);
@@ -389,4 +427,39 @@ fn launch_translator(app: AppHandle, state: State<'_, AppState>) {
     let model_path = crate::get_model_path(&app);
     let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
     *state.translator_tx.lock().unwrap() = Some(tx);
+}
+
+#[tauri::command]
+fn update_global_tab_shortcut(app: tauri::AppHandle, modifier: String, key: String) {
+    // 1. Unregister all existing shortcuts so we don't have duplicates
+    let _ = app.global_shortcut().unregister_all();
+
+    // 2. Format the string for Tauri (e.g., "Ctrl+Tab", "Alt+A")
+    // Tauri expects "CommandOrControl" instead of "Ctrl"
+    let tauri_mod = match modifier.as_str() {
+        "Ctrl" => "CommandOrControl",
+        "None" | "" => "",
+        other => other,
+    };
+
+    // Tauri expects uppercase letters for standard keys
+    let tauri_key = key.to_uppercase();
+
+    let shortcut_str = if tauri_mod.is_empty() {
+        tauri_key
+    } else {
+        format!("{}+{}", tauri_mod, tauri_key)
+    };
+
+    // 3. Register the new global shortcut
+    if let Ok(shortcut) = shortcut_str.parse::<Shortcut>() {
+        let _ = app.global_shortcut().on_shortcut(shortcut, move |app_handle, shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                // When the global shortcut is pressed, tell the frontend to switch tabs!
+                let _ = app_handle.emit("global-tab-switch", ());
+            }
+        });
+    } else {
+        inject_system_message(&app, SystemLogLevel::Error, "Shortcut", format!("Failed to parse global shortcut: {}", shortcut_str));
+    }
 }

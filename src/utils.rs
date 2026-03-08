@@ -1,3 +1,4 @@
+use leptos::leptos_dom::log;
 use crate::tauri_bridge::invoke;
 use leptos::prelude::GetUntracked;
 use leptos::task::spawn_local;
@@ -29,6 +30,6 @@ pub fn add_system_log(level: &str, source: &str, message: &str) {
     spawn_local(async move {
         // This triggers the backend which emits 'system-event'
         // that your existing listener already handles
-        let _ = invoke("inject_system_message", serde_wasm_bindgen::to_value(&msg_json).unwrap()).await;
+        let _ = invoke("ui_system_message", serde_wasm_bindgen::to_value(&msg_json).unwrap()).await;
     });
 }

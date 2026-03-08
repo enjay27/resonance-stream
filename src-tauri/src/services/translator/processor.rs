@@ -16,6 +16,7 @@ lazy_static! {
     static ref NUM_PATTERN_3: Regex = Regex::new(r"(\d+)周").unwrap();
     static ref NUM_PATTERN_4: Regex = Regex::new(r"(\d+)回").unwrap();
     static ref THINK_PATTERN: Regex = Regex::new(r"(?s)<think>.*?</think>\s*").unwrap();
+    static ref TURN_TAG_PATTERN: Regex = Regex::new(r"</?end_of_turn>|</?start_of_turn>|<bos>|<eos>").unwrap();
 }
 
 // --- PREPROCESSOR ---
@@ -125,8 +126,11 @@ pub fn preprocess_text(
 
 // --- POSTPROCESSOR ---
 pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
-    // Strip out the think tags first!
+    // 1. Strip <think> tags
     let mut final_text = THINK_PATTERN.replace_all(translated, "").to_string();
+
+    // 2. Strip leaked model turn tokens (</end_of_turn> etc.)
+    final_text = TURN_TAG_PATTERN.replace_all(&final_text, "").to_string();
 
     // --- NEW: Safe Replacement Logic ---
     // [P1]이 [P10]의 일부를 먼저 치환해버리는 버그를 막기 위해,
@@ -236,6 +240,13 @@ pub fn convert_to_romaji(ja_name: &str) -> String {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    fn empty_shield() -> ShieldData {
+        ShieldData {
+            masked_text: String::new(),
+            replacements: HashMap::new(),
+        }
+    }
 
     #[test]
     fn test_shielding_pipeline() {
@@ -428,5 +439,111 @@ mod tests {
 
         // Clean up
         let _ = fs::remove_file(&file_path);
+    }
+
+    #[test]
+    fn test_strips_end_of_turn_closing() {
+        // Standard observed case: 장미석</end_of_turn>
+        assert_eq!(
+            postprocess_text("장미석</end_of_turn>", &empty_shield()),
+            "장미석"
+        );
+    }
+
+    #[test]
+    fn test_strips_end_of_turn_no_slash() {
+        assert_eq!(
+            postprocess_text("안녕<end_of_turn>", &empty_shield()),
+            "안녕"
+        );
+    }
+
+    #[test]
+    fn test_strips_start_of_turn_leakage() {
+        assert_eq!(
+            postprocess_text("<start_of_turn>안녕", &empty_shield()),
+            "안녕"
+        );
+    }
+
+    #[test]
+    fn test_strips_bos_eos_tokens() {
+        assert_eq!(
+            postprocess_text("<bos>번역 결과<eos>", &empty_shield()),
+            "번역 결과"
+        );
+    }
+
+    #[test]
+    fn test_strips_multiple_tags_in_one_output() {
+        assert_eq!(
+            postprocess_text("<bos>번역 결과</end_of_turn>", &empty_shield()),
+            "번역 결과"
+        );
+    }
+
+    #[test]
+    fn test_turn_tag_with_placeholder_restoration() {
+        // Tag leaked alongside a placeholder that must be restored
+        let mut replacements = HashMap::new();
+        replacements.insert("[P0]".to_string(), "장미석".to_string());
+        let shield = ShieldData {
+            masked_text: String::new(),
+            replacements,
+        };
+        assert_eq!(postprocess_text("[P0]</end_of_turn>", &shield), "장미석");
+    }
+
+    #[test]
+    fn test_turn_tag_injected_mid_sentence() {
+        // Defensive: prompt injection inserts tag mid-output
+        assert_eq!(
+            postprocess_text("안녕</end_of_turn>하세요", &empty_shield()),
+            "안녕하세요"
+        );
+    }
+
+    #[test]
+    fn test_clean_output_unchanged() {
+        // No tags — output must pass through unmodified
+        assert_eq!(
+            postprocess_text("오늘 날씨가 좋네요.", &empty_shield()),
+            "오늘 날씨가 좋네요."
+        );
+    }
+
+    #[test]
+    fn test_think_and_turn_tag_combined() {
+        // Both <think> block and </end_of_turn> present simultaneously
+        assert_eq!(
+            postprocess_text(
+                "<think>내부 추론...</think>번역 결과</end_of_turn>",
+                &empty_shield()
+            ),
+            "번역 결과"
+        );
+    }
+
+    #[test]
+    fn test_only_tags_no_content() {
+        // Edge: output is nothing but tags — should produce empty string
+        assert_eq!(
+            postprocess_text("</end_of_turn>", &empty_shield()),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_placeholder_high_index_not_clobbered_by_low() {
+        // [P1] must not partially replace [P10] before [P10] is restored
+        let mut replacements = HashMap::new();
+        replacements.insert("[P1]".to_string(), "A".to_string());
+        replacements.insert("[P10]".to_string(), "B".to_string());
+        let shield = ShieldData {
+            masked_text: String::new(),
+            replacements,
+        };
+        let result = postprocess_text("[P10] [P1]", &shield);
+        assert_eq!(result, "B A");
     }
 }

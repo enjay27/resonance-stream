@@ -350,3 +350,15 @@ pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, Str
         Err("Could not find executable path.".to_string())
     }
 }
+
+pub fn check_firewall_rule() -> bool {
+    let result = Command::new("netsh")
+        .args(["advfirewall", "firewall", "show", "rule", &format!("name={}", RULE_NAME)])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    match result {
+        Ok(output) => output.status.success(), // Returns true if the rule exists
+        Err(_) => false,
+    }
+}

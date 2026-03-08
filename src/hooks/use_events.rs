@@ -17,6 +17,7 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     let sniffer_state_closure = create_sniffer_state_handler(signals);
     let translation_closure = create_translation_handler(signals);
     let update_message_closure = create_update_message_handler(signals);
+    let firewall_closure = create_firewall_missing_handler(signals);
 
     // 2. Register all listeners
     listen("packet-event", &packet_closure).await;
@@ -25,6 +26,7 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     listen("sniffer-state", &sniffer_state_closure).await;
     listen("translation-event", &translation_closure).await;
     listen("chat-message-update", &update_message_closure).await;
+    listen("firewall-missing", &firewall_closure).await;
 
     // 3. Prevent memory leaks / keep closures alive
     packet_closure.forget();
@@ -33,6 +35,7 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     sniffer_state_closure.forget();
     translation_closure.forget();
     update_message_closure.forget();
+    firewall_closure.forget();
 }
 
 // --- EXTRACTED HANDLER FUNCTIONS ---
@@ -218,5 +221,15 @@ fn create_update_message_handler(signals: AppSignals) -> Closure<dyn FnMut(JsVal
                 });
             }
         }
+    }) as Box<dyn FnMut(JsValue)>)
+}
+
+fn create_firewall_missing_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |_| {
+        // 1. Force the Setup Wizard to appear
+        signals.set_init_done.set(false);
+
+        // 2. Make sure it starts on Step 0 (the Firewall Agreement page)
+        signals.set_wizard_step.set(0);
     }) as Box<dyn FnMut(JsValue)>)
 }

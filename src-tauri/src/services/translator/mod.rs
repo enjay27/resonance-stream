@@ -62,9 +62,11 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
 fn process_translation_job(job: TranslationJob, client: &Client, dict: &std::collections::HashMap<String, String>, app: &AppHandle) {
     let chat = job.chat;
+    let state = app.state::<crate::AppState>();
+    let nick_cache = state.nickname_cache.lock().unwrap();
 
     // 1. Preprocess
-    let shield = preprocess_text(&chat.message, dict, chat.nickname_romaji.as_deref(), Some(&chat.nickname));
+    let shield = preprocess_text(&chat.message, dict, Some(&nick_cache));
 
     // 2. HTTP Request (Blocking)
     let raw_translation = translate_text(client, AI_SERVER_URL, &shield.masked_text);
@@ -73,8 +75,6 @@ fn process_translation_job(job: TranslationJob, client: &Client, dict: &std::col
     let final_str = postprocess_text(&raw_translation, &shield);
 
     // 4. Dispatch Side Effects
-    let state = app.state::<crate::AppState>();
-
     if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
         let _ = df_tx.send(crate::io::DataFactoryJob {
             pid: chat.pid,

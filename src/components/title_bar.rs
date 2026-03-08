@@ -15,8 +15,8 @@ pub fn TitleBar() -> impl IntoView {
 
             // --- LEFT: App Title ---
             <div class="flex-1 pointer-events-none">
-                <span class="text-[10px] font-black tracking-tighter text-gray-500 uppercase opacity-70">
-                    "Resonance Stream"
+                <span class="text-[10px] font-black tracking-tighter text-gray-500 opacity-70">
+                    "Resonance Stream v0.3.1"
                 </span>
             </div>
 
@@ -44,11 +44,10 @@ pub fn TitleBar() -> impl IntoView {
                         }
                     }
                     on:click=move |_| {
-                        // Show error alert on click if in Error state
-                        if store.sniffer_state.get() == "Error" {
-                            if let Some(w) = web_sys::window() {
-                                let _ = w.alert_with_message(&store.sniffer_error.get());
-                            }
+                        let current_state = store.sniffer_state.get();
+                        // Open troubleshooter if it's explicitly broken, or if the user wants to test it manually
+                        if current_state == "Error" || current_state.to_lowercase().contains("warning") || current_state == "Off" {
+                            store.set_show_troubleshooter.set(true);
                         }
                     }
                 >

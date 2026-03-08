@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde_with::DisplayFromStr;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -66,6 +67,12 @@ pub struct AppConfig {
     pub blocked_users: std::collections::HashMap<u64, String>,
     #[serde(default)]
     pub min_sender_level: u64,
+    #[serde(default)]
+    pub auto_sync_latest_dict: bool,
+    #[serde(default)]
+    pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
+    #[serde(default)]
+    pub tab_switch_key: String,     // e.g., "Tab", "ArrowRight", etc.
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -110,4 +117,32 @@ pub struct TranslatorStatePayload {
 pub struct SnifferStatePayload {
     pub state: String,   // "Starting", "Firewall", "Binding", "Active", "Error", "Off"
     pub message: String, // Context or Error message
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VersionInfo {
+    pub latest_version: String,
+    pub download_url: String,
+    pub release_notes: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RemoteDictionary {
+    pub version: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GistMetadata {
+    pub app: VersionInfo,
+    pub model: VersionInfo,
+    pub dictionary: RemoteDictionary,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UpdateCheckResult {
+    pub app_update_available: bool,
+    pub model_update_available: bool,
+    pub dict_update_available: bool,
+    pub remote_data: GistMetadata,
 }

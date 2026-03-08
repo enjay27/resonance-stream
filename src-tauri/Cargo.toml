@@ -37,7 +37,7 @@ is_elevated = "0.1"
 crossbeam-channel = "0.5"    # Blazing fast thread queues
 
 windows = { version = "0.62.2", features = [
-    "Win32_System_LibraryLoader", # [NEW] Required for SetDllDirectoryW
+    "Win32_System_LibraryLoader", # Required for SetDllDirectoryW
     "Win32_Foundation",           # Required for PCWSTR
 ] }
 
@@ -56,6 +56,7 @@ env_logger = "0.11"
 kakasi = "0.1.0"
 zip = "8.1.0"
 serde_with = "3.17.0"
+tauri-plugin-global-shortcut = "2.3.1"
 
 [dev-dependencies]
 pnet = "0.35"

@@ -4,7 +4,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::JsValue;
 use leptos::html::{Input, Div, Button}; // ADDED: Div and Button for our new refs
-use leptos::ev::{keydown, click}; // ADDED: click event
+use leptos::ev::{keydown, click};
+use wasm_bindgen::closure::Closure;
+// ADDED: click event
 use web_sys::Node; // ADDED: Node to verify click targets
 
 #[component]
@@ -37,6 +39,45 @@ pub fn NavBar() -> impl IntoView {
                 }
             });
         }
+    });
+
+    Effect::new(move |_| {
+        spawn_local(async move {
+            let closure = Closure::wrap(Box::new(move |_: JsValue| {
+                // This triggers ANYTIME the global shortcut is pressed, even during gameplay!
+                let sequence = vec!["커스텀", "월드", "길드", "파티", "로컬"];
+                let current = signals.active_tab.get_untracked();
+
+                let next_tab = if let Some(idx) = sequence.iter().position(|&x| x == current) {
+                    sequence[(idx + 1) % sequence.len()].to_string()
+                } else {
+                    "커스텀".to_string()
+                };
+
+                signals.set_active_tab.set(next_tab.clone());
+                signals.set_unread_count.set(0);
+
+                signals.set_unread_counts.update(|counts| {
+                    match next_tab.as_str() {
+                        "커스텀" => {
+                            let filters = signals.custom_filters.get_untracked();
+                            for f in filters { counts.remove(&f); }
+                        },
+                        "월드" => { counts.remove("WORLD"); },
+                        "길드" => { counts.remove("GUILD"); },
+                        "파티" => { counts.remove("PARTY"); },
+                        "로컬" => { counts.remove("LOCAL"); },
+                        _ => {}
+                    }
+                });
+
+                signals.set_is_at_bottom.set(true);
+                actions.save_config.dispatch(());
+            }) as Box<dyn FnMut(JsValue)>);
+
+            let _ = crate::tauri_bridge::listen("global-tab-switch", &closure).await;
+            closure.forget();
+        });
     });
 
     // ==========================================
@@ -86,8 +127,23 @@ pub fn NavBar() -> impl IntoView {
                     tabs.into_iter().map(|(full, icon)| {
                         let t_full = full.to_string();
                         let t_click = t_full.clone();
+                        let f_unread = full.to_string();
                         let is_custom = full == "커스텀";
                         let is_active = move || signals.active_tab.get() == t_full;
+
+                        let unread = Memo::new(move |_| {
+                            let counts = signals.unread_counts.get();
+                            match f_unread.as_str() {
+                                "전체" => 0,
+                                "커스텀" => 0,
+                                "월드" => *counts.get("WORLD").unwrap_or(&0),
+                                "길드" => *counts.get("GUILD").unwrap_or(&0),
+                                "파티" => *counts.get("PARTY").unwrap_or(&0),
+                                "로컬" => *counts.get("LOCAL").unwrap_or(&0),
+                                "시스템" => *counts.get("SYSTEM").unwrap_or(&0),
+                                _ => 0,
+                            }
+                        });
 
                         let (text_color, border_color) = match full {
                             "전체" => ("text-base-content", "border-base-content"),
@@ -104,27 +160,56 @@ pub fn NavBar() -> impl IntoView {
                             <div class="relative group flex items-center h-full">
                                 <button
                                     class=move || format!(
-                                        "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] {} {}",
+                                        "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] !overflow-visible {} {}",
                                         text_color,
                                         if is_active() {
-                                            format!("{} bg-white/5 opacity-100", border_color)
+                                            format!("font-black {} {} bg-white/5 opacity-100", text_color, border_color)
                                         } else {
-                                            "border-transparent bg-transparent opacity-40 hover:opacity-100".to_string()
+                                            format!("font-bold hover:font-black {} border-transparent bg-transparent opacity-70 hover:opacity-100", text_color)
                                         }
                                     )
                                     on:click=move |_| {
                                         signals.set_active_tab.set(t_click.clone());
                                         signals.set_unread_count.set(0);
+                                        signals.set_unread_counts.update(|counts| {
+                                            match t_click.as_str() {
+                                                "전체" => counts.clear(),
+                                                "커스텀" => {
+                                                    let filters = signals.custom_filters.get_untracked();
+                                                    for f in filters { counts.remove(&f); }
+                                                },
+                                                "월드" => { counts.remove("WORLD"); },
+                                                "길드" => { counts.remove("GUILD"); },
+                                                "파티" => { counts.remove("PARTY"); },
+                                                "로컬" => { counts.remove("LOCAL"); },
+                                                "시스템" => { counts.remove("SYSTEM"); },
+                                                _ => {}
+                                            }
+                                        });
                                         signals.set_is_at_bottom.set(true);
                                         signals.set_system_at_bottom.set(true);
                                         actions.save_config.dispatch(());
                                     }
                                 >
-                                    // Text only (Shows when narrower than 400px)
-                                    <span class="min-[460px]:hidden">{full}</span>
+                                    // Text only (Shows when narrower than 460px)
+                                    <span class="min-[460px]:hidden flex items-center relative">
+                                        {full}
+                                        <Show when={move || unread.get() > 0}>
+                                            <span class="absolute -top-1.5 -right-2.5 badge badge-error min-w-[14px] h-[14px] px-1 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200 z-10">
+                                                {move || if unread.get() > 9 { "9+".to_string() } else { unread.get().to_string() }}
+                                            </span>
+                                        </Show>
+                                    </span>
 
-                                    // Text + Emoji (Shows when wider than 400px)
-                                    <span class="hidden min-[460px]:inline">{full} " " {icon}</span>
+                                    // Text + Emoji (Shows when wider than 460px)
+                                    <span class="hidden min-[460px]:flex items-center relative">
+                                        {full} " " {icon}
+                                        <Show when={move || unread.get() > 0}>
+                                            <span class="absolute -top-1.5 -right-2.5 badge badge-error min-w-[14px] h-[14px] px-1 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200 z-10">
+                                                {move || if unread.get() > 9 { "9+".to_string() } else { unread.get().to_string() }}
+                                            </span>
+                                        </Show>
+                                    </span>
                                 </button>
 
                                 // NEW: Dropdown Menu that appears when hovering the '커스텀' tab
@@ -266,7 +351,7 @@ pub fn NavBar() -> impl IntoView {
                         </button>
                     </div>
 
-                    // NEW: Background Opacity Control
+                    // Background Opacity Control
                     <div class="relative group flex items-center justify-center">
                         <div class="tooltip tooltip-bottom" data-tip="Background Opacity">
                             <button class="btn btn-ghost btn-xs text-lg">
@@ -280,7 +365,7 @@ pub fn NavBar() -> impl IntoView {
                                 <span class="text-[9px] font-black text-success uppercase tracking-widest opacity-80">
                                     {move || format!("투명도: {:.0}%", signals.opacity.get() * 100.0)}
                                 </span>
-                                <input type="range" min="0.1" max="1.0" step="0.05"
+                                <input type="range" min="0.0" max="1.0" step="0.05"
                                     class="range range-xs range-success w-full"
                                     prop:value=move || signals.opacity.get().to_string()
                                     on:input=move |ev| {

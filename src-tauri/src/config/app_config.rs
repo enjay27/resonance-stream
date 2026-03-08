@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use serde_with::serde_as;
 use tauri::{AppHandle, Manager, State};
 use crate::{inject_system_message, AppState, SystemLogLevel};
-// Import Manager trait
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -38,6 +37,12 @@ pub struct AppConfig {
     pub blocked_users: std::collections::HashMap<u64, String>,
     #[serde(default)]
     pub min_sender_level: u64,
+    #[serde(default)]
+    pub auto_sync_latest_dict: bool,
+    #[serde(default)]
+    pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
+    #[serde(default)]
+    pub tab_switch_key: String,     // e.g., "Tab", "ArrowRight", etc.
 }
 
 impl Default for AppConfig {
@@ -68,13 +73,13 @@ impl Default for AppConfig {
             hide_blocked_messages: false,
             blocked_users: std::collections::HashMap::new(),
             min_sender_level: 1,
+            auto_sync_latest_dict: true,
+            tab_switch_modifier: "Ctrl".to_string(),
+            tab_switch_key: "Tab".to_string(),
         }
     }
 }
 
-// Helper to get the correct path:
-// Windows: C:\Users\Name\AppData\Roaming\com.your.identifier\config.json
-// Mac: /Users/Name/Library/Application Support/com.your.identifier/config.json
 fn get_config_path(app: &AppHandle) -> PathBuf {
     let config_dir = app.path().app_config_dir().expect("Could not resolve app config dir");
 

@@ -1,9 +1,9 @@
 use std::io::Write;
 use std::fs::OpenOptions;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager};
-use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use tauri::{AppHandle, Manager};
 
 pub struct DataFactoryJob {
     pub pid: u64,
@@ -33,7 +33,7 @@ pub fn save_to_data_factory(app: &AppHandle, pid: u64, original: &str, translate
         std::fs::create_dir_all(&path)?;
     }
 
-    path.push("dataset_raw.jsonl");
+    path.push("../../../dataset_raw.jsonl");
 
     // 3. Prepare the JSON Line
     let entry = serde_json::json!({
@@ -59,7 +59,7 @@ fn append_to_file(app: &AppHandle, pid: u64, original: &str, translated: Option<
     if !path.exists() {
         std::fs::create_dir_all(&path)?;
     }
-    path.push("dataset_raw.jsonl");
+    path.push("../../../dataset_raw.jsonl");
 
     let entry = serde_json::json!({
         "pid": pid,

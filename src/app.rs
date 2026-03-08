@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlDivElement;
-use crate::components::{ChatContainer, ChatRow, DictionaryModal, NavBar, SetupWizard};
+use crate::components::{ChatContainer, ChatRow, DictionaryModal, NavBar, SetupWizard, Troubleshooter};
 use crate::components::settings::Settings;
 use crate::components::title_bar::TitleBar;
 use crate::hooks::use_config::save_app_config;
@@ -98,6 +98,8 @@ pub fn App() -> impl IntoView {
     let (tab_switch_modifier, set_tab_switch_modifier) = signal("Ctrl".to_string());
     let (tab_switch_key, set_tab_switch_key) = signal("Tab".to_string());
 
+    let (show_troubleshooter, set_show_troubleshooter) = signal(false);
+
     let signals = AppSignals {
         init_done, set_init_done,
         use_translation, set_use_translation,
@@ -160,10 +162,9 @@ pub fn App() -> impl IntoView {
         auto_sync_latest_dict, set_auto_sync_latest_dict,
         show_dictionary, set_show_dictionary,
         unread_counts, set_unread_counts,
-        tab_switch_modifier,
-        set_tab_switch_modifier,
-        tab_switch_key,
-        set_tab_switch_key,
+        tab_switch_modifier, set_tab_switch_modifier,
+        tab_switch_key, set_tab_switch_key,
+        show_troubleshooter, set_show_troubleshooter,
     };
 
     provide_context(signals);
@@ -834,6 +835,8 @@ pub fn App() -> impl IntoView {
                     </div>
                 </div>
             </Show>
+
+            <Troubleshooter />
 
             // Dictionary Modal
             <DictionaryModal />

@@ -185,6 +185,7 @@ pub fn run() {
             ui_system_message,
             update_global_tab_shortcut,
             ensure_firewall_rule_command,
+            restart_sniffer_command,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

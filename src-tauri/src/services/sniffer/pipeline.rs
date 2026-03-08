@@ -28,7 +28,8 @@ impl ChatPipeline {
         &mut self,
         packet: &[u8],
         blocked_users: &HashMap<u64, String>,
-        mut assign_pid: impl FnMut() -> u64, // A closure to get the next PID without needing Tauri state
+        mut assign_pid: impl FnMut() -> u64,
+        mut feed_watchdog: impl FnMut(),
     ) -> Vec<PipelineAction> {
         let mut actions = Vec::new();
 
@@ -39,6 +40,8 @@ impl ChatPipeline {
 
         let payload = headers.payload.slice();
         if payload.is_empty() { return actions; }
+
+        feed_watchdog();
 
         let Some(NetHeaders::Ipv4(ipv4, _)) = headers.net else { return actions; };
 
@@ -127,7 +130,12 @@ mod tests {
         builder.write(&mut fake_network_packet, &tcp_payload).unwrap();
 
         // 3. Feed the forged packet into our pure pipeline
-        let actions = pipeline.feed_network_packet(&fake_network_packet, &blocked_users, &mut assign_pid);
+        let actions = pipeline.feed_network_packet(
+            &fake_network_packet,
+            &blocked_users,
+            &mut assign_pid,
+            || {} // Pass an empty closure for the test!
+        );
 
         // 4. Assert that the pipeline correctly extracted ALL fields!
         assert_eq!(actions.len(), 1);

@@ -77,6 +77,9 @@ pub fn run() {
 
             // --- CHECK CONFIG AND START AI IF NEEDED ---
             let config = load_config(handle.clone());
+
+            update_global_tab_shortcut(handle.clone(), config.tab_switch_modifier.clone(), config.tab_switch_key.clone());
+
             let initial_tx = if config.use_translation {
                 let model_path = crate::get_model_path(&handle);
                 Some(crate::services::translator::start_translator_worker(handle.clone(), model_path))
@@ -184,18 +187,17 @@ pub fn run() {
             ai_server_health_check,
             ui_system_message,
             update_global_tab_shortcut,
+            ensure_firewall_rule_command,
+            restart_sniffer_command,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
 
     app.run(|_app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
-            log::info!("Application closing. Cleaning up Firewall Rules & AI Server...");
+            log::info!("Application closing. Cleaning AI Server...");
 
-            // 1. Remove the firewall rule
-            services::sniffer::remove_firewall_rule();
-
-            // 2. Explicitly kill the llama-server to prevent zombie processes
+            // Explicitly kill the llama-server to prevent zombie processes
             #[cfg(target_os = "windows")]
             {
                 kill_orphaned_servers(&_app_handle);
@@ -433,6 +435,10 @@ fn launch_translator(app: AppHandle, state: State<'_, AppState>) {
 fn update_global_tab_shortcut(app: tauri::AppHandle, modifier: String, key: String) {
     // 1. Unregister all existing shortcuts so we don't have duplicates
     let _ = app.global_shortcut().unregister_all();
+
+    if key.trim().is_empty() || key == "None" {
+        return;
+    }
 
     // 2. Format the string for Tauri (e.g., "Ctrl+Tab", "Alt+A")
     // Tauri expects "CommandOrControl" instead of "Ctrl"

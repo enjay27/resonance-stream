@@ -8,7 +8,7 @@ pub use self::pipeline::*;
 
 use crate::{inject_system_message, store_and_emit, NetworkInterface, SnifferStatePayload, TranslationJob};
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, thread};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -25,10 +25,13 @@ use socket2::{Domain, Protocol, Socket, Type};
 use std::net::Ipv4Addr;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
+use etherparse::{PacketHeaders, TransportHeader};
+use log::trace;
 use crate::services::sniffer::network::initialize_network_socket;
 
 // --- GLOBAL STATE ---
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
+static IS_SNIFFER_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 // Helper to "Kick" or "Feed" the Watchdog
 fn feed_watchdog() {
@@ -49,7 +52,8 @@ pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State
     let mut tx_lock = state.sniffer_tx.lock().unwrap();
     if tx_lock.is_some() {
         inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Sniffer restart blocked: already active.");
-        emit_sniffer_state(&app, "Active", "Listening for game traffic...");
+        emit_sniffer_state(&app, "Pending", "Listening for game traffic...");
+        IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
         return;
     }
     let tx = start_sniffer_worker(app.clone());
@@ -71,6 +75,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
     thread::spawn(move || {
         inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "Engine Active");
         emit_sniffer_state(&app_handle, "Starting", "Engine Active");
+        IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
 
         // Abstracted Network Setup
         let socket = match initialize_network_socket(&app_handle, &config) {
@@ -79,7 +84,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
         };
 
         inject_system_message(&app_handle, SystemLogLevel::Success, "Sniffer", "Raw Socket active. Listening for game traffic...");
-        emit_sniffer_state(&app_handle, "Active", "Listening for game traffic...");
+        emit_sniffer_state(&app_handle, "Pending", "Listening for game traffic...");
 
         let mut buf = [0u8; 65535];
         let mut pipeline = pipeline::ChatPipeline::new();
@@ -97,15 +102,26 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
                 Err(_) => continue,
             };
 
-            feed_watchdog();
-
             let state = app_handle.state::<AppState>();
             let blocked_users = state.blocked_users.lock().unwrap().clone();
 
             // 1. Feed the Pure Pipeline
-            let actions = pipeline.feed_network_packet(&buf[..n], &blocked_users, || {
-                state.next_pid.fetch_add(1, Ordering::SeqCst)
-            });
+            let actions = pipeline.feed_network_packet(
+                &buf[..n],
+                &blocked_users,
+                || state.next_pid.fetch_add(1, Ordering::SeqCst),
+                || {
+                    // --- NEW: This only runs when the pipeline guarantees Port 5003 traffic! ---
+                    println!("Feed from pipeline");
+                    feed_watchdog();
+
+                    // If we were previously in an Error/Starting state, Auto-Recover the UI!
+                    if !IS_SNIFFER_ACTIVE.load(Ordering::Relaxed) {
+                        IS_SNIFFER_ACTIVE.store(true, Ordering::Relaxed);
+                        emit_sniffer_state(&app_handle, "Active", "Listening for game traffic...");
+                    }
+                }
+            );
 
             // 2. Dispatch Side Effects
             dispatch_pipeline_actions(&app_handle, actions);
@@ -130,8 +146,14 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
             if now.saturating_sub(last) > 15 {
+                // If it was previously active, throw the error state
                 inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Watchdog: No game traffic for 15s.");
-                let _ = app.emit("sniffer-status", "warning");
+
+                // Emitting "Error" changes the TitleBar badge to Red so the user can click it!
+                emit_sniffer_state(&app, "Error", "게임 트래픽 감지 안됨 (클릭하여 어댑터 복구)");
+                IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
+
+                // Kick the watchdog so we wait another 15s before checking again
                 feed_watchdog();
             }
         }
@@ -224,4 +246,21 @@ pub fn unblock_user_command(uid: u64, app: tauri::AppHandle, state: tauri::State
             let _ = app.emit("chat-message-update", msg.clone());
         }
     }
+}
+
+#[tauri::command]
+pub fn restart_sniffer_command(app: tauri::AppHandle, state: tauri::State<'_, AppState>) {
+    {
+        // 1. Drop the sender to safely terminate the old sniffer thread
+        let mut tx_lock = state.sniffer_tx.lock().unwrap();
+        *tx_lock = None;
+    }
+
+    // 2. Wait a moment for the OS to release the socket binding
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // 3. Start a fresh sniffer!
+    let mut tx_lock = state.sniffer_tx.lock().unwrap();
+    let tx = crate::services::sniffer::start_sniffer_worker(app.clone());
+    *tx_lock = Some(tx);
 }

@@ -160,12 +160,12 @@ pub fn NavBar() -> impl IntoView {
                             <div class="relative group flex items-center h-full">
                                 <button
                                     class=move || format!(
-                                        "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] {} {}",
+                                        "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] !overflow-visible {} {}",
                                         text_color,
                                         if is_active() {
-                                            format!("{} bg-white/5 opacity-100", border_color)
+                                            format!("font-black {} {} bg-white/5 opacity-100", text_color, border_color)
                                         } else {
-                                            "border-transparent bg-transparent opacity-40 hover:opacity-100".to_string()
+                                            format!("font-bold hover:font-black {} border-transparent bg-transparent opacity-70 hover:opacity-100", text_color)
                                         }
                                     )
                                     on:click=move |_| {
@@ -192,20 +192,20 @@ pub fn NavBar() -> impl IntoView {
                                     }
                                 >
                                     // Text only (Shows when narrower than 460px)
-                                    <span class="min-[460px]:hidden flex items-center">
+                                    <span class="min-[460px]:hidden flex items-center relative">
                                         {full}
                                         <Show when={move || unread.get() > 0}>
-                                            <span class="badge badge-error min-w-[14px] h-[14px] px-1 ml-0.5 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200">
+                                            <span class="absolute -top-1.5 -right-2.5 badge badge-error min-w-[14px] h-[14px] px-1 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200 z-10">
                                                 {move || if unread.get() > 9 { "9+".to_string() } else { unread.get().to_string() }}
                                             </span>
                                         </Show>
                                     </span>
 
-                                    // Text + Emoji (Shows when wider than 400px)
-                                    <span class="hidden min-[460px]:flex items-center">
+                                    // Text + Emoji (Shows when wider than 460px)
+                                    <span class="hidden min-[460px]:flex items-center relative">
                                         {full} " " {icon}
                                         <Show when={move || unread.get() > 0}>
-                                            <span class="badge badge-error min-w-[14px] h-[14px] px-1 ml-1 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200">
+                                            <span class="absolute -top-1.5 -right-2.5 badge badge-error min-w-[14px] h-[14px] px-1 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200 z-10">
                                                 {move || if unread.get() > 9 { "9+".to_string() } else { unread.get().to_string() }}
                                             </span>
                                         </Show>

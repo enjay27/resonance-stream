@@ -24,8 +24,6 @@ pub fn initialize_network_socket(app: &AppHandle, config: &crate::config::AppCon
         }
     }
 
-    ensure_firewall_rule(app);
-
     let local_ip = if !config.network_interface.is_empty() {
         match config.network_interface.parse::<std::net::Ipv4Addr>() {
             Ok(ip) => {
@@ -198,4 +196,52 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
         }
     }
     interfaces
+}
+
+#[tauri::command]
+pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, String> {
+    if let Ok(exe_path) = env::current_exe() {
+        if let Some(path_str) = exe_path.to_str() {
+            inject_system_message(&app, SystemLogLevel::Info, "Sniffer", "Requesting Administrator privileges to configure Windows Firewall...");
+
+            // Delete old rule first
+            let _ = Command::new("netsh")
+                .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}", RULE_NAME)])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+
+            // Create new rule
+            let result = Command::new("netsh")
+                .args([
+                    "advfirewall", "firewall", "add", "rule",
+                    &format!("name={}", RULE_NAME),
+                    "dir=in",
+                    "action=allow",
+                    "protocol=TCP",
+                    "remoteport=5003",
+                    "remoteip=172.65.0.0/16", // Specific to BPSR servers
+                    &format!("program={}", path_str),
+                    "enable=yes",
+                    "profile=any"
+                ])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+
+            match result {
+                Ok(status) if status.success() => {
+                    inject_system_message(&app, SystemLogLevel::Success, "Sniffer", "Firewall configured successfully.");
+                    Ok("Success".to_string())
+                }
+                _ => {
+                    let err = "Failed to configure firewall. The user may have denied the Administrator prompt.".to_string();
+                    inject_system_message(&app, SystemLogLevel::Error, "Sniffer", &err);
+                    Err(err)
+                }
+            }
+        } else {
+            Err("Failed to parse executable path.".to_string())
+        }
+    } else {
+        Err("Could not find executable path.".to_string())
+    }
 }

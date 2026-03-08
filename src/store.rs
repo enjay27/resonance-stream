@@ -130,6 +130,8 @@ pub struct AppSignals {
     pub set_tab_switch_modifier: WriteSignal<String>,
     pub tab_switch_key: ReadSignal<String>,
     pub set_tab_switch_key: WriteSignal<String>,
+    pub show_troubleshooter: ReadSignal<bool>,
+    pub set_show_troubleshooter: WriteSignal<bool>,
 }
 
 #[derive(Copy, Clone)]

@@ -111,11 +111,8 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
                 &blocked_users,
                 || state.next_pid.fetch_add(1, Ordering::SeqCst),
                 || {
-                    // --- NEW: This only runs when the pipeline guarantees Port 5003 traffic! ---
-                    println!("Feed from pipeline");
                     feed_watchdog();
 
-                    // If we were previously in an Error/Starting state, Auto-Recover the UI!
                     if !IS_SNIFFER_ACTIVE.load(Ordering::Relaxed) {
                         IS_SNIFFER_ACTIVE.store(true, Ordering::Relaxed);
                         emit_sniffer_state(&app_handle, "Active", "Listening for game traffic...");

@@ -109,8 +109,6 @@ pub fn get_dict_version(app: tauri::AppHandle) -> String {
 
 #[tauri::command]
 pub fn get_local_dictionary(app: tauri::AppHandle) -> Result<String, String> {
-    println!("call dictionary get_local_dictionary");
-
     let dict_path = app.path().app_data_dir()
         .map_err(|e| e.to_string())?
         .join("custom_dict.json");

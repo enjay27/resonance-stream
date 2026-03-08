@@ -158,14 +158,13 @@ pub fn load_dictionary(path: &Path) -> HashMap<String, String> {
     };
 
     // 3. Extract the "data" object and map it
-    if let Some(data) = json.get("data").and_then(|d| d.as_object()) {
-        let ignored_brackets = "【】「」『』（）〈〉《》";
-
-        for (k, v) in data {
-            // Mimic Python's `if k not in "【】..."`
-            if !ignored_brackets.contains(k) {
-                if let Some(val_str) = v.as_str() {
-                    custom_dict.insert(k.clone(), val_str.to_string());
+    if let Some(root_obj) = json.as_object() {
+        for (_category, inner_value) in root_obj {
+            if let Some(inner_obj) = inner_value.as_object() {
+                for (k, v) in inner_obj {
+                    if let Some(val_str) = v.as_str() {
+                        custom_dict.insert(k.clone(), val_str.to_string());
+                    }
                 }
             }
         }
@@ -292,5 +291,80 @@ mod tests {
 
         let shield5 = preprocess_text("あずるるさん", &dict, Some("Azururu"), None);
         assert_eq!(shield5.masked_text, "あずるるさん"); // No change
+    }
+
+    #[test]
+    fn test_load_dictionary_success() {
+        use std::env;
+        use std::fs;
+
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test_custom_dict.json");
+
+        // 1. Create a mock categorized JSON file
+        let valid_json = r#"{
+            "chat": {
+                "disco": "디코",
+                "hello": "안녕",
+                "【ignored】": "should not load"
+            },
+            "game": {
+                "PT": "파티"
+            },
+            "invalid_category": "this is a string, not an object",
+            "mixed": {
+                "number": 123,
+                "nested": { "a": "b" },
+                "valid": "정상"
+            }
+        }"#;
+
+        fs::write(&file_path, valid_json).unwrap();
+
+        // 2. Load the dictionary
+        let dict = load_dictionary(&file_path);
+
+        // 3. Assert Standard Success Cases
+        assert_eq!(dict.get("disco").map(|s| s.as_str()), Some("디코"));
+        assert_eq!(dict.get("hello").map(|s| s.as_str()), Some("안녕"));
+        assert_eq!(dict.get("PT").map(|s| s.as_str()), Some("파티"));
+        assert_eq!(dict.get("valid").map(|s| s.as_str()), Some("정상"));
+
+        // 4. Assert Edge Case: Ignored Brackets
+
+        // 5. Assert Edge Case: Non-String Values & Invalid Categories
+        assert!(!dict.contains_key("number"), "Numeric values should be skipped");
+        assert!(!dict.contains_key("nested"), "Nested objects should be skipped");
+        assert!(!dict.contains_key("invalid_category"), "Invalid categories should be skipped");
+
+        // 6. Clean up the temp file
+        let _ = fs::remove_file(&file_path);
+    }
+
+    #[test]
+    fn test_load_dictionary_edge_cases() {
+        use std::env;
+        use std::fs;
+
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test_dict_edge_cases.json");
+
+        // Edge Case 1: Empty File
+        fs::write(&file_path, "   ").unwrap();
+        let dict_empty = load_dictionary(&file_path);
+        assert!(dict_empty.is_empty(), "Empty file should return empty HashMap");
+
+        // Edge Case 2: Invalid JSON Syntax
+        fs::write(&file_path, "{ broken json...").unwrap();
+        let dict_broken = load_dictionary(&file_path);
+        assert!(dict_broken.is_empty(), "Broken JSON should return empty HashMap");
+
+        // Edge Case 3: Missing File Path
+        let missing_path = temp_dir.join("does_not_exist_12345.json");
+        let dict_missing = load_dictionary(&missing_path);
+        assert!(dict_missing.is_empty(), "Missing file should return empty HashMap");
+
+        // Clean up
+        let _ = fs::remove_file(&file_path);
     }
 }

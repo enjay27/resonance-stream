@@ -1,10 +1,9 @@
-use leptos::leptos_dom::log;
 use crate::store::{AppActions, AppSignals};
+use crate::tauri_bridge::invoke;
+use crate::ui_types::{FolderStatus, NetworkInterface};
 use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
-use crate::tauri_bridge::invoke;
-use crate::ui_types::{FolderStatus, NetworkInterface};
 
 #[derive(serde::Serialize)]
 struct OpenBrowserArgs {
@@ -44,14 +43,17 @@ pub fn Settings() -> impl IntoView {
 
     let save_chat_action = Action::new_local(move |_: &()| {
         // 1. Extract the raw chat messages from the signal map
-        let logs_to_export: Vec<_> = signals.chat_log.get_untracked()
+        let logs_to_export: Vec<_> = signals
+            .chat_log
+            .get_untracked()
             .values()
             .map(|sig| sig.get_untracked()) // Unpack the RwSignal<ChatMessage>
             .collect();
 
         // 2. Send them to Tauri
         async move {
-            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "logs": logs_to_export })).unwrap();
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "logs": logs_to_export }))
+                .unwrap();
 
             match invoke("export_chat_log", args).await {
                 Ok(_) => "저장 완료".to_string(),

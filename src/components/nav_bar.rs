@@ -1,13 +1,12 @@
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
+use leptos::ev::{click, keydown};
+use leptos::html::{Button, Div, Input};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use wasm_bindgen::JsValue;
-use leptos::html::{Input, Div, Button}; // ADDED: Div and Button for our new refs
-use leptos::ev::{keydown, click};
 use wasm_bindgen::closure::Closure;
-// ADDED: click event
-use web_sys::Node; // ADDED: Node to verify click targets
+use wasm_bindgen::JsValue;
+use web_sys::Node;
 
 #[component]
 pub fn NavBar() -> impl IntoView {
@@ -57,19 +56,29 @@ pub fn NavBar() -> impl IntoView {
                 signals.set_active_tab.set(next_tab.clone());
                 signals.set_unread_count.set(0);
 
-                signals.set_unread_counts.update(|counts| {
-                    match next_tab.as_str() {
+                signals
+                    .set_unread_counts
+                    .update(|counts| match next_tab.as_str() {
                         "커스텀" => {
                             let filters = signals.custom_filters.get_untracked();
-                            for f in filters { counts.remove(&f); }
-                        },
-                        "월드" => { counts.remove("WORLD"); },
-                        "길드" => { counts.remove("GUILD"); },
-                        "파티" => { counts.remove("PARTY"); },
-                        "로컬" => { counts.remove("LOCAL"); },
+                            for f in filters {
+                                counts.remove(&f);
+                            }
+                        }
+                        "월드" => {
+                            counts.remove("WORLD");
+                        }
+                        "길드" => {
+                            counts.remove("GUILD");
+                        }
+                        "파티" => {
+                            counts.remove("PARTY");
+                        }
+                        "로컬" => {
+                            counts.remove("LOCAL");
+                        }
                         _ => {}
-                    }
-                });
+                    });
 
                 signals.set_is_at_bottom.set(true);
                 actions.save_config.dispatch(());
@@ -89,7 +98,9 @@ pub fn NavBar() -> impl IntoView {
         if is_search_open.get_untracked() {
             let container = search_container_ref.get();
             let btn = search_btn_ref.get();
-            let clicked_inside = container.map(|c| c.contains(Some(&target))).unwrap_or(false);
+            let clicked_inside = container
+                .map(|c| c.contains(Some(&target)))
+                .unwrap_or(false);
             let clicked_btn = btn.map(|b| b.contains(Some(&target))).unwrap_or(false);
 
             if !clicked_inside && !clicked_btn {
@@ -100,7 +111,9 @@ pub fn NavBar() -> impl IntoView {
         if is_controls_open.get_untracked() {
             let container = controls_container_ref.get();
             let btn = folder_btn_ref.get();
-            let clicked_inside = container.map(|c| c.contains(Some(&target))).unwrap_or(false);
+            let clicked_inside = container
+                .map(|c| c.contains(Some(&target)))
+                .unwrap_or(false);
             let clicked_btn = btn.map(|b| b.contains(Some(&target))).unwrap_or(false);
 
             if !clicked_inside && !clicked_btn {

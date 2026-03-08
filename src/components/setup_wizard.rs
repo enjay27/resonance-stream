@@ -1,12 +1,14 @@
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
-use crate::ui_types::TauriEvent;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 
 #[component]
-pub fn SetupWizard(finalize: Callback<()>, start_download: Callback<web_sys::MouseEvent>) -> impl IntoView {
+pub fn SetupWizard(
+    finalize: Callback<()>,
+    start_download: Callback<web_sys::MouseEvent>,
+) -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("Signals missing");
 
     let (firewall_agreed, set_firewall_agreed) = signal(false);

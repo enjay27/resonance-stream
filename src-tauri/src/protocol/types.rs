@@ -1,9 +1,9 @@
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Condvar, Mutex};
-use std::sync::atomic::AtomicU64;
 use crossbeam_channel::Sender;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Condvar, Mutex};
 
 pub struct AppState {
     pub batch_data: Arc<(Mutex<(Vec<MessageRequest>, u64)>, Condvar)>,
@@ -44,11 +44,11 @@ pub struct ChatMessage {
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemMessage {
-    pub pid: u64,             // Unique ID for Leptos 'For' loop keys
-    pub timestamp: u64,       // Milliseconds for sorting
-    pub level: String,        // "info", "warn", "error", "success"
-    pub source: String,       // "Backend", "Sniffer", "Translator"
-    pub message: String,      // The actual log text
+    pub pid: u64,        // Unique ID for Leptos 'For' loop keys
+    pub timestamp: u64,  // Milliseconds for sorting
+    pub level: String,   // "info", "warn", "error", "success"
+    pub source: String,  // "Backend", "Sniffer", "Translator"
+    pub message: String, // The actual log text
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -63,9 +63,9 @@ pub enum SystemLogLevel {
 
 #[derive(Serialize)]
 pub struct MessageRequest {
-    pub cmd: String,          // Always "translate"
+    pub cmd: String, // Always "translate"
     pub pid: u64,
-    pub text: String,         // The Japanese message
+    pub text: String, // The Japanese message
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -97,7 +97,7 @@ pub struct SnifferStatePayload {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct TranslatorStatePayload {
-    pub state: String,   // "Starting", "Loading Model", "Active", "Error", "Off"
+    pub state: String, // "Starting", "Loading Model", "Active", "Error", "Off"
     pub message: String,
 }
 

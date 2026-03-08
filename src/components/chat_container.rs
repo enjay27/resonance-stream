@@ -1,9 +1,8 @@
 use crate::components::ChatRow;
 use crate::store::AppSignals;
-use crate::ui_types::{ChatMessage, SystemMessage};
+use crate::ui_types::SystemMessage;
 use crate::utils::format_time;
 use leptos::html;
-use leptos::leptos_dom::log;
 use leptos::prelude::*;
 use web_sys::{HtmlDivElement, MouseEvent};
 
@@ -34,43 +33,63 @@ pub fn ChatContainer() -> impl IntoView {
         let chat_log = signals.chat_log.get();
         let min_level = signals.min_sender_level.get();
 
-        if tab == "시스템" { return Vec::new(); }
+        if tab == "시스템" {
+            return Vec::new();
+        }
 
         let base_list = match tab.as_str() {
             "전체" => chat_log.values().cloned().collect::<Vec<_>>(),
-            "커스텀" => chat_log.values()
+            "커스텀" => chat_log
+                .values()
                 .filter(|m| filters.contains(&m.get().channel))
-                .cloned().collect(),
+                .cloned()
+                .collect(),
             _ => {
                 let key = match tab.as_str() {
-                    "로컬" => "LOCAL", "파티" => "PARTY", "길드" => "GUILD", _ => "WORLD"
+                    "로컬" => "LOCAL",
+                    "파티" => "PARTY",
+                    "길드" => "GUILD",
+                    _ => "WORLD",
                 };
-                chat_log.values()
+                chat_log
+                    .values()
                     .filter(|m| m.get().channel == key)
-                    .cloned().collect()
+                    .cloned()
+                    .collect()
             }
         };
 
         let full_list: Vec<_> = if search.is_empty() {
             // Apply level filter AND block system messages from general level-filtering logic if desired
-            base_list.into_iter().filter(|sig| {
-                let m = sig.get();
-                // We only apply the level filter if the message is specifically from the World Channel
-                if m.channel == "WORLD" {
-                    m.level >= min_level
-                } else {
-                    true // Pass all other channels regardless of level
-                }
-            }).collect()
-        }
-        else {
-            base_list.into_iter().filter(|sig| {
-                let m = sig.get();
-                // Apply level filter to World Channel AND search term filter
-                let passes_level_check = if m.channel == "WORLD" { m.level >= min_level } else { true };
+            base_list
+                .into_iter()
+                .filter(|sig| {
+                    let m = sig.get();
+                    // We only apply the level filter if the message is specifically from the World Channel
+                    if m.channel == "WORLD" {
+                        m.level >= min_level
+                    } else {
+                        true // Pass all other channels regardless of level
+                    }
+                })
+                .collect()
+        } else {
+            base_list
+                .into_iter()
+                .filter(|sig| {
+                    let m = sig.get();
+                    // Apply level filter to World Channel AND search term filter
+                    let passes_level_check = if m.channel == "WORLD" {
+                        m.level >= min_level
+                    } else {
+                        true
+                    };
 
-                passes_level_check && (m.nickname.to_lowercase().contains(&search) || m.message.to_lowercase().contains(&search))
-            }).collect()
+                    passes_level_check
+                        && (m.nickname.to_lowercase().contains(&search)
+                            || m.message.to_lowercase().contains(&search))
+                })
+                .collect()
         };
 
         // --- SLICE THE LIST (PAGING) ---
@@ -92,36 +111,42 @@ pub fn ChatContainer() -> impl IntoView {
         let search = signals.search_term.get().to_lowercase();
         let current_log_level = signals.log_level.get();
 
-        logs.into_iter().filter(|sig| {
-            let m = sig.get();
+        logs.into_iter()
+            .filter(|sig| {
+                let m = sig.get();
 
-            // 1. Assign numeric values to create a hierarchy
-            let msg_val = match m.level.as_str() {
-                "trace" => 0,
-                "debug" => 1,
-                "info" | "success" => 2,
-                "warn" => 3,
-                "error" => 4,
-                _ => 2, // default unknown to info
-            };
+                // 1. Assign numeric values to create a hierarchy
+                let msg_val = match m.level.as_str() {
+                    "trace" => 0,
+                    "debug" => 1,
+                    "info" | "success" => 2,
+                    "warn" => 3,
+                    "error" => 4,
+                    _ => 2, // default unknown to info
+                };
 
-            let filter_val = match current_log_level.as_str() {
-                "trace" => 0,
-                "debug" => 1,
-                "info" => 2,
-                "warn" => 3,
-                "error" => 4,
-                _ => 2,
-            };
+                let filter_val = match current_log_level.as_str() {
+                    "trace" => 0,
+                    "debug" => 1,
+                    "info" => 2,
+                    "warn" => 3,
+                    "error" => 4,
+                    _ => 2,
+                };
 
-            // 2. Hide messages that are beneath the chosen log level
-            if msg_val < filter_val { return false; }
+                // 2. Hide messages that are beneath the chosen log level
+                if msg_val < filter_val {
+                    return false;
+                }
 
-            // 3. Apply standard UI filters
-            let matches_level = level_f.as_ref().map_or(true, |f| &m.level == f);
-            let matches_source = source_f.as_ref().map_or(true, |f| &m.source == f);
-            matches_level && matches_source && (search.is_empty() || m.message.to_lowercase().contains(&search))
-        }).collect::<Vec<_>>()
+                // 3. Apply standard UI filters
+                let matches_level = level_f.as_ref().map_or(true, |f| &m.level == f);
+                let matches_source = source_f.as_ref().map_or(true, |f| &m.source == f);
+                matches_level
+                    && matches_source
+                    && (search.is_empty() || m.message.to_lowercase().contains(&search))
+            })
+            .collect::<Vec<_>>()
     });
 
     // --- AUTO-SCROLL EFFECT ---
@@ -138,7 +163,9 @@ pub fn ChatContainer() -> impl IntoView {
 
     // --- DRAG EVENT HANDLERS ---
     let on_mouse_down = move |ev: MouseEvent| {
-        if !signals.drag_to_scroll.get() { return; }
+        if !signals.drag_to_scroll.get() {
+            return;
+        }
         if let Some(el) = chat_container_ref.get() {
             set_is_dragging.set(true);
             set_start_y.set(ev.client_y());

@@ -1,10 +1,10 @@
 mod app;
-pub mod ui_types;
 pub mod components;
 pub mod hooks;
-pub mod utils;
 pub mod store;
 pub mod tauri_bridge;
+pub mod ui_types;
+pub mod utils;
 
 use app::*;
 use leptos::prelude::*;

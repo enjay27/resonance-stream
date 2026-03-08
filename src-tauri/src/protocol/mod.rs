@@ -1,4 +1,4 @@
-pub mod types;
-pub mod parser;
-pub mod packet_buffer;
 mod decoder;
+pub mod packet_buffer;
+pub mod parser;
+pub mod types;

@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-use serde_with::DisplayFromStr;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use serde_with::DisplayFromStr;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -72,18 +71,18 @@ pub struct AppConfig {
     #[serde(default)]
     pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
     #[serde(default)]
-    pub tab_switch_key: String,     // e.g., "Tab", "ArrowRight", etc.
+    pub tab_switch_key: String, // e.g., "Tab", "ArrowRight", etc.
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FolderStatus {
-    pub exists: bool, 
-    pub path: String 
+    pub exists: bool,
+    pub path: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TauriEvent { 
-    pub payload: ProgressPayload 
+pub struct TauriEvent {
+    pub payload: ProgressPayload,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -109,7 +108,7 @@ pub struct NetworkInterface {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct TranslatorStatePayload {
-    pub state: String,   // "Starting", "Loading Model", "Active", "Error", "Off"
+    pub state: String, // "Starting", "Loading Model", "Active", "Error", "Off"
     pub message: String,
 }
 

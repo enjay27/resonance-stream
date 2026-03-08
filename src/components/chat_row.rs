@@ -1,12 +1,12 @@
 use crate::store::AppSignals;
+use crate::tauri_bridge::invoke;
 use crate::ui_types::ChatMessage;
 use crate::use_context;
 use crate::utils::{copy_to_clipboard, format_time, is_japanese};
-use leptos::prelude::*;
-use leptos::{component, view, IntoView};
 use leptos::portal::Portal;
+use leptos::prelude::*;
 use leptos::reactive::spawn_local;
-use crate::tauri_bridge::invoke;
+use leptos::{component, view, IntoView};
 
 #[component]
 pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
@@ -28,7 +28,8 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
         }
     });
 
-    let is_active = Memo::new(move |_| signals.active_menu_id.get() == Some(sig.get_untracked().pid));
+    let is_active =
+        Memo::new(move |_| signals.active_menu_id.get() == Some(sig.get_untracked().pid));
     let (menu_pos, set_menu_pos) = signal((0, 0));
 
     let channel_colors = move || match sig.get().channel.as_str() {
@@ -42,12 +43,24 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
     let display_time = move || {
         let raw_ts = sig.get().timestamp;
-        let msg_secs = if raw_ts > 10_000_000_000 { raw_ts / 1000 } else { raw_ts };
+        let msg_secs = if raw_ts > 10_000_000_000 {
+            raw_ts / 1000
+        } else {
+            raw_ts
+        };
 
         if signals.use_relative_time.get() {
             let current_raw = signals.current_time.get();
-            let current_secs = if current_raw > 10_000_000_000 { current_raw / 1000 } else { current_raw };
-            let diff_secs = if current_secs > msg_secs { current_secs - msg_secs } else { 0 };
+            let current_secs = if current_raw > 10_000_000_000 {
+                current_raw / 1000
+            } else {
+                current_raw
+            };
+            let diff_secs = if current_secs > msg_secs {
+                current_secs - msg_secs
+            } else {
+                0
+            };
 
             if diff_secs < 10 {
                 "now".to_string()
@@ -407,7 +420,9 @@ fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
     while !current_text.is_empty() {
         let mut earliest_find = None;
         for kw in keywords {
-            if kw.is_empty() { continue; }
+            if kw.is_empty() {
+                continue;
+            }
             if let Some(idx) = current_text.find(kw) {
                 if earliest_find.map_or(true, |(e_idx, _)| idx < e_idx) {
                     earliest_find = Some((idx, kw));
@@ -419,22 +434,31 @@ fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
             Some((idx, kw)) => {
                 let before = &current_text[..idx];
                 if !before.is_empty() {
-                    views.push(view! {
-                        <span class="font-bold">{before.to_string()}</span>
-                    }.into_any());
+                    views.push(
+                        view! {
+                            <span class="font-bold">{before.to_string()}</span>
+                        }
+                        .into_any(),
+                    );
                 }
                 // Emphasis keywords keep their warning color, but no shadow needed.
-                views.push(view! {
-                    <span class="text-warning font-black mx-0.5">
-                        {kw.to_string()}
-                    </span>
-                }.into_any());
+                views.push(
+                    view! {
+                        <span class="text-warning font-black mx-0.5">
+                            {kw.to_string()}
+                        </span>
+                    }
+                    .into_any(),
+                );
                 current_text = &current_text[idx + kw.len()..];
-            },
+            }
             None => {
-                views.push(view! {
-                    <span class="font-bold">{current_text.to_string()}</span>
-                }.into_any());
+                views.push(
+                    view! {
+                        <span class="font-bold">{current_text.to_string()}</span>
+                    }
+                    .into_any(),
+                );
                 break;
             }
         }

@@ -1,18 +1,18 @@
-use std::io::Write;
 use crate::config::*;
+use env_logger::fmt::style::{AnsiColor, Color, Style};
 use indexmap::IndexMap;
+use lazy_static::lazy_static;
 use std::collections::VecDeque;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::Write;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use env_logger::fmt::style::{AnsiColor, Color, Style};
-use lazy_static::lazy_static;
-use tauri::{AppHandle, Emitter, Manager, State};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_shell::ShellExt;
 
@@ -27,8 +27,8 @@ pub mod io;
 pub mod protocol;
 pub mod services;
 
-pub use io::*;
 pub use config::*;
+pub use io::*;
 pub use protocol::parser::*;
 pub use protocol::types::*;
 pub use services::downloader::*;
@@ -45,14 +45,14 @@ pub fn run() {
             // 2. Create a custom style for the target name using the new API
             let target_style = Style::new()
                 .fg_color(Some(AnsiColor::Cyan.into())) // Set text to Cyan
-                .dimmed();                              // Make it slightly darker
+                .dimmed(); // Make it slightly darker
 
             // 3. Apply the styles using the 0.11 `{style}text{style:#}` pattern
             writeln!(
                 buf,
                 "[{timestamp} {level_style}{level}{level_style:#}] {message}",
                 timestamp = buf.timestamp(),
-                level_style = level_style,   // Turns level color ON
+                level_style = level_style, // Turns level color ON
                 level = record.level(),
                 // {level_style:#} magically turns the color OFF
                 // {target_style:#} turns target color OFF
@@ -66,23 +66,45 @@ pub fn run() {
     let app = tauri::Builder::default()
         .setup(|app| {
             let handle = app.handle().clone();
-            inject_system_message(&handle, SystemLogLevel::Info, "Backend", "Initializing Resonance Stream...");
+            inject_system_message(
+                &handle,
+                SystemLogLevel::Info,
+                "Backend",
+                "Initializing Resonance Stream...",
+            );
 
             let is_admin = is_elevated::is_elevated();
-            inject_system_message(&handle, SystemLogLevel::Info, "Backend", format!("Admin Privileges: {}", is_admin));
+            inject_system_message(
+                &handle,
+                SystemLogLevel::Info,
+                "Backend",
+                format!("Admin Privileges: {}", is_admin),
+            );
 
             if !is_admin {
-                inject_system_message(&handle, SystemLogLevel::Warning, "Backend", "Sniffer may fail without Admin rights.");
+                inject_system_message(
+                    &handle,
+                    SystemLogLevel::Warning,
+                    "Backend",
+                    "Sniffer may fail without Admin rights.",
+                );
             }
 
             // --- CHECK CONFIG AND START AI IF NEEDED ---
             let config = load_config(handle.clone());
 
-            update_global_tab_shortcut(handle.clone(), config.tab_switch_modifier.clone(), config.tab_switch_key.clone());
+            update_global_tab_shortcut(
+                handle.clone(),
+                config.tab_switch_modifier.clone(),
+                config.tab_switch_key.clone(),
+            );
 
             let initial_tx = if config.use_translation {
                 let model_path = crate::get_model_path(&handle);
-                Some(crate::services::translator::start_translator_worker(handle.clone(), model_path))
+                Some(crate::services::translator::start_translator_worker(
+                    handle.clone(),
+                    model_path,
+                ))
             } else {
                 None
             };
@@ -94,8 +116,20 @@ pub fn run() {
                 None
             };
 
-            let toggle_i = MenuItem::with_id(app, "toggle_click_through", "클릭 관통 (Click-Through): OFF", true, None::<&str>)?;
-            let top_i = MenuItem::with_id(app, "toggle_always_on_top", "항상 위에 표시 (Always on Top): OFF", true, None::<&str>)?;
+            let toggle_i = MenuItem::with_id(
+                app,
+                "toggle_click_through",
+                "클릭 관통 (Click-Through): OFF",
+                true,
+                None::<&str>,
+            )?;
+            let top_i = MenuItem::with_id(
+                app,
+                "toggle_always_on_top",
+                "항상 위에 표시 (Always on Top): OFF",
+                true,
+                None::<&str>,
+            )?;
             let show_i = MenuItem::with_id(app, "show", "앱 열기 (Open App)", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "종료 (Quit)", true, None::<&str>)?;
 
@@ -210,7 +244,7 @@ pub fn inject_system_message<S: Into<String>>(
     app: &tauri::AppHandle,
     level: SystemLogLevel,
     source: &str,
-    message: S
+    message: S,
 ) {
     let msg = message.into();
 
@@ -223,27 +257,27 @@ pub fn inject_system_message<S: Into<String>>(
             SystemLogLevel::Info => {
                 log::info!("{}", log_message);
                 "info"
-            },
+            }
             SystemLogLevel::Warning => {
                 log::warn!("{}", log_message);
                 "warn"
-            },
+            }
             SystemLogLevel::Error => {
                 log::error!("{}", log_message);
                 "error"
-            },
+            }
             SystemLogLevel::Success => {
                 log::info!("{}", log_message);
                 "success"
-            },
+            }
             SystemLogLevel::Debug => {
                 log::debug!("{}", log_message);
                 "debug"
-            },
+            }
             SystemLogLevel::Trace => {
                 log::trace!("{}", log_message);
                 "trace"
-            },
+            }
         };
 
         let system_message = SystemMessage {
@@ -294,7 +328,6 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
     }
 
     if let Some(state) = app.try_state::<AppState>() {
-
         // Auto-populate from Backend Cache
         {
             let cache = state.nickname_cache.lock().unwrap();
@@ -344,11 +377,12 @@ fn clear_chat_history(state: tauri::State<AppState>) {
 }
 
 #[tauri::command]
-fn ui_system_message(app: tauri::AppHandle, // Tauri prefers AppHandle passed by value in commands
-                       level: String,
-                       source: String,        // Use concrete String for frontend IPC
-                       message: String        // Use concrete String for frontend IPC
-                       ) {
+fn ui_system_message(
+    app: tauri::AppHandle, // Tauri prefers AppHandle passed by value in commands
+    level: String,
+    source: String,  // Use concrete String for frontend IPC
+    message: String, // Use concrete String for frontend IPC
+) {
     let sys_level = match level.to_lowercase().as_str() {
         "warn" | "warning" => SystemLogLevel::Warning,
         "error" => SystemLogLevel::Error,
@@ -414,7 +448,12 @@ fn update_tray_menu(state: tauri::State<TrayMenuState>, click_through: bool, alw
 }
 
 fn kill_orphaned_servers(app: &AppHandle) {
-    inject_system_message(app, SystemLogLevel::Info, "Translator", "Cleaning up any orphaned AI server processes...");
+    inject_system_message(
+        app,
+        SystemLogLevel::Info,
+        "Translator",
+        "Cleaning up any orphaned AI server processes...",
+    );
 
     // Uses Windows taskkill to forcefully close any dangling llama-server.exe instances
     let _ = Command::new("taskkill")
@@ -459,13 +498,20 @@ fn update_global_tab_shortcut(app: tauri::AppHandle, modifier: String, key: Stri
 
     // 3. Register the new global shortcut
     if let Ok(shortcut) = shortcut_str.parse::<Shortcut>() {
-        let _ = app.global_shortcut().on_shortcut(shortcut, move |app_handle, shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                // When the global shortcut is pressed, tell the frontend to switch tabs!
-                let _ = app_handle.emit("global-tab-switch", ());
-            }
-        });
+        let _ = app
+            .global_shortcut()
+            .on_shortcut(shortcut, move |app_handle, shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    // When the global shortcut is pressed, tell the frontend to switch tabs!
+                    let _ = app_handle.emit("global-tab-switch", ());
+                }
+            });
     } else {
-        inject_system_message(&app, SystemLogLevel::Error, "Shortcut", format!("Failed to parse global shortcut: {}", shortcut_str));
+        inject_system_message(
+            &app,
+            SystemLogLevel::Error,
+            "Shortcut",
+            format!("Failed to parse global shortcut: {}", shortcut_str),
+        );
     }
 }

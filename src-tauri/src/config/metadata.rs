@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
+use crate::{inject_system_message, SystemLogLevel};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppMetadata {
@@ -25,7 +26,10 @@ impl Default for AppMetadata {
 }
 
 fn get_metadata_path(app: &AppHandle) -> PathBuf {
-    let config_dir = app.path().app_config_dir().expect("Could not resolve app config dir");
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .expect("Could not resolve app config dir");
     if !config_dir.exists() {
         let _ = fs::create_dir_all(&config_dir);
     }
@@ -47,6 +51,8 @@ pub fn load_metadata(app: &AppHandle) -> AppMetadata {
 }
 
 pub fn save_metadata(app: &AppHandle, metadata: &AppMetadata) {
+    inject_system_message(&app, SystemLogLevel::Info, "Metadata", format!("Metadata saved {:?}", metadata));
+
     let path = get_metadata_path(app);
     if let Ok(json) = serde_json::to_string_pretty(metadata) {
         let _ = fs::write(path, json);

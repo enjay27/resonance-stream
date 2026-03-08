@@ -256,14 +256,24 @@ pub fn App() -> impl IntoView {
 
         spawn_local(async move {
             // FETCH THE GIST METADATA FIRST
+            match invoke("check_all_updates", JsValue::NULL).await {
+                Ok(config) => {
+                    let config = serde_wasm_bindgen::from_value::<crate::ui_types::UpdateCheckResult>(config);
+                }
+                Err(err) => {
+                    add_system_log("info", "downloader", &format!("{:?}", err));
+                }
+            }
+
             let update_res = invoke("check_all_updates", JsValue::NULL).await;
-            let (model_url, model_version, dict_version) = if let Ok(res) = update_res {
+            let (model_url, model_version, model_hash, dict_version) = if let Ok(res) = update_res {
                 if let Ok(data) =
                     serde_wasm_bindgen::from_value::<crate::ui_types::UpdateCheckResult>(res)
                 {
                     (
                         data.remote_data.model.download_url,
                         data.remote_data.model.latest_version,
+                        data.remote_data.model.sha256,
                         data.remote_data.dictionary.version,
                     )
                 } else {
@@ -294,7 +304,8 @@ pub fn App() -> impl IntoView {
             // 2. Download the AI Model (.gguf)
             let args = serde_wasm_bindgen::to_value(&serde_json::json!({
                 "downloadUrl": model_url,
-                "version": model_version
+                "version": model_version,
+                "expectedHash": model_hash
             }))
             .unwrap();
 
@@ -388,7 +399,7 @@ pub fn App() -> impl IntoView {
     };
 
     // --- MODEL UPDATE LOGIC ---
-    let start_model_update = move |download_url: String, version: String| {
+    let start_model_update = move |download_url: String, version: String, expected_hash: String| {
         set_model_update_step.set(1);
         set_model_update_progress.set(0);
 
@@ -413,7 +424,8 @@ pub fn App() -> impl IntoView {
 
             let args = serde_wasm_bindgen::to_value(&serde_json::json!({
                 "downloadUrl": download_url,
-                "version": version
+                "version": version,
+                "expectedHash": expected_hash
             }))
             .unwrap();
             let _ = invoke("download_model", args).await;
@@ -925,8 +937,9 @@ pub fn App() -> impl IntoView {
                                                         // CLONE DATA BEFORE THE CLOSURE
                                                         let url = data.model.download_url.clone();
                                                         let version = data.model.latest_version.clone();
+                                                        let hash = data.model.sha256.clone();
                                                         move |_| {
-                                                            start_model_update(url.clone(), version.clone());
+                                                            start_model_update(url.clone(), version.clone(), hash.clone());
                                                         }
                                                     }>
                                                     "다운로드 시작 (약 2.4GB)"

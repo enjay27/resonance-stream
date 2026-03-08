@@ -123,6 +123,7 @@ pub struct VersionInfo {
     pub latest_version: String,
     pub download_url: String,
     pub release_notes: String,
+    pub sha256: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

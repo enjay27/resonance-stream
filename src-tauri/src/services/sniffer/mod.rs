@@ -47,6 +47,15 @@ pub fn emit_sniffer_state(app: &tauri::AppHandle, state: &str, message: &str) {
 #[tauri::command]
 pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State<'_, AppState>) {
     let mut tx_lock = state.sniffer_tx.lock().unwrap();
+    if !check_firewall_rule() {
+        inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Firewall rule missing. Triggering Setup Wizard.");
+        emit_sniffer_state(&app, "Error", "방화벽 설정 필요 (Setup Required)");
+
+        let _ = app.emit("firewall-missing", ());
+
+        return;
+    }
+
     if tx_lock.is_some() {
         inject_system_message(
             &app,
@@ -70,10 +79,8 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
         inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Firewall rule missing. Triggering Setup Wizard.");
         emit_sniffer_state(&app, "Error", "방화벽 설정 필요 (Setup Required)");
 
-        // Tell the frontend to show the Setup Wizard!
         let _ = app.emit("firewall-missing", ());
 
-        // Return immediately without spawning the network thread
         return tx;
     }
 

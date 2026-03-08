@@ -33,24 +33,13 @@ pub fn Settings() -> impl IntoView {
         }
     });
 
-    let sync_dict_action = Action::new_local(|_: &()| async move {
-        let update_res = invoke("check_all_updates", JsValue::NULL).await;
-        let version = if let Ok(res) = update_res {
-            if let Ok(data) =
-                serde_wasm_bindgen::from_value::<crate::ui_types::UpdateCheckResult>(res)
-            {
-                (data.remote_data.dictionary.version,)
-            } else {
-                return;
-            }
-        } else {
-            return;
-        };
+    let sync_dict_action = Action::new_local(move |_: &()| async move {
+        let Some(metadata) = signals.pending_update_data.try_get_untracked() else { return; };
 
         let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-            "version": version
-        }))
-        .unwrap();
+        "version": metadata.unwrap().dictionary.version
+    }))
+            .unwrap();
 
         match invoke("sync_dictionary", args).await {
             Ok(_) => "최신 상태".to_string(),

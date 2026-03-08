@@ -54,7 +54,6 @@ pub fn preprocess_text(
         names.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
 
         for (ja_name, romaji) in names {
-            println!("{}: {}", ja_name, romaji);
             if current_text.contains(ja_name) {
                 // Shield the Japanese name with [Px] and map it to Romaji
                 mask_term(ja_name, romaji, &mut current_text);

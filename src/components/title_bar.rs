@@ -16,7 +16,7 @@ pub fn TitleBar() -> impl IntoView {
             // --- LEFT: App Title ---
             <div class="flex-1 pointer-events-none">
                 <span class="text-[10px] font-black tracking-tighter text-gray-500 opacity-70">
-                    "Resonance Stream v0.4.1"
+                    "Resonance Stream v0.4.0"
                 </span>
             </div>
 

@@ -696,13 +696,11 @@ pub fn App() -> impl IntoView {
                                                 "Updater",
                                                 "New dictionary found. Applying silently...",
                                             );
-                                            if let Ok(dict_args) = serde_wasm_bindgen::to_value(
-                                                &serde_json::json!({ "newDict": update_data.remote_data.dictionary }),
-                                            ) {
-                                                let _ =
-                                                    invoke("apply_dictionary_update", dict_args)
-                                                        .await;
-                                            }
+                                            let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                                    "version": update_data.remote_data.dictionary.version.clone()
+                                                }))
+                                                .unwrap();
+                                            let _ = invoke("sync_dictionary", args).await;
                                         }
 
                                         // 2. Save metadata for the modals to use
@@ -714,8 +712,7 @@ pub fn App() -> impl IntoView {
                                             set_show_app_update_modal.set(true);
                                         }
                                         if update_data.model_update_available
-                                            && config.use_translation
-                                        {
+                                            && config.use_translation {
                                             set_show_model_update_modal.set(true);
                                         }
                                     }

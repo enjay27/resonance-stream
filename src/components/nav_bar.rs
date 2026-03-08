@@ -163,9 +163,9 @@ pub fn NavBar() -> impl IntoView {
                                         "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] !overflow-visible {} {}",
                                         text_color,
                                         if is_active() {
-                                            format!("{} bg-white/5 opacity-100", border_color)
+                                            format!("font-black {} {} bg-white/5 opacity-100", text_color, border_color)
                                         } else {
-                                            "border-transparent bg-transparent opacity-40 hover:opacity-100".to_string()
+                                            format!("font-bold hover:font-black {} border-transparent bg-transparent opacity-70 hover:opacity-100", text_color)
                                         }
                                     )
                                     on:click=move |_| {

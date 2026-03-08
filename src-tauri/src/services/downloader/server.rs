@@ -1,9 +1,8 @@
+use crate::{FolderStatus, ProgressPayload};
+use futures_util::StreamExt;
 use std::fs;
 use std::io::Write;
 use tauri::{AppHandle, Emitter, Manager};
-use futures_util::StreamExt;
-use serde::Serialize;
-use crate::{FolderStatus, ProgressPayload};
 
 pub const AI_SERVER_FOLDER: &str = "ai-server";
 pub const AI_SERVER_ZIP_URL: &str = "https://github.com/enjay27/resonance-stream/releases/download/v0.2.0/llama-b8157-bin-win-vulkan-x64.zip";
@@ -12,7 +11,8 @@ pub const AI_SERVER_FILENAME: &str = "llama-server.exe";
 #[tauri::command]
 pub async fn check_ai_server_status(app: tauri::AppHandle) -> Result<FolderStatus, String> {
     // Check exactly one path for the .gguf file
-    let model_path = app.path()
+    let model_path = app
+        .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("bin")
@@ -27,7 +27,10 @@ pub async fn check_ai_server_status(app: tauri::AppHandle) -> Result<FolderStatu
 
 #[tauri::command]
 pub async fn download_ai_server(app: AppHandle) -> Result<(), String> {
-    let ai_server_dir = app.path().app_data_dir().unwrap()
+    let ai_server_dir = app
+        .path()
+        .app_data_dir()
+        .unwrap()
         .join("bin")
         .join(AI_SERVER_FOLDER);
     fs::create_dir_all(&ai_server_dir).map_err(|e| e.to_string())?;
@@ -43,11 +46,18 @@ pub async fn download_ai_server(app: AppHandle) -> Result<(), String> {
 
     // 1. Download the ZIP file (Streaming)
     let client = reqwest::Client::new();
-    let res = client.get(AI_SERVER_ZIP_URL).send().await.map_err(|e| e.to_string())?;
+    let res = client
+        .get(AI_SERVER_ZIP_URL)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
     // ADD THIS CHECK: Ensure we didn't hit a 404 on GitHub
     if !res.status().is_success() {
-        return Err(format!("Failed to download AI server. Server returned: {}", res.status()));
+        return Err(format!(
+            "Failed to download AI server. Server returned: {}",
+            res.status()
+        ));
     }
 
     let total_size = res.content_length().unwrap_or(0);
@@ -63,20 +73,26 @@ pub async fn download_ai_server(app: AppHandle) -> Result<(), String> {
 
         if total_size > 0 {
             let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
-            let _ = app.emit("download-progress", ProgressPayload {
-                current_file: "AI 엔진 다운로드 중...".to_string(),
-                percent,
-                total_percent: percent,
-            });
+            let _ = app.emit(
+                "download-progress",
+                ProgressPayload {
+                    current_file: "AI 엔진 다운로드 중...".to_string(),
+                    percent,
+                    total_percent: percent,
+                },
+            );
         }
     }
 
     // 2. Extract the ZIP file
-    let _ = app.emit("download-progress", ProgressPayload {
-        current_file: "압축 해제 중...".to_string(),
-        percent: 100,
-        total_percent: 100,
-    });
+    let _ = app.emit(
+        "download-progress",
+        ProgressPayload {
+            current_file: "압축 해제 중...".to_string(),
+            percent: 100,
+            total_percent: 100,
+        },
+    );
 
     let zip_file = fs::File::open(&zip_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;

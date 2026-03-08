@@ -1,9 +1,9 @@
+use crate::store::AppSignals;
+use crate::tauri_bridge::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use std::collections::BTreeMap;
 use wasm_bindgen::JsValue;
-use crate::store::AppSignals;
-use crate::tauri_bridge::invoke;
 
 #[component]
 pub fn DictionaryModal() -> impl IntoView {
@@ -41,7 +41,8 @@ pub fn DictionaryModal() -> impl IntoView {
 
                 if let Ok(json_val) = invoke("get_local_dictionary", JsValue::NULL).await {
                     if let Some(json_str) = json_val.as_string() {
-                        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap_or(serde_json::json!({}));
+                        let parsed: serde_json::Value =
+                            serde_json::from_str(&json_str).unwrap_or(serde_json::json!({}));
 
                         let mut new_dict = BTreeMap::new();
 
@@ -73,7 +74,8 @@ pub fn DictionaryModal() -> impl IntoView {
         spawn_local(async move {
             let args = serde_wasm_bindgen::to_value(&serde_json::json!({
                 "content": json_payload
-            })).unwrap();
+            }))
+            .unwrap();
             let _ = invoke("save_local_dictionary", args).await;
 
             signals.set_restart_required.set(true);
@@ -132,15 +134,28 @@ pub fn DictionaryModal() -> impl IntoView {
 
     let delete_category = move |cat: String| {
         if let Some(w) = web_sys::window() {
-            if !w.confirm_with_message(&format!("'{}' 카테고리와 내부의 모든 단어를 삭제하시겠습니까?", cat)).unwrap_or(false) {
+            if !w
+                .confirm_with_message(&format!(
+                    "'{}' 카테고리와 내부의 모든 단어를 삭제하시겠습니까?",
+                    cat
+                ))
+                .unwrap_or(false)
+            {
                 return;
             }
         }
-        set_dict.update(|d| { d.remove(&cat); });
+        set_dict.update(|d| {
+            d.remove(&cat);
+        });
 
         // Ensure we don't stay on a deleted category
         if active_category.get_untracked() == cat {
-            let first_cat = dict.get_untracked().keys().next().cloned().unwrap_or_else(|| "chat".to_string());
+            let first_cat = dict
+                .get_untracked()
+                .keys()
+                .next()
+                .cloned()
+                .unwrap_or_else(|| "chat".to_string());
             set_active_category.set(first_cat);
         }
     };
@@ -150,7 +165,9 @@ pub fn DictionaryModal() -> impl IntoView {
             let new_cat = edit_category_name.get_untracked().trim().to_string();
             set_renaming_category.set(None);
 
-            if new_cat.is_empty() || new_cat == old_cat { return; }
+            if new_cat.is_empty() || new_cat == old_cat {
+                return;
+            }
 
             set_dict.update(|d| {
                 // Prevent merging or overwriting an existing category

@@ -1,7 +1,7 @@
+use chrono::{Local, TimeZone};
 use std::fs;
 use std::io::Write;
-use chrono::{Local, TimeZone};
-use tauri::{AppHandle, Manager};
+use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
 // Adjust this import path if ExportMessage is located elsewhere!
@@ -10,9 +10,7 @@ use crate::protocol::types::ExportMessage;
 #[tauri::command]
 pub async fn open_app_data_folder(app: tauri::AppHandle) -> Result<(), String> {
     // 1. Resolve the specific AppData/Roaming folder for this app
-    let app_dir = app.path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     // 2. CRITICAL: Ensure the directory exists.
     // If Explorer is called on a non-existent path, it defaults to 'Documents'.
@@ -41,11 +39,12 @@ pub async fn open_app_data_folder(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn export_chat_log(app: tauri::AppHandle, logs: Vec<ExportMessage>) -> Result<String, String> {
+pub async fn export_chat_log(
+    app: tauri::AppHandle,
+    logs: Vec<ExportMessage>,
+) -> Result<String, String> {
     // 1. Get the AppData directory
-    let app_dir = app.path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     if !app_dir.exists() {
         fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
@@ -59,9 +58,14 @@ pub async fn export_chat_log(app: tauri::AppHandle, logs: Vec<ExportMessage>) ->
     let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
 
     // 4. Write the header
-    writeln!(file, "=== BPSR Translator Chat Export ({}) ===", Local::now().format("%Y-%m-%d %H:%M:%S"))
+    writeln!(
+        file,
+        "=== BPSR Translator Chat Export ({}) ===",
+        Local::now().format("%Y-%m-%d %H:%M:%S")
+    )
+    .map_err(|e| e.to_string())?;
+    writeln!(file, "--------------------------------------------------")
         .map_err(|e| e.to_string())?;
-    writeln!(file, "--------------------------------------------------").map_err(|e| e.to_string())?;
 
     // 5. Format and write each message
     for log in logs {
@@ -75,7 +79,10 @@ pub async fn export_chat_log(app: tauri::AppHandle, logs: Vec<ExportMessage>) ->
             None => "".to_string(),
         };
 
-        let line = format!("[{}] [{}] {}: {}{}", time_str, log.channel, log.nickname, log.message, trans_str);
+        let line = format!(
+            "[{}] [{}] {}: {}{}",
+            time_str, log.channel, log.nickname, log.message, trans_str
+        );
         writeln!(file, "{}", line).map_err(|e| e.to_string())?;
     }
 

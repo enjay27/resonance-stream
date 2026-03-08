@@ -1,9 +1,8 @@
+use lazy_static::lazy_static;
+use regex::{Captures, Regex};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::sync::MutexGuard;
-use regex::{Regex, Captures};
-use lazy_static::lazy_static;
 
 pub struct ShieldData {
     pub masked_text: String,
@@ -17,13 +16,14 @@ lazy_static! {
     static ref NUM_PATTERN_3: Regex = Regex::new(r"(\d+)周").unwrap();
     static ref NUM_PATTERN_4: Regex = Regex::new(r"(\d+)回").unwrap();
     static ref THINK_PATTERN: Regex = Regex::new(r"(?s)<think>.*?</think>\s*").unwrap();
+    static ref TURN_TAG_PATTERN: Regex = Regex::new(r"</?end_of_turn>|</?start_of_turn>|<bos>|<eos>").unwrap();
 }
 
 // --- PREPROCESSOR ---
 pub fn preprocess_text(
     input: &str,
     custom_dict: &HashMap<String, String>,
-    nickname_cache: Option<&HashMap<String, String>>
+    nickname_cache: Option<&HashMap<String, String>>,
 ) -> ShieldData {
     let mut current_text = input.to_string();
     let mut replacements = HashMap::new();
@@ -39,7 +39,7 @@ pub fn preprocess_text(
 
     // 1. Mask Japanese Brackets
     let jp_brackets = [
-        "【", "】", "「", "」", "『", "』", "（", "）", "〈", "〉", "《", "》", "［", "］"
+        "【", "】", "「", "」", "『", "』", "（", "）", "〈", "〉", "《", "》", "［", "］",
     ];
     for bracket in jp_brackets {
         if current_text.contains(bracket) {
@@ -54,7 +54,6 @@ pub fn preprocess_text(
         names.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
 
         for (ja_name, romaji) in names {
-            println!("{}: {}", ja_name, romaji);
             if current_text.contains(ja_name) {
                 // Shield the Japanese name with [Px] and map it to Romaji
                 mask_term(ja_name, romaji, &mut current_text);
@@ -63,7 +62,10 @@ pub fn preprocess_text(
     }
 
     // 3. Recruitment & @-Tag (Find all matches first, then replace)
-    let recruit_matches: Vec<String> = RECRUIT_PATTERN.find_iter(&current_text).map(|m| m.as_str().to_string()).collect();
+    let recruit_matches: Vec<String> = RECRUIT_PATTERN
+        .find_iter(&current_text)
+        .map(|m| m.as_str().to_string())
+        .collect();
     for m in recruit_matches {
         mask_term(&m, &m, &mut current_text);
     }
@@ -79,41 +81,55 @@ pub fn preprocess_text(
     }
 
     // 5. Numeric Units
-    current_text = NUM_PATTERN_1.replace_all(&current_text, |caps: &Captures| {
-        let placeholder = format!("[P{}]", p_count);
-        replacements.insert(placeholder.clone(), format!("{}종", &caps[1]));
-        p_count += 1;
-        placeholder
-    }).to_string();
+    current_text = NUM_PATTERN_1
+        .replace_all(&current_text, |caps: &Captures| {
+            let placeholder = format!("[P{}]", p_count);
+            replacements.insert(placeholder.clone(), format!("{}종", &caps[1]));
+            p_count += 1;
+            placeholder
+        })
+        .to_string();
 
-    current_text = NUM_PATTERN_2.replace_all(&current_text, |caps: &Captures| {
-        let placeholder = format!("[P{}]", p_count);
-        replacements.insert(placeholder.clone(), format!("{}인", &caps[1]));
-        p_count += 1;
-        placeholder
-    }).to_string();
+    current_text = NUM_PATTERN_2
+        .replace_all(&current_text, |caps: &Captures| {
+            let placeholder = format!("[P{}]", p_count);
+            replacements.insert(placeholder.clone(), format!("{}인", &caps[1]));
+            p_count += 1;
+            placeholder
+        })
+        .to_string();
 
-    current_text = NUM_PATTERN_3.replace_all(&current_text, |caps: &Captures| {
-        let placeholder = format!("[P{}]", p_count);
-        replacements.insert(placeholder.clone(), format!("{}주", &caps[1]));
-        p_count += 1;
-        placeholder
-    }).to_string();
+    current_text = NUM_PATTERN_3
+        .replace_all(&current_text, |caps: &Captures| {
+            let placeholder = format!("[P{}]", p_count);
+            replacements.insert(placeholder.clone(), format!("{}주", &caps[1]));
+            p_count += 1;
+            placeholder
+        })
+        .to_string();
 
-    current_text = NUM_PATTERN_4.replace_all(&current_text, |caps: &Captures| {
-        let placeholder = format!("[P{}]", p_count);
-        replacements.insert(placeholder.clone(), format!("{}회", &caps[1]));
-        p_count += 1;
-        placeholder
-    }).to_string();
+    current_text = NUM_PATTERN_4
+        .replace_all(&current_text, |caps: &Captures| {
+            let placeholder = format!("[P{}]", p_count);
+            replacements.insert(placeholder.clone(), format!("{}회", &caps[1]));
+            p_count += 1;
+            placeholder
+        })
+        .to_string();
 
-    ShieldData { masked_text: current_text, replacements }
+    ShieldData {
+        masked_text: current_text,
+        replacements,
+    }
 }
 
 // --- POSTPROCESSOR ---
 pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
-    // Strip out the think tags first!
+    // 1. Strip <think> tags
     let mut final_text = THINK_PATTERN.replace_all(translated, "").to_string();
+
+    // 2. Strip leaked model turn tokens (</end_of_turn> etc.)
+    final_text = TURN_TAG_PATTERN.replace_all(&final_text, "").to_string();
 
     // --- NEW: Safe Replacement Logic ---
     // [P1]이 [P10]의 일부를 먼저 치환해버리는 버그를 막기 위해,
@@ -134,7 +150,10 @@ pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
 
     // Collapse extra spaces
     let extra_spaces = Regex::new(r"\s+").unwrap();
-    extra_spaces.replace_all(&final_text, " ").trim().to_string()
+    extra_spaces
+        .replace_all(&final_text, " ")
+        .trim()
+        .to_string()
 }
 
 pub fn load_dictionary(path: &Path) -> HashMap<String, String> {
@@ -180,10 +199,17 @@ pub fn load_dictionary(path: &Path) -> HashMap<String, String> {
                     }
                 }
             } else {
-                println!("[Dictionary] Warning: Category '{}' is not a valid object.", category);
+                println!(
+                    "[Dictionary] Warning: Category '{}' is not a valid object.",
+                    category
+                );
             }
         }
-        println!("[Dictionary] Successfully loaded {} terms across {} categories.", custom_dict.len(), root_obj.len());
+        println!(
+            "[Dictionary] Successfully loaded {} terms across {} categories.",
+            custom_dict.len(),
+            root_obj.len()
+        );
     } else {
         println!("[Dictionary] Warning: Root JSON is not an object.");
     }
@@ -213,6 +239,13 @@ pub fn convert_to_romaji(ja_name: &str) -> String {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    fn empty_shield() -> ShieldData {
+        ShieldData {
+            masked_text: String::new(),
+            replacements: HashMap::new(),
+        }
+    }
 
     #[test]
     fn test_shielding_pipeline() {
@@ -312,5 +345,204 @@ mod tests {
         // Edge Case 3: No cache provided
         let shield3 = preprocess_text("あずるるさん", &dict, None);
         assert_eq!(shield3.masked_text, "あずるるさん");
+    }
+
+    #[test]
+    fn test_load_dictionary_success() {
+        use std::env;
+        use std::fs;
+
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test_custom_dict.json");
+
+        // 1. Create a mock categorized JSON file
+        let valid_json = r#"{
+            "chat": {
+                "disco": "디코",
+                "hello": "안녕",
+                "【ignored】": "should not load"
+            },
+            "game": {
+                "PT": "파티"
+            },
+            "invalid_category": "this is a string, not an object",
+            "mixed": {
+                "number": 123,
+                "nested": { "a": "b" },
+                "valid": "정상"
+            }
+        }"#;
+
+        fs::write(&file_path, valid_json).unwrap();
+
+        // 2. Load the dictionary
+        let dict = load_dictionary(&file_path);
+
+        // 3. Assert Standard Success Cases
+        assert_eq!(dict.get("disco").map(|s| s.as_str()), Some("디코"));
+        assert_eq!(dict.get("hello").map(|s| s.as_str()), Some("안녕"));
+        assert_eq!(dict.get("PT").map(|s| s.as_str()), Some("파티"));
+        assert_eq!(dict.get("valid").map(|s| s.as_str()), Some("정상"));
+
+        // 4. Assert Edge Case: Ignored Brackets
+
+        // 5. Assert Edge Case: Non-String Values & Invalid Categories
+        assert!(
+            !dict.contains_key("number"),
+            "Numeric values should be skipped"
+        );
+        assert!(
+            !dict.contains_key("nested"),
+            "Nested objects should be skipped"
+        );
+        assert!(
+            !dict.contains_key("invalid_category"),
+            "Invalid categories should be skipped"
+        );
+
+        // 6. Clean up the temp file
+        let _ = fs::remove_file(&file_path);
+    }
+
+    #[test]
+    fn test_load_dictionary_edge_cases() {
+        use std::env;
+        use std::fs;
+
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test_dict_edge_cases.json");
+
+        // Edge Case 1: Empty File
+        fs::write(&file_path, "   ").unwrap();
+        let dict_empty = load_dictionary(&file_path);
+        assert!(
+            dict_empty.is_empty(),
+            "Empty file should return empty HashMap"
+        );
+
+        // Edge Case 2: Invalid JSON Syntax
+        fs::write(&file_path, "{ broken json...").unwrap();
+        let dict_broken = load_dictionary(&file_path);
+        assert!(
+            dict_broken.is_empty(),
+            "Broken JSON should return empty HashMap"
+        );
+
+        // Edge Case 3: Missing File Path
+        let missing_path = temp_dir.join("does_not_exist_12345.json");
+        let dict_missing = load_dictionary(&missing_path);
+        assert!(
+            dict_missing.is_empty(),
+            "Missing file should return empty HashMap"
+        );
+
+        // Clean up
+        let _ = fs::remove_file(&file_path);
+    }
+
+    #[test]
+    fn test_strips_end_of_turn_closing() {
+        // Standard observed case: 장미석</end_of_turn>
+        assert_eq!(
+            postprocess_text("장미석</end_of_turn>", &empty_shield()),
+            "장미석"
+        );
+    }
+
+    #[test]
+    fn test_strips_end_of_turn_no_slash() {
+        assert_eq!(
+            postprocess_text("안녕<end_of_turn>", &empty_shield()),
+            "안녕"
+        );
+    }
+
+    #[test]
+    fn test_strips_start_of_turn_leakage() {
+        assert_eq!(
+            postprocess_text("<start_of_turn>안녕", &empty_shield()),
+            "안녕"
+        );
+    }
+
+    #[test]
+    fn test_strips_bos_eos_tokens() {
+        assert_eq!(
+            postprocess_text("<bos>번역 결과<eos>", &empty_shield()),
+            "번역 결과"
+        );
+    }
+
+    #[test]
+    fn test_strips_multiple_tags_in_one_output() {
+        assert_eq!(
+            postprocess_text("<bos>번역 결과</end_of_turn>", &empty_shield()),
+            "번역 결과"
+        );
+    }
+
+    #[test]
+    fn test_turn_tag_with_placeholder_restoration() {
+        // Tag leaked alongside a placeholder that must be restored
+        let mut replacements = HashMap::new();
+        replacements.insert("[P0]".to_string(), "장미석".to_string());
+        let shield = ShieldData {
+            masked_text: String::new(),
+            replacements,
+        };
+        assert_eq!(postprocess_text("[P0]</end_of_turn>", &shield), "장미석");
+    }
+
+    #[test]
+    fn test_turn_tag_injected_mid_sentence() {
+        // Defensive: prompt injection inserts tag mid-output
+        assert_eq!(
+            postprocess_text("안녕</end_of_turn>하세요", &empty_shield()),
+            "안녕하세요"
+        );
+    }
+
+    #[test]
+    fn test_clean_output_unchanged() {
+        // No tags — output must pass through unmodified
+        assert_eq!(
+            postprocess_text("오늘 날씨가 좋네요.", &empty_shield()),
+            "오늘 날씨가 좋네요."
+        );
+    }
+
+    #[test]
+    fn test_think_and_turn_tag_combined() {
+        // Both <think> block and </end_of_turn> present simultaneously
+        assert_eq!(
+            postprocess_text(
+                "<think>내부 추론...</think>번역 결과</end_of_turn>",
+                &empty_shield()
+            ),
+            "번역 결과"
+        );
+    }
+
+    #[test]
+    fn test_only_tags_no_content() {
+        // Edge: output is nothing but tags — should produce empty string
+        assert_eq!(
+            postprocess_text("</end_of_turn>", &empty_shield()),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_placeholder_high_index_not_clobbered_by_low() {
+        // [P1] must not partially replace [P10] before [P10] is restored
+        let mut replacements = HashMap::new();
+        replacements.insert("[P1]".to_string(), "A".to_string());
+        replacements.insert("[P10]".to_string(), "B".to_string());
+        let shield = ShieldData {
+            masked_text: String::new(),
+            replacements,
+        };
+        let result = postprocess_text("[P10] [P1]", &shield);
+        assert_eq!(result, "B A");
     }
 }

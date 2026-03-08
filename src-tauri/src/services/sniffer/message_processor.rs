@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::protocol::types::ChatMessage;
+use std::collections::HashMap;
 
 pub enum ProcessAction {
     IgnoreDuplicate,
@@ -13,12 +13,18 @@ pub struct MessageProcessor {
 
 impl MessageProcessor {
     pub fn new() -> Self {
-        Self { dedup_cache: HashMap::new() }
+        Self {
+            dedup_cache: HashMap::new(),
+        }
     }
 
     /// Pure logic: Determines what to do with a chat message without mutating global state.
     /// Takes blocked_users as a reference so it always has the latest UI state.
-    pub fn process(&self, chat: &mut ChatMessage, blocked_users: &HashMap<u64, String>) -> ProcessAction {
+    pub fn process(
+        &self,
+        chat: &mut ChatMessage,
+        blocked_users: &HashMap<u64, String>,
+    ) -> ProcessAction {
         if blocked_users.contains_key(&chat.uid) {
             chat.is_blocked = true;
         }
@@ -53,8 +59,20 @@ mod tests {
         let mut processor = MessageProcessor::new();
         let blocked = HashMap::new(); // Empty blocked list for this test
 
-        let mut msg1 = ChatMessage { uid: 100, timestamp: 5000, sequence_id: 1, pid: 1, ..Default::default() };
-        let mut msg2 = ChatMessage { uid: 100, timestamp: 5000, sequence_id: 1, pid: 2, ..Default::default() }; // Exact duplicate signature
+        let mut msg1 = ChatMessage {
+            uid: 100,
+            timestamp: 5000,
+            sequence_id: 1,
+            pid: 1,
+            ..Default::default()
+        };
+        let mut msg2 = ChatMessage {
+            uid: 100,
+            timestamp: 5000,
+            sequence_id: 1,
+            pid: 2,
+            ..Default::default()
+        }; // Exact duplicate signature
 
         // First message should be evaluated as new
         match processor.process(&mut msg1, &blocked) {
@@ -64,7 +82,7 @@ mod tests {
 
         // Second message should be ignored
         match processor.process(&mut msg2, &blocked) {
-            ProcessAction::IgnoreDuplicate => {}, // Success!
+            ProcessAction::IgnoreDuplicate => {} // Success!
             _ => panic!("Expected duplicate to be ignored"),
         }
     }
@@ -76,13 +94,17 @@ mod tests {
         let mut blocked = HashMap::new();
         blocked.insert(999, "Spammer".to_string());
 
-        let mut msg = ChatMessage { uid: 999, message: "Buy gold!".to_string(), ..Default::default() };
+        let mut msg = ChatMessage {
+            uid: 999,
+            message: "Buy gold!".to_string(),
+            ..Default::default()
+        };
 
         // Should evaluate as new, but automatically flag the mutable chat reference as blocked
         match processor.process(&mut msg, &blocked) {
             ProcessAction::EmitNewMessage => {
                 assert_eq!(msg.is_blocked, true);
-            },
+            }
             _ => panic!("Expected new message"),
         }
     }

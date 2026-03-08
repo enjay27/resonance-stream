@@ -1,5 +1,5 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 use crate::protocol::decoder::read_varint;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
 pub struct PacketBuffer {
@@ -23,7 +23,10 @@ impl PacketBuffer {
         // AND it has been > 500 ms since we successfully parsed a packet...
         if !self.buffer.is_empty() {
             if now.saturating_sub(self.last_success_ms) > 500 {
-                println!("[PacketBuffer] Watchdog: Stuck buffer detected (len={}). Resetting.", self.buffer.len());
+                println!(
+                    "[PacketBuffer] Watchdog: Stuck buffer detected (len={}). Resetting.",
+                    self.buffer.len()
+                );
                 self.buffer.clear();
                 self.last_success_ms = now; // Reset timer
             }
@@ -43,18 +46,23 @@ impl PacketBuffer {
 
             if let Some(idx) = start_pos {
                 // Drop any garbage before the 0x0A
-                if idx > 0 { self.buffer.drain(0..idx); }
+                if idx > 0 {
+                    self.buffer.drain(0..idx);
+                }
 
                 // 2. Read the Varint length
                 let (msg_len, varint_size) = read_varint(&self.buffer[1..]);
-                if varint_size == 0 { return None; } // Need more data
+                if varint_size == 0 {
+                    return None;
+                } // Need more data
 
                 let total_len = 1 + varint_size + msg_len as usize;
 
                 // 3. SANITY CHECK:
                 // If the buffer length is 471 but the packet claims to be 32,000,
                 // the 0x0A was a 'fake' one from the header.
-                if total_len > 65535 || (total_len > self.buffer.len() && self.buffer.len() > 1024) {
+                if total_len > 65535 || (total_len > self.buffer.len() && self.buffer.len() > 1024)
+                {
                     self.buffer.drain(0..1); // Discard fake 0x0A and retry
                     continue;
                 }
@@ -117,7 +125,7 @@ mod tests {
         // 2. We add 1100 bytes of padding.
         // 3. We add the real packet [0x0A, 0x03, 0x01, 0x02, 0x03].
         let mut data = vec![0x0A, 0xFF, 0x08]; // Total packet length will be 1154
-        data.extend(vec![0; 1100]);           // Current buffer size becomes ~1108
+        data.extend(vec![0; 1100]); // Current buffer size becomes ~1108
         data.extend(&[0x0A, 0x03, 0x01, 0x02, 0x03]);
 
         pb.add(&data);

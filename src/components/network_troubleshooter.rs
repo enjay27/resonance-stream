@@ -1,13 +1,12 @@
-use crate::set_timeout;
-use leptos::prelude::{ElementChild, GetUntracked};
-use leptos::*;
-use leptos::context::use_context;
-use leptos::control_flow::Show;
-use leptos::prelude::{signal, ClassAttribute, Get, IntoAny, OnAttribute, Set};
-use leptos::task::spawn_local;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
 use crate::ui_types::NetworkInterface;
+use leptos::context::use_context;
+use leptos::control_flow::Show;
+use leptos::prelude::{signal, ClassAttribute, Get, IntoAny, OnAttribute, Set};
+use leptos::prelude::{ElementChild, GetUntracked};
+use leptos::task::spawn_local;
+use leptos::*;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
@@ -40,7 +39,6 @@ pub fn Troubleshooter() -> impl IntoView {
 
             if let Ok(res) = invoke("get_network_interfaces", JsValue::NULL).await {
                 if let Ok(list) = serde_wasm_bindgen::from_value::<Vec<NetworkInterface>>(res) {
-
                     for (i, iface) in list.iter().enumerate() {
                         set_current_test.set(format!("{} ({})", iface.name, iface.ip));
                         set_progress.set((i as f64 / list.len() as f64) * 100.0);

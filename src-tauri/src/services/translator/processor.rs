@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::MutexGuard;
 use regex::{Regex, Captures};
 use lazy_static::lazy_static;
 
@@ -22,8 +23,7 @@ lazy_static! {
 pub fn preprocess_text(
     input: &str,
     custom_dict: &HashMap<String, String>,
-    nickname_romaji: Option<&str>,
-    original_nickname: Option<&str>
+    nickname_cache: Option<&HashMap<String, String>>
 ) -> ShieldData {
     let mut current_text = input.to_string();
     let mut replacements = HashMap::new();
@@ -37,8 +37,7 @@ pub fn preprocess_text(
         p_count += 1;
     };
 
-    // --- NEW: 1. Mask Japanese Brackets ---
-    // 특수 괄호들을 먼저 마스킹하여 LLM이 건드리지 못하게 보호합니다.
+    // 1. Mask Japanese Brackets
     let jp_brackets = [
         "【", "】", "「", "」", "『", "』", "（", "）", "〈", "〉", "《", "》", "［", "］"
     ];
@@ -48,20 +47,28 @@ pub fn preprocess_text(
         }
     }
 
-    // 2. Replace Nickname if matched
-    if let (Some(romaji), Some(ja_name)) = (nickname_romaji, original_nickname) {
-        if current_text.contains(ja_name) {
-            current_text = current_text.replace(ja_name, romaji);
+    // 2. Replace Nicknames from Cache
+    if let Some(cache) = nickname_cache {
+        // Sort keys by length descending so longer names ("AliceBob") are shielded before shorter ones ("Alice")
+        let mut names: Vec<(&String, &String)> = cache.iter().collect();
+        names.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+
+        for (ja_name, romaji) in names {
+            println!("{}: {}", ja_name, romaji);
+            if current_text.contains(ja_name) {
+                // Shield the Japanese name with [Px] and map it to Romaji
+                mask_term(ja_name, romaji, &mut current_text);
+            }
         }
     }
 
-    // 3. Recruitment & @-Tag (Find all matches first, then replace to avoid iterator invalidation)
+    // 3. Recruitment & @-Tag (Find all matches first, then replace)
     let recruit_matches: Vec<String> = RECRUIT_PATTERN.find_iter(&current_text).map(|m| m.as_str().to_string()).collect();
     for m in recruit_matches {
-        mask_term(&m, &m, &mut current_text); // Replace with itself later
+        mask_term(&m, &m, &mut current_text);
     }
 
-    // 4. Custom Dictionary Terms (Sort by length descending to match longest terms first)
+    // 4. Custom Dictionary Terms (Sort by length descending)
     let mut dict_entries: Vec<(&String, &String)> = custom_dict.iter().collect();
     dict_entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
 
@@ -157,20 +164,28 @@ pub fn load_dictionary(path: &Path) -> HashMap<String, String> {
         }
     };
 
-    // 3. Extract the "data" object and map it
+    // 3. Iterate through categories and extract nested key-values
     if let Some(root_obj) = json.as_object() {
-        for (_category, inner_value) in root_obj {
+        let ignored_brackets = "【】「」『』（）〈〉《》";
+
+        for (category, inner_value) in root_obj {
+            // For each category (e.g., "chat", "class"), check if its value is an object
             if let Some(inner_obj) = inner_value.as_object() {
                 for (k, v) in inner_obj {
-                    if let Some(val_str) = v.as_str() {
-                        custom_dict.insert(k.clone(), val_str.to_string());
+                    // Mimic Python's `if k not in "【】..."`
+                    if !ignored_brackets.contains(k) {
+                        if let Some(val_str) = v.as_str() {
+                            custom_dict.insert(k.clone(), val_str.to_string());
+                        }
                     }
                 }
+            } else {
+                println!("[Dictionary] Warning: Category '{}' is not a valid object.", category);
             }
         }
-        println!("[Dictionary] Successfully loaded {} terms.", custom_dict.len());
+        println!("[Dictionary] Successfully loaded {} terms across {} categories.", custom_dict.len(), root_obj.len());
     } else {
-        println!("[Dictionary] Warning: 'data' key not found in custom_dict.json");
+        println!("[Dictionary] Warning: Root JSON is not an object.");
     }
 
     custom_dict
@@ -205,10 +220,13 @@ mod tests {
         custom_dict.insert("火力".to_string(), "딜러".to_string());
         custom_dict.insert("完凸".to_string(), "풀돌".to_string());
 
+        let mut nicknames = HashMap::new();
+        nicknames.insert("アズルル".to_string(), "Azururu".to_string());
+
         let original_text = "【火力】@アズルル 完凸 3周 <think>LLM is thinking...</think>";
 
         // 1. Test Preprocessor
-        let shield = preprocess_text(original_text, &custom_dict, Some("Azururu"), Some("アズルル"));
+        let shield = preprocess_text(original_text, &custom_dict, Some(&nicknames));
 
         // Ensure the original terms are no longer in the masked text
         assert!(!shield.masked_text.contains("火力"));
@@ -234,9 +252,10 @@ mod tests {
     #[test]
     fn test_processor_edge_cases() {
         let dict = HashMap::new();
+        let nicknames = HashMap::new();
 
         // Edge Case 1: Completely empty input
-        let shield1 = preprocess_text("", &dict, None, None);
+        let shield1 = preprocess_text("", &dict, Some(&nicknames));
         assert_eq!(shield1.masked_text, "");
         assert!(shield1.replacements.is_empty());
 
@@ -248,7 +267,7 @@ mod tests {
         assert_eq!(final_text, "안녕하세요 <think>this is a broken thought...");
 
         // Edge Case 3: Only brackets, no text
-        let shield2 = preprocess_text("【】", &dict, None, None);
+        let shield2 = preprocess_text("【】", &dict, Some(&nicknames));
         // It should mask the brackets themselves to protect them
         assert!(shield2.masked_text.contains("[P0]"));
         assert!(shield2.masked_text.contains("[P1]"));
@@ -257,40 +276,42 @@ mod tests {
     #[test]
     fn test_nickname_replacement() {
         let dict = HashMap::new();
+        let mut nicknames = HashMap::new();
+        nicknames.insert("あずるる".to_string(), "Azururu".to_string());
 
         // Standard Case: The player's Japanese name is in the chat
         let original_text = "あずるるさん、こんにちは！";
-        let shield = preprocess_text(original_text, &dict, Some("Azururu"), Some("あずるる"));
+        let shield = preprocess_text(original_text, &dict, Some(&nicknames));
 
-        // Because the nickname is a direct string replacement (not a [P0] mask),
-        // we verify the text is immediately updated to Romaji so the LLM can read it.
-        assert!(shield.masked_text.contains("Azururu"));
+        // It should be shielded so the AI doesn't translate it
+        assert!(shield.masked_text.contains("[P0]"));
         assert!(!shield.masked_text.contains("あずるる"));
-        assert_eq!(shield.masked_text, "Azururuさん、こんにちは！");
+
+        let final_text = postprocess_text(&shield.masked_text, &shield);
+        assert_eq!(final_text, "Azururuさん、こんにちは！");
     }
 
     #[test]
     fn test_nickname_edge_cases() {
         let dict = HashMap::new();
+        let mut nicknames = HashMap::new();
+        nicknames.insert("あずる".to_string(), "Azuru".to_string());
+        nicknames.insert("アズルル".to_string(), "Azururu".to_string());
 
-        // Edge Case 1: Nickname provided, but does not exist in the chat message
-        let shield1 = preprocess_text("パーティー 구합니다", &dict, Some("Azururu"), Some("あずるる"));
-        assert_eq!(shield1.masked_text, "パーティー 구합니다"); // Should remain unchanged
+        // Edge Case 1: Nickname in cache, but does not exist in the chat message
+        let shield1 = preprocess_text("パーティー 구합니다", &dict, Some(&nicknames));
+        assert_eq!(shield1.masked_text, "パーティー 구합니다");
 
         // Edge Case 2: Multiple occurrences of the nickname in one message
-        let shield2 = preprocess_text("あずるる! あずるる?", &dict, Some("Azururu"), Some("あずるる"));
-        assert_eq!(shield2.masked_text, "Azururu! Azururu?"); // Both should be replaced
+        let shield2 = preprocess_text("あずる! アズルル?", &dict, Some(&nicknames));
+        assert!(shield2.masked_text.contains("[P1]! [P0]?"));
 
-        // Edge Case 3: Empty strings provided as nicknames
-        let shield3 = preprocess_text(" ", &dict, Some(""), Some(""));
-        assert_eq!(shield3.masked_text, " "); // Should not panic or infinite loop
+        let final_text = postprocess_text(&shield2.masked_text, &shield2);
+        assert_eq!(final_text, "Azuru! Azururu?");
 
-        // Edge Case 4: Missing arguments (Romaji exists, but original doesn't, or vice versa)
-        let shield4 = preprocess_text("あずるるさん", &dict, None, Some("あずるる"));
-        assert_eq!(shield4.masked_text, "あずるるさん"); // No change
-
-        let shield5 = preprocess_text("あずるるさん", &dict, Some("Azururu"), None);
-        assert_eq!(shield5.masked_text, "あずるるさん"); // No change
+        // Edge Case 3: No cache provided
+        let shield3 = preprocess_text("あずるるさん", &dict, None);
+        assert_eq!(shield3.masked_text, "あずるるさん");
     }
 
     #[test]

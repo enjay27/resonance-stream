@@ -77,6 +77,9 @@ pub fn run() {
 
             // --- CHECK CONFIG AND START AI IF NEEDED ---
             let config = load_config(handle.clone());
+
+            update_global_tab_shortcut(handle.clone(), config.tab_switch_modifier.clone(), config.tab_switch_key.clone());
+
             let initial_tx = if config.use_translation {
                 let model_path = crate::get_model_path(&handle);
                 Some(crate::services::translator::start_translator_worker(handle.clone(), model_path))
@@ -432,6 +435,10 @@ fn launch_translator(app: AppHandle, state: State<'_, AppState>) {
 fn update_global_tab_shortcut(app: tauri::AppHandle, modifier: String, key: String) {
     // 1. Unregister all existing shortcuts so we don't have duplicates
     let _ = app.global_shortcut().unregister_all();
+
+    if key.trim().is_empty() || key == "None" {
+        return;
+    }
 
     // 2. Format the string for Tauri (e.g., "Ctrl+Tab", "Alt+A")
     // Tauri expects "CommandOrControl" instead of "Ctrl"

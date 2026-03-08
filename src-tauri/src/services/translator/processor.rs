@@ -157,21 +157,28 @@ pub fn load_dictionary(path: &Path) -> HashMap<String, String> {
         }
     };
 
-    // 3. Extract the "data" object and map it
-    if let Some(data) = json.get("data").and_then(|d| d.as_object()) {
+    // 3. Iterate through categories and extract nested key-values
+    if let Some(root_obj) = json.as_object() {
         let ignored_brackets = "【】「」『』（）〈〉《》";
 
-        for (k, v) in data {
-            // Mimic Python's `if k not in "【】..."`
-            if !ignored_brackets.contains(k) {
-                if let Some(val_str) = v.as_str() {
-                    custom_dict.insert(k.clone(), val_str.to_string());
+        for (category, inner_value) in root_obj {
+            // For each category (e.g., "chat", "class"), check if its value is an object
+            if let Some(inner_obj) = inner_value.as_object() {
+                for (k, v) in inner_obj {
+                    // Mimic Python's `if k not in "【】..."`
+                    if !ignored_brackets.contains(k) {
+                        if let Some(val_str) = v.as_str() {
+                            custom_dict.insert(k.clone(), val_str.to_string());
+                        }
+                    }
                 }
+            } else {
+                println!("[Dictionary] Warning: Category '{}' is not a valid object.", category);
             }
         }
-        println!("[Dictionary] Successfully loaded {} terms.", custom_dict.len());
+        println!("[Dictionary] Successfully loaded {} terms across {} categories.", custom_dict.len(), root_obj.len());
     } else {
-        println!("[Dictionary] Warning: 'data' key not found in custom_dict.json");
+        println!("[Dictionary] Warning: Root JSON is not an object.");
     }
 
     custom_dict

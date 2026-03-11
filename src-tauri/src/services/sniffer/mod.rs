@@ -132,8 +132,9 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
             }
 
             let uninit_buf = unsafe {
-                std::mem::transmute::<&mut [u8], &mut [std::mem::MaybeUninit<u8>]>(
-                    buf.as_mut_slice(),
+                std::slice::from_raw_parts_mut(
+                    buf.as_mut_ptr() as *mut std::mem::MaybeUninit<u8>,
+                    buf.len(),
                 )
             };
             let n = match socket.recv(uninit_buf) {

@@ -121,6 +121,16 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
         let mut buf = [0u8; 65535];
         let state = app_handle.state::<AppState>();
         let mut pipeline = ChatPipeline::new();
+        // History reloaded from disk: the server re-sending it after login is
+        // not new chat.
+        pipeline.remember(
+            &state
+                .chat_history
+                .lock()
+                .values()
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         // Raw unparsed fields are only useful when reverse-engineering the protocol.
         pipeline.set_keep_unknown_fields(config.debug_mode);
 
@@ -262,11 +272,7 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                     }
                 } else if archive_chat {
                     if let Some(df_tx) = state.data_factory_tx.lock().as_ref() {
-                        let _ = df_tx.send(crate::io::DataFactoryJob {
-                            pid: chat.pid,
-                            original: chat.message.clone(),
-                            translated: None,
-                        });
+                        let _ = df_tx.send(crate::io::DataFactoryJob { chat: chat.clone() });
                     }
                 }
             }

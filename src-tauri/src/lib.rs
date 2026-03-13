@@ -51,6 +51,23 @@ pub fn run() {
             });
             let state = app.state::<AppState>();
 
+            // Chat saved by earlier runs (daily chat logs), newest last; new
+            // pids continue after them so the list stays in order.
+            let restored = resonance_core::history::load_recent(
+                &crate::io::chat_logs_dir(&handle),
+                config.chat_limit,
+            );
+            state.next_pid.fetch_max(
+                restored.len() as u64 + 1,
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            {
+                let mut history = state.chat_history.lock();
+                for message in restored {
+                    history.push(message);
+                }
+            }
+
             inject_system_message(
                 &handle,
                 SystemLogLevel::Info,

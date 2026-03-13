@@ -163,9 +163,13 @@ mod tests {
                             let _ = stream.write_all(response.as_bytes());
                         }
                         // Route 2: Mock the Translation endpoint
-                        else if request.starts_with("POST /v1/chat/completions") {
-                            let body = r#"{"choices": [{"message": {"content": "116 정찰 우측 은나포"}}]}"#;
-                            // FIXED: Added Content-Length and Connection: close
+                        // Route 2: Mock the Translation endpoint
+                        else if request.starts_with("POST") {
+
+                            // This ensures that whether `core.rs` expects the raw Llama.cpp format ("content")
+                            // or the OpenAI format ("choices"), it will successfully parse the translated string!
+                            let body = r#"{"content": "116 정찰 우측 은나포", "choices": [{"message": {"content": "116 정찰 우측 은나포"}}]}"#;
+
                             let response = format!(
                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                                 body.len(), body

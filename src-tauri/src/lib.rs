@@ -412,13 +412,6 @@ fn close_window(window: tauri::Window) {
 }
 
 #[tauri::command]
-fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatMessage> {
-    // Returns ONLY Game Chat
-    let history = state.chat_history.lock().unwrap();
-    history.values().cloned().collect()
-}
-
-#[tauri::command]
 fn get_system_history(state: tauri::State<AppState>) -> Vec<SystemMessage> {
     // Change: Returns specialized SystemMessages
     let history = state.system_history.lock().unwrap();

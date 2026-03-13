@@ -155,7 +155,6 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
             let actions = pipeline.feed_network_packet(
                 &buf[..n],
                 &blocked_users,
-                || state.next_pid.fetch_add(1, Ordering::SeqCst),
                 || {
                     feed_watchdog();
 
@@ -255,9 +254,7 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                 } else if config.archive_chat {
                     if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
                         let _ = df_tx.send(crate::io::DataFactoryJob {
-                            pid: chat.pid,
-                            original: chat.message.clone(),
-                            translated: None,
+                            chat: chat.clone(),
                         });
                     }
                 }

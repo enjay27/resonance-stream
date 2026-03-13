@@ -38,7 +38,6 @@ pub fn App() -> impl IntoView {
     let (active_tab, set_active_tab) = signal("전체".to_string());
     let (search_term, set_search_term) = signal("".to_string());
     let (name_cache, set_name_cache) = signal(std::collections::HashMap::<String, String>::new());
-    let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatMessage>>::new());
     let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
 
     let (is_system_at_bottom, set_system_at_bottom) = signal(true);
@@ -108,6 +107,9 @@ pub fn App() -> impl IntoView {
 
     let (show_troubleshooter, set_show_troubleshooter) = signal(false);
 
+    let (chat_db, set_chat_db) = signal(HashMap::<u64, RwSignal<ChatMessage>>::new());
+    let (tab_views, set_tab_views) = signal(HashMap::<String, std::collections::VecDeque<u64>>::new());
+
     let signals = AppSignals {
         init_done, set_init_done,
         use_translation, set_use_translation,
@@ -123,7 +125,6 @@ pub fn App() -> impl IntoView {
         active_tab, set_active_tab,
         search_term, set_search_term,
         name_cache, set_name_cache,
-        chat_log, set_chat_log,
         system_log, set_system_log,
         is_system_at_bottom, set_system_at_bottom,
         debug_mode, set_debug_mode,
@@ -172,6 +173,8 @@ pub fn App() -> impl IntoView {
         tab_switch_modifier, set_tab_switch_modifier,
         tab_switch_key, set_tab_switch_key,
         show_troubleshooter, set_show_troubleshooter,
+        chat_db, set_chat_db,
+        tab_views, set_tab_views,
     };
 
     provide_context(signals);
@@ -216,22 +219,17 @@ pub fn App() -> impl IntoView {
 
     // Action: Clear Chat
     let clear_history = Action::new_local(move |_: &()| {
-        let confirmed = window()
-            .confirm_with_message("Clear all chat history?")
-            .unwrap_or(false);
-
+        let confirmed = window().confirm_with_message("Clear all chat history?").unwrap_or(false);
         async move {
             if confirmed {
                 crate::hooks::use_events::clear_backend_history().await;
-                set_chat_log.set(IndexMap::new());
+                set_chat_db.set(HashMap::new());
+                set_tab_views.set(HashMap::new());
                 set_system_log.set(Vec::new());
-
-                // NEW: Clear the badges when history is wiped
                 set_unread_count.set(0);
                 set_unread_counts.set(HashMap::new());
             }
-        }
-        .boxed_local()
+        }.boxed_local()
     });
 
     let finalize_setup = move |_| {
@@ -558,62 +556,72 @@ pub fn App() -> impl IntoView {
 
                             // Hydrate GAME History
                             if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
-                                if let Ok(vec) =
-                                    serde_wasm_bindgen::from_value::<Vec<ChatMessage>>(res)
-                                {
-                                    let sanitized_vec: Vec<(u64, RwSignal<ChatMessage>)> = vec
-                                        .clone()
-                                        .into_iter()
-                                        .map(|mut p| {
-                                            // 1. Handle Standalone Stamps (emojiPic=...)
-                                            if p.message.starts_with("emojiPic=") {
-                                                p.message = "[스티커]".to_string();
-                                            }
-                                            // 2. Handle Inline Emojis (<sprite=...>)
+                                log!("Res : {:?}", res);
+                                match serde_wasm_bindgen::from_value::<Vec<ChatMessage>>(res) {
+                                    Ok(vec) => {
+                                        log!("Successfully loaded {} history messages", vec.len());
+                                        let mut db = std::collections::HashMap::new();
+                                        let mut tabs = std::collections::HashMap::<String, std::collections::VecDeque<u64>>::new();
+                                        let limit = config.chat_limit;
+                                        let filters = custom_filters.get_untracked();
+
+                                        for mut p in vec {
+                                            if p.message.starts_with("emojiPic=") { p.message = "[스티커]".to_string(); }
                                             else if p.message.contains("<sprite=") {
-                                                let mut output =
-                                                    String::with_capacity(p.message.len());
+                                                let mut output = String::with_capacity(p.message.len());
                                                 let mut current = p.message.as_str();
-
                                                 while let Some(start) = current.find("<sprite=") {
-                                                    // Push the text *before* the sprite tag
                                                     output.push_str(&current[..start]);
-
-                                                    // Find the closing '>'
                                                     if let Some(end) = current[start..].find('>') {
-                                                        // Insert our clean UI placeholder
                                                         output.push_str("[이모지]");
-                                                        // Move the cursor past the '>'
                                                         current = &current[start + end + 1..];
-                                                    } else {
-                                                        // If the tag is somehow broken/malformed, stop parsing
-                                                        output.push_str(&current[start..]);
-                                                        current = "";
-                                                        break;
-                                                    }
+                                                    } else { output.push_str(&current[start..]); current = ""; break; }
                                                 }
-                                                // Push any remaining text *after* the last sprite tag
-                                                output.push_str(current);
-                                                p.message = output;
+                                                output.push_str(current); p.message = output;
                                             }
 
-                                            (p.pid, RwSignal::new(p))
-                                        })
-                                        .collect();
+                                            let pid = p.pid;
+                                            let ch = p.channel.clone();
+                                            db.insert(pid, RwSignal::new(p));
 
-                                    set_chat_log.set(sanitized_vec.into_iter().collect());
+                                            // Map to Tabs
+                                            let all_tab = tabs.entry("전체".to_string()).or_insert_with(std::collections::VecDeque::new);
+                                            all_tab.push_back(pid);
+                                            if all_tab.len() > limit { all_tab.pop_front(); }
+
+                                            let spec_tab = tabs.entry(ch.clone()).or_insert_with(std::collections::VecDeque::new);
+                                            spec_tab.push_back(pid);
+                                            if spec_tab.len() > limit { spec_tab.pop_front(); }
+
+                                            if filters.contains(&ch) {
+                                                let custom_tab = tabs.entry("커스텀".to_string()).or_insert_with(std::collections::VecDeque::new);
+                                                custom_tab.push_back(pid);
+                                                if custom_tab.len() > limit { custom_tab.pop_front(); }
+                                            }
+                                        }
+                                        db.retain(|db_pid, _| tabs.values().any(|pid_list| pid_list.contains(db_pid)));
+                                        set_chat_db.set(db);
+                                        set_tab_views.set(tabs);
+                                    }
+                                    Err(e) => {
+                                        // THIS WILL NOW PRINT THE EXACT ERROR!
+                                        log!("❌ GAME HISTORY DESERIALIZATION ERROR: {:?}", e);
+                                    }
                                 }
                             }
 
                             // Hydrate SYSTEM History
                             if let Ok(res) = invoke("get_system_history", JsValue::NULL).await {
-                                if let Ok(vec) =
-                                    serde_wasm_bindgen::from_value::<Vec<SystemMessage>>(res)
-                                {
-                                    set_system_log
-                                        .set(vec.into_iter().map(|p| RwSignal::new(p)).collect());
+                                match serde_wasm_bindgen::from_value::<Vec<SystemMessage>>(res) {
+                                    Ok(vec) => {
+                                        set_system_log.set(vec.into_iter().map(|p| RwSignal::new(p)).collect());
+                                    }
+                                    Err(e) => {
+                                        log!("❌ SYSTEM HISTORY DESERIALIZATION ERROR: {:?}", e);
+                                    }
                                 }
                             }
+
                             set_is_sniffer_active.set(true);
                             let _ = invoke("start_sniffer_command", JsValue::NULL).await;
 

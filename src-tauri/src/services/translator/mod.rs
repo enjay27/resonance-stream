@@ -98,9 +98,7 @@ fn process_translation_job(
     // 4. Dispatch Side Effects
     if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
         let _ = df_tx.send(crate::io::DataFactoryJob {
-            pid: chat.pid,
-            original: chat.message.clone(),
-            translated: Some(final_str.clone()),
+            chat: chat.clone(),
         });
     }
 

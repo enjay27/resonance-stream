@@ -49,19 +49,19 @@ pub fn Settings() -> impl IntoView {
     let is_syncing = sync_dict_action.pending();
 
     let save_chat_action = Action::new_local(move |_: &()| {
-        // 1. Extract the raw chat messages from the signal map
-        let logs_to_export: Vec<_> = signals
-            .chat_log
+        // 1. Extract and SORT the raw chat messages
+        let mut logs_to_export: Vec<_> = signals
+            .chat_db
             .get_untracked()
             .values()
-            .map(|sig| sig.get_untracked()) // Unpack the RwSignal<ChatMessage>
+            .map(|sig| sig.get_untracked())
             .collect();
+
+        logs_to_export.sort_by_key(|msg| msg.timestamp);
 
         // 2. Send them to Tauri
         async move {
-            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "logs": logs_to_export }))
-                .unwrap();
-
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "logs": logs_to_export })).unwrap();
             match invoke("export_chat_log", args).await {
                 Ok(_) => "저장 완료".to_string(),
                 Err(_) => "저장 실패".to_string(),

@@ -34,8 +34,6 @@ pub struct AppSignals {
     pub set_search_term: WriteSignal<String>,
     pub name_cache: ReadSignal<HashMap<String, String>>,
     pub set_name_cache: WriteSignal<HashMap<String, String>>,
-    pub chat_log: ReadSignal<IndexMap<u64, RwSignal<ChatMessage>>>,
-    pub set_chat_log: WriteSignal<IndexMap<u64, RwSignal<ChatMessage>>>,
     pub system_log: ReadSignal<Vec<RwSignal<SystemMessage>>>,
     pub set_system_log: WriteSignal<Vec<RwSignal<SystemMessage>>>,
     pub is_system_at_bottom: ReadSignal<bool>,
@@ -132,6 +130,10 @@ pub struct AppSignals {
     pub set_tab_switch_key: WriteSignal<String>,
     pub show_troubleshooter: ReadSignal<bool>,
     pub set_show_troubleshooter: WriteSignal<bool>,
+    pub chat_db: ReadSignal<HashMap<u64, RwSignal<ChatMessage>>>,
+    pub set_chat_db: WriteSignal<HashMap<u64, RwSignal<ChatMessage>>>,
+    pub tab_views: ReadSignal<HashMap<String, std::collections::VecDeque<u64>>>,
+    pub set_tab_views: WriteSignal<HashMap<String, std::collections::VecDeque<u64>>>,
 }
 
 #[derive(Copy, Clone)]

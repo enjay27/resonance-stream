@@ -2,6 +2,8 @@
 
 **Blue Protocol: Star Resonance (BPSR) Real-time Packet-Sniffing Translator**
 
+**관련 링크: [Resonance Lab](https://github.com/enjay27/resonance-lab) | [LLM Model](https://huggingface.co/enjay27/TranslateGemma-Blue-Protocol-Translator-JA-KO)**
+
 ---
 
 ## 📖 소개 (Introduction)
@@ -10,7 +12,7 @@
 
 ![compact-mode](https://github.com/user-attachments/assets/733550a1-f05e-49b4-9b5a-2ab83756fdb7)
 
-**Resonance Stream**은 블루 프로토콜 게임 서버의 네트워크 패킷을 스니핑하여 대화 내용을 추출하고 번역합니다. 이를 통해 UI 에 채팅 내용을 그대로 가져올 수 있으며, 닉네임 검색, 대화 내용 검색, 키워드 알림 등의 다양한 기능을 제공합니다. 또한 번역이 필요한 일본어 채팅의 경우에는 AI 모델을 탑재하여 실시간 번역을 제공합니다.
+**Resonance Stream**은 블루 프로토콜 게임 서버의 네트워크 패킷을 스니핑하여 대화 내용을 추출하고 번역합니다. 이를 통해 UI 에 채팅 내용을 그대로 가져올 수 있으며, 닉네임 검색, 대화 내용 검색, 키워드 알림 등의 다양한 기능을 제공합니다. 또한 번역이 필요한 일본어 채팅의 경우에는 AI 모델을 탑재하여 실시간 번역을 제공합니다. 일본어 번역은 실제 게임에서 사용하는 용어로 번역하기 위해 게임 내 채팅 데이터로 파인튜닝을 진행합니다. [프로젝트 링크](https://github.com/enjay27/resonance-lab)
 
 ### ✨ 핵심 기능 (Key Features)
 

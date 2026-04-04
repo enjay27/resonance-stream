@@ -252,10 +252,12 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                         let _ = tx.send(TranslationJob { chat: chat.clone() });
                     }
                 } else if config.archive_chat {
-                    if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
-                        let _ = df_tx.send(crate::io::DataFactoryJob {
-                            chat: chat.clone(),
-                        });
+                    if !config.archive_ignored_channels.contains(&chat.channel) {
+                        if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
+                            let _ = df_tx.send(crate::io::DataFactoryJob {
+                                chat: chat.clone(),
+                            });
+                        }
                     }
                 }
             }

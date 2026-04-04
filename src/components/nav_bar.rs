@@ -131,29 +131,27 @@ pub fn NavBar() -> impl IntoView {
             // --- LEFT: DaisyUI Tabs ---
             <div class="join bg-base-300/50 p-0.5 rounded-lg border border-base-content/5 flex-shrink-0">
                 {move || {
+                    // NEW: Updated mapping array to include Backend DB keys and configuration flags
                     let mut tabs = vec![
-                        ("전체", "♾️"), ("커스텀", "⭐"), ("월드", "🌐"),
-                        ("길드", "🛡️"), ("파티", "⚔️"), ("로컬", "📍"),
+                        ("전체", "전체", "♾️", false),
+                        ("커스텀", "커스텀", "⭐", false),
+                        ("월드", "WORLD", "🌐", true),
+                        ("길드", "GUILD", "🛡️", true),
+                        ("파티", "PARTY", "⚔️", true),
+                        ("로컬", "LOCAL", "📍", true),
                     ];
-                    if signals.debug_mode.get() { tabs.push(("시스템", "⚙️")); }
+                    if signals.debug_mode.get() { tabs.push(("시스템", "SYSTEM", "⚙️", false)); }
 
-                    tabs.into_iter().map(|(full, icon)| {
+                    tabs.into_iter().map(|(full, db_key, icon, has_archive_setting)| {
                         let t_full = full.to_string();
                         let t_click = t_full.clone();
-                        let f_unread = full.to_string();
-                        let is_custom = full == "커스텀";
+                        let db_key_str = db_key.to_string();
                         let is_active = move || signals.active_tab.get() == t_full;
 
                         let unread = Memo::new(move |_| {
                             let counts = signals.unread_counts.get();
-                            match f_unread.as_str() {
-                                "전체" => 0,
-                                "커스텀" => 0,
-                                "월드" => *counts.get("WORLD").unwrap_or(&0),
-                                "길드" => *counts.get("GUILD").unwrap_or(&0),
-                                "파티" => *counts.get("PARTY").unwrap_or(&0),
-                                "로컬" => *counts.get("LOCAL").unwrap_or(&0),
-                                "시스템" => *counts.get("SYSTEM").unwrap_or(&0),
+                            match db_key {
+                                "WORLD" | "GUILD" | "PARTY" | "LOCAL" | "SYSTEM" => *counts.get(db_key).unwrap_or(&0),
                                 _ => 0,
                             }
                         });
@@ -170,10 +168,12 @@ pub fn NavBar() -> impl IntoView {
                         };
 
                         view! {
-                            <div class="relative group flex items-center h-full">
+                            <div class="dropdown dropdown-bottom dropdown-hover group flex items-center h-full">
+
+                                // 1. THE TAB BUTTON
                                 <button
                                     class=move || format!(
-                                        "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] !overflow-visible {} {}",
+                                        "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] !overflow-visible flex flex-nowrap items-center {} {}",
                                         text_color,
                                         if is_active() {
                                             format!("font-black {} {} bg-white/5 opacity-100", text_color, border_color)
@@ -191,12 +191,7 @@ pub fn NavBar() -> impl IntoView {
                                                     let filters = signals.custom_filters.get_untracked();
                                                     for f in filters { counts.remove(&f); }
                                                 },
-                                                "월드" => { counts.remove("WORLD"); },
-                                                "길드" => { counts.remove("GUILD"); },
-                                                "파티" => { counts.remove("PARTY"); },
-                                                "로컬" => { counts.remove("LOCAL"); },
-                                                "시스템" => { counts.remove("SYSTEM"); },
-                                                _ => {}
+                                                _ => { counts.remove(&db_key_str); }
                                             }
                                         });
                                         signals.set_is_at_bottom.set(true);
@@ -205,8 +200,13 @@ pub fn NavBar() -> impl IntoView {
                                     }
                                 >
                                     // Text only (Shows when narrower than 460px)
-                                    <span class="min-[460px]:hidden flex items-center relative">
+                                    <span class="min-[460px]:hidden flex items-center relative gap-1">
                                         {full}
+
+                                        <Show when=move || db_key != "SYSTEM">
+                                            <span class="opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">"⚙️"</span>
+                                        </Show>
+
                                         <Show when={move || unread.get() > 0}>
                                             <span class="absolute -top-1.5 -right-2.5 badge badge-error min-w-[14px] h-[14px] px-1 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200 z-10">
                                                 {move || if unread.get() > 9 { "9+".to_string() } else { unread.get().to_string() }}
@@ -215,8 +215,13 @@ pub fn NavBar() -> impl IntoView {
                                     </span>
 
                                     // Text + Emoji (Shows when wider than 460px)
-                                    <span class="hidden min-[460px]:flex items-center relative">
+                                    <span class="hidden min-[460px]:flex items-center relative gap-1">
                                         {full} " " {icon}
+
+                                        <Show when=move || db_key != "SYSTEM">
+                                            <span class="opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">"⚙️"</span>
+                                        </Show>
+
                                         <Show when={move || unread.get() > 0}>
                                             <span class="absolute -top-1.5 -right-2.5 badge badge-error min-w-[14px] h-[14px] px-1 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200 z-10">
                                                 {move || if unread.get() > 9 { "9+".to_string() } else { unread.get().to_string() }}
@@ -225,34 +230,82 @@ pub fn NavBar() -> impl IntoView {
                                     </span>
                                 </button>
 
-                                // NEW: Dropdown Menu that appears when hovering the '커스텀' tab
-                                <Show when=move || is_custom>
-                                    <div class="absolute top-full left-0 pt-2 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
-                                        <div class="bg-base-300 border border-base-content/10 rounded-lg shadow-2xl p-2 w-36 flex flex-col gap-1">
-                                            <span class="text-[9px] font-black text-success uppercase tracking-widest px-1 mb-1 opacity-80">"필터 설정"</span>
+                                // 2. THE SETTINGS DROPDOWN MENU
+                                <Show when=move || db_key != "SYSTEM">
+                                    <ul tabindex="0"
+                                        class="dropdown-content z-[100] menu p-3 shadow-2xl bg-base-300 rounded-box w-64 border border-base-content/10 mt-1 space-y-3 cursor-default"
+                                        on:click=move |ev| ev.stop_propagation() // Prevent clicks from closing the menu
+                                    >
+                                        <h3 class="text-[11px] font-black opacity-50 border-b border-base-content/10 pb-1.5 uppercase tracking-wider">
+                                            {full} " 채널 설정"
+                                        </h3>
 
-                                            {vec!["WORLD", "GUILD", "PARTY", "LOCAL"].into_iter().map(|channel| {
-                                                let ch = channel.to_string();
-                                                let ch_clone = ch.clone();
-                                                view! {
-                                                    <label class="label cursor-pointer flex justify-between px-1.5 py-1 hover:bg-base-content/10 rounded">
-                                                        <span class="label-text text-[10px] font-bold">{channel}</span>
-                                                        <input type="checkbox" class="checkbox checkbox-xs checkbox-success"
-                                                            checked=move || signals.custom_filters.get().contains(&ch_clone)
-                                                            on:change=move |ev| {
-                                                                let checked = event_target_checked(&ev);
-                                                                signals.set_custom_filters.update(|f| {
-                                                                    if checked { f.push(ch.clone()); }
-                                                                    else { f.retain(|x| x != &ch); }
-                                                                });
-                                                                actions.save_config.dispatch(());
-                                                            }
-                                                        />
-                                                    </label>
+                                        // --- ONLY FOR CUSTOM TAB: Channel filter selection ---
+                                        <Show when=move || db_key == "커스텀">
+                                            <div class="space-y-1 mb-2 pb-2 border-b border-base-content/10">
+                                                <span class="text-[10px] font-bold text-success">"표시할 채널 선택:"</span>
+                                                {vec!["WORLD", "GUILD", "PARTY", "LOCAL"].into_iter().map(|channel| {
+                                                    let ch = channel.to_string();
+                                                    let ch_clone = ch.clone();
+                                                    view! {
+                                                        <label class="label cursor-pointer flex justify-between px-1.5 py-0 hover:bg-base-content/10 rounded">
+                                                            <span class="label-text text-[10px] font-bold">{channel}</span>
+                                                            <input type="checkbox" class="checkbox checkbox-xs checkbox-success"
+                                                                checked=move || signals.custom_filters.get().contains(&ch_clone)
+                                                                on:change=move |ev| {
+                                                                    let checked = event_target_checked(&ev);
+                                                                    signals.set_custom_filters.update(|f| {
+                                                                        if checked { f.push(ch.clone()); }
+                                                                        else { f.retain(|x| x != &ch); }
+                                                                    });
+                                                                    actions.save_config.dispatch(());
+                                                                }
+                                                            />
+                                                        </label>
+                                                    }
+                                                }).collect_view()}
+                                            </div>
+                                        </Show>
+
+                                        // --- MAX RAM LIMIT INPUT ---
+                                        <div class="flex items-center justify-between">
+                                            <span class="text-xs font-bold text-base-content/80">"최대 메시지 유지:"</span>
+                                            <input type="number" class="input input-xs input-bordered w-16 text-right font-mono bg-base-200 focus:border-success"
+                                                prop:value=move || signals.tab_limits.get().get(db_key).copied().unwrap_or(if db_key == "WORLD" { 200 } else { 1000 }).to_string()
+                                                on:change=move |ev| {
+                                                    let val = event_target_value(&ev).parse::<usize>().unwrap_or(500);
+                                                    signals.set_tab_limits.update(|map| { map.insert(db_key.to_string(), val); });
+                                                    actions.save_config.dispatch(());
                                                 }
-                                            }).collect_view()}
+                                            />
                                         </div>
-                                    </div>
+
+                                        // --- DISK LOGGING IGNORE TOGGLE ---
+                                        <Show when=move || has_archive_setting>
+                                            <div class="form-control mt-1 pt-2 border-t border-base-content/5">
+                                                <label class="label cursor-pointer p-0 hover:bg-transparent">
+                                                    <span class="label-text text-xs font-bold text-error">"디스크 자동 저장 안함"</span>
+                                                    <input type="checkbox" class="checkbox checkbox-xs checkbox-error"
+                                                        prop:checked=move || signals.archive_ignored_channels.get().contains(&db_key.to_string())
+                                                        on:change=move |ev| {
+                                                            let is_checked = event_target_checked(&ev);
+                                                            signals.set_archive_ignored_channels.update(|list| {
+                                                                if is_checked {
+                                                                    if !list.contains(&db_key.to_string()) { list.push(db_key.to_string()); }
+                                                                } else {
+                                                                    list.retain(|c| c != db_key);
+                                                                }
+                                                            });
+                                                            actions.save_config.dispatch(());
+                                                        }
+                                                    />
+                                                </label>
+                                                <span class="text-[9px] text-base-content/50 mt-1.5 leading-tight">
+                                                    "체크 시 이 채널의 메시지는 " <br/> <span class="font-mono opacity-80">dataset_raw.jsonl</span> " 파일에 기록되지 않습니다."
+                                                </span>
+                                            </div>
+                                        </Show>
+                                    </ul>
                                 </Show>
                             </div>
                         }

@@ -81,7 +81,7 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
 
                     let pid = packet.pid;
                     let ch = packet.channel.clone();
-                    let limit = signals.chat_limit.get_untracked();
+                    let limits = signals.tab_limits.get_untracked();
                     let filters = signals.custom_filters.get_untracked();
 
                     // 1. Add to DB
@@ -91,18 +91,24 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
 
                     // 2. Update Views
                     signals.set_tab_views.update(|tabs| {
+                        // All Tab
+                        let all_limit = *limits.get("전체").unwrap_or(&1000);
                         let all_tab = tabs.entry("전체".to_string()).or_insert_with(std::collections::VecDeque::new);
                         all_tab.push_back(pid);
-                        while all_tab.len() > limit { all_tab.pop_front(); }
+                        while all_tab.len() > all_limit { all_tab.pop_front(); }
 
+                        // Specific Channel Tab
+                        let spec_limit = *limits.get(&ch).unwrap_or(&500);
                         let spec_tab = tabs.entry(ch.clone()).or_insert_with(std::collections::VecDeque::new);
                         spec_tab.push_back(pid);
-                        while spec_tab.len() > limit { spec_tab.pop_front(); }
+                        while spec_tab.len() > spec_limit { spec_tab.pop_front(); }
 
+                        // Custom Tab
                         if filters.contains(&ch) {
+                            let custom_limit = *limits.get("커스텀").unwrap_or(&1000);
                             let custom_tab = tabs.entry("커스텀".to_string()).or_insert_with(std::collections::VecDeque::new);
                             custom_tab.push_back(pid);
-                            while custom_tab.len() > limit { custom_tab.pop_front(); }
+                            while custom_tab.len() > custom_limit { custom_tab.pop_front(); }
                         }
                     });
 

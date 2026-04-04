@@ -42,7 +42,6 @@ pub struct AppConfig {
     pub compact_mode: bool,
     pub always_on_top: bool,
     pub active_tab: String,
-    pub chat_limit: usize,
     pub custom_tab_filters: Vec<String>,
     pub theme: String,
     pub overlay_opacity: f32,
@@ -72,6 +71,10 @@ pub struct AppConfig {
     pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
     #[serde(default)]
     pub tab_switch_key: String, // e.g., "Tab", "ArrowRight", etc.
+    #[serde(default)]
+    pub tab_limits: std::collections::HashMap<String, usize>,
+    #[serde(default)]
+    pub archive_ignored_channels: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

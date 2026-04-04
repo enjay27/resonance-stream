@@ -52,8 +52,6 @@ pub struct AppSignals {
     pub set_is_pinned: WriteSignal<bool>,
     pub show_settings: ReadSignal<bool>,
     pub set_show_settings: WriteSignal<bool>,
-    pub chat_limit: ReadSignal<usize>,
-    pub set_chat_limit: WriteSignal<usize>,
     pub custom_filters: ReadSignal<Vec<String>>,
     pub set_custom_filters: WriteSignal<Vec<String>>,
     pub theme: ReadSignal<String>,
@@ -134,6 +132,10 @@ pub struct AppSignals {
     pub set_chat_db: WriteSignal<HashMap<u64, RwSignal<ChatMessage>>>,
     pub tab_views: ReadSignal<HashMap<String, std::collections::VecDeque<u64>>>,
     pub set_tab_views: WriteSignal<HashMap<String, std::collections::VecDeque<u64>>>,
+    pub tab_limits: ReadSignal<HashMap<String, usize>>,
+    pub set_tab_limits: WriteSignal<HashMap<String, usize>>,
+    pub archive_ignored_channels: ReadSignal<Vec<String>>,
+    pub set_archive_ignored_channels: WriteSignal<Vec<String>>,
 }
 
 #[derive(Copy, Clone)]

@@ -128,7 +128,7 @@ pub fn get_chat_history(
 ) -> Result<Vec<ChatMessage>, String> {
     // 1. Get the limit from user settings
     let config = crate::config::load_config(app.clone());
-    let limit = config.chat_limit;
+    let limit = config.tab_limits.values().copied().max().unwrap_or(1000);
 
     // 2. Locate the chat_logs directory
     let mut path = app.path().app_data_dir().map_err(|e| e.to_string())?;

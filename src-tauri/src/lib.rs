@@ -341,7 +341,10 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
             let config = load_config(app.clone());
 
             let mut history = state.chat_history.lock().unwrap();
-            while history.len() >= config.chat_limit && !history.is_empty() {
+
+            let max_limit = config.tab_limits.values().copied().max().unwrap_or(1000);
+
+            while history.len() >= max_limit && !history.is_empty() {
                 history.shift_remove_index(0);
             }
             history.insert(packet.pid, packet.clone());

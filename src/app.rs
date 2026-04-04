@@ -49,7 +49,6 @@ pub fn App() -> impl IntoView {
     let (compact_mode, set_compact_mode) = signal(false);
     let (is_pinned, set_is_pinned) = signal(false);
     let (show_settings, set_show_settings) = signal(false);
-    let (chat_limit, set_chat_limit) = signal(1000);
     let (custom_filters, set_custom_filters) = signal(vec![
         "WORLD".to_string(),
         "GUILD".to_string(),
@@ -110,6 +109,9 @@ pub fn App() -> impl IntoView {
     let (chat_db, set_chat_db) = signal(HashMap::<u64, RwSignal<ChatMessage>>::new());
     let (tab_views, set_tab_views) = signal(HashMap::<String, std::collections::VecDeque<u64>>::new());
 
+    let (tab_limits, set_tab_limits) = signal(HashMap::new());
+    let (archive_ignored_channels, set_archive_ignored_channels) = signal(Vec::new());
+
     let signals = AppSignals {
         init_done, set_init_done,
         use_translation, set_use_translation,
@@ -134,7 +136,6 @@ pub fn App() -> impl IntoView {
         compact_mode, set_compact_mode,
         is_pinned, set_is_pinned,
         show_settings, set_show_settings,
-        chat_limit, set_chat_limit,
         custom_filters, set_custom_filters,
         theme, set_theme,
         opacity, set_opacity,
@@ -175,6 +176,8 @@ pub fn App() -> impl IntoView {
         show_troubleshooter, set_show_troubleshooter,
         chat_db, set_chat_db,
         tab_views, set_tab_views,
+        tab_limits, set_tab_limits,
+        archive_ignored_channels, set_archive_ignored_channels,
     };
 
     provide_context(signals);
@@ -188,7 +191,6 @@ pub fn App() -> impl IntoView {
             compact_mode: compact_mode.get_untracked(),
             always_on_top: is_pinned.get_untracked(),
             active_tab: active_tab.get_untracked(),
-            chat_limit: chat_limit.get_untracked(),
             custom_tab_filters: custom_filters.get_untracked(),
             theme: theme.get_untracked(),
             overlay_opacity: opacity.get_untracked(),
@@ -210,6 +212,8 @@ pub fn App() -> impl IntoView {
             auto_sync_latest_dict: auto_sync_latest_dict.get_untracked(),
             tab_switch_modifier: tab_switch_modifier.get_untracked(),
             tab_switch_key: tab_switch_key.get_untracked(),
+            tab_limits: tab_limits.get_untracked(),
+            archive_ignored_channels: archive_ignored_channels.get_untracked(),
         };
 
         async move {
@@ -512,7 +516,6 @@ pub fn App() -> impl IntoView {
                         set_compact_mode.set(config.compact_mode);
                         set_active_tab.set(config.active_tab);
                         set_is_pinned.set(config.always_on_top);
-                        set_chat_limit.set(config.chat_limit);
                         set_custom_filters.set(config.custom_tab_filters);
                         set_theme.set(config.theme);
                         set_opacity.set(config.overlay_opacity);
@@ -547,6 +550,8 @@ pub fn App() -> impl IntoView {
                         } else {
                             config.tab_switch_key
                         });
+                        set_tab_limits.set(config.tab_limits);
+                        set_archive_ignored_channels.set(config.archive_ignored_channels);
 
                         // 2. If the user hasn't finished the wizard, stop here
                         if config.init_done {
@@ -562,7 +567,7 @@ pub fn App() -> impl IntoView {
                                         log!("Successfully loaded {} history messages", vec.len());
                                         let mut db = std::collections::HashMap::new();
                                         let mut tabs = std::collections::HashMap::<String, std::collections::VecDeque<u64>>::new();
-                                        let limit = config.chat_limit;
+                                        let limits = tab_limits.get_untracked();
                                         let filters = custom_filters.get_untracked();
 
                                         for mut p in vec {
@@ -585,18 +590,21 @@ pub fn App() -> impl IntoView {
                                             db.insert(pid, RwSignal::new(p));
 
                                             // Map to Tabs
+                                            let all_limit = *limits.get("전체").unwrap_or(&1000);
                                             let all_tab = tabs.entry("전체".to_string()).or_insert_with(std::collections::VecDeque::new);
                                             all_tab.push_back(pid);
-                                            if all_tab.len() > limit { all_tab.pop_front(); }
+                                            if all_tab.len() > all_limit { all_tab.pop_front(); }
 
+                                            let spec_limit = *limits.get(&ch).unwrap_or(&500);
                                             let spec_tab = tabs.entry(ch.clone()).or_insert_with(std::collections::VecDeque::new);
                                             spec_tab.push_back(pid);
-                                            if spec_tab.len() > limit { spec_tab.pop_front(); }
+                                            if spec_tab.len() > spec_limit { spec_tab.pop_front(); }
 
                                             if filters.contains(&ch) {
+                                                let custom_limit = *limits.get("커스텀").unwrap_or(&1000);
                                                 let custom_tab = tabs.entry("커스텀".to_string()).or_insert_with(std::collections::VecDeque::new);
                                                 custom_tab.push_back(pid);
-                                                if custom_tab.len() > limit { custom_tab.pop_front(); }
+                                                if custom_tab.len() > custom_limit { custom_tab.pop_front(); }
                                             }
                                         }
                                         db.retain(|db_pid, _| tabs.values().any(|pid_list| pid_list.contains(db_pid)));

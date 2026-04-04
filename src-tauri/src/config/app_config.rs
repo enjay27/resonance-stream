@@ -15,7 +15,6 @@ pub struct AppConfig {
     pub compact_mode: bool,
     pub always_on_top: bool,
     pub active_tab: String,
-    pub chat_limit: usize,
     pub custom_tab_filters: Vec<String>,
     pub theme: String,
     pub overlay_opacity: f32,
@@ -43,10 +42,22 @@ pub struct AppConfig {
     pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
     #[serde(default)]
     pub tab_switch_key: String, // e.g., "Tab", "ArrowRight", etc.
+    #[serde(default)]
+    pub tab_limits: std::collections::HashMap<String, usize>,
+    #[serde(default)]
+    pub archive_ignored_channels: Vec<String>,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
+        let mut limits = std::collections::HashMap::new();
+        limits.insert("WORLD".to_string(), 200);  // World gets a small limit
+        limits.insert("LOCAL".to_string(), 500);
+        limits.insert("PARTY".to_string(), 1000); // Party/Guild get huge limits
+        limits.insert("GUILD".to_string(), 1000);
+        limits.insert("전체".to_string(), 1000);
+        limits.insert("커스텀".to_string(), 1000);
+
         Self {
             init_done: false,
             use_translation: false,
@@ -54,7 +65,6 @@ impl Default for AppConfig {
             compact_mode: false,
             always_on_top: false,
             active_tab: "전체".to_string(),
-            chat_limit: 1000,
             custom_tab_filters: vec![
                 "WORLD".into(),
                 "GUILD".into(),
@@ -81,6 +91,8 @@ impl Default for AppConfig {
             auto_sync_latest_dict: true,
             tab_switch_modifier: "Ctrl".to_string(),
             tab_switch_key: "Tab".to_string(),
+            tab_limits: limits,
+            archive_ignored_channels: vec!["WORLD".to_string()],
         }
     }
 }

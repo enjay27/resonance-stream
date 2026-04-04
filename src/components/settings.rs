@@ -254,19 +254,6 @@ pub fn Settings() -> impl IntoView {
                                 <div class="text-[9px] text-base-content/50">"기본 크기는 14px 입니다."</div>
                             </div>
 
-                            // Message Limit
-                            <div class="flex items-center justify-between bg-base-200 p-3 rounded-lg border border-base-content/5 px-3">
-                                <span class="text-xs font-bold text-base-content/80">"최대 메시지 유지 개수"</span>
-                                <input type="number" class="input input-xs input-bordered w-20 text-right font-mono"
-                                    prop:value=move || signals.chat_limit.get().to_string()
-                                    on:input=move |ev| {
-                                        let val = event_target_value(&ev).parse::<usize>().unwrap_or(1000);
-                                        signals.set_chat_limit.set(val);
-                                        actions.save_config.dispatch(());
-                                    }
-                                />
-                            </div>
-
                             <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
                                 <label class="label cursor-pointer p-0">
                                     <span class="label-text text-xs font-bold text-base-content/80">"컴팩트 모드에서 번역 시 원문 숨기기"</span>

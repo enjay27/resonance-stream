@@ -216,7 +216,11 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                                 log!("data {:?}", update_data);
 
                                 // 1. Silent Dictionary Update
-                                if update_data.dict_update_available {
+                                // Only when auto-sync is on (off by default); the
+                                // settings button and the wizard always sync.
+                                if update_data.dict_update_available
+                                    && signals.auto_sync_latest_dict.get_untracked()
+                                {
                                     add_system_log(
                                         "info",
                                         "Updater",

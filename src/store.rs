@@ -227,7 +227,7 @@ impl AppSignals {
         let (model_update_step, set_model_update_step) = signal(0); // 0: Info, 1: Downloading, 2: Ready
         let (model_update_progress, set_model_update_progress) = signal(0u8);
 
-        let (auto_sync_latest_dict, set_auto_sync_latest_dict) = signal(true);
+        let (auto_sync_latest_dict, set_auto_sync_latest_dict) = signal(false);
         let (show_dictionary, set_show_dictionary) = signal(false);
         let (unread_counts, set_unread_counts) =
             signal::<std::collections::HashMap<String, usize>>(HashMap::new());

@@ -125,7 +125,7 @@ impl Default for AppConfig {
             hide_blocked_messages: false,
             blocked_users: std::collections::HashMap::new(),
             min_sender_level: 1,
-            auto_sync_latest_dict: true,
+            auto_sync_latest_dict: false,
             tab_switch_modifier: "Ctrl".to_string(),
             tab_switch_key: "Tab".to_string(),
             tab_limits: default_tab_limits(),
@@ -278,5 +278,22 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
             "DataFactory",
             "Dataset logging disabled.",
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dictionary_auto_sync_is_off_by_default() {
+        assert!(!AppConfig::default().auto_sync_latest_dict);
+        // A config file without the field (older versions) reads as off too.
+        let mut json = serde_json::to_value(AppConfig::default()).unwrap();
+        json.as_object_mut()
+            .unwrap()
+            .remove("auto_sync_latest_dict");
+        let config: AppConfig = serde_json::from_value(json).unwrap();
+        assert!(!config.auto_sync_latest_dict);
     }
 }

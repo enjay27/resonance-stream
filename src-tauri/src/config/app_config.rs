@@ -90,7 +90,7 @@ impl Default for AppConfig {
             hide_blocked_messages: false,
             blocked_users: std::collections::HashMap::new(),
             min_sender_level: 1,
-            auto_sync_latest_dict: true,
+            auto_sync_latest_dict: false,
             tab_switch_modifier: "Ctrl".to_string(),
             tab_switch_key: "Tab".to_string(),
             tab_limits: limits,

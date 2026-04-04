@@ -1,11 +1,11 @@
 //! The two app-wide actions every component reaches through `AppActions`.
 
+use crate::chat_view::ChatStore;
 use crate::hooks::use_config::save_app_config;
 use crate::store::{AppActions, AppSignals};
 use crate::ui_types::AppConfig;
 use futures::FutureExt;
 use leptos::prelude::*;
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 pub fn create_actions(signals: AppSignals) -> AppActions {
@@ -14,13 +14,14 @@ pub fn create_actions(signals: AppSignals) -> AppActions {
         use_translation,
         compute_mode,
         active_tab,
-        set_chat_log,
+        set_chat,
         set_system_log,
         debug_mode,
         log_level,
         compact_mode,
         is_pinned,
-        chat_limit,
+        tab_limits,
+        archive_ignored_channels,
         custom_filters,
         theme,
         opacity,
@@ -54,7 +55,6 @@ pub fn create_actions(signals: AppSignals) -> AppActions {
             compact_mode: compact_mode.get_untracked(),
             always_on_top: is_pinned.get_untracked(),
             active_tab: active_tab.get_untracked(),
-            chat_limit: chat_limit.get_untracked(),
             custom_tab_filters: custom_filters.get_untracked(),
             theme: theme.get_untracked(),
             overlay_opacity: opacity.get_untracked(),
@@ -75,6 +75,8 @@ pub fn create_actions(signals: AppSignals) -> AppActions {
             min_sender_level: min_sender_level.get_untracked(),
             auto_sync_latest_dict: auto_sync_latest_dict.get_untracked(),
             tab_switch_modifier: tab_switch_modifier.get_untracked(),
+            tab_limits: tab_limits.get_untracked(),
+            archive_ignored_channels: archive_ignored_channels.get_untracked(),
             tab_switch_key: tab_switch_key.get_untracked(),
         };
 
@@ -92,7 +94,7 @@ pub fn create_actions(signals: AppSignals) -> AppActions {
         async move {
             if confirmed {
                 crate::hooks::use_events::clear_backend_history().await;
-                set_chat_log.set(BTreeMap::new());
+                set_chat.set(ChatStore::default());
                 set_system_log.set(Vec::new());
 
                 // NEW: Clear the badges when history is wiped

@@ -1,6 +1,7 @@
+use crate::chat_view::ChatStore;
 use crate::ui_types::{ChatMessage, SystemMessage};
 use leptos::prelude::{signal, Action, ReadSignal, RwSignal, WriteSignal};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 #[derive(Copy, Clone, Debug)]
 pub struct AppSignals {
@@ -33,9 +34,15 @@ pub struct AppSignals {
     pub set_search_term: WriteSignal<String>,
     pub name_cache: ReadSignal<HashMap<String, String>>,
     pub set_name_cache: WriteSignal<HashMap<String, String>>,
-    /// Keyed by pid: pids only grow, so key order is arrival order.
-    pub chat_log: ReadSignal<BTreeMap<u64, RwSignal<ChatMessage>>>,
-    pub set_chat_log: WriteSignal<BTreeMap<u64, RwSignal<ChatMessage>>>,
+    /// Chat messages by pid, plus each tab's list (per-tab limits).
+    pub chat: ReadSignal<ChatStore<RwSignal<ChatMessage>>>,
+    pub set_chat: WriteSignal<ChatStore<RwSignal<ChatMessage>>>,
+    /// Messages each tab keeps (right-click a tab); keys as in AppConfig.
+    pub tab_limits: ReadSignal<HashMap<String, usize>>,
+    pub set_tab_limits: WriteSignal<HashMap<String, usize>>,
+    /// Channels not written to the chat archive (right-click a tab).
+    pub archive_ignored_channels: ReadSignal<Vec<String>>,
+    pub set_archive_ignored_channels: WriteSignal<Vec<String>>,
     pub system_log: ReadSignal<Vec<RwSignal<SystemMessage>>>,
     pub set_system_log: WriteSignal<Vec<RwSignal<SystemMessage>>>,
     pub is_system_at_bottom: ReadSignal<bool>,
@@ -54,8 +61,6 @@ pub struct AppSignals {
     pub set_is_pinned: WriteSignal<bool>,
     pub show_settings: ReadSignal<bool>,
     pub set_show_settings: WriteSignal<bool>,
-    pub chat_limit: ReadSignal<usize>,
-    pub set_chat_limit: WriteSignal<usize>,
     pub custom_filters: ReadSignal<Vec<String>>,
     pub set_custom_filters: WriteSignal<Vec<String>>,
     pub theme: ReadSignal<String>,
@@ -155,7 +160,10 @@ impl AppSignals {
         let (search_term, set_search_term) = signal("".to_string());
         let (name_cache, set_name_cache) =
             signal(std::collections::HashMap::<String, String>::new());
-        let (chat_log, set_chat_log) = signal(BTreeMap::<u64, RwSignal<ChatMessage>>::new());
+        let (chat, set_chat) = signal(ChatStore::<RwSignal<ChatMessage>>::default());
+        let (tab_limits, set_tab_limits) = signal(HashMap::<String, usize>::new());
+        let (archive_ignored_channels, set_archive_ignored_channels) =
+            signal(vec!["WORLD".to_string()]);
         let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
 
         let (is_system_at_bottom, set_system_at_bottom) = signal(true);
@@ -167,7 +175,6 @@ impl AppSignals {
         let (compact_mode, set_compact_mode) = signal(false);
         let (is_pinned, set_is_pinned) = signal(false);
         let (show_settings, set_show_settings) = signal(false);
-        let (chat_limit, set_chat_limit) = signal(1000);
         let (custom_filters, set_custom_filters) = signal(vec![
             "WORLD".to_string(),
             "GUILD".to_string(),
@@ -255,8 +262,12 @@ impl AppSignals {
             set_search_term,
             name_cache,
             set_name_cache,
-            chat_log,
-            set_chat_log,
+            chat,
+            set_chat,
+            tab_limits,
+            set_tab_limits,
+            archive_ignored_channels,
+            set_archive_ignored_channels,
             system_log,
             set_system_log,
             is_system_at_bottom,
@@ -275,8 +286,6 @@ impl AppSignals {
             set_is_pinned,
             show_settings,
             set_show_settings,
-            chat_limit,
-            set_chat_limit,
             custom_filters,
             set_custom_filters,
             theme,

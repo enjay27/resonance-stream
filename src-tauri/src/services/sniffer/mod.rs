@@ -270,7 +270,7 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                     if let Some(tx) = state.translator_tx.lock().as_ref() {
                         let _ = tx.send(TranslationJob::new(chat.clone()));
                     }
-                } else if archive_chat {
+                } else if archive_chat && crate::io::archives_channel(app, &chat.channel) {
                     if let Some(df_tx) = state.data_factory_tx.lock().as_ref() {
                         let _ = df_tx.send(crate::io::DataFactoryJob { chat: chat.clone() });
                     }

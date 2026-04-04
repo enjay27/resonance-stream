@@ -111,7 +111,7 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
             }
         }
 
-        // Store in HOT Storage (bounded by chat_limit, oldest dropped first)
+        // Store in HOT Storage (bounded by the largest tab limit, oldest dropped first)
         state.chat_history.lock().push(packet.clone());
 
         // Emit "packet-event" for Game Chat

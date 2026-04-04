@@ -25,6 +25,20 @@ fn dataset_path(app: &AppHandle) -> std::io::Result<PathBuf> {
     Ok(dir.join("dataset_raw.jsonl"))
 }
 
+/// Is `channel` archived? (Channels can be switched off per tab, right-click
+/// menu; the translator path asks too, so a translated message of a
+/// switched-off channel is not written either.)
+pub fn archives_channel(app: &AppHandle, channel: &str) -> bool {
+    app.try_state::<crate::AppState>().is_none_or(|state| {
+        !state
+            .config
+            .read()
+            .archive_ignored_channels
+            .iter()
+            .any(|c| c == channel)
+    })
+}
+
 /// Daily chat logs (full messages), reloaded as history on the next start.
 pub fn chat_logs_dir(app: &AppHandle) -> PathBuf {
     app.path()

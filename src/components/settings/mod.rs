@@ -68,9 +68,9 @@ pub fn Settings() -> impl IntoView {
     let save_chat_action = Action::new_local(move |_: &()| {
         // 1. Extract the raw chat messages from the signal map
         let logs_to_export: Vec<_> = signals
-            .chat_log
-            .get_untracked()
-            .values()
+            .chat
+            .with_untracked(|store| store.all())
+            .into_iter()
             .map(|sig| sig.get_untracked()) // Unpack the RwSignal<ChatMessage>
             .collect();
 

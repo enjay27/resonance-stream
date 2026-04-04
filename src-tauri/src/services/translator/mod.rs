@@ -108,7 +108,8 @@ fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle
     let final_str = postprocess_text(&raw_translation, &shield);
 
     // 4. Dispatch Side Effects
-    if let Some(df_tx) = state.data_factory_tx.lock().as_ref() {
+    let archive = state.data_factory_tx.lock().clone();
+    if let Some(df_tx) = archive.filter(|_| crate::io::archives_channel(app, &chat.channel)) {
         let mut archived = chat.clone();
         archived.translated = Some(final_str.clone());
         let _ = df_tx.send(crate::io::DataFactoryJob { chat: archived });

@@ -1,4 +1,4 @@
-use crate::chat_view::{push_bounded, Tab};
+use crate::chat_view::Tab;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
 use crate::ui_types::{
@@ -63,15 +63,18 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
             return;
         };
 
-        let limit = signals.chat_limit.get_untracked();
+        let limits = signals.tab_limits.get_untracked();
         let alert = signals
             .alert_keywords
             .with_untracked(|kws| kws.iter().any(|kw| packet.message.contains(kw.as_str())));
         let channel = packet.channel.clone();
         let message_for_log = alert.then(|| packet.message.clone());
 
-        signals.set_chat_log.update(|log| {
-            push_bounded(log, packet.pid, RwSignal::new(packet), limit);
+        let pid = packet.pid;
+        signals.custom_filters.with_untracked(|filters| {
+            signals.set_chat.update(|store| {
+                store.add(pid, &channel, RwSignal::new(packet), filters, &limits);
+            });
         });
 
         let tab = Tab::from_label(&signals.active_tab.get_untracked());
@@ -109,8 +112,8 @@ fn create_translation_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)
         if let Some(payload) = payload::<TranslationResult>(event_obj) {
             // Find the existing message by PID and update its signal.
             // Only this row re-renders; the list itself is untouched.
-            signals.chat_log.with_untracked(|log| {
-                if let Some(chat_rw) = log.get(&payload.pid) {
+            signals.chat.with_untracked(|store| {
+                if let Some(chat_rw) = store.get(payload.pid) {
                     chat_rw.update(|c| {
                         c.translated = Some(payload.translated);
                     });
@@ -174,8 +177,8 @@ fn create_update_message_handler(signals: AppSignals) -> Closure<dyn FnMut(JsVal
             return;
         };
         // Find the existing signal by PID and completely overwrite its value
-        signals.chat_log.with_untracked(|log| {
-            if let Some(chat_rw) = log.get(&updated_msg.pid) {
+        signals.chat.with_untracked(|store| {
+            if let Some(chat_rw) = store.get(updated_msg.pid) {
                 chat_rw.set(updated_msg);
             }
         });

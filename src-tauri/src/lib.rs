@@ -39,7 +39,7 @@ pub fn run() {
             let dictionary = resonance_core::text::Dictionary::load(&dictionary_path(&handle));
             app.manage(AppState {
                 config: RwLock::new(config.clone()),
-                chat_history: Mutex::new(ChatHistory::new(config.chat_limit)),
+                chat_history: Mutex::new(ChatHistory::new(config.history_limit())),
                 system_history: Mutex::new(VecDeque::with_capacity(200)),
                 next_pid: 1.into(),
                 nickname_cache: Mutex::new(std::collections::HashMap::new()),
@@ -55,7 +55,7 @@ pub fn run() {
             // pids continue after them so the list stays in order.
             let restored = resonance_core::history::load_recent(
                 &crate::io::chat_logs_dir(&handle),
-                config.chat_limit,
+                config.history_limit(),
             );
             state.next_pid.fetch_max(
                 restored.len() as u64 + 1,

@@ -16,7 +16,6 @@ pub struct AppConfig {
     pub compact_mode: bool,
     pub always_on_top: bool,
     pub active_tab: String,
-    pub chat_limit: usize,
     pub custom_tab_filters: Vec<String>,
     pub theme: String,
     pub overlay_opacity: f32,
@@ -44,6 +43,48 @@ pub struct AppConfig {
     pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
     #[serde(default)]
     pub tab_switch_key: String, // e.g., "Tab", "ArrowRight", etc.
+    /// Messages each tab keeps (keys: channel names, "전체", "커스텀").
+    #[serde(default = "default_tab_limits")]
+    pub tab_limits: std::collections::HashMap<String, usize>,
+    /// Channels not written to the chat archive.
+    #[serde(default = "default_archive_ignored_channels")]
+    pub archive_ignored_channels: Vec<String>,
+}
+
+fn default_tab_limits() -> std::collections::HashMap<String, usize> {
+    [
+        ("WORLD", 200), // World gets a small limit
+        ("LOCAL", 500),
+        ("PARTY", 1000), // Party/Guild get huge limits
+        ("GUILD", 1000),
+        ("전체", 1000),
+        ("커스텀", 1000),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect()
+}
+
+fn default_archive_ignored_channels() -> Vec<String> {
+    vec!["WORLD".to_string()]
+}
+
+impl AppConfig {
+    /// Messages the backend keeps (and reloads): as many as the UI's all-tab
+    /// holds -- all channel limits together (see src/chat_view.rs tab_limit).
+    pub fn history_limit(&self) -> usize {
+        let sum: usize = self
+            .tab_limits
+            .iter()
+            .filter(|(k, _)| !matches!(k.as_str(), "전체" | "커스텀" | "SYSTEM"))
+            .map(|(_, v)| *v)
+            .sum();
+        if sum == 0 {
+            2000
+        } else {
+            sum
+        }
+    }
 }
 
 impl Default for AppConfig {
@@ -55,7 +96,6 @@ impl Default for AppConfig {
             compact_mode: false,
             always_on_top: false,
             active_tab: "전체".to_string(),
-            chat_limit: 1000,
             custom_tab_filters: vec![
                 "WORLD".into(),
                 "GUILD".into(),
@@ -82,6 +122,8 @@ impl Default for AppConfig {
             auto_sync_latest_dict: true,
             tab_switch_modifier: "Ctrl".to_string(),
             tab_switch_key: "Tab".to_string(),
+            tab_limits: default_tab_limits(),
+            archive_ignored_channels: default_archive_ignored_channels(),
         }
     }
 }
@@ -151,7 +193,7 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
         let _ = fs::write(path, json);
     }
     *state.config.write() = config.clone();
-    state.chat_history.lock().set_limit(config.chat_limit);
+    state.chat_history.lock().set_limit(config.history_limit());
 
     // --- MANAGE THE SNIFFER THREAD (NETWORK ADAPTER CHANGE) ---
     if old_config.network_interface != config.network_interface {

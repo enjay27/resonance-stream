@@ -58,6 +58,7 @@ zip = "8.1.0"
 serde_with = "3.17.0"
 tauri-plugin-global-shortcut = "2.3.1"
 sha2 = "0.10.9"
+tauri-plugin-window-state = "2.4.1"
 
 [dev-dependencies]
 pnet = "0.35"

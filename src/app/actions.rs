@@ -22,6 +22,7 @@ pub fn create_actions(signals: AppSignals) -> AppActions {
         is_pinned,
         tab_limits,
         archive_ignored_channels,
+        message_spacing,
         custom_filters,
         theme,
         opacity,
@@ -77,6 +78,7 @@ pub fn create_actions(signals: AppSignals) -> AppActions {
             tab_switch_modifier: tab_switch_modifier.get_untracked(),
             tab_limits: tab_limits.get_untracked(),
             archive_ignored_channels: archive_ignored_channels.get_untracked(),
+            message_spacing: message_spacing.get_untracked(),
             tab_switch_key: tab_switch_key.get_untracked(),
         };
 

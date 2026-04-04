@@ -51,6 +51,12 @@ pub struct AppConfig {
     pub tab_limits: std::collections::HashMap<String, usize>,
     #[serde(default)]
     pub archive_ignored_channels: Vec<String>,
+    #[serde(default = "default_spacing")]
+    pub message_spacing: u32,
+}
+
+pub fn default_spacing() -> u32 {
+    4
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

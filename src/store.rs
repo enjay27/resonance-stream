@@ -43,6 +43,9 @@ pub struct AppSignals {
     /// Channels not written to the chat archive (right-click a tab).
     pub archive_ignored_channels: ReadSignal<Vec<String>>,
     pub set_archive_ignored_channels: WriteSignal<Vec<String>>,
+    /// Vertical padding of each chat row, px.
+    pub message_spacing: ReadSignal<u32>,
+    pub set_message_spacing: WriteSignal<u32>,
     pub system_log: ReadSignal<Vec<RwSignal<SystemMessage>>>,
     pub set_system_log: WriteSignal<Vec<RwSignal<SystemMessage>>>,
     pub is_system_at_bottom: ReadSignal<bool>,
@@ -164,6 +167,7 @@ impl AppSignals {
         let (tab_limits, set_tab_limits) = signal(HashMap::<String, usize>::new());
         let (archive_ignored_channels, set_archive_ignored_channels) =
             signal(vec!["WORLD".to_string()]);
+        let (message_spacing, set_message_spacing) = signal(4u32);
         let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
 
         let (is_system_at_bottom, set_system_at_bottom) = signal(true);
@@ -268,6 +272,8 @@ impl AppSignals {
             set_tab_limits,
             archive_ignored_channels,
             set_archive_ignored_channels,
+            message_spacing,
+            set_message_spacing,
             system_log,
             set_system_log,
             is_system_at_bottom,

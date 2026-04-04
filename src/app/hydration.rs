@@ -24,6 +24,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
         tab_limits,
         set_tab_limits,
         set_archive_ignored_channels,
+        set_message_spacing,
         custom_filters,
         set_system_log,
         set_debug_mode,
@@ -72,6 +73,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                     set_tab_limits.set(config.tab_limits);
                 }
                 set_archive_ignored_channels.set(config.archive_ignored_channels);
+                set_message_spacing.set(config.message_spacing);
                 set_custom_filters.set(config.custom_tab_filters);
                 set_theme.set(config.theme);
                 set_opacity.set(config.overlay_opacity);

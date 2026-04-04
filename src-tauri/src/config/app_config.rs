@@ -49,6 +49,12 @@ pub struct AppConfig {
     /// Channels not written to the chat archive.
     #[serde(default = "default_archive_ignored_channels")]
     pub archive_ignored_channels: Vec<String>,
+    #[serde(default = "default_spacing")]
+    pub message_spacing: u32,
+}
+
+fn default_spacing() -> u32 {
+    4
 }
 
 fn default_tab_limits() -> std::collections::HashMap<String, usize> {
@@ -124,6 +130,7 @@ impl Default for AppConfig {
             tab_switch_key: "Tab".to_string(),
             tab_limits: default_tab_limits(),
             archive_ignored_channels: default_archive_ignored_channels(),
+            message_spacing: default_spacing(),
         }
     }
 }

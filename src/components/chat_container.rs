@@ -28,80 +28,36 @@ pub fn ChatContainer() -> impl IntoView {
     // --- FILTERED VIEW LOGIC ---
     let filtered_chat = Memo::new(move |_| {
         let tab = signals.active_tab.get();
+        if tab == "시스템" { return Vec::new(); }
+
         let search = signals.search_term.get().to_lowercase();
-        let filters = signals.custom_filters.get();
-        let chat_log = signals.chat_log.get();
         let min_level = signals.min_sender_level.get();
+        let db = signals.chat_db.get();
+        let tabs = signals.tab_views.get();
 
-        if tab == "시스템" {
-            return Vec::new();
-        }
-
-        let base_list = match tab.as_str() {
-            "전체" => chat_log.values().cloned().collect::<Vec<_>>(),
-            "커스텀" => chat_log
-                .values()
-                .filter(|m| filters.contains(&m.get().channel))
-                .cloned()
-                .collect(),
-            _ => {
-                let key = match tab.as_str() {
-                    "로컬" => "LOCAL",
-                    "파티" => "PARTY",
-                    "길드" => "GUILD",
-                    _ => "WORLD",
-                };
-                chat_log
-                    .values()
-                    .filter(|m| m.get().channel == key)
-                    .cloned()
-                    .collect()
-            }
+        let target_key = match tab.as_str() {
+            "로컬" => "LOCAL",
+            "파티" => "PARTY",
+            "길드" => "GUILD",
+            "월드" => "WORLD",
+            _ => tab.as_str(), // Keeps "전체" and "커스텀" as they are!
         };
 
-        let full_list: Vec<_> = if search.is_empty() {
-            // Apply level filter AND block system messages from general level-filtering logic if desired
-            base_list
-                .into_iter()
-                .filter(|sig| {
-                    let m = sig.get();
-                    // We only apply the level filter if the message is specifically from the World Channel
-                    if m.channel == "WORLD" {
-                        m.level >= min_level
-                    } else {
-                        true // Pass all other channels regardless of level
-                    }
-                })
-                .collect()
-        } else {
-            base_list
-                .into_iter()
-                .filter(|sig| {
-                    let m = sig.get();
-                    // Apply level filter to World Channel AND search term filter
-                    let passes_level_check = if m.channel == "WORLD" {
-                        m.level >= min_level
-                    } else {
-                        true
-                    };
+        let pids = tabs.get(target_key).cloned().unwrap_or_default();
+        let full_list: Vec<_> = pids.into_iter().filter_map(|pid| {
+            if let Some(sig) = db.get(&pid) {
+                let m = sig.get();
+                let passes_level_check = if m.channel == "WORLD" { m.level >= min_level } else { true };
+                let passes_search = search.is_empty() || m.nickname.to_lowercase().contains(&search) || m.message.to_lowercase().contains(&search);
 
-                    passes_level_check
-                        && (m.nickname.to_lowercase().contains(&search)
-                            || m.message.to_lowercase().contains(&search))
-                })
-                .collect()
-        };
+                if passes_level_check && passes_search { Some(sig.clone()) } else { None }
+            } else { None }
+        }).collect();
 
         // --- SLICE THE LIST (PAGING) ---
         let current_limit = display_limit.get();
         let total = full_list.len();
-
-        // Only return the bottom `current_limit` amount of messages
-        if total > current_limit {
-            full_list[total - current_limit..].to_vec()
-        } else {
-            full_list
-        }
+        if total > current_limit { full_list[total - current_limit..].to_vec() } else { full_list }
     });
 
     let filtered_system_logs = Memo::new(move |_| {

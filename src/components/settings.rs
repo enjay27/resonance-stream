@@ -33,28 +33,35 @@ pub fn Settings() -> impl IntoView {
         }
     });
 
-    let sync_dict_action = Action::new_local(|_: &()| async move {
-        match invoke("sync_dictionary", JsValue::NULL).await {
+    let sync_dict_action = Action::new_local(move |_: &()| async move {
+        let Some(metadata) = signals.pending_update_data.try_get_untracked() else { return; };
+
+        let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "version": metadata.unwrap().dictionary.version
+    }))
+            .unwrap();
+
+        match invoke("sync_dictionary", args).await {
             Ok(_) => "최신 상태".to_string(),
             Err(_) => "동기화 실패".to_string(),
-        }
+        };
     });
     let is_syncing = sync_dict_action.pending();
 
     let save_chat_action = Action::new_local(move |_: &()| {
-        // 1. Extract the raw chat messages from the signal map
-        let logs_to_export: Vec<_> = signals
-            .chat_log
+        // 1. Extract and SORT the raw chat messages
+        let mut logs_to_export: Vec<_> = signals
+            .chat_db
             .get_untracked()
             .values()
-            .map(|sig| sig.get_untracked()) // Unpack the RwSignal<ChatMessage>
+            .map(|sig| sig.get_untracked())
             .collect();
+
+        logs_to_export.sort_by_key(|msg| msg.timestamp);
 
         // 2. Send them to Tauri
         async move {
-            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "logs": logs_to_export }))
-                .unwrap();
-
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "logs": logs_to_export })).unwrap();
             match invoke("export_chat_log", args).await {
                 Ok(_) => "저장 완료".to_string(),
                 Err(_) => "저장 실패".to_string(),
@@ -247,17 +254,28 @@ pub fn Settings() -> impl IntoView {
                                 <div class="text-[9px] text-base-content/50">"기본 크기는 14px 입니다."</div>
                             </div>
 
-                            // Message Limit
-                            <div class="flex items-center justify-between bg-base-200 p-3 rounded-lg border border-base-content/5 px-3">
-                                <span class="text-xs font-bold text-base-content/80">"최대 메시지 유지 개수"</span>
-                                <input type="number" class="input input-xs input-bordered w-20 text-right font-mono"
-                                    prop:value=move || signals.chat_limit.get().to_string()
+                            // Message Spacing Slider
+                            <div class="space-y-2 mt-4 pt-4 border-t border-base-content/10">
+                                <div class="flex justify-between text-[11px] font-bold">
+                                    <span class="text-base-content/80">"메시지 간격 (Message Spacing)"</span>
+                                    <span class="text-success">{move || format!("{}px", signals.message_spacing.get())}</span>
+                                </div>
+                                <input type="range" min="0" max="24" step="1"
+                                    class="range range-xs range-success"
+                                    prop:value=move || signals.message_spacing.get().to_string()
                                     on:input=move |ev| {
-                                        let val = event_target_value(&ev).parse::<usize>().unwrap_or(1000);
-                                        signals.set_chat_limit.set(val);
+                                        // Update UI live while dragging
+                                        let val = event_target_value(&ev).parse::<u32>().unwrap_or(4);
+                                        signals.set_message_spacing.set(val);
+                                    }
+                                    on:change=move |ev| {
+                                        // Save to config when released
+                                        let val = event_target_value(&ev).parse::<u32>().unwrap_or(4);
+                                        signals.set_message_spacing.set(val);
                                         actions.save_config.dispatch(());
                                     }
                                 />
+                                <div class="text-[9px] text-base-content/50">"채팅 메시지 위아래의 여백을 조절합니다. (기본값: 4px)"</div>
                             </div>
 
                             <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">

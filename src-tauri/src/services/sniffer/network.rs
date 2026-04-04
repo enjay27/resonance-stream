@@ -125,6 +125,7 @@ pub fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, S
     // 3. Enable Promiscuous Mode safely
     let rcval: u32 = 1;
     let mut out_buffer = [0u8; 4];
+    let mut bytes_returned: u32 = 0;
     unsafe {
         use std::os::windows::io::AsRawSocket;
         use windows_sys::Win32::Networking::WinSock::SIO_RCVALL;
@@ -136,7 +137,7 @@ pub fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, S
             std::mem::size_of::<u32>() as u32,
             out_buffer.as_mut_ptr() as _,
             out_buffer.len() as u32,
-            &mut 0,
+            &mut bytes_returned,
             std::ptr::null_mut(),
             None,
         );
@@ -286,6 +287,8 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
 
 #[tauri::command]
 pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, String> {
+    remove_firewall_rule();
+
     if let Ok(exe_path) = env::current_exe() {
         if let Some(path_str) = exe_path.to_str() {
             inject_system_message(
@@ -348,5 +351,17 @@ pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, Str
         }
     } else {
         Err("Could not find executable path.".to_string())
+    }
+}
+
+pub fn check_firewall_rule() -> bool {
+    let result = Command::new("netsh")
+        .args(["advfirewall", "firewall", "show", "rule", &format!("name={}", RULE_NAME)])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    match result {
+        Ok(output) => output.status.success(), // Returns true if the rule exists
+        Err(_) => false,
     }
 }

@@ -16,7 +16,7 @@ pub fn translate_text(client: &Client, server_url: &str, jp_text: &str) -> Strin
         These represent protected terms. Copy them verbatim into the translation at the correct position.\n\
         Example: '今日は[P0]と[P1]で行く' → '오늘은 [P0]와 [P1]에서 가'\n\
         Produce only the Korean translation, without any additional explanations or commentary. \
-        Please translate the following Japanese text into Korean:\n\
+        Please translate the following Japanese text into Korean:\n\n\n\
         {}<end_of_turn>\n\
         <start_of_turn>model\n",
         safe_text

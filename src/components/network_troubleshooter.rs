@@ -79,24 +79,48 @@ pub fn Troubleshooter() -> impl IntoView {
         });
     };
 
+    let fix_firewall = move |_| {
+        spawn_local(async move {
+            // 1. Call the backend to trigger the UAC prompt and overwrite the rule
+            if invoke("ensure_firewall_rule_command", JsValue::NULL).await.is_ok() {
+                // 2. If the user clicked "Yes" on the Admin prompt, restart the sniffer!
+                let _ = invoke("restart_sniffer_command", JsValue::NULL).await;
+
+                // 3. Close the troubleshooter so they can see the main UI reconnecting
+                signals.set_show_troubleshooter.set(false);
+            }
+        });
+    };
+
     view! {
         <Show when=move || signals.show_troubleshooter.get()>
             <div class="modal modal-open backdrop-blur-sm z-[30000]">
                 <div class="modal-box bg-base-300 border border-base-content/10 shadow-2xl w-full max-w-md p-6">
 
-                    <div class="flex items-center gap-3 mb-4">
-                        <div class="w-10 h-10 rounded-full bg-warning/20 text-warning flex items-center justify-center text-xl">"📡"</div>
-                        <div>
-                            <h2 class="text-lg font-black text-base-content">"네트워크 어댑터 복구"</h2>
-                            <p class="text-xs text-base-content/60">"VPN이나 가상 네트워크 환경 문제 해결"</p>
-                        </div>
-                    </div>
-
                     {move || match status.get().as_str() {
                         "idle" => view! {
                             <div class="space-y-4">
-                                <p class="text-sm">"게임 채팅이 인식되지 않나요? PC에 설치된 다른 네트워크 어댑터들을 하나씩 순회하며 게임 트래픽이 잡히는지 자동으로 테스트합니다."</p>
-                                <button class="btn btn-warning btn-block font-bold" on:click=start_scan>"자동 복구 시작"</button>
+                                // --- STEP 1: FIREWALL (Primary Action) ---
+                                <div class="bg-error/10 p-3 rounded-lg border border-error/20">
+                                    <h3 class="text-sm font-bold text-error mb-1">"1단계: 방화벽 규칙 초기화"</h3>
+                                    <p class="text-[11px] text-base-content/80 mb-3 leading-relaxed">
+                                        "가장 흔한 원인입니다. 윈도우 업데이트나 백신 프로그램에 의해 삭제된 방화벽 규칙을 다시 생성합니다."
+                                    </p>
+                                    <button class="btn btn-error btn-sm btn-block shadow-sm" on:click=fix_firewall>
+                                        "방화벽 규칙 재설정 (관리자 권한 필요)"
+                                    </button>
+                                </div>
+
+                                // --- STEP 2: ADAPTER SCAN (Secondary Action) ---
+                                <div class="bg-warning/10 p-3 rounded-lg border border-warning/20">
+                                    <h3 class="text-sm font-bold text-warning mb-1">"2단계: 네트워크 어댑터 검사"</h3>
+                                    <p class="text-[11px] text-base-content/80 mb-3 leading-relaxed">
+                                        "방화벽을 재설정해도 해결되지 않는다면, VPN이나 가상 어댑터와의 충돌일 수 있습니다. 게임이 켜진 상태에서 클릭하세요."
+                                    </p>
+                                    <button class="btn btn-warning btn-sm btn-block shadow-sm" on:click=start_scan>
+                                        "어댑터 자동 스캔 시작"
+                                    </button>
+                                </div>
                             </div>
                         }.into_any(),
 
@@ -128,9 +152,10 @@ pub fn Troubleshooter() -> impl IntoView {
                             <div class="space-y-4 text-center py-2">
                                 <div class="text-4xl mb-2">"❌"</div>
                                 <h3 class="text-lg font-bold text-error">"감지 실패"</h3>
-                                <p class="text-xs">"모든 네트워크 어댑터를 확인했지만 게임 트래픽을 찾지 못했습니다. 게임이 켜져있고 로그인 된 상태인지 확인해주세요."</p>
+                                <p class="text-xs leading-relaxed">"모든 네트워크 어댑터를 확인했지만 게임 트래픽을 찾지 못했습니다. 게임이 켜져있고 로그인 된 상태인지 확인해주세요."</p>
+
                                 <div class="flex gap-2 mt-4">
-                                    <button class="btn btn-ghost flex-1" on:click=move |_| signals.set_show_troubleshooter.set(false)>"취소"</button>
+                                    <button class="btn btn-ghost flex-1" on:click=move |_| signals.set_show_troubleshooter.set(false)>"닫기"</button>
                                     <button class="btn btn-warning flex-1" on:click=start_scan>"다시 시도"</button>
                                 </div>
                             </div>

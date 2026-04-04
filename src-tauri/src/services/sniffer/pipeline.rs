@@ -28,7 +28,6 @@ impl ChatPipeline {
         &mut self,
         packet: &[u8],
         blocked_users: &HashMap<u64, String>,
-        mut assign_pid: impl FnMut() -> u64,
         mut feed_watchdog: impl FnMut(),
     ) -> Vec<PipelineAction> {
         let mut actions = Vec::new();
@@ -66,7 +65,6 @@ impl ChatPipeline {
         // 4. Process the fully assembled packets
         for packet_data in assembled_packets {
             for event in parsing_pipeline(&packet_data) {
-                // Guard clause for the event loop using let-else
                 let Port5003Event::Chat(mut chat) = event;
 
                 // 5. Apply duplicate and blocking rules
@@ -76,7 +74,6 @@ impl ChatPipeline {
                         actions.push(PipelineAction::UpdateBlockedMessage(chat));
                     }
                     ProcessAction::EmitNewMessage => {
-                        chat.pid = assign_pid();
                         self.processor.commit_new_message(&chat);
                         actions.push(PipelineAction::EmitNewMessage(chat));
                     }
@@ -98,13 +95,6 @@ mod tests {
     fn test_full_chat_pipeline() {
         let mut pipeline = ChatPipeline::new();
         let blocked_users = HashMap::new();
-
-        let mut mock_pid_counter = 1;
-        let mut assign_pid = || {
-            let pid = mock_pid_counter;
-            mock_pid_counter += 1;
-            pid
-        };
 
         // 1. Construct the raw Protobuf payload for a complete BPSR Chat Message
         // Includes Session ID (Sequence ID), Sender Info (Nickname & UID), and Message Text
@@ -135,17 +125,19 @@ mod tests {
             .unwrap();
 
         // 3. Feed the forged packet into our pure pipeline
+        // FIX 1: Removed the `assign_pid` argument
         let actions = pipeline.feed_network_packet(
             &fake_network_packet,
             &blocked_users,
-            &mut assign_pid,
-            || {}, // Pass an empty closure for the test!
+            || {}, // Pass an empty closure for the watchdog test!
         );
 
         // 4. Assert that the pipeline correctly extracted ALL fields!
         assert_eq!(actions.len(), 1);
         if let PipelineAction::EmitNewMessage(chat) = &actions[0] {
-            assert_eq!(chat.pid, 1, "Local UI PID should be 1");
+            // FIX 2: Since PID is now a hash, we just verify it was successfully generated
+            assert!(chat.pid != 0, "Local UI PID should be generated deterministically");
+
             assert_eq!(
                 chat.sequence_id, 999,
                 "Sequence ID from packet should be 999"

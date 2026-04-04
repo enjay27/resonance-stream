@@ -1,5 +1,6 @@
 use crate::protocol::types::ChatMessage;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 pub enum ProcessAction {
     IgnoreDuplicate,
@@ -8,32 +9,37 @@ pub enum ProcessAction {
 }
 
 pub struct MessageProcessor {
-    pub dedup_cache: HashMap<(u64, u64, u64), u64>,
+    pub dedup_cache: HashSet<u64>,
 }
 
 impl MessageProcessor {
     pub fn new() -> Self {
         Self {
-            dedup_cache: HashMap::new(),
+            dedup_cache: HashSet::new(),
         }
     }
 
     /// Pure logic: Determines what to do with a chat message without mutating global state.
     /// Takes blocked_users as a reference so it always has the latest UI state.
     pub fn process(
-        &self,
+        &mut self,
         chat: &mut ChatMessage,
         blocked_users: &HashMap<u64, String>,
     ) -> ProcessAction {
+
+        // 1. GENERATE DETERMINISTIC PID
+        let mut hasher = DefaultHasher::new();
+        (chat.uid, chat.timestamp, chat.sequence_id).hash(&mut hasher);
+        chat.pid = hasher.finish() & 0x1FFFFFFFFFFFFF;
+
+        // 2. Check if Blocked
         if blocked_users.contains_key(&chat.uid) {
             chat.is_blocked = true;
         }
 
-        let signature = (chat.uid, chat.timestamp, chat.sequence_id);
-
-        if let Some(&existing_pid) = self.dedup_cache.get(&signature) {
+        // 3. Deduplication Check using the new PID
+        if self.dedup_cache.contains(&chat.pid) {
             if chat.is_blocked {
-                chat.pid = existing_pid; // Carry over the original PID so the UI updates the correct row
                 return ProcessAction::UpdateBlockedMessage;
             }
             return ProcessAction::IgnoreDuplicate;
@@ -44,8 +50,12 @@ impl MessageProcessor {
 
     /// Registers a successfully emitted message into the duplicate cache
     pub fn commit_new_message(&mut self, chat: &ChatMessage) {
-        let signature = (chat.uid, chat.timestamp, chat.sequence_id);
-        self.dedup_cache.insert(signature, chat.pid);
+        self.dedup_cache.insert(chat.pid);
+
+        // Prevent memory leaks over an 8-hour gaming session!
+        if self.dedup_cache.len() > 2000 {
+            self.dedup_cache.clear();
+        }
     }
 }
 
@@ -89,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_message_processor_blocking() {
-        let processor = MessageProcessor::new();
+        let mut processor = MessageProcessor::new();
 
         let mut blocked = HashMap::new();
         blocked.insert(999, "Spammer".to_string());

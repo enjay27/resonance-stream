@@ -47,6 +47,15 @@ pub fn emit_sniffer_state(app: &tauri::AppHandle, state: &str, message: &str) {
 #[tauri::command]
 pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State<'_, AppState>) {
     let mut tx_lock = state.sniffer_tx.lock().unwrap();
+    if !check_firewall_rule() {
+        inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Firewall rule missing. Triggering Setup Wizard.");
+        emit_sniffer_state(&app, "Error", "방화벽 설정 필요 (Setup Required)");
+
+        let _ = app.emit("firewall-missing", ());
+
+        return;
+    }
+
     if tx_lock.is_some() {
         inject_system_message(
             &app,
@@ -65,6 +74,16 @@ pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State
 pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
     // We use a blank channel just for its lifecycle dropping properties
     let (tx, rx) = crossbeam_channel::unbounded::<()>();
+
+    if !check_firewall_rule() {
+        inject_system_message(&app, SystemLogLevel::Warning, "Sniffer", "Firewall rule missing. Triggering Setup Wizard.");
+        emit_sniffer_state(&app, "Error", "방화벽 설정 필요 (Setup Required)");
+
+        let _ = app.emit("firewall-missing", ());
+
+        return tx;
+    }
+
     let config = crate::config::load_config(app.clone());
 
     feed_watchdog();
@@ -113,8 +132,9 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
             }
 
             let uninit_buf = unsafe {
-                std::mem::transmute::<&mut [u8], &mut [std::mem::MaybeUninit<u8>]>(
-                    buf.as_mut_slice(),
+                std::slice::from_raw_parts_mut(
+                    buf.as_mut_ptr() as *mut std::mem::MaybeUninit<u8>,
+                    buf.len(),
                 )
             };
             let n = match socket.recv(uninit_buf) {
@@ -135,7 +155,6 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
             let actions = pipeline.feed_network_packet(
                 &buf[..n],
                 &blocked_users,
-                || state.next_pid.fetch_add(1, Ordering::SeqCst),
                 || {
                     feed_watchdog();
 
@@ -233,12 +252,12 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                         let _ = tx.send(TranslationJob { chat: chat.clone() });
                     }
                 } else if config.archive_chat {
-                    if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
-                        let _ = df_tx.send(crate::io::DataFactoryJob {
-                            pid: chat.pid,
-                            original: chat.message.clone(),
-                            translated: None,
-                        });
+                    if !config.archive_ignored_channels.contains(&chat.channel) {
+                        if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
+                            let _ = df_tx.send(crate::io::DataFactoryJob {
+                                chat: chat.clone(),
+                            });
+                        }
                     }
                 }
             }

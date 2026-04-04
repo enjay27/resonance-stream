@@ -42,7 +42,6 @@ pub struct AppConfig {
     pub compact_mode: bool,
     pub always_on_top: bool,
     pub active_tab: String,
-    pub chat_limit: usize,
     pub custom_tab_filters: Vec<String>,
     pub theme: String,
     pub overlay_opacity: f32,
@@ -72,6 +71,12 @@ pub struct AppConfig {
     pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
     #[serde(default)]
     pub tab_switch_key: String, // e.g., "Tab", "ArrowRight", etc.
+    #[serde(default)]
+    pub tab_limits: std::collections::HashMap<String, usize>,
+    #[serde(default)]
+    pub archive_ignored_channels: Vec<String>,
+    #[serde(default = "crate::ui_types::default_spacing")]
+    pub message_spacing: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -123,6 +128,7 @@ pub struct VersionInfo {
     pub latest_version: String,
     pub download_url: String,
     pub release_notes: String,
+    pub sha256: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -145,3 +151,5 @@ pub struct UpdateCheckResult {
     pub dict_update_available: bool,
     pub remote_data: GistMetadata,
 }
+
+pub fn default_spacing() -> u32 { 4 }

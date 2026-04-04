@@ -184,6 +184,7 @@ pub fn run() {
 
             Ok(())
         })
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -341,7 +342,10 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
             let config = load_config(app.clone());
 
             let mut history = state.chat_history.lock().unwrap();
-            while history.len() >= config.chat_limit && !history.is_empty() {
+
+            let max_limit = config.tab_limits.values().copied().max().unwrap_or(1000);
+
+            while history.len() >= max_limit && !history.is_empty() {
                 history.shift_remove_index(0);
             }
             history.insert(packet.pid, packet.clone());
@@ -409,13 +413,6 @@ fn minimize_window(window: tauri::Window) {
 #[tauri::command]
 fn close_window(window: tauri::Window) {
     let _ = window.close();
-}
-
-#[tauri::command]
-fn get_chat_history(state: tauri::State<AppState>) -> Vec<ChatMessage> {
-    // Returns ONLY Game Chat
-    let history = state.chat_history.lock().unwrap();
-    history.values().cloned().collect()
 }
 
 #[tauri::command]

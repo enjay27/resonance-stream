@@ -84,6 +84,13 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
                     let limits = signals.tab_limits.get_untracked();
                     let filters = signals.custom_filters.get_untracked();
 
+                    let aggregate_limit: usize = limits.iter()
+                        .filter(|(k, _)| *k != "전체" && *k != "커스텀" && *k != "SYSTEM")
+                        .map(|(_, v)| *v)
+                        .sum();
+                    // Fallback to 2000 just in case all limits were somehow set to 0
+                    let aggregate_limit = if aggregate_limit == 0 { 2000 } else { aggregate_limit };
+
                     // 1. Add to DB
                     signals.set_chat_db.update(|db| {
                         db.insert(pid, RwSignal::new(packet.clone()));
@@ -91,11 +98,10 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
 
                     // 2. Update Views
                     signals.set_tab_views.update(|tabs| {
-                        // All Tab
-                        let all_limit = *limits.get("전체").unwrap_or(&1000);
+                        // All Tab (Uses dynamic aggregate limit)
                         let all_tab = tabs.entry("전체".to_string()).or_insert_with(std::collections::VecDeque::new);
                         all_tab.push_back(pid);
-                        while all_tab.len() > all_limit { all_tab.pop_front(); }
+                        while all_tab.len() > aggregate_limit { all_tab.pop_front(); }
 
                         // Specific Channel Tab
                         let spec_limit = *limits.get(&ch).unwrap_or(&500);
@@ -103,12 +109,11 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
                         spec_tab.push_back(pid);
                         while spec_tab.len() > spec_limit { spec_tab.pop_front(); }
 
-                        // Custom Tab
+                        // Custom Tab (Uses dynamic aggregate limit)
                         if filters.contains(&ch) {
-                            let custom_limit = *limits.get("커스텀").unwrap_or(&1000);
                             let custom_tab = tabs.entry("커스텀".to_string()).or_insert_with(std::collections::VecDeque::new);
                             custom_tab.push_back(pid);
-                            while custom_tab.len() > custom_limit { custom_tab.pop_front(); }
+                            while custom_tab.len() > aggregate_limit { custom_tab.pop_front(); }
                         }
                     });
 

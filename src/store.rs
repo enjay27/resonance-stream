@@ -136,6 +136,8 @@ pub struct AppSignals {
     pub set_tab_limits: WriteSignal<HashMap<String, usize>>,
     pub archive_ignored_channels: ReadSignal<Vec<String>>,
     pub set_archive_ignored_channels: WriteSignal<Vec<String>>,
+    pub message_spacing: ReadSignal<u32>,
+    pub set_message_spacing: WriteSignal<u32>,
 }
 
 #[derive(Copy, Clone)]

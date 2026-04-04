@@ -112,6 +112,8 @@ pub fn App() -> impl IntoView {
     let (tab_limits, set_tab_limits) = signal(HashMap::new());
     let (archive_ignored_channels, set_archive_ignored_channels) = signal(Vec::new());
 
+    let (message_spacing, set_message_spacing) = signal(4u32);
+
     let signals = AppSignals {
         init_done, set_init_done,
         use_translation, set_use_translation,
@@ -178,6 +180,7 @@ pub fn App() -> impl IntoView {
         tab_views, set_tab_views,
         tab_limits, set_tab_limits,
         archive_ignored_channels, set_archive_ignored_channels,
+        message_spacing, set_message_spacing,
     };
 
     provide_context(signals);
@@ -214,6 +217,7 @@ pub fn App() -> impl IntoView {
             tab_switch_key: tab_switch_key.get_untracked(),
             tab_limits: tab_limits.get_untracked(),
             archive_ignored_channels: archive_ignored_channels.get_untracked(),
+            message_spacing: message_spacing.get_untracked(),
         };
 
         async move {
@@ -552,6 +556,7 @@ pub fn App() -> impl IntoView {
                         });
                         set_tab_limits.set(config.tab_limits);
                         set_archive_ignored_channels.set(config.archive_ignored_channels);
+                        set_message_spacing.set(config.message_spacing);
 
                         // 2. If the user hasn't finished the wizard, stop here
                         if config.init_done {

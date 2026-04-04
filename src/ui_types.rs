@@ -75,6 +75,8 @@ pub struct AppConfig {
     pub tab_limits: std::collections::HashMap<String, usize>,
     #[serde(default)]
     pub archive_ignored_channels: Vec<String>,
+    #[serde(default = "crate::ui_types::default_spacing")]
+    pub message_spacing: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -149,3 +151,5 @@ pub struct UpdateCheckResult {
     pub dict_update_available: bool,
     pub remote_data: GistMetadata,
 }
+
+pub fn default_spacing() -> u32 { 4 }

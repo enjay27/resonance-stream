@@ -46,6 +46,8 @@ pub struct AppConfig {
     pub tab_limits: std::collections::HashMap<String, usize>,
     #[serde(default)]
     pub archive_ignored_channels: Vec<String>,
+    #[serde(default = "default_spacing")]
+    pub message_spacing: u32,
 }
 
 impl Default for AppConfig {
@@ -93,6 +95,7 @@ impl Default for AppConfig {
             tab_switch_key: "Tab".to_string(),
             tab_limits: limits,
             archive_ignored_channels: vec!["WORLD".to_string()],
+            message_spacing: 4,
         }
     }
 }
@@ -233,3 +236,5 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
         crate::services::translator::emit_translator_state(&app, "Off", "AI Translation Disabled.");
     }
 }
+
+fn default_spacing() -> u32 { 4 }

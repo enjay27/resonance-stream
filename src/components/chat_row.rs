@@ -92,7 +92,8 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                     // ==========================================
                     // STANDARD VIEW (Stacked)
                     // ==========================================
-                    <div class="flex flex-col items-start px-2 py-1 group transition-colors hover:bg-base-content/5">
+                    <div class="flex flex-col items-start px-2 group transition-colors hover:bg-base-content/5"
+                         style=move || format!("padding-top: {0}px; padding-bottom: {0}px;", signals.message_spacing.get())>
                         <div class="opacity-90 mb-1 flex gap-2 items-center">
                             // 1. NICKNAME BUBBLE
                             <span
@@ -245,7 +246,8 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                 // COMPACT VIEW (Inline Wrapping)
                 // ==========================================
                 // 1. Parent is now a standard block with generous line-height for wrapping bubbles
-                <div class="block px-2 py-1 group transition-colors hover:bg-base-content/5 w-full leading-[1.7] text-left break-words">
+                <div class="block px-2 group transition-colors hover:bg-base-content/5 w-full leading-[1.7] text-left break-words"
+                     style=move || format!("padding-top: {0}px; padding-bottom: {0}px;", signals.message_spacing.get())>
 
                     // 2. NICKNAME BUBBLE (inline-block so it flows like text)
                     <span

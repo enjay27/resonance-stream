@@ -254,6 +254,30 @@ pub fn Settings() -> impl IntoView {
                                 <div class="text-[9px] text-base-content/50">"기본 크기는 14px 입니다."</div>
                             </div>
 
+                            // Message Spacing Slider
+                            <div class="space-y-2 mt-4 pt-4 border-t border-base-content/10">
+                                <div class="flex justify-between text-[11px] font-bold">
+                                    <span class="text-base-content/80">"메시지 간격 (Message Spacing)"</span>
+                                    <span class="text-success">{move || format!("{}px", signals.message_spacing.get())}</span>
+                                </div>
+                                <input type="range" min="0" max="24" step="1"
+                                    class="range range-xs range-success"
+                                    prop:value=move || signals.message_spacing.get().to_string()
+                                    on:input=move |ev| {
+                                        // Update UI live while dragging
+                                        let val = event_target_value(&ev).parse::<u32>().unwrap_or(4);
+                                        signals.set_message_spacing.set(val);
+                                    }
+                                    on:change=move |ev| {
+                                        // Save to config when released
+                                        let val = event_target_value(&ev).parse::<u32>().unwrap_or(4);
+                                        signals.set_message_spacing.set(val);
+                                        actions.save_config.dispatch(());
+                                    }
+                                />
+                                <div class="text-[9px] text-base-content/50">"채팅 메시지 위아래의 여백을 조절합니다. (기본값: 4px)"</div>
+                            </div>
+
                             <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
                                 <label class="label cursor-pointer p-0">
                                     <span class="label-text text-xs font-bold text-base-content/80">"컴팩트 모드에서 번역 시 원문 숨기기"</span>

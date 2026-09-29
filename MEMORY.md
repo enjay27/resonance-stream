@@ -8,8 +8,6 @@
 [`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).
 Pushed at Kade's request. **CI green on 182d651** (run 36551390327): Linux + Windows,
 incl. the app tests — after fixing one stale test (mock served the wrong llama endpoint).
-Open decisions for Kade: `AppConfig` unification, unused `pcap`/`windivert` deps,
-TROUBLE_SHOOTING rewrite, the "v2.0" footer.
 
 **The app part (`src-tauri/`) only cross-*checks* on Linux** (`just app-cross-check`,
 mingw) — it cannot link, so its tests and any run need Windows (CI or Kade's machine). Anything that

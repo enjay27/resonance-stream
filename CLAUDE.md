@@ -33,7 +33,7 @@ to wasm).
 - **Backend:** Tauri 2 (`unstable`, tray, global-shortcut, fs, shell, opener).
 - **Capture:** raw socket with `SIO_RCVALL` (`windows-sys`,
   `src-tauri/src/services/sniffer/network.rs`). Needs **Administrator**. Port 5003
-  carries chat. The `pcap` and `windivert` crates are dependencies but unused.
+  carries chat. No Npcap / WinDivert (removed 2026-09-29; capture never used them).
 - **Translation:** llama.cpp server (Vulkan build, downloaded at runtime from this
   repo's releases) on `127.0.0.1:8080`; pre/post-processing in `crates/core/src/text.rs`.
 - **Remote metadata:** a public gist (`downloader/gist.rs`) carries app/model/dictionary
@@ -150,7 +150,6 @@ git add -A && git commit
 
 ### Never commit
 - Secrets, `.env`.
-- Build output: `target/`, `dist/`, `style/output.css`, `*.exe`, `lib/` (Npcap/WinDivert SDKs),
-  `WinDivert*.{dll,lib,sys}`.
+- Build output: `target/`, `dist/`, `style/output.css`, `*.exe`.
 - `graft/` (regenerable), `node_modules/`, IDE folders.
 - A half-applied or unformatted tree "to save progress". Use a branch.

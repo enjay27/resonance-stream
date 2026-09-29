@@ -25,13 +25,11 @@ tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-windivert = { version = "0.6", features = ["vendored"] }
 tokio = { version = "1", features = ["fs", "io-util"] }
 reqwest = { version = "0.11", features = ["stream", "json", "blocking", "rustls-tls"] }
 futures-util = "0.3"
 tauri-plugin-fs = "2.4.5" # For handling the download stream
 # Network & Parsing
-pcap = "2.4"
 byteorder = "1.5"  # For reading u16/u32 from packets
 indexmap = { version = "2.0", features = ["serde"] }
 is_elevated = "0.1"

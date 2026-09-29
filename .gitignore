@@ -1,11 +1,6 @@
 /dist/
 /target/
 
-# WinDivert
-WinDivert.dll
-WinDivert.lib
-WinDivert64.sys
-
 # IDE
 .idea
 .vscode
@@ -22,9 +17,6 @@ build/
 dist/
 style/output.css
 *.exe
-
-# downloaded libraries
-/lib/
 
 # ENV
 .env

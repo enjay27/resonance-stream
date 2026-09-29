@@ -16,7 +16,7 @@ skipped it is listed in
 
 **`AppConfig` is still defined twice** (ui has derived `Default`, app a hand-written one) —
 [`.memory/active-issues/duplicate-appconfig.md`](.memory/active-issues/duplicate-appconfig.md).
-**Docs:** BUILD/README_EN fixed; TROUBLE_SHOOTING flagged —
+**Docs:** BUILD/README_EN fixed; TROUBLE_SHOOTING deleted (Kade adds new later) —
 [`.memory/active-issues/stale-docs.md`](.memory/active-issues/stale-docs.md).
 
 **Graft MCP start-up fix is PR #24, open.** Until merged, cloud sessions get the CLI only.

@@ -5,10 +5,8 @@ reference; the rest was fixed or flagged in phase 5b.
 
 - **Fixed (5b):** `BUILD*.md` rewritten (no Python sidecar / `setup_libs.bat` / Npcap;
   trunk + tauri-cli + npm; `just check`). `README_EN.md` re-translated from `README.md`.
-- **Flagged, not rewritten:** `TROUBLE_SHOOTING*.md` describe the Python sidecar and
-  WinDivert and quote log lines (`[Python CRASH]`, `Driver Integrity`) that were not
-  checked against the current code. A banner now points to issues #12 / #13, which
-  `README.md` links. Rewrite or delete — Kade's call.
+- **Deleted (Kade, 2026-09-29):** `TROUBLE_SHOOTING*.md` described the Python sidecar
+  and WinDivert. Kade will write new ones; until then README links issues #12 / #13.
 - **Settings footer says "Resonance Stream v2.0"** (`src/components/settings/mod.rs`)
   while the app is 0.4.0 and the title bar (now `CARGO_PKG_VERSION`) says v0.4.0.
   Left as is: changing visible text is Kade's call.

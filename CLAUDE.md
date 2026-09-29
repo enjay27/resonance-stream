@@ -22,7 +22,11 @@ ui on Linux and the full app gate on `windows-latest`, on every push and PR.
 
 **New pure logic goes in `crates/core`**, where it is tested on every OS. Anything that
 crosses the Tauri boundary is defined once, in `crates/types` (serde only — it compiles
-to wasm).
+to wasm) — **except `AppConfig`**, which is deliberately two types: the app's
+(`src-tauri/src/config/app_config.rs`, owns the file on disk and the real defaults) and
+the ui's (`src/ui_types.rs`, the UI's view of it). Architecture decision, Kade
+2026-09-29 — do not merge them. A field added to one must be added to the other with
+the same name, or it will not cross the boundary.
 
 ---
 

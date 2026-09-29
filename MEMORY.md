@@ -14,8 +14,6 @@ mingw) — it cannot link, so its tests and any run need Windows (CI or Kade's m
 skipped it is listed in
 [`.memory/active-issues/unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).
 
-**`AppConfig` is still defined twice** (ui has derived `Default`, app a hand-written one) —
-[`.memory/active-issues/duplicate-appconfig.md`](.memory/active-issues/duplicate-appconfig.md).
 **Docs:** BUILD/README_EN fixed; TROUBLE_SHOOTING deleted (Kade adds new later) —
 [`.memory/active-issues/stale-docs.md`](.memory/active-issues/stale-docs.md).
 

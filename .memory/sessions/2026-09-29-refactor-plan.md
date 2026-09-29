@@ -18,3 +18,7 @@ Hence phase 2: move that code into a crate that builds anywhere.
 
 **Graft MCP:** this session started on `main` without PR #24; the MCP server failed with
 ENOENT (graft installed by the bootstrap hook after MCP spawn). The CLI worked throughout.
+
+**Follow-up decisions (Kade, after CI went green):** `AppConfig` stays split between app
+and ui — architecture, recorded in CLAUDE.md; `pcap`/`windivert` removed;
+TROUBLE_SHOOTING deleted (new ones later); footer shows the app version.

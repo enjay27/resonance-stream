@@ -1,12 +1,12 @@
 //! Backend -> UI events that are also kept as history: system log lines
 //! ("system-event") and game chat ("packet-event").
 
-use crate::{load_config, AppState, ChatMessage, SystemLogLevel, SystemMessage};
+use crate::{AppState, ChatMessage, SystemLogLevel, SystemMessage};
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::Ordering;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
@@ -65,7 +65,7 @@ pub fn inject_system_message<S: Into<String>>(
 
         // Store in specialized system storage
         {
-            let mut sys_hist = state.system_history.lock().unwrap();
+            let mut sys_hist = state.system_history.lock();
             if sys_hist.len() >= 200 {
                 sys_hist.pop_front();
             }
@@ -81,7 +81,7 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
     let now = Instant::now();
 
     {
-        let mut cache = CHAT_DEDUPE_CACHE.lock().unwrap();
+        let mut cache = CHAT_DEDUPE_CACHE.lock();
 
         // 1. Prune old messages from the sliding window (e.g., older than 2 seconds)
         while let Some(&(_, time)) = cache.front() {
@@ -105,22 +105,14 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
     if let Some(state) = app.try_state::<AppState>() {
         // Auto-populate from Backend Cache
         {
-            let cache = state.nickname_cache.lock().unwrap();
+            let cache = state.nickname_cache.lock();
             if let Some(romaji) = cache.get(&packet.nickname) {
                 packet.nickname_romaji = Some(romaji.clone());
             }
         }
 
-        // Store in HOT Storage (IndexMap)
-        {
-            let config = load_config(app.clone());
-
-            let mut history = state.chat_history.lock().unwrap();
-            while history.len() >= config.chat_limit && !history.is_empty() {
-                history.shift_remove_index(0);
-            }
-            history.insert(packet.pid, packet.clone());
-        }
+        // Store in HOT Storage (bounded by chat_limit, oldest dropped first)
+        state.chat_history.lock().push(packet.clone());
 
         // Emit "packet-event" for Game Chat
         let _ = app.emit("packet-event", &packet);

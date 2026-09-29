@@ -1,6 +1,7 @@
-use indexmap::IndexMap;
+use parking_lot::{Mutex, RwLock};
+use resonance_core::history::ChatHistory;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tauri::Manager;
 
 pub mod commands;
@@ -33,6 +34,23 @@ pub fn run() {
     let app = tauri::Builder::default()
         .setup(|app| {
             let handle = app.handle().clone();
+            // --- STATE FIRST: everything below logs through it and reads its config ---
+            let config = read_config_file(&handle);
+            let dictionary = resonance_core::text::Dictionary::load(&dictionary_path(&handle));
+            app.manage(AppState {
+                config: RwLock::new(config.clone()),
+                chat_history: Mutex::new(ChatHistory::new(config.chat_limit)),
+                system_history: Mutex::new(VecDeque::with_capacity(200)),
+                next_pid: 1.into(),
+                nickname_cache: Mutex::new(std::collections::HashMap::new()),
+                dictionary: RwLock::new(Arc::new(dictionary)),
+                translator_tx: Mutex::new(None),
+                data_factory_tx: Mutex::new(None),
+                sniffer_tx: Mutex::new(None),
+                blocked_users: Mutex::new(config.blocked_users.clone()),
+            });
+            let state = app.state::<AppState>();
+
             inject_system_message(
                 &handle,
                 SystemLogLevel::Info,
@@ -57,51 +75,34 @@ pub fn run() {
                 );
             }
 
-            // --- CHECK CONFIG AND START AI IF NEEDED ---
-            let config = load_config(handle.clone());
-
             update_global_tab_shortcut(
                 handle.clone(),
                 config.tab_switch_modifier.clone(),
                 config.tab_switch_key.clone(),
             );
 
-            let initial_tx = if config.use_translation {
+            // --- START AI IF NEEDED ---
+            if config.use_translation {
                 let model_path = crate::get_model_path(&handle);
-                Some(crate::services::translator::start_translator_worker(
-                    handle.clone(),
-                    model_path,
-                ))
-            } else {
-                None
-            };
+                *state.translator_tx.lock() =
+                    Some(crate::services::translator::start_translator_worker(
+                        handle.clone(),
+                        model_path,
+                    ));
+            }
 
-            // --- CHECK CONFIG AND START DATA LOGGING IF NEEDED ---
-            let initial_df_tx = if config.archive_chat {
-                Some(crate::io::start_data_factory_worker(handle.clone()))
-            } else {
-                None
-            };
+            // --- START DATA LOGGING IF NEEDED ---
+            if config.archive_chat {
+                *state.data_factory_tx.lock() =
+                    Some(crate::io::start_data_factory_worker(handle.clone()));
+            }
 
             crate::tray::setup_tray(app)?;
-
-            // Initialize State INSIDE setup so we have access to the App context
-            app.manage(AppState {
-                batch_data: Arc::new((Mutex::new((vec![], 0)), Default::default())),
-                chat_history: Mutex::new(IndexMap::new()),
-                system_history: Mutex::new(VecDeque::with_capacity(200)),
-                next_pid: 1.into(),
-                nickname_cache: Mutex::new(std::collections::HashMap::new()),
-                translator_tx: Mutex::new(initial_tx),
-                data_factory_tx: Mutex::new(initial_df_tx),
-                sniffer_tx: Mutex::new(None),
-                dedup_cache: Mutex::new(std::collections::HashMap::new()),
-                blocked_users: Mutex::new(config.blocked_users.clone()),
-            });
 
             Ok(())
         })
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![

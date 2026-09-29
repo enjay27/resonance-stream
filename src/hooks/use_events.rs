@@ -1,6 +1,9 @@
+use crate::chat_view::{push_bounded, Tab};
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
-use crate::ui_types::{ChatMessage, SnifferStatePayload, SystemMessage, TranslationResult};
+use crate::ui_types::{
+    ChatMessage, SnifferStatePayload, SystemMessage, TranslationResult, TranslatorStatePayload,
+};
 use leptos::logging::log;
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
@@ -37,94 +40,61 @@ pub async fn setup_event_listeners(signals: AppSignals) {
 
 // --- EXTRACTED HANDLER FUNCTIONS ---
 
+#[derive(serde::Deserialize)]
+struct TauriEvent<T> {
+    payload: T,
+}
+
+/// Deserializes an event's payload straight from the JS value -- no
+/// intermediate `serde_json::Value`, no copy of the payload.
+fn payload<T: serde::de::DeserializeOwned>(event_obj: JsValue) -> Option<T> {
+    serde_wasm_bindgen::from_value::<TauriEvent<T>>(event_obj)
+        .ok()
+        .map(|event| event.payload)
+}
+
 fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |event_obj: JsValue| {
-        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-            if let Ok(mut packet) = serde_json::from_value::<ChatMessage>(ev["payload"].clone()) {
-                // Handle Stickers/Emojis
-                if packet.message.starts_with("emojiPic=") {
-                    packet.message = "[스티커]".to_string();
-                    packet.translated = None;
-                }
-                if packet.message.contains("<sprite=") {
-                    let mut output = String::with_capacity(packet.message.len());
-                    let mut current = packet.message.as_str();
+        // Stickers/emotes arrive already normalized by the backend.
+        let Some(packet) = payload::<ChatMessage>(event_obj) else {
+            return;
+        };
 
-                    while let Some(start) = current.find("<sprite=") {
-                        // Push the text *before* the sprite tag
-                        output.push_str(&current[..start]);
+        let limit = signals.chat_limit.get_untracked();
+        let alert = signals
+            .alert_keywords
+            .with_untracked(|kws| kws.iter().any(|kw| packet.message.contains(kw.as_str())));
+        let channel = packet.channel.clone();
+        let message_for_log = alert.then(|| packet.message.clone());
 
-                        // Find the closing '>'
-                        if let Some(end) = current[start..].find('>') {
-                            // Insert our clean UI placeholder
-                            output.push_str("[이모지]");
-                            // Move the cursor past the '>'
-                            current = &current[start + end + 1..];
-                        } else {
-                            // If the tag is somehow broken/malformed, stop parsing
-                            output.push_str(&current[start..]);
-                            current = "";
-                            break;
-                        }
-                    }
-                    // Push any remaining text *after* the last sprite tag
-                    output.push_str(current);
-                    packet.message = output;
-                    packet.translated = None;
-                }
+        signals.set_chat_log.update(|log| {
+            push_bounded(log, packet.pid, RwSignal::new(packet), limit);
+        });
 
-                signals.set_chat_log.update(|log| {
-                    let limit = signals.chat_limit.get_untracked();
-                    if log.len() >= limit {
-                        log.shift_remove_index(0);
-                    }
-                    log.insert(packet.pid, RwSignal::new(packet.clone()));
-                });
+        let tab = Tab::from_label(&signals.active_tab.get_untracked());
+        let is_visible = signals
+            .custom_filters
+            .with_untracked(|filters| tab.shows_channel(&channel, filters));
 
-                let active_tab = signals.active_tab.get_untracked();
-                let is_visible = match active_tab.as_str() {
-                    "전체" => true,
-                    "커스텀" => signals
-                        .custom_filters
-                        .get_untracked()
-                        .contains(&packet.channel),
-                    "시스템" => false,
-                    _ => {
-                        let key = match active_tab.as_str() {
-                            "로컬" => "LOCAL",
-                            "파티" => "PARTY",
-                            "길드" => "GUILD",
-                            _ => "WORLD",
-                        };
-                        packet.channel == key
-                    }
-                };
+        // Only increment if the message belongs to the tab we are currently looking at
+        if is_visible && !signals.is_at_bottom.get_untracked() {
+            signals.set_unread_count.update(|c| *c += 1);
+        } else if !is_visible {
+            // Inactive tab -> Increment Tab Badge
+            signals.set_unread_counts.update(|counts| {
+                *counts.entry(channel).or_insert(0) += 1;
+            });
+        }
 
-                // Only increment if the message belongs to the tab we are currently looking at
-                if is_visible && !signals.is_at_bottom.get_untracked() {
-                    signals.set_unread_count.update(|c| *c += 1);
-                } else if !is_visible {
-                    // Inactive tab -> Increment Tab Badge
-                    signals.set_unread_counts.update(|counts| {
-                        *counts.entry(packet.channel.clone()).or_insert(0) += 1;
-                    });
-                }
-
-                let keywords = signals.alert_keywords.get_untracked();
-                let volume = signals.alert_volume.get_untracked();
-
-                if keywords.iter().any(|kw| packet.message.contains(kw)) {
-                    // Fire and forget the audio ping
-                    if volume > 0.0 {
-                        log!("audio ping by keyword {:?}", packet.message);
-                        if let Ok(audio) =
-                            web_sys::HtmlAudioElement::new_with_src("public/ping.mp3")
-                        {
-                            // Convert f32 to f64 for the Web Audio API
-                            audio.set_volume(volume as f64);
-                            let _ = audio.play();
-                        }
-                    }
+        let volume = signals.alert_volume.get_untracked();
+        if let Some(message) = message_for_log {
+            // Fire and forget the audio ping
+            if volume > 0.0 {
+                log!("audio ping by keyword {:?}", message);
+                if let Ok(audio) = web_sys::HtmlAudioElement::new_with_src("public/ping.mp3") {
+                    // Convert f32 to f64 for the Web Audio API
+                    audio.set_volume(volume as f64);
+                    let _ = audio.play();
                 }
             }
         }
@@ -133,90 +103,78 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
 
 fn create_translation_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |event_obj: JsValue| {
-        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-            if let Ok(payload) = serde_json::from_value::<TranslationResult>(ev["payload"].clone())
-            {
-                // Find the existing message by PID and update its signal
-                // Leptos will instantly re-render ONLY this specific ChatRow!
-                signals.set_chat_log.update(|log| {
-                    if let Some(chat_rw) = log.get(&payload.pid) {
-                        chat_rw.update(|c| {
-                            c.translated = Some(payload.translated);
-                        });
-                    }
-                });
-            }
+        if let Some(payload) = payload::<TranslationResult>(event_obj) {
+            // Find the existing message by PID and update its signal.
+            // Only this row re-renders; the list itself is untouched.
+            signals.chat_log.with_untracked(|log| {
+                if let Some(chat_rw) = log.get(&payload.pid) {
+                    chat_rw.update(|c| {
+                        c.translated = Some(payload.translated);
+                    });
+                }
+            });
         }
     }) as Box<dyn FnMut(JsValue)>)
 }
 
 fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |event_obj: JsValue| {
-        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-            if let Ok(packet) = serde_json::from_value::<SystemMessage>(ev["payload"].clone()) {
-                signals.set_system_log.update(|log| {
-                    if log.len() >= 200 {
-                        log.remove(0);
-                    }
-                    log.push(RwSignal::new(packet));
-                });
-
-                let active_tab = signals.active_tab.get_untracked();
-                if active_tab != "전체" && active_tab != "시스템" {
-                    signals.set_unread_counts.update(|counts| {
-                        *counts.entry("SYSTEM".to_string()).or_insert(0) += 1;
-                    });
-                }
+        let Some(packet) = payload::<SystemMessage>(event_obj) else {
+            return;
+        };
+        signals.set_system_log.update(|log| {
+            if log.len() >= 200 {
+                log.remove(0);
             }
+            log.push(RwSignal::new(packet));
+        });
+
+        let active_tab = signals.active_tab.get_untracked();
+        if active_tab != "전체" && active_tab != "시스템" {
+            signals.set_unread_counts.update(|counts| {
+                *counts.entry("SYSTEM".to_string()).or_insert(0) += 1;
+            });
         }
     }) as Box<dyn FnMut(JsValue)>)
 }
 
 fn create_translator_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |event_obj: JsValue| {
-        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-            // NOTE: Make sure to import TranslatorStatePayload at the top of use_events.rs!
-            if let Ok(payload) = serde_json::from_value::<crate::ui_types::TranslatorStatePayload>(
-                ev["payload"].clone(),
-            ) {
-                signals.set_translator_state.set(payload.state.clone());
-                if payload.state == "Error" {
-                    signals.set_translator_error.set(payload.message);
-                }
-            }
+        let Some(payload) = payload::<TranslatorStatePayload>(event_obj) else {
+            return;
+        };
+        signals.set_translator_state.set(payload.state.clone());
+        if payload.state == "Error" {
+            signals.set_translator_error.set(payload.message);
         }
     }) as Box<dyn FnMut(JsValue)>)
 }
 
 fn create_sniffer_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |event_obj: JsValue| {
-        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-            if let Ok(payload) =
-                serde_json::from_value::<SnifferStatePayload>(ev["payload"].clone())
-            {
-                signals.set_sniffer_state.set(payload.state.clone());
+        let Some(payload) = payload::<SnifferStatePayload>(event_obj) else {
+            return;
+        };
+        signals.set_sniffer_state.set(payload.state.clone());
 
-                // If it's an error, save the message so the user can click the badge to read it
-                if payload.state == "Error" {
-                    signals.set_sniffer_error.set(payload.message);
-                }
-            }
+        // If it's an error, save the message so the user can click the badge to read it
+        if payload.state == "Error" {
+            signals.set_sniffer_error.set(payload.message);
         }
     }) as Box<dyn FnMut(JsValue)>)
 }
 
 fn create_update_message_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |event_obj: JsValue| {
-        if let Ok(ev) = serde_wasm_bindgen::from_value::<serde_json::Value>(event_obj) {
-            // Parse the fully updated ChatMessage sent from the backend
-            if let Ok(updated_msg) = serde_json::from_value::<ChatMessage>(ev["payload"].clone()) {
-                // Find the existing signal by PID and completely overwrite its value
-                signals.set_chat_log.update(|log| {
-                    if let Some(chat_rw) = log.get(&updated_msg.pid) {
-                        chat_rw.set(updated_msg);
-                    }
-                });
+        // The fully updated ChatMessage sent from the backend
+        let Some(updated_msg) = payload::<ChatMessage>(event_obj) else {
+            return;
+        };
+        // Find the existing signal by PID and completely overwrite its value
+        signals.chat_log.with_untracked(|log| {
+            if let Some(chat_rw) = log.get(&updated_msg.pid) {
+                chat_rw.set(updated_msg);
             }
-        }
+        });
     }) as Box<dyn FnMut(JsValue)>)
 }

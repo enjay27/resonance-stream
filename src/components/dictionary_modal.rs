@@ -76,9 +76,10 @@ pub fn DictionaryModal() -> impl IntoView {
                 "content": json_payload
             }))
             .unwrap();
+            // The backend swaps the dictionary in place: the next translation
+            // uses it, no restart needed.
             let _ = invoke("save_local_dictionary", args).await;
 
-            signals.set_restart_required.set(true);
             signals.set_show_dictionary.set(false);
         });
     };

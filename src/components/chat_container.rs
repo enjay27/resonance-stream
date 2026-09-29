@@ -1,3 +1,4 @@
+use crate::chat_view::{newest_matching, ChatFilter, Tab};
 use crate::components::ChatRow;
 use crate::store::AppSignals;
 use crate::ui_types::SystemMessage;
@@ -9,7 +10,7 @@ use web_sys::{HtmlDivElement, MouseEvent};
 #[component]
 pub fn ChatContainer() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
-    let chat_container_ref = create_node_ref::<html::Div>();
+    let chat_container_ref = NodeRef::<html::Div>::new();
 
     // Start by only rendering the last 50 messages to keep the DOM blazing fast
     let (display_limit, set_display_limit) = signal(50);
@@ -26,82 +27,21 @@ pub fn ChatContainer() -> impl IntoView {
     });
 
     // --- FILTERED VIEW LOGIC ---
+    // Re-runs when a message arrives or a filter changes. Rows are read
+    // untracked and by reference: the fields filtered on never change after
+    // arrival, so a translation landing in one row does not re-filter the
+    // whole log, and no message is cloned to be looked at.
     let filtered_chat = Memo::new(move |_| {
-        let tab = signals.active_tab.get();
-        let search = signals.search_term.get().to_lowercase();
+        let tab = Tab::from_label(&signals.active_tab.get());
+        let search = signals.search_term.get();
         let filters = signals.custom_filters.get();
-        let chat_log = signals.chat_log.get();
         let min_level = signals.min_sender_level.get();
+        let limit = display_limit.get();
 
-        if tab == "시스템" {
-            return Vec::new();
-        }
-
-        let base_list = match tab.as_str() {
-            "전체" => chat_log.values().cloned().collect::<Vec<_>>(),
-            "커스텀" => chat_log
-                .values()
-                .filter(|m| filters.contains(&m.get().channel))
-                .cloned()
-                .collect(),
-            _ => {
-                let key = match tab.as_str() {
-                    "로컬" => "LOCAL",
-                    "파티" => "PARTY",
-                    "길드" => "GUILD",
-                    _ => "WORLD",
-                };
-                chat_log
-                    .values()
-                    .filter(|m| m.get().channel == key)
-                    .cloned()
-                    .collect()
-            }
-        };
-
-        let full_list: Vec<_> = if search.is_empty() {
-            // Apply level filter AND block system messages from general level-filtering logic if desired
-            base_list
-                .into_iter()
-                .filter(|sig| {
-                    let m = sig.get();
-                    // We only apply the level filter if the message is specifically from the World Channel
-                    if m.channel == "WORLD" {
-                        m.level >= min_level
-                    } else {
-                        true // Pass all other channels regardless of level
-                    }
-                })
-                .collect()
-        } else {
-            base_list
-                .into_iter()
-                .filter(|sig| {
-                    let m = sig.get();
-                    // Apply level filter to World Channel AND search term filter
-                    let passes_level_check = if m.channel == "WORLD" {
-                        m.level >= min_level
-                    } else {
-                        true
-                    };
-
-                    passes_level_check
-                        && (m.nickname.to_lowercase().contains(&search)
-                            || m.message.to_lowercase().contains(&search))
-                })
-                .collect()
-        };
-
-        // --- SLICE THE LIST (PAGING) ---
-        let current_limit = display_limit.get();
-        let total = full_list.len();
-
-        // Only return the bottom `current_limit` amount of messages
-        if total > current_limit {
-            full_list[total - current_limit..].to_vec()
-        } else {
-            full_list
-        }
+        let filter = ChatFilter::new(tab, &filters, min_level, &search);
+        signals.chat_log.with(|log| {
+            newest_matching(log, limit, |sig| sig.with_untracked(|m| filter.matches(m)))
+        })
     });
 
     let filtered_system_logs = Memo::new(move |_| {
@@ -248,14 +188,14 @@ pub fn ChatContainer() -> impl IntoView {
                     fallback=move || view! {
                         <For
                             each=move || filtered_chat.get()
-                            key=|sig| sig.get_untracked().pid
+                            key=|sig| sig.with_untracked(|m| m.pid)
                             children=move |sig| view! { <ChatRow sig=sig /> }
                         />
                     }
                 >
                     <For
                         each=move || filtered_system_logs.get()
-                        key=|sig| sig.get_untracked().pid
+                        key=|sig| sig.with_untracked(|m| m.pid)
                         children={move |sig: RwSignal<SystemMessage>| {
                             let level = sig.get().level.clone();
                             let level_badge = level.clone();

@@ -13,7 +13,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
 
     Effect::new(move |_| {
-        if sig.get().translated.is_some() {
+        if sig.with(|m| m.translated.is_some()) {
             if signals.is_at_bottom.get_untracked() {
                 request_animation_frame(move || {
                     if let Some(window) = web_sys::window() {
@@ -29,20 +29,22 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
     });
 
     let is_active =
-        Memo::new(move |_| signals.active_menu_id.get() == Some(sig.get_untracked().pid));
+        Memo::new(move |_| signals.active_menu_id.get() == Some(sig.with_untracked(|m| m.pid)));
     let (menu_pos, set_menu_pos) = signal((0, 0));
 
-    let channel_colors = move || match sig.get().channel.as_str() {
-        "WORLD" => ("text-purple-500", "border-l-purple-500"),
-        "GUILD" => ("text-emerald-500", "border-l-emerald-500"),
-        "PARTY" => ("text-sky-500", "border-l-sky-500"),
-        "LOCAL" => ("text-base-content/70", "border-l-base-content/50"),
-        "SYSTEM" => ("text-warning", "border-l-warning"),
-        _ => ("text-base-content", "border-l-base-content"),
+    let channel_colors = move || {
+        sig.with(|m| match m.channel.as_str() {
+            "WORLD" => ("text-purple-500", "border-l-purple-500"),
+            "GUILD" => ("text-emerald-500", "border-l-emerald-500"),
+            "PARTY" => ("text-sky-500", "border-l-sky-500"),
+            "LOCAL" => ("text-base-content/70", "border-l-base-content/50"),
+            "SYSTEM" => ("text-warning", "border-l-warning"),
+            _ => ("text-base-content", "border-l-base-content"),
+        })
     };
 
     let display_time = move || {
-        let raw_ts = sig.get().timestamp;
+        let raw_ts = sig.with(|m| m.timestamp);
         let msg_secs = if raw_ts > 10_000_000_000 {
             raw_ts / 1000
         } else {
@@ -85,7 +87,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
     };
 
     view! {
-        <Show when=move || !(sig.get().is_blocked && signals.hide_blocked_messages.get())>
+        <Show when=move || !(sig.with(|m| m.is_blocked) && signals.hide_blocked_messages.get())>
             <Show
                 when=move || signals.compact_mode.get()
                 fallback=move || view! {
@@ -97,7 +99,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                             // 1. NICKNAME BUBBLE
                             <span
                                 class=move || {
-                                    let color_class = if signals.search_term.get() == sig.get().nickname {
+                                    let color_class = if signals.search_term.with(|s| sig.with(|m| *s == m.nickname)) {
                                         "text-success underline decoration-2"
                                     } else {
                                         channel_colors().0
@@ -112,7 +114,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                         signals.set_active_menu_id.set(None);
                                     } else {
                                         set_menu_pos.set((ev.client_x(), ev.client_y()));
-                                        signals.set_active_menu_id.set(Some(sig.get_untracked().pid));
+                                        signals.set_active_menu_id.set(Some(sig.with_untracked(|m| m.pid)));
                                     }
                                 }
                             >
@@ -136,7 +138,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
                                         <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
                                             on:click=move |_| {
-                                                copy_to_clipboard(&sig.get_untracked().nickname);
+                                                sig.with_untracked(|m| copy_to_clipboard(&m.nickname));
                                                 signals.set_active_menu_id.set(None);
                                             }>
                                             "📋 Copy Name"
@@ -144,7 +146,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
                                         <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
                                             on:click=move |_| {
-                                                let n = sig.get_untracked().nickname;
+                                                let n = sig.with_untracked(|m| m.nickname.clone());
                                                 if signals.search_term.get_untracked() == n {
                                                     signals.set_search_term.set("".into());
                                                 } else {
@@ -157,9 +159,9 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
                                         <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2 text-error"
                                             on:click=move |_| {
-                                                let target_uid = sig.get_untracked().uid;
-                                                let target_name = sig.get_untracked().nickname.clone();
-                                                let blocked_name = sig.get_untracked().nickname.clone();
+                                                let target_uid = sig.with_untracked(|m| m.uid);
+                                                let target_name = sig.with_untracked(|m| m.nickname.clone());
+                                                let blocked_name = sig.with_untracked(|m| m.nickname.clone());
 
                                                 spawn_local(async move {
                                                     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
@@ -179,7 +181,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                             </Show>
 
                             <span class="text-base-content/50 font-bold text-[10px] bg-base-200 px-1 rounded border border-base-content/5">
-                                "Lv." {move || sig.get().level}
+                                "Lv." {move || sig.with(|m| m.level)}
                             </span>
                             <time class="ml-1 text-base-content/50 opacity-70 text-[10px] bg-base-200 px-1 rounded border border-base-content/5">
                                 {display_time}
@@ -233,7 +235,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
                             <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                                 <button class="btn btn-ghost btn-xs text-[10px] text-base-content/50 h-6 min-h-0 px-2 hover:bg-base-content/10 hover:text-base-content bg-base-200 rounded-md shadow-sm"
-                                    on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
+                                    on:click=move |_| sig.with_untracked(|m| copy_to_clipboard(&m.message))>
                                     "COPY"
                                 </button>
                             </div>
@@ -250,7 +252,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                     // 2. NICKNAME BUBBLE (inline-block so it flows like text)
                     <span
                         class=move || {
-                            let color_class = if signals.search_term.get() == sig.get().nickname {
+                            let color_class = if signals.search_term.with(|s| sig.with(|m| *s == m.nickname)) {
                                 "text-success underline decoration-2"
                             } else {
                                 channel_colors().0
@@ -264,7 +266,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                 signals.set_active_menu_id.set(None);
                             } else {
                                 set_menu_pos.set((ev.client_x(), ev.client_y()));
-                                signals.set_active_menu_id.set(Some(sig.get_untracked().pid));
+                                signals.set_active_menu_id.set(Some(sig.with_untracked(|m| m.pid)));
                             }
                         }
                     >
@@ -288,7 +290,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
                                 <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
                                     on:click=move |_| {
-                                        copy_to_clipboard(&sig.get_untracked().nickname);
+                                        sig.with_untracked(|m| copy_to_clipboard(&m.nickname));
                                         signals.set_active_menu_id.set(None);
                                     }>
                                     "📋 Copy Name"
@@ -296,7 +298,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
                                 <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
                                     on:click=move |_| {
-                                        let n = sig.get_untracked().nickname;
+                                        let n = sig.with_untracked(|m| m.nickname.clone());
                                         if signals.search_term.get_untracked() == n {
                                             signals.set_search_term.set("".into());
                                         } else {
@@ -309,9 +311,9 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
 
                                 <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2 text-error"
                                     on:click=move |_| {
-                                        let target_uid = sig.get_untracked().uid;
-                                        let target_name = sig.get_untracked().nickname.clone();
-                                        let blocked_name = sig.get_untracked().nickname.clone();
+                                        let target_uid = sig.with_untracked(|m| m.uid);
+                                        let target_name = sig.with_untracked(|m| m.nickname.clone());
+                                        let blocked_name = sig.with_untracked(|m| m.nickname.clone());
 
                                         spawn_local(async move {
                                             let args = serde_wasm_bindgen::to_value(&serde_json::json!({
@@ -395,9 +397,9 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                         </time>
 
                         // --- NEW: HIDE COPY BUTTON ON BLOCKED MESSAGES ---
-                        <Show when=move || !sig.get().is_blocked>
+                        <Show when=move || !sig.with(|m| m.is_blocked)>
                             <button class="hidden group-hover:flex btn btn-ghost btn-xs text-[10px] font-bold text-base-content/50 h-5 min-h-0 px-1.5 py-0 hover:bg-base-content/10 hover:text-base-content leading-none"
-                                on:click=move |_| copy_to_clipboard(&sig.get_untracked().message)>
+                                on:click=move |_| sig.with_untracked(|m| copy_to_clipboard(&m.message))>
                                 "COPY"
                             </button>
                         </Show>

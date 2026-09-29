@@ -13,6 +13,7 @@ use crate::{inject_system_message, NetworkInterface};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000; //
 const RULE_NAME: &str = "Resonance Stream (Packet Sniffing)"; //
+const RECV_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 
 // --- 3. NETWORK INITIALIZATION ---
 pub fn initialize_network_socket(
@@ -82,6 +83,17 @@ pub fn initialize_network_socket(
     };
 
     let socket = setup_raw_socket(local_ip, app).ok()?;
+
+    // Every IP packet on the interface lands in this socket; the default
+    // buffer overflows (and drops chat) during bursts.
+    if let Err(e) = socket.set_recv_buffer_size(RECV_BUFFER_BYTES) {
+        inject_system_message(
+            app,
+            SystemLogLevel::Warning,
+            "Sniffer",
+            format!("Could not enlarge the socket receive buffer: {:?}", e),
+        );
+    }
 
     if let Err(e) = socket.set_read_timeout(Some(Duration::from_millis(500))) {
         inject_system_message(
@@ -189,82 +201,6 @@ pub fn find_game_interface_ip() -> Option<std::net::Ipv4Addr> {
         }
     }
     None
-}
-
-pub fn ensure_firewall_rule(app: &AppHandle) {
-    if let Ok(exe_path) = env::current_exe() {
-        if let Some(path_str) = exe_path.to_str() {
-            inject_system_message(
-                app,
-                SystemLogLevel::Info,
-                "Sniffer",
-                "Configuring Windows Firewall...",
-            );
-            emit_sniffer_state(app, "Firewall", "Configuring Windows Firewall...");
-
-            let _ = Command::new("netsh")
-                .args([
-                    "advfirewall",
-                    "firewall",
-                    "delete",
-                    "rule",
-                    &format!("name={}", RULE_NAME),
-                ])
-                .creation_flags(CREATE_NO_WINDOW)
-                .status();
-
-            let result = Command::new("netsh")
-                .args([
-                    "advfirewall",
-                    "firewall",
-                    "add",
-                    "rule",
-                    &format!("name={}", RULE_NAME),
-                    "dir=in",
-                    "action=allow",
-                    "protocol=TCP",
-                    "remoteport=5003",
-                    "remoteip=172.65.0.0/16",
-                    &format!("program={}", path_str),
-                    "enable=yes",
-                    "profile=any",
-                ])
-                .creation_flags(CREATE_NO_WINDOW)
-                .status();
-
-            match result {
-                Ok(status) if status.success() => {
-                    inject_system_message(
-                        app,
-                        SystemLogLevel::Success,
-                        "Sniffer",
-                        "Firewall configured successfully.",
-                    );
-                }
-                _ => {
-                    inject_system_message(
-                        app,
-                        SystemLogLevel::Error,
-                        "Sniffer",
-                        "Failed to configure firewall. Inbound chat may be blocked.",
-                    );
-                }
-            }
-        }
-    }
-}
-
-pub fn remove_firewall_rule() {
-    let _ = Command::new("netsh")
-        .args([
-            "advfirewall",
-            "firewall",
-            "delete",
-            "rule",
-            &format!("name={}", RULE_NAME),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
 }
 
 #[tauri::command]

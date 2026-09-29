@@ -31,3 +31,10 @@ run as the real app.
   (`app.package_info().version` in `downloader/gist.rs`). `Cargo.lock` was generated in
   this session from the local registry cache — Kade's previous local lock was untracked,
   so its exact versions may differ.
+- **Review fixes (2026-09-29, fbfd552..HEAD).** Core logic is tested on Linux (78 + 8 UI
+  + 3 types tests); app wiring is cross-checked and CI-built only. Worth a real run:
+  chat capture incl. long/bursty world chat (new framing -- confirm with a captured
+  fixture), translation on/off/tier change (one llama-server, new port if 8080 busy,
+  Exit kills it), dictionary edit applies without restart, model/app/AI-engine
+  download (`.part` then rename; engine zip hash pinned), archive now in the app data
+  folder, block/unblock, restart sniffer, tab/search/unread badges.

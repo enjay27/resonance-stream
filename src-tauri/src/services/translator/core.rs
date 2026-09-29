@@ -1,7 +1,20 @@
 use reqwest::blocking::Client;
 use serde_json::json;
 
-pub const AI_SERVER_URL: &str = "http://127.0.0.1:8080";
+use std::sync::atomic::{AtomicU16, Ordering};
+
+/// Port tried first for llama-server; another is picked if it is taken.
+pub const PREFERRED_SERVER_PORT: u16 = 8080;
+static SERVER_PORT: AtomicU16 = AtomicU16::new(PREFERRED_SERVER_PORT);
+
+/// Base URL of the running llama-server (the port is chosen at launch).
+pub fn server_url() -> String {
+    format!("http://127.0.0.1:{}", SERVER_PORT.load(Ordering::Relaxed))
+}
+
+pub(crate) fn set_server_port(port: u16) {
+    SERVER_PORT.store(port, Ordering::Relaxed);
+}
 
 pub fn translate_text(client: &Client, server_url: &str, jp_text: &str) -> String {
     let safe_text = sanitize_input(jp_text);

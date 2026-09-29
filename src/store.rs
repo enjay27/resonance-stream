@@ -1,7 +1,6 @@
 use crate::ui_types::{ChatMessage, SystemMessage};
-use indexmap::IndexMap;
 use leptos::prelude::{signal, Action, ReadSignal, RwSignal, WriteSignal};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Copy, Clone, Debug)]
 pub struct AppSignals {
@@ -34,8 +33,9 @@ pub struct AppSignals {
     pub set_search_term: WriteSignal<String>,
     pub name_cache: ReadSignal<HashMap<String, String>>,
     pub set_name_cache: WriteSignal<HashMap<String, String>>,
-    pub chat_log: ReadSignal<IndexMap<u64, RwSignal<ChatMessage>>>,
-    pub set_chat_log: WriteSignal<IndexMap<u64, RwSignal<ChatMessage>>>,
+    /// Keyed by pid: pids only grow, so key order is arrival order.
+    pub chat_log: ReadSignal<BTreeMap<u64, RwSignal<ChatMessage>>>,
+    pub set_chat_log: WriteSignal<BTreeMap<u64, RwSignal<ChatMessage>>>,
     pub system_log: ReadSignal<Vec<RwSignal<SystemMessage>>>,
     pub set_system_log: WriteSignal<Vec<RwSignal<SystemMessage>>>,
     pub is_system_at_bottom: ReadSignal<bool>,
@@ -155,7 +155,7 @@ impl AppSignals {
         let (search_term, set_search_term) = signal("".to_string());
         let (name_cache, set_name_cache) =
             signal(std::collections::HashMap::<String, String>::new());
-        let (chat_log, set_chat_log) = signal(IndexMap::<u64, RwSignal<ChatMessage>>::new());
+        let (chat_log, set_chat_log) = signal(BTreeMap::<u64, RwSignal<ChatMessage>>::new());
         let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
 
         let (is_system_at_bottom, set_system_at_bottom) = signal(true);

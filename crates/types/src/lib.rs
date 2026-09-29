@@ -29,7 +29,9 @@ pub struct ChatMessage {
     pub translated: Option<String>,
     #[serde(default)]
     pub nickname_romaji: Option<String>,
-    #[serde(default)]
+    /// Raw bytes of fields the parser does not understand. Empty unless the
+    /// backend runs with unknown-field capture on; omitted from the wire when empty.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub unknown_fields: HashMap<String, Vec<u8>>,
 }
 
@@ -90,6 +92,10 @@ pub struct VersionInfo {
     pub latest_version: String,
     pub download_url: String,
     pub release_notes: String,
+    /// SHA-256 (hex) of the file at `download_url`. When the gist publishes
+    /// it, the download is verified against it; older gists omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -111,4 +117,48 @@ pub struct UpdateCheckResult {
     pub model_update_available: bool,
     pub dict_update_available: bool,
     pub remote_data: GistMetadata,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_unknown_fields_are_left_off_the_wire() {
+        let json = serde_json::to_value(ChatMessage {
+            pid: 1,
+            message: "hi".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(json.get("unknownFields").is_none(), "{json}");
+        // ...and the field still deserializes when absent.
+        let back: ChatMessage = serde_json::from_value(json).unwrap();
+        assert!(back.unknown_fields.is_empty());
+    }
+
+    #[test]
+    fn version_info_sha256_is_optional() {
+        // Today's gist has no sha256: it must still parse.
+        let old: VersionInfo = serde_json::from_str(
+            r#"{"latest_version":"0.4.0","download_url":"https://x/y","release_notes":""}"#,
+        )
+        .unwrap();
+        assert_eq!(old.sha256, None);
+        assert!(serde_json::to_value(&old).unwrap().get("sha256").is_none());
+
+        let new: VersionInfo = serde_json::from_str(
+            r#"{"latest_version":"0.5.0","download_url":"https://x/y","release_notes":"","sha256":"ab"}"#,
+        )
+        .unwrap();
+        assert_eq!(new.sha256.as_deref(), Some("ab"));
+    }
+
+    #[test]
+    fn non_empty_unknown_fields_still_cross() {
+        let mut msg = ChatMessage::default();
+        msg.unknown_fields.insert("chat_40".into(), vec![7]);
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["unknownFields"]["chat_40"][0], 7);
+    }
 }

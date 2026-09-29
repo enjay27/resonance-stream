@@ -7,22 +7,33 @@ use crossbeam_channel::{unbounded, Sender};
 use reqwest::blocking::Client;
 use std::path::PathBuf;
 use std::thread;
+use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::inject_system_message;
 use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorStatePayload};
 
-use self::core::{translate_text, AI_SERVER_URL};
-use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds, ServerGuard};
-use resonance_core::text::{load_dictionary, postprocess_text, preprocess_text};
+use self::core::{server_url, translate_text};
+use resonance_core::text::{postprocess_text, preprocess_text};
+use resonance_core::workers::translation_is_stale;
 
 pub struct TranslationJob {
     pub chat: ChatMessage,
+    pub queued_at: Instant,
+}
+
+impl TranslationJob {
+    pub fn new(chat: ChatMessage) -> Self {
+        Self {
+            chat,
+            queued_at: Instant::now(),
+        }
+    }
 }
 
 pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<TranslationJob> {
-    let (tx, rx) = unbounded();
-    let config = crate::config::load_config(app.clone());
+    let (tx, rx) = unbounded::<TranslationJob>();
+    let config = crate::config::current_config(&app);
 
     thread::spawn(move || {
         inject_system_message(
@@ -36,15 +47,14 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         server_manager::kill_orphaned_servers(&app);
 
         // 1. Launch the Server
-        let server_process = match launch_ai_server(&app, &model_path, &config) {
-            Some(p) => p,
+        let _server_guard = match server_manager::launch_ai_server(&app, &model_path, &config) {
+            Some(guard) => guard,
             None => return,
         };
-        let _server_guard = ServerGuard(server_process);
 
         // 2. Wait for Health
         emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
-        if !server_health_check_for_30_seconds(&app) {
+        if !server_manager::server_health_check_for_30_seconds(&app) {
             emit_translator_state(
                 &app,
                 "Error",
@@ -53,10 +63,9 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             return;
         }
 
-        // 3. Setup Dependencies
+        // 3. Setup Dependencies (the dictionary lives in AppState, so a
+        // sync or an edit applies to the next job without a restart)
         let client = Client::new();
-        let dict_path = app.path().app_data_dir().unwrap().join("custom_dict.json");
-        let custom_dict = load_dictionary(&dict_path);
 
         inject_system_message(
             &app,
@@ -68,34 +77,38 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
         // 4. Run the pure translation loop
         while let Ok(job) = rx.recv() {
-            process_translation_job(job, &client, &custom_dict, &app);
+            if translation_is_stale(job.queued_at, Instant::now()) {
+                log::debug!("[Translator] Skipped pid {}: waited too long", job.chat.pid);
+                continue;
+            }
+            process_translation_job(job, &client, &app);
         }
     });
 
     tx
 }
 
-fn process_translation_job(
-    job: TranslationJob,
-    client: &Client,
-    dict: &std::collections::HashMap<String, String>,
-    app: &AppHandle,
-) {
+fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle) {
     let chat = job.chat;
     let state = app.state::<crate::AppState>();
-    let nick_cache = state.nickname_cache.lock().unwrap();
 
-    // 1. Preprocess
-    let shield = preprocess_text(&chat.message, dict, Some(&nick_cache));
+    // 1. Preprocess. The nickname lock is held only for this step: the
+    // sniffer needs it for every Japanese nickname, and must not wait for
+    // the HTTP round trip below.
+    let dict = state.dictionary.read().clone();
+    let shield = {
+        let nick_cache = state.nickname_cache.lock();
+        preprocess_text(&chat.message, &dict, Some(&nick_cache))
+    };
 
     // 2. HTTP Request (Blocking)
-    let raw_translation = translate_text(client, AI_SERVER_URL, &shield.masked_text);
+    let raw_translation = translate_text(client, &server_url(), &shield.masked_text);
 
     // 3. Postprocess
     let final_str = postprocess_text(&raw_translation, &shield);
 
     // 4. Dispatch Side Effects
-    if let Some(df_tx) = state.data_factory_tx.lock().unwrap().as_ref() {
+    if let Some(df_tx) = state.data_factory_tx.lock().as_ref() {
         let _ = df_tx.send(crate::io::DataFactoryJob {
             pid: chat.pid,
             original: chat.message.clone(),
@@ -103,7 +116,7 @@ fn process_translation_job(
         });
     }
 
-    if let Some(existing_chat) = state.chat_history.lock().unwrap().get_mut(&chat.pid) {
+    if let Some(existing_chat) = state.chat_history.lock().get_mut(chat.pid) {
         existing_chat.translated = Some(final_str.clone());
     }
 

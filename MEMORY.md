@@ -17,6 +17,11 @@ skipped it is listed in
 **Docs:** BUILD/README_EN fixed; TROUBLE_SHOOTING deleted (Kade adds new later) —
 [`.memory/active-issues/stale-docs.md`](.memory/active-issues/stale-docs.md).
 
+**Code review 2026-09-29:** [`docs/code-review-2026-09-29.md`](docs/code-review-2026-09-29.md) —
+every item fixed test-first in 7 commits (fbfd552 onward, see the report's *Status*). Not
+done by design: gist host allow-list, reqwest 0.12. B2 framing still wants a real capture.
+Windows run needed — [`unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).
+
 **Graft MCP start-up fix is PR #24, open.** Until merged, cloud sessions get the CLI only.
 
 ## Where the detail is

@@ -109,46 +109,9 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                     // Hydrate GAME History
                     if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
                         if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatMessage>>(res) {
-                            let sanitized_vec: Vec<(u64, RwSignal<ChatMessage>)> = vec
-                                .clone()
-                                .into_iter()
-                                .map(|mut p| {
-                                    // 1. Handle Standalone Stamps (emojiPic=...)
-                                    if p.message.starts_with("emojiPic=") {
-                                        p.message = "[스티커]".to_string();
-                                    }
-                                    // 2. Handle Inline Emojis (<sprite=...>)
-                                    else if p.message.contains("<sprite=") {
-                                        let mut output = String::with_capacity(p.message.len());
-                                        let mut current = p.message.as_str();
-
-                                        while let Some(start) = current.find("<sprite=") {
-                                            // Push the text *before* the sprite tag
-                                            output.push_str(&current[..start]);
-
-                                            // Find the closing '>'
-                                            if let Some(end) = current[start..].find('>') {
-                                                // Insert our clean UI placeholder
-                                                output.push_str("[이모지]");
-                                                // Move the cursor past the '>'
-                                                current = &current[start + end + 1..];
-                                            } else {
-                                                // If the tag is somehow broken/malformed, stop parsing
-                                                output.push_str(&current[start..]);
-                                                current = "";
-                                                break;
-                                            }
-                                        }
-                                        // Push any remaining text *after* the last sprite tag
-                                        output.push_str(current);
-                                        p.message = output;
-                                    }
-
-                                    (p.pid, RwSignal::new(p))
-                                })
-                                .collect();
-
-                            set_chat_log.set(sanitized_vec.into_iter().collect());
+                            // Stickers/emotes arrive already normalized by the backend.
+                            set_chat_log
+                                .set(vec.into_iter().map(|p| (p.pid, RwSignal::new(p))).collect());
                         }
                     }
 

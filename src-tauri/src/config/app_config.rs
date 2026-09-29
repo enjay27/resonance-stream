@@ -1,4 +1,5 @@
 use crate::{inject_system_message, AppState, SystemLogLevel};
+use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
@@ -99,9 +100,10 @@ fn get_config_path(app: &AppHandle) -> PathBuf {
     config_dir.join("config.json")
 }
 
-#[tauri::command]
-pub fn load_config(app: AppHandle) -> AppConfig {
-    let path = get_config_path(&app);
+/// Reads `config.json`, writing the defaults first if it does not exist yet.
+/// Only start-up (and early callers before the state exists) read the file.
+pub fn read_config_file(app: &AppHandle) -> AppConfig {
+    let path = get_config_path(app);
 
     if !path.exists() {
         // Create default if missing
@@ -118,20 +120,43 @@ pub fn load_config(app: AppHandle) -> AppConfig {
     }
 }
 
+fn translator_settings(c: &AppConfig) -> TranslatorSettings<'_> {
+    TranslatorSettings {
+        enabled: c.use_translation,
+        compute_mode: &c.compute_mode,
+        tier: &c.tier,
+    }
+}
+
+/// The live config: the in-memory copy once the app state exists.
+pub fn current_config(app: &AppHandle) -> AppConfig {
+    match app.try_state::<AppState>() {
+        Some(state) => state.config.read().clone(),
+        None => read_config_file(app),
+    }
+}
+
 #[tauri::command]
+pub fn load_config(app: AppHandle) -> AppConfig {
+    current_config(&app)
+}
+
+/// async: writes the file and may start or stop workers -- not on the main thread.
+#[tauri::command(async)]
 pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) {
-    let old_config = load_config(app.clone());
+    let old_config = state.config.read().clone();
 
     let path = get_config_path(&app);
-
     if let Ok(json) = serde_json::to_string_pretty(&config) {
         let _ = fs::write(path, json);
     }
+    *state.config.write() = config.clone();
+    state.chat_history.lock().set_limit(config.chat_limit);
 
     // --- MANAGE THE SNIFFER THREAD (NETWORK ADAPTER CHANGE) ---
     if old_config.network_interface != config.network_interface {
         // Drop the old Sender (Instantly kills the socket and watchdog threads)
-        *state.sniffer_tx.lock().unwrap() = None;
+        *state.sniffer_tx.lock() = None;
 
         // Restart the sniffer bound to the newly selected interface
         if config.init_done {
@@ -142,33 +167,53 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
                 "Network adapter changed. Restarting sniffer...",
             );
             let tx = crate::services::sniffer::start_sniffer_worker(app.clone());
-            *state.sniffer_tx.lock().unwrap() = Some(tx);
+            *state.sniffer_tx.lock() = Some(tx);
         }
     }
 
-    // --- MANAGE THE AI WORKER THREAD ---
-    if !old_config.use_translation && config.use_translation {
-        // Turned ON: Start the server and store the Sender
-        let model_path = crate::get_model_path(&app);
-        let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
-        *state.translator_tx.lock().unwrap() = Some(tx);
-    } else if old_config.use_translation && !config.use_translation {
-        // Turned OFF: Drop the Sender (Kills the thread and frees VRAM)
-        *state.translator_tx.lock().unwrap() = None;
-        inject_system_message(
-            &app,
-            SystemLogLevel::Info,
-            "Translator",
-            "AI Translation Disabled. Server stopped and VRAM cleared.",
-        );
-        crate::services::translator::emit_translator_state(&app, "Off", "AI Translation Disabled.");
+    // --- MANAGE THE AI WORKER THREAD --- (exactly one change per save)
+    match translator_change(
+        translator_settings(&old_config),
+        translator_settings(&config),
+    ) {
+        WorkerChange::Keep => {}
+        change @ (WorkerChange::Start | WorkerChange::Restart) => {
+            if change == WorkerChange::Restart {
+                // Drop the old sender to break the current thread's loop
+                *state.translator_tx.lock() = None;
+                inject_system_message(
+                    &app,
+                    SystemLogLevel::Info,
+                    "Translator",
+                    "Applying new AI Engine specifications...",
+                );
+            }
+            let model_path = crate::get_model_path(&app);
+            let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
+            *state.translator_tx.lock() = Some(tx);
+        }
+        WorkerChange::Stop => {
+            // Drop the Sender (Kills the thread and frees VRAM)
+            *state.translator_tx.lock() = None;
+            inject_system_message(
+                &app,
+                SystemLogLevel::Info,
+                "Translator",
+                "AI Translation Disabled. Server stopped and VRAM cleared.",
+            );
+            crate::services::translator::emit_translator_state(
+                &app,
+                "Off",
+                "AI Translation Disabled.",
+            );
+        }
     }
 
     // --- MANAGE THE DATA FACTORY THREAD ---
     if !old_config.archive_chat && config.archive_chat {
         // Turned ON: Spawn the I/O thread
         let tx = crate::io::start_data_factory_worker(app.clone());
-        *state.data_factory_tx.lock().unwrap() = Some(tx);
+        *state.data_factory_tx.lock() = Some(tx);
         inject_system_message(
             &app,
             SystemLogLevel::Info,
@@ -177,47 +222,12 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
         );
     } else if old_config.archive_chat && !config.archive_chat {
         // Turned OFF: Drop the Sender (Kills the thread)
-        *state.data_factory_tx.lock().unwrap() = None;
+        *state.data_factory_tx.lock() = None;
         inject_system_message(
             &app,
             SystemLogLevel::Info,
             "DataFactory",
             "Dataset logging disabled.",
         );
-    }
-
-    // --- MANAGE THE AI WORKER THREAD ---
-    let translation_toggled_on = !old_config.use_translation && config.use_translation;
-    let translation_toggled_off = old_config.use_translation && !config.use_translation;
-    let translation_specs_changed = config.use_translation
-        && old_config.use_translation
-        && (old_config.compute_mode != config.compute_mode || old_config.tier != config.tier);
-
-    if translation_toggled_on || translation_specs_changed {
-        if translation_specs_changed {
-            // Drop the old sender to break the current thread's loop
-            *state.translator_tx.lock().unwrap() = None;
-            inject_system_message(
-                &app,
-                SystemLogLevel::Info,
-                "Translator",
-                "Applying new AI Engine specifications...",
-            );
-        }
-
-        // Start the server and store the new Sender
-        let model_path = crate::get_model_path(&app);
-        let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
-        *state.translator_tx.lock().unwrap() = Some(tx);
-    } else if translation_toggled_off {
-        // Turned OFF: Drop the Sender (Kills the thread and frees VRAM)
-        *state.translator_tx.lock().unwrap() = None;
-        inject_system_message(
-            &app,
-            SystemLogLevel::Info,
-            "Translator",
-            "AI Translation Disabled. Server stopped and VRAM cleared.",
-        );
-        crate::services::translator::emit_translator_state(&app, "Off", "AI Translation Disabled.");
     }
 }

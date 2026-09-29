@@ -1,11 +1,12 @@
 use crate::{FolderStatus, ProgressPayload};
-use futures_util::StreamExt;
 use std::fs;
-use std::io::Write;
 use tauri::{AppHandle, Emitter, Manager};
 
 pub const AI_SERVER_FOLDER: &str = "ai-server";
 pub const AI_SERVER_ZIP_URL: &str = "https://github.com/enjay27/resonance-stream/releases/download/v0.2.0/llama-b8157-bin-win-vulkan-x64.zip";
+/// SHA-256 of the zip above (computed 2026-09-29). Change both together.
+const AI_SERVER_ZIP_SHA256: &str =
+    "8144cf0a765f6a69c8bf62acb70e9d224bcfef28b3ffd2260fe4cf5b8bde20dc";
 pub const AI_SERVER_FILENAME: &str = "llama-server.exe";
 
 #[tauri::command]
@@ -44,45 +45,15 @@ pub async fn download_ai_server(app: AppHandle) -> Result<(), String> {
 
     let zip_path = ai_server_dir.join("server_temp.zip");
 
-    // 1. Download the ZIP file (Streaming)
-    let client = reqwest::Client::new();
-    let res = client
-        .get(AI_SERVER_ZIP_URL)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // ADD THIS CHECK: Ensure we didn't hit a 404 on GitHub
-    if !res.status().is_success() {
-        return Err(format!(
-            "Failed to download AI server. Server returned: {}",
-            res.status()
-        ));
-    }
-
-    let total_size = res.content_length().unwrap_or(0);
-
-    let mut file = fs::File::create(&zip_path).map_err(|e| e.to_string())?;
-    let mut downloaded: u64 = 0;
-    let mut stream = res.bytes_stream();
-
-    while let Some(item) = stream.next().await {
-        let chunk = item.map_err(|e| e.to_string())?;
-        file.write_all(&chunk).map_err(|e| e.to_string())?;
-        downloaded += chunk.len() as u64;
-
-        if total_size > 0 {
-            let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
-            let _ = app.emit(
-                "download-progress",
-                ProgressPayload {
-                    current_file: "AI 엔진 다운로드 중...".to_string(),
-                    percent,
-                    total_percent: percent,
-                },
-            );
-        }
-    }
+    // 1. Download the ZIP file (Streaming, verified against the pinned hash)
+    super::fetch::download_file(
+        &app,
+        AI_SERVER_ZIP_URL,
+        &zip_path,
+        "AI 엔진 다운로드 중...",
+        Some(AI_SERVER_ZIP_SHA256),
+    )
+    .await?;
 
     // 2. Extract the ZIP file
     let _ = app.emit(

@@ -1,4 +1,6 @@
-use crate::protocol::decoder::{find_int_by_tag, find_string_by_tag, read_varint, skip_field};
+use crate::protocol::decoder::{
+    field_end, find_int_by_tag, find_string_by_tag, read_tag, read_varint, skip_field,
+};
 use resonance_types::ChatMessage;
 use std::collections::HashMap;
 
@@ -51,7 +53,7 @@ pub fn parsing_pipeline(data: &[u8]) -> Vec<Port5003Event> {
 
 // --- STAGE 1: SPLIT ---
 // Separates the raw Protobuf packet into categorized byte blocks.
-pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
+pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload<'_>> {
     let mut payload = SplitPayload {
         channel: "WORLD".to_string(),
         chat_blocks: Vec::new(),
@@ -63,20 +65,22 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
 
     let (total_len, header_read) = read_varint(&data[1..]);
     let mut i = 1 + header_read;
-    let safe_end = (i + total_len as usize).min(data.len());
+    let safe_end = field_end(i, total_len, data.len());
 
     let mut is_valid_chat_packet = false;
 
     while i < safe_end {
-        let tag = data[i];
-        let wire_type = tag & 0x07;
+        let Some((tag, tag_len)) = read_tag(&data[i..safe_end]) else {
+            break;
+        };
+        let wire_type = (tag & 0x07) as u8;
         let field_num = (tag >> 3) as u32;
-        i += 1;
+        i += tag_len;
 
         if wire_type == 2 {
             let (len, read) = read_varint(&data[i..safe_end]);
             i += read;
-            let block_end = (i + len as usize).min(safe_end);
+            let block_end = field_end(i, len, safe_end);
 
             if let Some(sub_data) = data.get(i..block_end) {
                 match field_num {
@@ -101,7 +105,7 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload> {
             }
             i += read;
         } else {
-            i += skip_field(wire_type, &data[i..safe_end]);
+            i = i.saturating_add(skip_field(wire_type, &data[i..safe_end]));
         }
     }
 
@@ -178,9 +182,11 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
     let mut i = 0;
 
     while i < data.len() {
-        let tag = data[i];
-        let wire_type = tag & 0x07;
-        i += 1;
+        let Some((tag, tag_len)) = read_tag(&data[i..]) else {
+            break;
+        };
+        let wire_type = (tag & 0x07) as u8;
+        i += tag_len;
 
         match tag {
             8 => {
@@ -193,7 +199,7 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
                 // SenderInfo Block
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
-                let block_end = (i + len as usize).min(data.len());
+                let block_end = field_end(i, len, data.len());
                 if let Some(sub_data) = data.get(i..block_end) {
                     payload.sender = parse_sender_info(sub_data);
                 }
@@ -209,7 +215,7 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
                 // Message Block -> Delegated to extracted function!
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
-                let block_end = (i + len as usize).min(data.len());
+                let block_end = field_end(i, len, data.len());
                 if let Some(sub_data) = data.get(i..block_end) {
                     parse_message_block(sub_data, &mut payload);
                 }
@@ -217,12 +223,13 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
             }
             _ => {
                 // Skip Unknown
-                let skipped = skip_field(wire_type, &data[i..]);
-                let safe_end = (i + skipped).min(data.len());
+                let safe_end = i
+                    .saturating_add(skip_field(wire_type, &data[i..]))
+                    .min(data.len());
                 payload
                     .unknown_fields
                     .insert(format!("chat_{}", tag), data[i..safe_end].to_vec());
-                i += skipped;
+                i = safe_end;
             }
         }
     }
@@ -235,25 +242,28 @@ fn parse_rich_content(data: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>
     let mut k = 0;
 
     while k < data.len() {
-        let r_tag = data[k];
-        let r_wire = r_tag & 0x07;
-        k += 1;
+        let Some((r_tag, tag_len)) = read_tag(&data[k..]) else {
+            break;
+        };
+        let r_wire = (r_tag & 0x07) as u8;
+        k += tag_len;
 
         if r_tag == 18 {
             // Chunk Block (Field 2)
             let (clen, cr) = read_varint(&data[k..]);
             k += cr;
-            let c_end = (k + clen as usize).min(data.len());
+            let c_end = field_end(k, clen, data.len());
 
             // Delegate to ANOTHER small function!
             parsed_text.push_str(&parse_chunk_block(&data[k..c_end], unknown_fields));
 
             k = c_end;
         } else {
-            let skipped = skip_field(r_wire, &data[k..]);
-            let safe_end = (k + skipped).min(data.len());
+            let safe_end = k
+                .saturating_add(skip_field(r_wire, &data[k..]))
+                .min(data.len());
             unknown_fields.insert(format!("rich_{}", r_tag), data[k..safe_end].to_vec());
-            k += skipped;
+            k = safe_end;
         }
     }
     parsed_text
@@ -266,9 +276,11 @@ fn parse_chunk_block(chunk: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>
     let mut l = 0;
 
     while l < chunk.len() {
-        let c_tag = chunk[l];
-        let c_wire = c_tag & 0x07;
-        l += 1;
+        let Some((c_tag, tag_len)) = read_tag(&chunk[l..]) else {
+            break;
+        };
+        let c_wire = (c_tag & 0x07) as u8;
+        l += tag_len;
 
         if c_tag == 8 {
             // Chunk Type
@@ -279,7 +291,7 @@ fn parse_chunk_block(chunk: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>
             // Chunk Payload
             let (plen, pr) = read_varint(&chunk[l..]);
             l += pr;
-            let p_end = (l + plen as usize).min(chunk.len());
+            let p_end = field_end(l, plen, chunk.len());
 
             // Type 7 = Text Chunk. We must dig one layer deeper to Tag 10 for the string!
             if chunk_type == 7 {
@@ -289,10 +301,11 @@ fn parse_chunk_block(chunk: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>
             }
             l = p_end;
         } else {
-            let skipped = skip_field(c_wire, &chunk[l..]);
-            let safe_end = (l + skipped).min(chunk.len());
+            let safe_end = l
+                .saturating_add(skip_field(c_wire, &chunk[l..]))
+                .min(chunk.len());
             unknown_fields.insert(format!("chunk_{}", c_tag), chunk[l..safe_end].to_vec());
-            l += skipped;
+            l = safe_end;
         }
     }
 
@@ -310,9 +323,11 @@ fn parse_sender_info(data: &[u8]) -> SenderInfo {
     let mut sender = SenderInfo::default();
     let mut i = 0;
     while i < data.len() {
-        let tag = data[i];
-        let wire_type = tag & 0x07;
-        i += 1;
+        let Some((tag, tag_len)) = read_tag(&data[i..]) else {
+            break;
+        };
+        let wire_type = (tag & 0x07) as u8;
+        i += tag_len;
 
         match tag {
             8 => {
@@ -325,7 +340,7 @@ fn parse_sender_info(data: &[u8]) -> SenderInfo {
                 // Tag 18 = Field 2 (Nickname)
                 let (len, read) = read_varint(&data[i..]);
                 i += read;
-                let block_end = (i + len as usize).min(data.len());
+                let block_end = field_end(i, len, data.len());
                 if let Some(sub_data) = data.get(i..block_end) {
                     sender.nickname = String::from_utf8_lossy(sub_data).into_owned();
                 }
@@ -346,12 +361,13 @@ fn parse_sender_info(data: &[u8]) -> SenderInfo {
             // Tags 24 (Platform?), 56 (Rank?), and 64 (Badge?)
             // will now safely fall into the skip_field wildcard!
             _ => {
-                let skipped = skip_field(wire_type, &data[i..]);
-                let safe_end = (i + skipped).min(data.len());
+                let safe_end = i
+                    .saturating_add(skip_field(wire_type, &data[i..]))
+                    .min(data.len());
                 sender
                     .unknown_fields
                     .insert(format!("sender_{}", tag), data[i..safe_end].to_vec());
-                i += skipped;
+                i = safe_end;
             }
         }
     }
@@ -362,16 +378,18 @@ fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
     let mut j = 0;
 
     while j < data.len() {
-        let sub_tag = data[j];
-        let sub_wire = sub_tag & 0x07;
-        j += 1;
+        let Some((sub_tag, tag_len)) = read_tag(&data[j..]) else {
+            break;
+        };
+        let sub_wire = (sub_tag & 0x07) as u8;
+        j += tag_len;
 
         match sub_tag {
             26 => {
                 // Normal Chat Text
                 let (slen, r) = read_varint(&data[j..]);
                 j += r;
-                let s_end = (j + slen as usize).min(data.len());
+                let s_end = field_end(j, slen, data.len());
                 if j < s_end {
                     let text_msg = String::from_utf8_lossy(&data[j..s_end]).into_owned();
                     payload.message.push_str(&text_msg);
@@ -382,7 +400,7 @@ fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
                 // Rich Content Array (Item Links, Fishing, etc.)
                 let (rlen, rr) = read_varint(&data[j..]);
                 j += rr;
-                let r_end = (j + rlen as usize).min(data.len());
+                let r_end = field_end(j, rlen, data.len());
                 let rich_data = &data[j..r_end];
 
                 let rich_text = parse_rich_content(rich_data, &mut payload.unknown_fields);
@@ -393,52 +411,13 @@ fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
             }
             _ => {
                 // Safely skip unknown inner tags
-                let skipped = skip_field(sub_wire, &data[j..]);
-                let safe_end = (j + skipped).min(data.len());
+                let safe_end = j
+                    .saturating_add(skip_field(sub_wire, &data[j..]))
+                    .min(data.len());
                 payload
                     .unknown_fields
                     .insert(format!("msg_{}", sub_tag), data[j..safe_end].to_vec());
-                j += skipped;
-            }
-        }
-    }
-}
-
-// ==========================================
-// PARSING & UTILITIES (Keep your existing functions below)
-// ==========================================
-pub(crate) fn strip_application_header(payload: &[u8], port: u16) -> Option<&[u8]> {
-    if payload.len() < 5 {
-        return None;
-    }
-
-    match port {
-        10250 => {
-            if payload.len() > 32 && payload[32] == 0x0A {
-                Some(&payload[32..])
-            } else {
-                None
-            }
-        }
-        5003 => {
-            // Search for the 0x0A that correctly describes the rest of the payload
-            for i in 0..payload.len().saturating_sub(3) {
-                if payload[i] == 0x0A {
-                    let (msg_len, varint_size) = read_varint(&payload[i + 1..]);
-                    // If this 0x0A + its length exactly matches the end of the TCP packet, it's real
-                    if varint_size > 0 && (i + 1 + varint_size + msg_len as usize) == payload.len()
-                    {
-                        return Some(&payload[i..]);
-                    }
-                }
-            }
-            None
-        }
-        _ => {
-            if payload[0] == 0x0A {
-                Some(payload)
-            } else {
-                None
+                j = safe_end;
             }
         }
     }
@@ -474,29 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn test_strip_application_header_5003() {
-        // Fake TCP Packet from port 5003
-        // Includes garbage app header [0x00, 0x00, 0x11, 0x22]
-        // Real payload starts at 0x0A, len 0x02, payload [0xBB, 0xCC]
-        let packet = [0x00, 0x00, 0x11, 0x22, 0x0A, 0x02, 0xBB, 0xCC];
-
-        let stripped = strip_application_header(&packet, 5003).unwrap();
-
-        // Should perfectly ignore the first 4 bytes
-        assert_eq!(stripped, &[0x0A, 0x02, 0xBB, 0xCC]);
-
-        // Test rejection of bad packet
-        let bad_packet = [0x00, 0x11, 0x22, 0x0A, 0x09, 0xBB]; // Claims length 9, but ends early
-        assert!(strip_application_header(&bad_packet, 5003).is_none());
-    }
-
-    #[test]
     fn test_parser_edge_cases() {
-        // Edge Case 1: strip_application_header with tiny payloads
-        let tiny_payload = [0x0A, 0x01]; // Length is only 2 bytes
-        assert!(strip_application_header(&tiny_payload, 5003).is_none());
-        assert!(strip_application_header(&tiny_payload, 10250).is_none());
-
         // Edge Case 2: Truncated Varint parsing
         // The byte 0xAC indicates continuation, but the buffer ends abruptly!
         let truncated_data = [0xAC];
@@ -632,5 +589,82 @@ mod tests {
         // Verify the nested Sender Info was delegated correctly
         assert_eq!(parsed.sender.uid, 100);
         assert_eq!(parsed.sender.nickname, "Bob");
+    }
+    /// Wraps `root_fields` in a `0x0A <len>` root, as it arrives after the app header.
+    fn root(root_fields: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x0A, root_fields.len() as u8];
+        out.extend_from_slice(root_fields);
+        out
+    }
+
+    #[test]
+    fn huge_length_varint_does_not_panic() {
+        // Regression (review B1): message sub-tag 58 with a u64::MAX length.
+        let huge = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
+        let mut msg = vec![58u8];
+        msg.extend_from_slice(&huge);
+        msg.extend_from_slice(&[0, 0, 0]);
+        let mut chat = vec![34u8, msg.len() as u8];
+        chat.extend(&msg);
+        let mut field2 = vec![0x12u8, chat.len() as u8];
+        field2.extend(&chat);
+        parsing_pipeline(&root(&field2));
+
+        // The same huge length at every length-delimited position of a chat payload.
+        for tag in [18u8, 34, 26, 58, 0x12, 0x0A] {
+            let mut inner = vec![tag];
+            inner.extend_from_slice(&huge);
+            inner.extend_from_slice(&[1, 2, 3]);
+            let mut f2 = vec![0x12u8, inner.len() as u8];
+            f2.extend(&inner);
+            parsing_pipeline(&root(&f2));
+            let mut f4 = vec![0x22u8, inner.len() as u8];
+            f4.extend(&inner);
+            parsing_pipeline(&root(&f4));
+        }
+    }
+
+    #[test]
+    fn random_bytes_never_panic() {
+        // Small deterministic xorshift, so the test needs no extra dependency.
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for _ in 0..50_000 {
+            let len = (next() % 96) as usize;
+            let mut data: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+            // Bias towards plausible input: a root tag and a chat field up front.
+            if len > 2 && next() % 2 == 0 {
+                data[0] = 0x0A;
+                data[2] = if next() % 2 == 0 { 0x12 } else { 0x22 };
+            }
+            // Splice in a maximal length varint: random bytes almost never form one.
+            if len > 12 && next() % 3 == 0 {
+                let at = (next() as usize) % (len - 10);
+                data[at..at + 10]
+                    .copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]);
+            }
+            parsing_pipeline(&data);
+            for root in crate::protocol::framing::FrameAssembler::new().push(&data) {
+                parsing_pipeline(&root);
+            }
+        }
+    }
+
+    #[test]
+    fn multi_byte_tag_is_skipped_as_one_field() {
+        // Unknown field 20 (varint) -> tag 160 encodes as two bytes [0xA0, 0x01].
+        let data = [
+            0xA0, 0x01, 0x05, // field 20 = 5
+            24, 0x80, 0x01, // timestamp = 128
+            34, 4, 26, 2, b'H', b'i', // message "Hi"
+        ];
+        let parsed = parse_chat_payload(&data);
+        assert_eq!(parsed.timestamp, 128);
+        assert_eq!(parsed.message, "Hi");
     }
 }

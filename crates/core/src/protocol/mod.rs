@@ -1,5 +1,5 @@
-//! Port 5003 chat protocol: TCP stream reassembly and protobuf-style decoding.
+//! Port 5003 chat protocol: TCP stream framing and protobuf-style decoding.
 
 mod decoder;
-pub mod packet_buffer;
+pub mod framing;
 pub mod parser;

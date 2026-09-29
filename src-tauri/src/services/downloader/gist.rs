@@ -1,6 +1,11 @@
 use crate::inject_system_message;
 use crate::protocol::types::SystemLogLevel;
+use parking_lot::Mutex;
+use resonance_core::download::is_newer_version;
+use resonance_core::text::Dictionary;
 use std::fs;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
 const METADATA_URL: &str =
@@ -10,11 +15,23 @@ const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac
 // --- 1. Structs matching the unified Gist JSON: shared with the UI ---
 pub use resonance_types::{GistMetadata, RemoteDictionary, UpdateCheckResult, VersionInfo};
 
+/// The metadata from the last update check. Downloads look their expected
+/// SHA-256 up here by URL, so the hash comes from the gist, not the UI.
+static LAST_METADATA: Mutex<Option<GistMetadata>> = Mutex::new(None);
+
+/// The SHA-256 the gist published for `url`, if any.
+pub fn published_sha256(url: &str) -> Option<String> {
+    let guard = LAST_METADATA.lock();
+    let metadata = guard.as_ref()?;
+    let entry = [&metadata.app, &metadata.model]
+        .into_iter()
+        .find(|entry| entry.download_url == url)?;
+    entry.sha256.clone()
+}
+
 // --- 2. The Single Unified Fetch Command ---
 #[tauri::command]
 pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, String> {
-    // Paste your PERMANENT RAW URL here
-
     let client = reqwest::Client::new();
     let remote_data: GistMetadata = client
         .get(METADATA_URL)
@@ -28,8 +45,12 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
     let metadata = crate::config::load_metadata(&app);
     let current_app_version = app.package_info().version.to_string();
 
-    // App Check
-    let mut app_update_available = remote_data.app.latest_version != current_app_version;
+    *LAST_METADATA.lock() = Some(remote_data.clone());
+
+    // App Check: only a newer version is an update (a stale gist must not
+    // offer a downgrade)
+    let mut app_update_available =
+        is_newer_version(&remote_data.app.latest_version, &current_app_version);
     if let Some(ignored) = &metadata.ignored_app_version {
         if ignored == &remote_data.app.latest_version {
             app_update_available = false;
@@ -56,14 +77,25 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
     })
 }
 
+/// %APPDATA%/<bundle id>/custom_dict.json
+pub fn dictionary_path(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("Failed to resolve AppData directory")
+        .join("custom_dict.json")
+}
+
+/// Makes `dict` the one the translator uses from its next job on.
+fn install_dictionary(app: &AppHandle, dict: Dictionary) {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        *state.dictionary.write() = Arc::new(dict);
+    }
+}
+
 #[tauri::command]
 pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, String> {
-    // 1. Resolve Local Path: %APPDATA%/your.bundle.id/custom_dict.json
-    let dict_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("custom_dict.json");
+    // 1. Resolve Local Path
+    let dict_path = dictionary_path(&app);
 
     // 2. Fetch from Remote
     let client = reqwest::Client::new();
@@ -74,14 +106,14 @@ pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, 
         .map_err(|e| e.to_string())?;
     let json_content = response.text().await.map_err(|e| e.to_string())?;
 
-    // Validate JSON before saving
-    if serde_json::from_str::<serde_json::Value>(&json_content).is_err() {
-        return Err("Invalid JSON received from Gist".to_string());
-    }
+    // Validate before saving: a dictionary that does not parse is rejected
+    let dict = Dictionary::from_json_str(&json_content)
+        .map_err(|e| format!("Invalid dictionary received from Gist: {}", e))?;
 
     // 3. Save Locally
     fs::create_dir_all(dict_path.parent().unwrap()).map_err(|e| e.to_string())?;
     fs::write(&dict_path, &json_content).map_err(|e| e.to_string())?;
+    install_dictionary(&app, dict);
 
     inject_system_message(
         &app,
@@ -116,11 +148,7 @@ pub fn get_dict_version(app: tauri::AppHandle) -> String {
 
 #[tauri::command]
 pub fn get_local_dictionary(app: tauri::AppHandle) -> Result<String, String> {
-    let dict_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("custom_dict.json");
+    let dict_path = dictionary_path(&app);
 
     if !dict_path.exists() {
         return Ok("{}".to_string());
@@ -131,13 +159,10 @@ pub fn get_local_dictionary(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 pub fn save_local_dictionary(app: tauri::AppHandle, content: String) -> Result<(), String> {
-    let dict_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("custom_dict.json");
-
-    std::fs::write(&dict_path, content).map_err(|e| e.to_string())
+    let dict = Dictionary::from_json_str(&content)?;
+    std::fs::write(dictionary_path(&app), content).map_err(|e| e.to_string())?;
+    install_dictionary(&app, dict);
+    Ok(())
 }
 
 #[tauri::command]

@@ -10,7 +10,7 @@ gate applies.** That is the most important thing on this page.
 | tree | part | builds on | gate |
 |---|---|---|---|
 | `crates/core/` `crates/types/` | **core** — packet → chat pipeline, protocol decoding, translation text processing; DTOs shared by app and ui | any OS | `just core-check` |
-| `src/` | **ui** — Leptos 0.8 CSR frontend (wasm) | any OS | `just ui-check` |
+| `src/` | **ui** — Leptos 0.8 CSR frontend (wasm); pure modules unit-tested on the host | any OS | `just ui-check` |
 | `src-tauri/` | **app** — Tauri 2 backend: sockets, translator server, downloader, windows, tray | **Windows only** | `just app-check` (Windows) · `just app-cross-check` (Linux, compile only) |
 
 `just check` runs `fmt-check`, then every gate the current OS can run (`pip install
@@ -39,7 +39,8 @@ the same name, or it will not cross the boundary.
   `src-tauri/src/services/sniffer/network.rs`). Needs **Administrator**. Port 5003
   carries chat. No Npcap / WinDivert (removed 2026-09-29; capture never used them).
 - **Translation:** llama.cpp server (Vulkan build, downloaded at runtime from this
-  repo's releases) on `127.0.0.1:8080`; pre/post-processing in `crates/core/src/text.rs`.
+  repo's releases) on `127.0.0.1:8080`, or a free port if 8080 is taken; only the PID the
+  app started is ever killed. Pre/post-processing in `crates/core/src/text.rs`.
 - **Remote metadata:** a public gist (`downloader/gist.rs`) carries app/model/dictionary
   versions and the custom dictionary. Public URLs, not secrets.
 - **Packaging:** `package.bat` → `cargo tauri build` → NSIS installer in `dist/`.
@@ -54,14 +55,18 @@ the same name, or it will not cross the boundary.
 .github/workflows/    CI — the gates, per OS
 justfile              the gates as commands
 crates/core/           resonance-core — pure logic, tested on any OS
-  src/protocol/         port 5003: packet reassembly + protobuf-style decoding of chat
+  src/protocol/         port 5003: stream framing (framing.rs) + protobuf-style decoding
   src/capture/          ChatPipeline: raw IPv4/TCP bytes → dedup/blocked ChatMessages
-  src/text.rs           translation pre/post-processing, dictionary, romaji
+  src/text.rs           translation pre/post-processing, Dictionary, emotes, romaji
+  src/history.rs        ChatHistory (backend chat log, bounded by chat_limit)
+  src/workers.rs        worker decisions: translator on/off/restart, stale jobs, port
+  src/download.rs       download checks: HTTPS, length + SHA-256, progress, versions
 crates/types/          resonance-types — DTOs shared across the Tauri boundary (serde only)
 src/                  ui crate (resonance-stream-ui)
   app/                  App shell; actions.rs (save_config, clear_history),
                           hydration.rs (start-up load), setup_flow.rs (first-run wizard)
   store.rs              AppSignals (all app-wide signals, AppSignals::new) + AppActions
+  chat_view.rs          chat list rules (tabs, filter, paging) -- pure, host-tested
   components/           views; settings/ is one file per settings section
   hooks/                backend event, config and tray wiring
   ui_types.rs           ui-only types (AppConfig) + re-export of resonance-types

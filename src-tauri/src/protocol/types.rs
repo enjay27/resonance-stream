@@ -1,5 +1,8 @@
+use crate::config::AppConfig;
 use crossbeam_channel::Sender;
-use indexmap::IndexMap;
+use parking_lot::{Mutex, RwLock};
+use resonance_core::history::ChatHistory;
+use resonance_core::text::Dictionary;
 use serde::{Deserialize, Serialize};
 
 pub use resonance_types::{
@@ -8,18 +11,24 @@ pub use resonance_types::{
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 
+/// Locks are parking_lot's: they do not poison, so one panicking thread does
+/// not make every later command that touches the same state panic too.
 pub struct AppState {
-    pub batch_data: Arc<(Mutex<(Vec<MessageRequest>, u64)>, Condvar)>,
-    pub chat_history: Mutex<IndexMap<u64, ChatMessage>>,
+    /// The live config. The file on disk is read once at start-up and
+    /// written by `save_config`; everything else reads this copy.
+    pub config: RwLock<AppConfig>,
+    pub chat_history: Mutex<ChatHistory>,
     pub system_history: Mutex<VecDeque<SystemMessage>>,
     pub next_pid: AtomicU64,
     pub nickname_cache: Mutex<HashMap<String, String>>,
+    /// Swapped whole when the dictionary is synced or edited; the translator
+    /// takes a cheap `Arc` clone per job.
+    pub dictionary: RwLock<Arc<Dictionary>>,
     pub translator_tx: Mutex<Option<Sender<crate::services::translator::TranslationJob>>>,
     pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
     pub sniffer_tx: Mutex<Option<Sender<()>>>,
-    pub dedup_cache: Mutex<HashMap<(u64, u64, u64), u64>>,
     pub blocked_users: Mutex<HashMap<u64, String>>,
 }
 
@@ -31,13 +40,6 @@ pub enum SystemLogLevel {
     Success, // Dictionary updated, Model ready
     Debug,   // high-frequency, technical events
     Trace,   // extremely-frequency
-}
-
-#[derive(Serialize)]
-pub struct MessageRequest {
-    pub cmd: String, // Always "translate"
-    pub pid: u64,
-    pub text: String, // The Japanese message
 }
 
 #[derive(Deserialize)]

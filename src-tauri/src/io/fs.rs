@@ -2,7 +2,7 @@ use chrono::{Local, TimeZone};
 use std::fs;
 use std::io::Write;
 use tauri::Manager;
-use tauri_plugin_shell::ShellExt;
+use tauri_plugin_opener::OpenerExt;
 
 // Adjust this import path if ExportMessage is located elsewhere!
 use crate::protocol::types::ExportMessage;
@@ -92,5 +92,7 @@ pub async fn export_chat_log(
 
 #[tauri::command]
 pub fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
-    app.shell().open(url, None).map_err(|e| e.to_string())
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
 }

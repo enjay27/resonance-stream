@@ -1,0 +1,12 @@
+# Docs that contradict the code
+
+Found 2026-09-29 while planning the refactor.
+
+- **Translation engine.** `README*.md` and `BUILD*.md` describe a Python/CTranslate2
+  sidecar built with PyInstaller (`translator.spec`, `requirements.txt`). The code
+  downloads a llama.cpp Vulkan server zip (`src-tauri/src/services/downloader/server.rs`,
+  `AI_SERVER_ZIP_URL`) and talks to it on `127.0.0.1:8080` (`translator/core.rs`).
+  Neither `translator.spec` nor `requirements.txt` is in the repo.
+- **Build scripts.** `BUILD*.md` references `setup_libs.bat`, which is not in the repo,
+  and says `package.bat` builds the sidecar and copies drivers; `package.bat` only runs
+  `cargo tauri build` and moves the installer.

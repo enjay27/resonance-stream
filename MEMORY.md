@@ -1,0 +1,33 @@
+# Active State — resonance-stream
+
+**Index, not the record.** Only what would be *false* the moment it goes stale lives here.
+
+## Now — 2026-09-29 (refactor started)
+
+**Graft-guided refactor, phases 0–5** —
+[`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).
+Phase 0 (rules + memory) done. Next: phase 1, gates + CI.
+
+**The app part (`src-tauri/`) does not build on Linux.** Cloud sessions verify the ui
+part only; the app gate needs Windows (CI or Kade's machine). Anything that
+skipped it is listed in
+[`.memory/active-issues/unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).
+
+**Docs are stale:** README/BUILD describe a Python sidecar; the code runs llama.cpp —
+[`.memory/active-issues/stale-docs.md`](.memory/active-issues/stale-docs.md).
+
+**Graft MCP start-up fix is PR #24, open.** Until merged, cloud sessions get the CLI only.
+
+## Where the detail is
+
+| read | when |
+|---|---|
+| [`CLAUDE.md`](CLAUDE.md) | rules, gates, layout |
+| [`.memory/README.md`](.memory/README.md) | which memory file takes what |
+| [`.memory/active-issues/`](.memory/active-issues/) | before trusting a doc, a build, or a behaviour |
+| [`.memory/roadmap/`](.memory/roadmap/) | what is next, and what proves it done |
+| [`.memory/sessions/`](.memory/sessions/) | why a decision was made, including wrong turns |
+
+## Rules
+- **Under ~40 lines.** *Now* carries what is next and what is unverified; nothing else.
+- **Update *Now* every session**, even when the answer is "unchanged".

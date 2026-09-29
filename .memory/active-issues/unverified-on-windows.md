@@ -6,7 +6,8 @@ run as the real app.
 
 - **CI workflow (phase 1).** First run (36549688320): Linux job green; Windows job
   **built and linked** `src-tauri` (so the no-Npcap-SDK assumption held) and failed one
-  test — a stale mock, fixed 2026-09-29 (see sessions/). Original note:
+  test — a stale mock, fixed 2026-09-29 (see sessions/); run 36551390327 on 182d651
+  is fully green, so app build + tests are now verified on Windows. Original note:
   `.github/workflows/ci.yml` had never run. The Windows
   job assumes no Npcap SDK is needed: `pcap` 2.5's build script falls back to version
   1.0.0 when `wpcap.dll` is absent, and nothing links it because no code uses the crate

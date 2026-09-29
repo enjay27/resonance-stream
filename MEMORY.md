@@ -2,12 +2,12 @@
 
 **Index, not the record.** Only what would be *false* the moment it goes stale lives here.
 
-## Now — 2026-09-29 (refactor done, pushed, CI fix pending)
+## Now — 2026-09-29 (refactor done, pushed, CI green)
 
 **Graft-guided refactor, phases 0–5: done** —
 [`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).
-Pushed at Kade's request. First CI run: Linux green; Windows built + linked `src-tauri`,
-one stale test (mock used the wrong llama endpoint) fixed after it.
+Pushed at Kade's request. **CI green on 182d651** (run 36551390327): Linux + Windows,
+incl. the app tests — after fixing one stale test (mock served the wrong llama endpoint).
 Open decisions for Kade: `AppConfig` unification, unused `pcap`/`windivert` deps,
 TROUBLE_SHOOTING rewrite, the "v2.0" footer.
 

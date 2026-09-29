@@ -423,48 +423,6 @@ fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
     }
 }
 
-// ==========================================
-// PARSING & UTILITIES (Keep your existing functions below)
-// ==========================================
-pub(crate) fn strip_application_header(payload: &[u8], port: u16) -> Option<&[u8]> {
-    if payload.len() < 5 {
-        return None;
-    }
-
-    match port {
-        10250 => {
-            if payload.len() > 32 && payload[32] == 0x0A {
-                Some(&payload[32..])
-            } else {
-                None
-            }
-        }
-        5003 => {
-            // Search for the 0x0A that correctly describes the rest of the payload
-            for i in 0..payload.len().saturating_sub(3) {
-                if payload[i] == 0x0A {
-                    let (msg_len, varint_size) = read_varint(&payload[i + 1..]);
-                    let root_end = usize::try_from(msg_len)
-                        .ok()
-                        .and_then(|len| (i + 1 + varint_size).checked_add(len));
-                    // If this 0x0A + its length exactly matches the end of the TCP packet, it's real
-                    if varint_size > 0 && root_end == Some(payload.len()) {
-                        return Some(&payload[i..]);
-                    }
-                }
-            }
-            None
-        }
-        _ => {
-            if payload[0] == 0x0A {
-                Some(payload)
-            } else {
-                None
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,29 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn test_strip_application_header_5003() {
-        // Fake TCP Packet from port 5003
-        // Includes garbage app header [0x00, 0x00, 0x11, 0x22]
-        // Real payload starts at 0x0A, len 0x02, payload [0xBB, 0xCC]
-        let packet = [0x00, 0x00, 0x11, 0x22, 0x0A, 0x02, 0xBB, 0xCC];
-
-        let stripped = strip_application_header(&packet, 5003).unwrap();
-
-        // Should perfectly ignore the first 4 bytes
-        assert_eq!(stripped, &[0x0A, 0x02, 0xBB, 0xCC]);
-
-        // Test rejection of bad packet
-        let bad_packet = [0x00, 0x11, 0x22, 0x0A, 0x09, 0xBB]; // Claims length 9, but ends early
-        assert!(strip_application_header(&bad_packet, 5003).is_none());
-    }
-
-    #[test]
     fn test_parser_edge_cases() {
-        // Edge Case 1: strip_application_header with tiny payloads
-        let tiny_payload = [0x0A, 0x01]; // Length is only 2 bytes
-        assert!(strip_application_header(&tiny_payload, 5003).is_none());
-        assert!(strip_application_header(&tiny_payload, 10250).is_none());
-
         // Edge Case 2: Truncated Varint parsing
         // The byte 0xAC indicates continuation, but the buffer ends abruptly!
         let truncated_data = [0xAC];
@@ -713,7 +649,9 @@ mod tests {
                     .copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]);
             }
             parsing_pipeline(&data);
-            let _ = strip_application_header(&data, 5003);
+            for root in crate::protocol::framing::FrameAssembler::new().push(&data) {
+                parsing_pipeline(&root);
+            }
         }
     }
 

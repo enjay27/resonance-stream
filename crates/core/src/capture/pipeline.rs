@@ -219,6 +219,60 @@ mod tests {
         assert_eq!(texts, ["one", "two"]);
     }
 
+    /// App header + root { field 2: chat { seq, sender "Bob", message } }.
+    fn chat_segment(seq: u8, text: &str) -> Vec<u8> {
+        let mut msg = vec![0x1A, text.len() as u8];
+        msg.extend_from_slice(text.as_bytes());
+        let sender = [0x08, 0x64, 0x12, 0x03, b'B', b'o', b'b'];
+        let mut payload = vec![0x08, seq, 0x12, sender.len() as u8];
+        payload.extend_from_slice(&sender);
+        payload.extend([0x22, msg.len() as u8]);
+        payload.extend(msg);
+        let mut root = vec![0x12, payload.len() as u8];
+        root.extend(payload);
+        let mut seg = vec![0, 0, 0, 0, 0x0A, root.len() as u8];
+        seg.extend(root);
+        seg
+    }
+
+    fn texts(chats: &[ChatMessage]) -> Vec<&str> {
+        chats.iter().map(|c| c.message.as_str()).collect()
+    }
+
+    #[test]
+    fn coalesced_messages_are_all_emitted() {
+        // Regression (review B2): only the last message of a segment survived.
+        let mut pipeline = ChatPipeline::new();
+        let segment = [chat_segment(1, "Hello"), chat_segment(2, "World")].concat();
+        let got = emitted(&mut pipeline, &[segment]);
+        assert_eq!(texts(&got), ["Hello", "World"]);
+    }
+
+    #[test]
+    fn message_split_across_segments_is_reassembled() {
+        // Regression (review B2): the first half never ended on a boundary and was dropped.
+        let mut pipeline = ChatPipeline::new();
+        let whole = chat_segment(1, "Hello");
+        let (a, b) = whole.split_at(10);
+        let got = emitted(&mut pipeline, &[a.to_vec(), b.to_vec()]);
+        assert_eq!(texts(&got), ["Hello"]);
+    }
+
+    #[test]
+    fn split_and_coalesced_together() {
+        let mut pipeline = ChatPipeline::new();
+        let stream = [
+            chat_segment(1, "one"),
+            chat_segment(2, "two"),
+            chat_segment(3, "three"),
+        ]
+        .concat();
+        let (a, rest) = stream.split_at(12);
+        let (b, c) = rest.split_at(30);
+        let got = emitted(&mut pipeline, &[a.to_vec(), b.to_vec(), c.to_vec()]);
+        assert_eq!(texts(&got), ["one", "two", "three"]);
+    }
+
     /// App header + a chat whose payload carries an unknown field (tag 0x28 = field 5).
     fn chat_with_unknown_field() -> Vec<u8> {
         let payload = [

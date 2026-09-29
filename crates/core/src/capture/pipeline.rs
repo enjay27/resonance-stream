@@ -1,6 +1,7 @@
 use crate::capture::message_processor::{MessageProcessor, ProcessAction};
 use crate::capture::stream_tracker::StreamTracker;
 use crate::protocol::parser::{parsing_pipeline, Port5003Event};
+use crate::text::normalize_emotes;
 use etherparse::{NetHeaders, PacketHeaders, TransportHeader};
 use resonance_types::ChatMessage;
 use std::collections::HashMap;
@@ -80,6 +81,9 @@ impl ChatPipeline {
                 if !self.keep_unknown_fields {
                     chat.unknown_fields = HashMap::new();
                 }
+                // Display form of stickers/emotes, before anything (the
+                // translator included) sees the text.
+                chat.message = normalize_emotes(&chat.message);
 
                 // 5. Apply duplicate and blocking rules
                 match self.processor.process(&mut chat, blocked_users) {
@@ -271,6 +275,19 @@ mod tests {
         let (b, c) = rest.split_at(30);
         let got = emitted(&mut pipeline, &[a.to_vec(), b.to_vec(), c.to_vec()]);
         assert_eq!(texts(&got), ["one", "two", "three"]);
+    }
+
+    #[test]
+    fn emotes_are_normalized_before_leaving_the_pipeline() {
+        let mut pipeline = ChatPipeline::new();
+        let got = emitted(
+            &mut pipeline,
+            &[
+                chat_segment(1, "hi<sprite=3>"),
+                chat_segment(2, "emojiPic=9"),
+            ],
+        );
+        assert_eq!(texts(&got), ["hi[이모지]", "[스티커]"]);
     }
 
     /// App header + a chat whose payload carries an unknown field (tag 0x28 = field 5).

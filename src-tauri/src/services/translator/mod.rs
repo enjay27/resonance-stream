@@ -14,7 +14,7 @@ use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorStatePayload
 
 use self::core::{translate_text, AI_SERVER_URL};
 use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds, ServerGuard};
-use resonance_core::text::{load_dictionary, postprocess_text, preprocess_text};
+use resonance_core::text::{postprocess_text, preprocess_text, Dictionary};
 
 pub struct TranslationJob {
     pub chat: ChatMessage,
@@ -56,7 +56,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         // 3. Setup Dependencies
         let client = Client::new();
         let dict_path = app.path().app_data_dir().unwrap().join("custom_dict.json");
-        let custom_dict = load_dictionary(&dict_path);
+        let custom_dict = Dictionary::load(&dict_path);
 
         inject_system_message(
             &app,
@@ -78,7 +78,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 fn process_translation_job(
     job: TranslationJob,
     client: &Client,
-    dict: &std::collections::HashMap<String, String>,
+    dict: &Dictionary,
     app: &AppHandle,
 ) {
     let chat = job.chat;

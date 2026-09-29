@@ -58,7 +58,7 @@ crates/core/           resonance-core — pure logic, tested on any OS
   src/protocol/         port 5003: stream framing (framing.rs) + protobuf-style decoding
   src/capture/          ChatPipeline: raw IPv4/TCP bytes → dedup/blocked ChatMessages
   src/text.rs           translation pre/post-processing, Dictionary, emotes, romaji
-  src/history.rs        ChatHistory (backend chat log, bounded by chat_limit)
+  src/history.rs        ChatHistory (backend chat log) + load_recent (daily chat_logs reload)
   src/workers.rs        worker decisions: translator on/off/restart, stale jobs, port
   src/download.rs       download checks: HTTPS, length + SHA-256, progress, versions
 crates/types/          resonance-types — DTOs shared across the Tauri boundary (serde only)
@@ -66,7 +66,7 @@ src/                  ui crate (resonance-stream-ui)
   app/                  App shell; actions.rs (save_config, clear_history),
                           hydration.rs (start-up load), setup_flow.rs (first-run wizard)
   store.rs              AppSignals (all app-wide signals, AppSignals::new) + AppActions
-  chat_view.rs          chat list rules (tabs, filter, paging) -- pure, host-tested
+  chat_view.rs          chat list: per-tab views + limits (ChatStore), filter, paging -- pure, host-tested
   components/           views; settings/ is one file per settings section
   hooks/                backend event, config and tray wiring
   ui_types.rs           ui-only types (AppConfig) + re-export of resonance-types

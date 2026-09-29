@@ -38,3 +38,8 @@ run as the real app.
   Exit kills it), dictionary edit applies without restart, model/app/AI-engine
   download (`.part` then rename; engine zip hash pinned), archive now in the app data
   folder, block/unblock, restart sniffer, tab/search/unread badges.
+- **feat/ui-improve port (2026-09-29, a5b1966..).** Cross-checked only. Worth a real run:
+  firewall-missing → setup wizard; model download skip when the hash matches; restart
+  with archiving on reloads chat (no duplicates after re-login); right-click tab menu
+  (limits, archive toggle, custom channels); message spacing; window position restored;
+  no silent dictionary sync unless auto-sync is on.

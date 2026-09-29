@@ -22,6 +22,10 @@ every item fixed test-first in 7 commits (fbfd552 onward, see the report's *Stat
 done by design: gist host allow-list, reqwest 0.12. B2 framing still wants a real capture.
 Windows run needed — [`unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).
 
+**feat/ui-improve ported onto main** (8 commits, Kade as author; 9937ef2 redundant) —
+[`.memory/sessions/2026-09-29-ui-improve-port.md`](.memory/sessions/2026-09-29-ui-improve-port.md).
+Kade's calls: sequential pids, both archives, gist has sha256, auto-sync off by default.
+
 **Graft MCP start-up fix is PR #24, open.** Until merged, cloud sessions get the CLI only.
 
 ## Where the detail is

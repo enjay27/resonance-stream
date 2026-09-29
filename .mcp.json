@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "graft": {
-      "command": "node",
+      "command": "graft",
       "args": [
-        ".claude/helpers/graft-mcp.cjs"
+        "mcp"
       ]
     }
   }

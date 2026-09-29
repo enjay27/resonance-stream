@@ -13,6 +13,7 @@ use crate::{inject_system_message, NetworkInterface};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000; //
 const RULE_NAME: &str = "Resonance Stream (Packet Sniffing)"; //
+const RECV_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 
 // --- 3. NETWORK INITIALIZATION ---
 pub fn initialize_network_socket(
@@ -82,6 +83,17 @@ pub fn initialize_network_socket(
     };
 
     let socket = setup_raw_socket(local_ip, app).ok()?;
+
+    // Every IP packet on the interface lands in this socket; the default
+    // buffer overflows (and drops chat) during bursts.
+    if let Err(e) = socket.set_recv_buffer_size(RECV_BUFFER_BYTES) {
+        inject_system_message(
+            app,
+            SystemLogLevel::Warning,
+            "Sniffer",
+            format!("Could not enlarge the socket receive buffer: {:?}", e),
+        );
+    }
 
     if let Err(e) = socket.set_read_timeout(Some(Duration::from_millis(500))) {
         inject_system_message(

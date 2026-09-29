@@ -7,8 +7,4 @@ Close an item by deleting its line in the commit that fixes it.
 - **B5** `[profile.release]` in `src-tauri/Cargo.toml` is ignored (non-root member); cargo warns on every build.
 
 **From reading the code, not run** (app crate, Windows only):
-- **B4** `save_config` starts the translator worker twice on off→on (two blocks, `app_config.rs`).
-- **P1** `load_config` (disk read + JSON parse) runs for every packet the raw socket receives.
-- **P3** Translator holds `nickname_cache` lock across the HTTP call → sniffer stalls.
-- **B6** Dictionary sync/save does not reach the running translator.
 - **B7** Model re-download deletes the old model before downloading.

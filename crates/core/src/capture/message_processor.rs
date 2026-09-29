@@ -50,13 +50,13 @@ impl MessageProcessor {
     }
 
     /// Pure logic: Determines what to do with a chat message without mutating global state.
-    /// Takes blocked_users as a reference so it always has the latest UI state.
+    /// `is_blocked` is asked once per message, so it always sees the latest block list.
     pub fn process(
         &self,
         chat: &mut ChatMessage,
-        blocked_users: &HashMap<u64, String>,
+        is_blocked: &dyn Fn(u64) -> bool,
     ) -> ProcessAction {
-        if blocked_users.contains_key(&chat.uid) {
+        if is_blocked(chat.uid) {
             chat.is_blocked = true;
         }
 
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn test_message_processor_deduplication() {
         let mut processor = MessageProcessor::new();
-        let blocked = HashMap::new(); // Empty blocked list for this test
+        let blocked: HashMap<u64, String> = HashMap::new(); // Empty blocked list for this test
 
         let mut msg1 = ChatMessage {
             uid: 100,
@@ -118,13 +118,13 @@ mod tests {
         }; // Exact duplicate signature
 
         // First message should be evaluated as new
-        match processor.process(&mut msg1, &blocked) {
+        match processor.process(&mut msg1, &|uid| blocked.contains_key(&uid)) {
             ProcessAction::EmitNewMessage => processor.commit_new_message(&msg1),
             _ => panic!("Expected new message"),
         }
 
         // Second message should be ignored
-        match processor.process(&mut msg2, &blocked) {
+        match processor.process(&mut msg2, &|uid| blocked.contains_key(&uid)) {
             ProcessAction::IgnoreDuplicate => {} // Success!
             _ => panic!("Expected duplicate to be ignored"),
         }
@@ -134,7 +134,7 @@ mod tests {
     fn test_message_processor_blocking() {
         let processor = MessageProcessor::new();
 
-        let mut blocked = HashMap::new();
+        let mut blocked: HashMap<u64, String> = HashMap::new();
         blocked.insert(999, "Spammer".to_string());
 
         let mut msg = ChatMessage {
@@ -144,7 +144,7 @@ mod tests {
         };
 
         // Should evaluate as new, but automatically flag the mutable chat reference as blocked
-        match processor.process(&mut msg, &blocked) {
+        match processor.process(&mut msg, &|uid| blocked.contains_key(&uid)) {
             ProcessAction::EmitNewMessage => {
                 assert_eq!(msg.is_blocked, true);
             }
@@ -164,10 +164,10 @@ mod tests {
     fn messages_without_identity_are_never_deduplicated() {
         // Regression (review B3): all "Me" messages share the key (0, 0, 0).
         let mut processor = MessageProcessor::new();
-        let blocked = HashMap::new();
+        let blocked: HashMap<u64, String> = HashMap::new();
         for text in ["one", "two", "three"] {
             let mut msg = me(text);
-            match processor.process(&mut msg, &blocked) {
+            match processor.process(&mut msg, &|uid| blocked.contains_key(&uid)) {
                 ProcessAction::EmitNewMessage => processor.commit_new_message(&msg),
                 _ => panic!("'{text}' was dropped as a duplicate"),
             }
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn dedup_cache_is_bounded_and_forgets_the_oldest() {
         let mut processor = MessageProcessor::with_capacity(3);
-        let blocked = HashMap::new();
+        let blocked: HashMap<u64, String> = HashMap::new();
         let msg = |seq| ChatMessage {
             uid: 7,
             timestamp: 1,
@@ -191,11 +191,11 @@ mod tests {
         assert_eq!(processor.len(), 3);
         // seq 1 was evicted, so it is new again; seq 4 is still a duplicate.
         assert!(matches!(
-            processor.process(&mut msg(1), &blocked),
+            processor.process(&mut msg(1), &|uid| blocked.contains_key(&uid)),
             ProcessAction::EmitNewMessage
         ));
         assert!(matches!(
-            processor.process(&mut msg(4), &blocked),
+            processor.process(&mut msg(4), &|uid| blocked.contains_key(&uid)),
             ProcessAction::IgnoreDuplicate
         ));
     }

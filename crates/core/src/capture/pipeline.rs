@@ -37,7 +37,7 @@ impl ChatPipeline {
     pub fn feed_network_packet(
         &mut self,
         packet: &[u8],
-        blocked_users: &HashMap<u64, String>,
+        is_blocked: impl Fn(u64) -> bool,
         mut assign_pid: impl FnMut() -> u64,
         mut feed_watchdog: impl FnMut(),
     ) -> Vec<PipelineAction> {
@@ -86,7 +86,7 @@ impl ChatPipeline {
                 chat.message = normalize_emotes(&chat.message);
 
                 // 5. Apply duplicate and blocking rules
-                match self.processor.process(&mut chat, blocked_users) {
+                match self.processor.process(&mut chat, &is_blocked) {
                     ProcessAction::IgnoreDuplicate => continue,
                     ProcessAction::UpdateBlockedMessage => {
                         actions.push(PipelineAction::UpdateBlockedMessage(chat));
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn test_full_chat_pipeline() {
         let mut pipeline = ChatPipeline::new();
-        let blocked_users = HashMap::new();
+        let blocked_users: HashMap<u64, String> = HashMap::new();
 
         let mut mock_pid_counter = 1;
         let mut assign_pid = || {
@@ -153,7 +153,7 @@ mod tests {
         // 3. Feed the forged packet into our pure pipeline
         let actions = pipeline.feed_network_packet(
             &fake_network_packet,
-            &blocked_users,
+            |uid| blocked_users.contains_key(&uid),
             &mut assign_pid,
             || {}, // Pass an empty closure for the test!
         );
@@ -193,13 +193,13 @@ mod tests {
     }
 
     fn emitted(pipeline: &mut ChatPipeline, segments: &[Vec<u8>]) -> Vec<ChatMessage> {
-        let blocked = HashMap::new();
+        let blocked: HashMap<u64, String> = HashMap::new();
         let mut pid = 0;
         let mut out = Vec::new();
         for seg in segments {
             let actions = pipeline.feed_network_packet(
                 &tcp_from_5003(seg),
-                &blocked,
+                |uid| blocked.contains_key(&uid),
                 || {
                     pid += 1;
                     pid
@@ -288,6 +288,38 @@ mod tests {
             ],
         );
         assert_eq!(texts(&got), ["hi[이모지]", "[스티커]"]);
+    }
+
+    #[test]
+    fn blocklist_is_consulted_only_for_chat_messages() {
+        use std::cell::Cell;
+        let mut pipeline = ChatPipeline::new();
+        let lookups = Cell::new(0);
+        let is_blocked = |uid: u64| {
+            lookups.set(lookups.get() + 1);
+            uid == 100
+        };
+
+        // Other traffic: not port 5003, and a 5003 segment that is not chat.
+        let other = PacketBuilder::ipv4([1, 1, 1, 1], [2, 2, 2, 2], 64).tcp(443, 5000, 1, 0);
+        let mut https = Vec::new();
+        other.write(&mut https, b"hello").unwrap();
+        pipeline.feed_network_packet(&https, &is_blocked, || 1, || {});
+        pipeline.feed_network_packet(&tcp_from_5003(&[1, 2, 3, 4, 5]), &is_blocked, || 1, || {});
+        assert_eq!(lookups.get(), 0);
+
+        // One chat message from uid 100: one lookup, and it is marked blocked.
+        let actions = pipeline.feed_network_packet(
+            &tcp_from_5003(&chat_segment(1, "hi")),
+            &is_blocked,
+            || 1,
+            || {},
+        );
+        assert_eq!(lookups.get(), 1);
+        match &actions[..] {
+            [PipelineAction::EmitNewMessage(chat)] => assert!(chat.is_blocked),
+            _ => panic!("expected one new message"),
+        }
     }
 
     /// App header + a chat whose payload carries an unknown field (tag 0x28 = field 5).

@@ -17,6 +17,10 @@ skipped it is listed in
 **Docs:** BUILD/README_EN fixed; TROUBLE_SHOOTING deleted (Kade adds new later) —
 [`.memory/active-issues/stale-docs.md`](.memory/active-issues/stale-docs.md).
 
+**Code review 2026-09-29:** [`docs/code-review-2026-09-29.md`](docs/code-review-2026-09-29.md) —
+analysis only, no code changed. Bugs to fix first (B1–B4, P1, P3) are in
+[`.memory/active-issues/known-bugs.md`](.memory/active-issues/known-bugs.md); order in the report's §5.
+
 **Graft MCP start-up fix is PR #24, open.** Until merged, cloud sessions get the CLI only.
 
 ## Where the detail is

@@ -56,7 +56,11 @@ impl PacketBuffer {
                     return None;
                 } // Need more data
 
-                let total_len = 1 + varint_size + msg_len as usize;
+                // A corrupted length must not overflow: treat it as absurdly large.
+                let total_len = usize::try_from(msg_len)
+                    .ok()
+                    .and_then(|len| (1 + varint_size).checked_add(len))
+                    .unwrap_or(usize::MAX);
 
                 // 3. SANITY CHECK:
                 // If the buffer length is 471 but the packet claims to be 32,000,

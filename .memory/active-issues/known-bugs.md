@@ -4,9 +4,7 @@ Full evidence, line numbers and fix sketches: [`docs/code-review-2026-09-29.md`]
 Close an item by deleting its line in the commit that fixes it.
 
 **Reproduced on Linux** (probe crate linking `resonance-core`, synthetic packets):
-- **B1** Oversized length varint → add overflow → panic in `protocol/parser.rs` (20-byte packet). Kills the sniffer thread today; would abort the app once B5 is fixed.
 - **B2** `strip_application_header(5003)` accepts a segment only if a root ends exactly at its end: coalesced messages keep only the last, split messages are dropped, `PacketBuffer` reassembly is unreachable. Confirm the real framing with a captured fixture first.
-- **B3** Field-4 ("Me") messages have dedup key `(0,0,0)` → only the first is ever shown.
 - **B5** `[profile.release]` in `src-tauri/Cargo.toml` is ignored (non-root member); cargo warns on every build.
 
 **From reading the code, not run** (app crate, Windows only):

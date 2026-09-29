@@ -96,6 +96,8 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
 
         let mut buf = [0u8; 65535];
         let mut pipeline = ChatPipeline::new();
+        // Raw unparsed fields are only useful when reverse-engineering the protocol.
+        pipeline.set_keep_unknown_fields(config.debug_mode);
 
         loop {
             if let Err(crossbeam_channel::TryRecvError::Disconnected) = rx_main.try_recv() {

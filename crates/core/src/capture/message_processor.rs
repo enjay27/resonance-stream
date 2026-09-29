@@ -1,5 +1,12 @@
 use resonance_types::ChatMessage;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+
+/// Signatures remembered for duplicate detection. Duplicates arrive close
+/// together (retransmits, a second client), so the most recent few thousand
+/// are plenty; older ones are forgotten.
+pub const DEFAULT_DEDUP_CAPACITY: usize = 4096;
+
+type Signature = (u64, u64, u64);
 
 pub enum ProcessAction {
     IgnoreDuplicate,
@@ -8,14 +15,38 @@ pub enum ProcessAction {
 }
 
 pub struct MessageProcessor {
-    pub dedup_cache: HashMap<(u64, u64, u64), u64>,
+    dedup_cache: HashMap<Signature, u64>,
+    order: VecDeque<Signature>,
+    capacity: usize,
 }
 
 impl MessageProcessor {
     pub fn new() -> Self {
+        Self::with_capacity(DEFAULT_DEDUP_CAPACITY)
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            dedup_cache: HashMap::new(),
+            dedup_cache: HashMap::with_capacity(capacity),
+            order: VecDeque::with_capacity(capacity),
+            capacity: capacity.max(1),
         }
+    }
+
+    /// Number of remembered signatures.
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.dedup_cache.len()
+    }
+
+    /// The duplicate-detection key, or `None` when the message carries no
+    /// identity (field-4 "Me" messages have no timestamp or sequence id, so
+    /// every one of them would share one key).
+    fn signature(chat: &ChatMessage) -> Option<Signature> {
+        if chat.timestamp == 0 && chat.sequence_id == 0 {
+            return None;
+        }
+        Some((chat.uid, chat.timestamp, chat.sequence_id))
     }
 
     /// Pure logic: Determines what to do with a chat message without mutating global state.
@@ -29,7 +60,9 @@ impl MessageProcessor {
             chat.is_blocked = true;
         }
 
-        let signature = (chat.uid, chat.timestamp, chat.sequence_id);
+        let Some(signature) = Self::signature(chat) else {
+            return ProcessAction::EmitNewMessage;
+        };
 
         if let Some(&existing_pid) = self.dedup_cache.get(&signature) {
             if chat.is_blocked {
@@ -42,10 +75,20 @@ impl MessageProcessor {
         ProcessAction::EmitNewMessage
     }
 
-    /// Registers a successfully emitted message into the duplicate cache
+    /// Registers a successfully emitted message into the duplicate cache,
+    /// forgetting the oldest signature once the cache is full.
     pub fn commit_new_message(&mut self, chat: &ChatMessage) {
-        let signature = (chat.uid, chat.timestamp, chat.sequence_id);
-        self.dedup_cache.insert(signature, chat.pid);
+        let Some(signature) = Self::signature(chat) else {
+            return;
+        };
+        if self.dedup_cache.insert(signature, chat.pid).is_none() {
+            self.order.push_back(signature);
+        }
+        while self.order.len() > self.capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                self.dedup_cache.remove(&oldest);
+            }
+        }
     }
 }
 
@@ -107,5 +150,53 @@ mod tests {
             }
             _ => panic!("Expected new message"),
         }
+    }
+    fn me(text: &str) -> ChatMessage {
+        // Field-4 ("Me") messages carry no uid, timestamp or sequence id.
+        ChatMessage {
+            nickname: "Me".into(),
+            message: text.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn messages_without_identity_are_never_deduplicated() {
+        // Regression (review B3): all "Me" messages share the key (0, 0, 0).
+        let mut processor = MessageProcessor::new();
+        let blocked = HashMap::new();
+        for text in ["one", "two", "three"] {
+            let mut msg = me(text);
+            match processor.process(&mut msg, &blocked) {
+                ProcessAction::EmitNewMessage => processor.commit_new_message(&msg),
+                _ => panic!("'{text}' was dropped as a duplicate"),
+            }
+        }
+    }
+
+    #[test]
+    fn dedup_cache_is_bounded_and_forgets_the_oldest() {
+        let mut processor = MessageProcessor::with_capacity(3);
+        let blocked = HashMap::new();
+        let msg = |seq| ChatMessage {
+            uid: 7,
+            timestamp: 1,
+            sequence_id: seq,
+            pid: seq,
+            ..Default::default()
+        };
+        for seq in 1..=4 {
+            processor.commit_new_message(&msg(seq));
+        }
+        assert_eq!(processor.len(), 3);
+        // seq 1 was evicted, so it is new again; seq 4 is still a duplicate.
+        assert!(matches!(
+            processor.process(&mut msg(1), &blocked),
+            ProcessAction::EmitNewMessage
+        ));
+        assert!(matches!(
+            processor.process(&mut msg(4), &blocked),
+            ProcessAction::IgnoreDuplicate
+        ));
     }
 }

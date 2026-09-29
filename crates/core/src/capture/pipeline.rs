@@ -13,6 +13,7 @@ pub enum PipelineAction {
 pub struct ChatPipeline {
     tracker: StreamTracker,
     processor: MessageProcessor,
+    keep_unknown_fields: bool,
 }
 
 impl ChatPipeline {
@@ -20,7 +21,15 @@ impl ChatPipeline {
         Self {
             tracker: StreamTracker::new(),
             processor: MessageProcessor::new(),
+            keep_unknown_fields: false,
         }
+    }
+
+    /// Keep the raw bytes of fields the parser does not understand on each
+    /// message (a reverse-engineering aid). Off by default: they are never
+    /// displayed, and would otherwise be cloned, stored and sent to the UI.
+    pub fn set_keep_unknown_fields(&mut self, keep: bool) {
+        self.keep_unknown_fields = keep;
     }
 
     /// 100% Pure Logic: Takes raw network bytes and returns UI Actions.
@@ -68,6 +77,9 @@ impl ChatPipeline {
             for event in parsing_pipeline(&packet_data) {
                 // Guard clause for the event loop using let-else
                 let Port5003Event::Chat(mut chat) = event;
+                if !self.keep_unknown_fields {
+                    chat.unknown_fields = HashMap::new();
+                }
 
                 // 5. Apply duplicate and blocking rules
                 match self.processor.process(&mut chat, blocked_users) {
@@ -156,5 +168,82 @@ mod tests {
         } else {
             panic!("Pipeline failed to emit a new message.");
         }
+    }
+    fn tcp_from_5003(payload: &[u8]) -> Vec<u8> {
+        let builder =
+            PacketBuilder::ipv4([192, 168, 1, 1], [192, 168, 1, 2], 64).tcp(5003, 12345, 1, 0);
+        let mut out = Vec::new();
+        builder.write(&mut out, payload).unwrap();
+        out
+    }
+
+    /// App header + root { field 4: { tag 0x1A text } } -- a "Me" message.
+    fn me_segment(text: &str) -> Vec<u8> {
+        let mut block = vec![0x1A, text.len() as u8];
+        block.extend_from_slice(text.as_bytes());
+        let mut root = vec![0x22, block.len() as u8];
+        root.extend(block);
+        let mut seg = vec![0, 0, 0, 0, 0x0A, root.len() as u8];
+        seg.extend(root);
+        seg
+    }
+
+    fn emitted(pipeline: &mut ChatPipeline, segments: &[Vec<u8>]) -> Vec<ChatMessage> {
+        let blocked = HashMap::new();
+        let mut pid = 0;
+        let mut out = Vec::new();
+        for seg in segments {
+            let actions = pipeline.feed_network_packet(
+                &tcp_from_5003(seg),
+                &blocked,
+                || {
+                    pid += 1;
+                    pid
+                },
+                || {},
+            );
+            for action in actions {
+                if let PipelineAction::EmitNewMessage(chat) = action {
+                    out.push(chat);
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn every_me_message_is_emitted() {
+        let mut pipeline = ChatPipeline::new();
+        let got = emitted(&mut pipeline, &[me_segment("one"), me_segment("two")]);
+        let texts: Vec<_> = got.iter().map(|c| c.message.as_str()).collect();
+        assert_eq!(texts, ["one", "two"]);
+    }
+
+    /// App header + a chat whose payload carries an unknown field (tag 0x28 = field 5).
+    fn chat_with_unknown_field() -> Vec<u8> {
+        let payload = [
+            0x08, 0x01, // session id 1
+            0x12, 0x02, 0x08, 0x64, // sender uid 100
+            0x28, 0x07, // unknown field 5 = 7
+            0x22, 0x04, 0x1A, 0x02, b'H', b'i', // message "Hi"
+        ];
+        let mut root = vec![0x12, payload.len() as u8];
+        root.extend_from_slice(&payload);
+        let mut seg = vec![0, 0, 0, 0, 0x0A, root.len() as u8];
+        seg.extend(root);
+        seg
+    }
+
+    #[test]
+    fn unknown_fields_are_dropped_unless_asked_for() {
+        let mut pipeline = ChatPipeline::new();
+        let got = emitted(&mut pipeline, &[chat_with_unknown_field()]);
+        assert_eq!(got.len(), 1);
+        assert!(got[0].unknown_fields.is_empty());
+
+        let mut pipeline = ChatPipeline::new();
+        pipeline.set_keep_unknown_fields(true);
+        let got = emitted(&mut pipeline, &[chat_with_unknown_field()]);
+        assert!(!got[0].unknown_fields.is_empty());
     }
 }

@@ -14,3 +14,6 @@ run as the real app.
   unused imports of moved code). Not run: app tests (`translator` mock-server test),
   linking, and the app itself. Wire format: the ui's `ChatMessage` now also carries
   `unknownFields` (the app always sent it; the ui used to ignore it).
+- **Phase 3 (`lib.rs` split).** Cross-check only. Worth a real run: tray menu (all four
+  items), global tab shortcut, Exit → `llama-server.exe` killed. These are the paths
+  whose code moved.

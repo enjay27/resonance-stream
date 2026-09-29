@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::inject_system_message;
 use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorStatePayload};
-use crate::{inject_system_message, kill_orphaned_servers};
 
 use self::core::{translate_text, AI_SERVER_URL};
 use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds, ServerGuard};
@@ -33,7 +33,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         );
         emit_translator_state(&app, "Starting", "Initializing AI Backend...");
 
-        kill_orphaned_servers(&app);
+        server_manager::kill_orphaned_servers(&app);
 
         // 1. Launch the Server
         let server_process = match launch_ai_server(&app, &model_path, &config) {

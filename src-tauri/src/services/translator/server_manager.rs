@@ -137,3 +137,18 @@ pub fn ai_server_health_check(app: AppHandle) -> bool {
         }
     }
 }
+
+pub fn kill_orphaned_servers(app: &AppHandle) {
+    inject_system_message(
+        app,
+        SystemLogLevel::Info,
+        "Translator",
+        "Cleaning up any orphaned AI server processes...",
+    );
+
+    // Uses Windows taskkill to forcefully close any dangling llama-server.exe instances
+    let _ = Command::new("taskkill")
+        .args(["/F", "/IM", "llama-server.exe"])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW so it doesn't flash a cmd prompt
+        .output(); // .output() waits for the command to finish
+}

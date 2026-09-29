@@ -7,7 +7,7 @@ Plan agreed 2026-09-29. One phase, one commit. Push is Kade's.
 | 0 | CLAUDE.md, MEMORY.md, `.memory/`, workflow-control skill | files exist, index < 40 lines |
 | 1 | `justfile` gates + GitHub Actions (ui on Linux, app on Windows); `cargo fmt` baseline | `just check` green on Linux; CI file valid |
 | 2 | `crates/core`: protocol decoding, text processing, shared DTOs; ui + app depend on it | core tests run on Linux; one definition of `ChatMessage`/`SystemMessage` |
-| 3 | split `src-tauri/src/lib.rs` into commands / tray / state; `run` only wires | no behaviour change; app gate (CI) |
+| 3 | split `src-tauri/src/lib.rs` into events / commands / window / tray / shortcut / logging; `run` only wires | no behaviour change; app gate (CI) |
 | 4 | split `Settings` (920-line fn) and `App` (950-line fn) into section components | ui gate green; UI unchanged (manual run on Windows) |
 | 5 | hygiene: commit `Cargo.lock`, one version source, `package.json` metadata, template leftovers, stale docs (`stream_traacker.rs` typo fixed in phase 2 during the move) | gates green |
 
@@ -24,3 +24,8 @@ Hotspots: `inject_system_message` 19 callers, `read_varint` 14, `skip_field` 9.
   12 DTOs de-duplicated into `resonance-types`. App crate dropped `etherparse`, `kakasi`,
   `regex` (their only users moved). App compile-checks for Windows from Linux via
   mingw (discovered this phase; `just app-cross-check`).
+- **Phase 3:** `lib.rs` 517 → 158 lines. Bodies copied verbatim; setup order unchanged
+  (tray built at the same point, via `tray::setup_tray`). `generate_handler!` list
+  byte-identical; 11 `#[tauri::command]`s before and after. `kill_orphaned_servers`
+  moved to `translator/server_manager.rs`. App cross-check: 0 errors, warnings 19 → 16
+  (only unused-import warnings of `lib.rs` disappeared).

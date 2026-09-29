@@ -48,8 +48,3 @@ pub struct ExportMessage {
     pub translated: Option<String>,
     pub timestamp: u64,
 }
-
-pub struct TrayMenuState {
-    pub click_through: tauri::menu::MenuItem<tauri::Wry>,
-    pub always_on_top: tauri::menu::MenuItem<tauri::Wry>,
-}

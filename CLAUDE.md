@@ -58,6 +58,9 @@ src/                  ui crate (resonance-stream-ui)
   components/           views; hooks/ (event + config wiring); store.rs (signals)
   ui_types.rs           ui-only types (AppConfig) + re-export of resonance-types
 src-tauri/            app crate (resonance-stream, lib resonance_stream_lib)
+  src/lib.rs            module list, crate-root re-exports, run() — start-up wiring only
+  src/events.rs         inject_system_message / store_and_emit: emit to UI + keep history
+  src/commands.rs       history + translator commands; window.rs, tray.rs, shortcut.rs
   src/protocol/types.rs AppState and backend-only types; re-exports resonance-types
   src/services/         sniffer/ (sockets, workers) translator/ (llama server) downloader/
   src/config/ src/io/   config + metadata persistence, archive writer
@@ -77,6 +80,13 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
 - After structural changes graft rebuilds via the PostToolUse hook; `graft build` if stale.
 
 ---
+
+## Conventions (app crate)
+
+- **Tauri commands are `pub` and reach `generate_handler!` through the crate-root
+  `pub use <module>::*`.** A new command module needs both. A private `use` of the same
+  name in a module shadows its glob re-export (rustc warns) — the item then silently
+  stops being exported; call it by path instead.
 
 ## Guardrails
 

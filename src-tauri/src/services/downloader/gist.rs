@@ -1,40 +1,14 @@
-use crate::protocol::types::SystemLogLevel;
 use crate::inject_system_message;
-use serde::{Deserialize, Serialize};
+use crate::protocol::types::SystemLogLevel;
 use std::fs;
 use tauri::{AppHandle, Manager};
 
-const METADATA_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/metadata.json";
+const METADATA_URL: &str =
+    "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/metadata.json";
 const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/custom_dict.json";
 
-// --- 1. Structs matching your new unified Gist JSON ---
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct VersionInfo {
-    pub latest_version: String,
-    pub download_url: String,
-    pub release_notes: String,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct RemoteDictionary {
-    pub version: String,
-    pub updated_at: String,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct GistMetadata {
-    pub app: VersionInfo,
-    pub model: VersionInfo,
-    pub dictionary: RemoteDictionary,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct UpdateCheckResult {
-    pub app_update_available: bool,
-    pub model_update_available: bool,
-    pub dict_update_available: bool,
-    pub remote_data: GistMetadata,
-}
+// --- 1. Structs matching the unified Gist JSON: shared with the UI ---
+pub use resonance_types::{GistMetadata, RemoteDictionary, UpdateCheckResult, VersionInfo};
 
 // --- 2. The Single Unified Fetch Command ---
 #[tauri::command]
@@ -122,12 +96,14 @@ pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, 
         "Translator",
         "Dictionary successfully synchronized.",
     );
-    println!("Dictionary successfully synchronized. version {:?}", version);
+    println!(
+        "Dictionary successfully synchronized. version {:?}",
+        version
+    );
 
     let mut metadata = crate::config::load_metadata(&app);
     metadata.current_dict_version = version;
     crate::config::save_metadata(&app, &metadata);
-
 
     Ok("Dictionary updated and reloaded!".to_string())
 }

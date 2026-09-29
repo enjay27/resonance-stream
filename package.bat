@@ -3,7 +3,6 @@ setlocal enabledelayedexpansion
 
 :: --- Configuration ---
 set APP_NAME=Resonance-Stream
-set VERSION=0.4.0
 set OUTPUT_DIR=dist
 
 :: [1/1] Build Tauri Installer

@@ -1,12 +1,13 @@
 [package]
 name = "resonance-stream-ui"
-version = "0.4.0"
+version.workspace = true
 authors = ["Enjay27 <kdkm2002@gmail.com>"]
 description = "Blue Protocol: Star Resonance Real-time Translator"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
+resonance-types = { path = "crates/types" }
 leptos = { version = "0.8", features = ["csr"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -24,4 +25,9 @@ chrono = "0.4.44"
 serde_with = "3.17.0"
 
 [workspace]
-members = ["src-tauri"]
+members = ["src-tauri", "crates/core", "crates/types"]
+
+# The one place the app version is set. src-tauri inherits it, and
+# tauri.conf.json has no "version", so Tauri falls back to src-tauri's.
+[workspace.package]
+version = "0.4.0"

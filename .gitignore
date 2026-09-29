@@ -1,11 +1,5 @@
 /dist/
 /target/
-/Cargo.lock
-
-# WinDivert
-WinDivert.dll
-WinDivert.lib
-WinDivert64.sys
 
 # IDE
 .idea
@@ -23,9 +17,6 @@ build/
 dist/
 style/output.css
 *.exe
-
-# downloaded libraries
-/lib/
 
 # ENV
 .env

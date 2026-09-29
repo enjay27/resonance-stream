@@ -1,8 +1,8 @@
+use crate::{inject_system_message, SystemLogLevel};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
-use crate::{inject_system_message, SystemLogLevel};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppMetadata {
@@ -51,7 +51,12 @@ pub fn load_metadata(app: &AppHandle) -> AppMetadata {
 }
 
 pub fn save_metadata(app: &AppHandle, metadata: &AppMetadata) {
-    inject_system_message(&app, SystemLogLevel::Info, "Metadata", format!("Metadata saved {:?}", metadata));
+    inject_system_message(
+        &app,
+        SystemLogLevel::Info,
+        "Metadata",
+        format!("Metadata saved {:?}", metadata),
+    );
 
     let path = get_metadata_path(app);
     if let Ok(json) = serde_json::to_string_pretty(metadata) {

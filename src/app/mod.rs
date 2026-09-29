@@ -1,0 +1,136 @@
+mod actions;
+mod hydration;
+mod setup_flow;
+
+use crate::components::settings::Settings;
+use crate::components::title_bar::TitleBar;
+use crate::components::{
+    AppUpdateModal, ChatContainer, DictionaryModal, ModelUpdateModal, NavBar, SetupWizard,
+    Troubleshooter,
+};
+use crate::hooks::use_tray::{setup_tray_listeners, sync_tray_menu};
+use crate::store::AppSignals;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+
+#[component]
+pub fn App() -> impl IntoView {
+    // --- STATE SIGNALS ---
+    let signals = AppSignals::new();
+    let AppSignals {
+        compact_mode,
+        theme,
+        opacity,
+        active_menu_id,
+        set_active_menu_id,
+        set_current_time,
+        ..
+    } = signals;
+
+    provide_context(signals);
+
+    // --- CONFIG ACTIONS ---
+    let actions = actions::create_actions(signals);
+    let finalize_setup = setup_flow::finalize_setup(signals, actions.save_config);
+    let start_download = setup_flow::start_download(signals, finalize_setup);
+
+    provide_context(actions);
+
+    // --- TRAY ICON LISTENER ---
+    setup_tray_listeners(signals, actions);
+
+    // Apply theme to the root element whenever it changes
+    Effect::new(move |_| {
+        if let Some(window) = web_sys::window() {
+            if let Some(doc) = window.document() {
+                // 1. Apply theme to <html> (DaisyUI standard) and FORCE transparency
+                if let Some(html) = doc.document_element() {
+                    let _ = html.set_attribute("data-theme", &theme.get());
+                    // This strips DaisyUI's solid background so the Tauri window is clear
+                    let _ =
+                        html.set_attribute("style", "background-color: transparent !important;");
+                }
+
+                // 2. Ensure <body> is also fully transparent
+                if let Some(body) = doc.body() {
+                    let _ =
+                        body.set_attribute("style", "background-color: transparent !important;");
+                }
+            }
+        }
+    });
+
+    // --- STARTUP HYDRATION ---
+    Effect::new(move |_| {
+        spawn_local(async move {
+            hydration::hydrate_from_backend(signals).await;
+        });
+    });
+
+    // This automatically runs on startup, AND anytime either variable is changed from anywhere!
+    sync_tray_menu(signals);
+
+    // --- TICKER FOR RELATIVE TIME ---
+    // Updates the global current_time signal every 10 seconds
+    spawn_local(async move {
+        loop {
+            set_current_time.set(chrono::Local::now().timestamp_millis() as u64);
+            gloo_timers::future::TimeoutFuture::new(10_000).await;
+        }
+    });
+
+    view! {
+        <main id="main-app-container"
+            class=move || if compact_mode.get() {
+                "chat-app compact flex flex-col h-screen overflow-hidden"
+            } else {
+                "chat-app flex flex-col h-screen overflow-hidden"
+            }
+            // Natively binds your opacity signal to the DaisyUI theme background
+            // style:background-color=move || {
+            style=move || {
+                let current_opacity = opacity.get();
+                if theme.get() == "dark" {
+                    format!("background-color: rgba(18, 18, 18, {}) !important;", current_opacity)
+                } else {
+                    format!("background-color: rgba(252, 252, 252, {}) !important;", current_opacity)
+                }
+            }
+            // Note: Use `signals.opacity.get()` if your app.rs uses the signals struct instead of local signals.
+        >
+            <Show when=move || active_menu_id.get().is_some()>
+                <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
+            </Show>
+            <Show when=move || !compact_mode.get()>
+                <TitleBar />
+            </Show>
+            <Show
+                when=move || signals.init_done.get()
+                fallback=move || view! {
+                    <SetupWizard
+                        finalize=Callback::new(finalize_setup)
+                        start_download=Callback::new(start_download)
+                    />
+                }
+            >
+                <NavBar />
+
+                <ChatContainer />
+            </Show>
+
+
+            <AppUpdateModal />
+
+            <ModelUpdateModal />
+
+            <Troubleshooter />
+
+            // Dictionary Modal
+            <DictionaryModal />
+
+            // Settings Modal
+            <Settings />
+
+        </main>
+    }
+}

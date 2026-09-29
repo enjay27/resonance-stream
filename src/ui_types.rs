@@ -2,36 +2,12 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatMessage {
-    pub pid: u64,
-    pub channel: String,
-    pub nickname: String,
-    pub message: String,
-    pub timestamp: u64,
-    pub uid: u64,
-    pub class_id: u64,
-    pub level: u64,
-    pub sequence_id: u64,
-    #[serde(default)]
-    pub is_blocked: bool,
-    // --- Translation Support ---
-    #[serde(default)]
-    pub translated: Option<String>,
-    #[serde(default)]
-    pub nickname_romaji: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SystemMessage {
-    pub pid: u64,
-    pub timestamp: u64,
-    pub level: String,  // info, warn, error, success, debug
-    pub source: String, // Backend, Sniffer, Sidecar
-    pub message: String,
-}
+// Types shared with the backend live in crates/types.
+pub use resonance_types::{
+    ChatMessage, FolderStatus, GistMetadata, NetworkInterface, ProgressPayload, RemoteDictionary,
+    SnifferStatePayload, SystemMessage, TranslationResult, TranslatorStatePayload,
+    UpdateCheckResult, VersionInfo,
+};
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -75,73 +51,6 @@ pub struct AppConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct FolderStatus {
-    pub exists: bool,
-    pub path: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TauriEvent {
     pub payload: ProgressPayload,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TranslationResult {
-    pub pid: u64,
-    pub translated: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ProgressPayload {
-    #[serde(rename = "current_file")] // Match backend field name
-    pub current_file: String,
-    pub percent: u8,
-    #[serde(rename = "total_percent")] // Match backend field name
-    pub total_percent: u8,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct NetworkInterface {
-    pub name: String,
-    pub ip: String,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct TranslatorStatePayload {
-    pub state: String, // "Starting", "Loading Model", "Active", "Error", "Off"
-    pub message: String,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct SnifferStatePayload {
-    pub state: String,   // "Starting", "Firewall", "Binding", "Active", "Error", "Off"
-    pub message: String, // Context or Error message
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct VersionInfo {
-    pub latest_version: String,
-    pub download_url: String,
-    pub release_notes: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct RemoteDictionary {
-    pub version: String,
-    pub updated_at: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct GistMetadata {
-    pub app: VersionInfo,
-    pub model: VersionInfo,
-    pub dictionary: RemoteDictionary,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct UpdateCheckResult {
-    pub app_update_available: bool,
-    pub model_update_available: bool,
-    pub dict_update_available: bool,
-    pub remote_data: GistMetadata,
 }

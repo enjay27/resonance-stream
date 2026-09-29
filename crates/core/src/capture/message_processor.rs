@@ -1,4 +1,4 @@
-use crate::protocol::types::ChatMessage;
+use resonance_types::ChatMessage;
 use std::collections::HashMap;
 
 pub enum ProcessAction {
@@ -52,7 +52,7 @@ impl MessageProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::types::ChatMessage;
+    use resonance_types::ChatMessage;
 
     #[test]
     fn test_message_processor_deduplication() {

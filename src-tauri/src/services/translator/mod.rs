@@ -1,5 +1,4 @@
 pub mod core;
-pub mod processor;
 pub mod server_manager;
 
 pub use server_manager::*;
@@ -10,12 +9,12 @@ use std::path::PathBuf;
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::inject_system_message;
 use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorStatePayload};
-use crate::{inject_system_message, kill_orphaned_servers};
 
 use self::core::{translate_text, AI_SERVER_URL};
-use self::processor::{load_dictionary, postprocess_text, preprocess_text};
 use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds, ServerGuard};
+use resonance_core::text::{load_dictionary, postprocess_text, preprocess_text};
 
 pub struct TranslationJob {
     pub chat: ChatMessage,
@@ -34,7 +33,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         );
         emit_translator_state(&app, "Starting", "Initializing AI Backend...");
 
-        kill_orphaned_servers(&app);
+        server_manager::kill_orphaned_servers(&app);
 
         // 1. Launch the Server
         let server_process = match launch_ai_server(&app, &model_path, &config) {
@@ -162,9 +161,10 @@ mod tests {
                             );
                             let _ = stream.write_all(response.as_bytes());
                         }
-                        // Route 2: Mock the Translation endpoint
-                        else if request.starts_with("POST /v1/chat/completions") {
-                            let body = r#"{"choices": [{"message": {"content": "116 정찰 우측 은나포"}}]}"#;
+                        // Route 2: Mock llama.cpp's native /completion endpoint,
+                        // which translate_text() calls (not the OpenAI-style one)
+                        else if request.starts_with("POST /completion") {
+                            let body = r#"{"content": " 116 정찰 우측 은나포 "}"#;
                             // FIXED: Added Content-Length and Connection: close
                             let response = format!(
                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",

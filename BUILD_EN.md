@@ -1,95 +1,68 @@
 # 🛠️ Resonance Stream Build Guide
 
-This document provides the technical instructions required to compile and package **Resonance Stream** from source code. Since this project combines a Rust (Tauri) backend with a Python (AI Engine) sidecar, the build order and dependency management are critical.
+How to build **Resonance Stream** from source. The app is a Cargo workspace:
+a Tauri 2 backend (`src-tauri/`), a Leptos frontend compiled to WebAssembly (`src/`),
+and two platform-independent crates (`crates/core`, `crates/types`).
 
-## 📋 1. Prerequisites
+There is no Python sidecar and no driver SDK to install. Packets are read from a raw
+socket, and the translation engine (llama.cpp `llama-server`, Vulkan build) and the AI
+model are downloaded by the app at runtime.
 
-Ensure your development environment meets these requirements before starting the build:
+## 📋 1. Prerequisites (Windows 10/11 x64)
 
-* **Rust**: Version 1.70+ with the **2021 Edition** toolchain.
-* **Node.js & Trunk**: Required for building and bundling the **Leptos** frontend.
-* **Python 3.10+**: Must have `ctranslate2`, `pykakasi`, `argparse`, and `pyinstaller` installed (via `requirements.txt`).
-* **CUDA Toolkit**: Version 11.x or 12.x is required for GPU-accelerated translation.
+* **Rust** (stable, MSVC toolchain) with the WebAssembly target:
+  ```cmd
+  rustup target add wasm32-unknown-unknown
+  ```
+* **Trunk** (frontend bundler) and the **Tauri CLI**:
+  ```cmd
+  cargo install trunk
+  cargo install tauri-cli --version "^2"
+  ```
+* **Node.js**: Trunk's pre-build hook runs the Tailwind CSS CLI through `npx`.
+  Install the Node dependencies once:
+  ```cmd
+  npm install
+  ```
+* **just** (optional, for the check commands): `cargo install just` or `pip install rust-just`.
 
----
+## 🚀 2. Run in development
 
-## ⚙️ 2. Library & Dependency Setup (Automated)
+The packet sniffer needs **Administrator** rights. Development builds do not embed the
+manifest that requests them, so start your terminal as Administrator, then:
 
-Unlike previous versions, you do **not** need to manually download SDKs or configure a `.env` file. The project includes a bootstrap script to handle this automatically.
-
-1. **Run the Setup Script**:
-   Execute `setup_libs.bat` in the project root.
-   ```cmd
-   setup_libs.bat
-   ```
-
-- This script creates a `lib/` directory and automatically downloads/extracts the required **Npcap SDK** and **WinDivert** binaries.
-- The `lib/` directory is git-ignored to keep the repository clean.
-
-------
-
-## 🚀 3. Compilation Pipeline (Manual Steps)
-
-If you are building manually without `package.bat`, you must follow this exact sequence to satisfy Tauri's bundling requirements.
-
-### Step 1: Library Path Setup
-
-Temporarily set the environment variable so the Rust linker can find the Npcap library.
-
-```
-set LIB=%CD%\lib\npcap-sdk\Lib\x64;%LIB%
+```cmd
+cargo tauri dev
 ```
 
-### Step 2: AI Sidecar Build (Python)
+This runs `trunk serve` on port 1420 and starts the app against it.
 
-Use PyInstaller to compile the AI engine. Tauri requires the sidecar filename to include the **Target Triple**.
+## 📦 3. Release build
 
-- **Command**:
-
-```
-pyinstaller --noconfirm --clean --distpath src-tauri\bin translator.spec
-```
-
-- **Output**: Generates `src-tauri/bin/translator-x86_64-pc-windows-msvc.exe`.
-
-### Step 3: Driver Placement
-
-Copy the WinDivert drivers from the `lib` folder to the binary location.
-
-- `lib\WinDivert\x64\WinDivert.dll` -> `src-tauri\bin\`
-- `lib\WinDivert\x64\WinDivert64.sys` -> `src-tauri\bin\`
-
-### Step 4: Main Application (Rust/Tauri)
-
-Bundle the frontend assets and compile the Rust backend to create the installer.
-
-```
-cargo tauri build
-```
-
-------
-
-## 📦 4. Automated Packaging (Recommended)
-
-The **`package.bat`** script automates the entire process and ensures a clean release. It performs the following:
-
-1. **Dependency Check**: Verifies `lib/` exists; runs `setup_libs.bat` if missing.
-2. **Sidecar Build**: Compiles the AI engine using `translator.spec`.
-3. **Resource Placement**: Automatically copies WinDivert drivers to the correct build folder.
-4. **Installer Build**: Runs the Tauri (NSIS) build process.
-5. **Move & Organize**: Moves the final installer (`*-setup.exe`) to a clean **`dist`** folder in the project root for immediate deployment.
-
-**How to Run:**
-
-```
+```cmd
 package.bat
 ```
 
-------
+`package.bat` runs `cargo tauri build` (which runs `trunk build` first) and moves the
+NSIS installer (`*-setup.exe`) into `dist\`. Release builds embed `src-tauri/app.manifest`,
+so the installed app asks for Administrator rights on launch.
 
-## ⚠️ 5. Vital Runtime Notes
+The version number is set once, in the root `Cargo.toml` (`[workspace.package]`).
 
-- **Administrator Privileges**: The final executable **must be run as Administrator** to load the WinDivert network driver.
-- **Model Downloads**: On the first launch, the application will use the links in `models.json` to automatically download the required AI model files.
-- **VC++ Redistributable**: Users must have the **Microsoft Visual C++ Redistributable (x64)** installed for the Python AI engine to initialize correctly.
-- **Debugging Sidecar**: If translation fails, enable `console=True` in `translator.spec` and rebuild to see Python error logs.
+## ✅ 4. Checks
+
+```cmd
+just check
+```
+
+Runs formatting, the tests of the platform-independent crates, the frontend check and,
+on Windows, the backend check and tests. The same checks run in GitHub Actions on every
+push (`.github/workflows/ci.yml`). See `CLAUDE.md` for which check covers which folder.
+
+## ⚠️ 5. Runtime notes
+
+- **First launch downloads:** the AI model (its URL comes from the project's metadata
+  gist), the `llama-server` Vulkan build (from this repository's releases) and the user
+  dictionary. They are stored in `%APPDATA%\com.enjay.bpsr.resonance-stream`.
+- **Firewall:** on first launch the app asks to add a firewall rule for packet capture.
+- **Administrator rights** are required for the raw socket.

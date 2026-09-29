@@ -1,10 +1,10 @@
 use super::{FolderStatus, ProgressPayload};
+use crate::{inject_system_message, SystemLogLevel};
 use futures_util::StreamExt;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
-use crate::{inject_system_message, SystemLogLevel};
 
 pub const MODEL_FOLDER: &str = "translation-model";
 pub const MODEL_FILENAME: &str = "model.gguf";
@@ -61,7 +61,12 @@ pub async fn download_model(
 ) -> Result<(), String> {
     let model_dir = get_model_dir(&app)?;
 
-    inject_system_message(&app, SystemLogLevel::Info, "Model", format!("Download Model version {}", version));
+    inject_system_message(
+        &app,
+        SystemLogLevel::Info,
+        "Model",
+        format!("Download Model version {}", version),
+    );
 
     // 1. Cleanup: If the folder exists, delete it first to remove old 4GB model files
     if model_dir.exists() {

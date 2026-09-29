@@ -39,7 +39,7 @@ pub fn run() {
             let dictionary = resonance_core::text::Dictionary::load(&dictionary_path(&handle));
             app.manage(AppState {
                 config: RwLock::new(config.clone()),
-                chat_history: Mutex::new(ChatHistory::new(config.chat_limit)),
+                chat_history: Mutex::new(ChatHistory::new(config.history_limit())),
                 system_history: Mutex::new(VecDeque::with_capacity(200)),
                 next_pid: 1.into(),
                 nickname_cache: Mutex::new(std::collections::HashMap::new()),
@@ -50,6 +50,23 @@ pub fn run() {
                 blocked_users: Mutex::new(config.blocked_users.clone()),
             });
             let state = app.state::<AppState>();
+
+            // Chat saved by earlier runs (daily chat logs), newest last; new
+            // pids continue after them so the list stays in order.
+            let restored = resonance_core::history::load_recent(
+                &crate::io::chat_logs_dir(&handle),
+                config.history_limit(),
+            );
+            state.next_pid.fetch_max(
+                restored.len() as u64 + 1,
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            {
+                let mut history = state.chat_history.lock();
+                for message in restored {
+                    history.push(message);
+                }
+            }
 
             inject_system_message(
                 &handle,
@@ -101,6 +118,7 @@ pub fn run() {
 
             Ok(())
         })
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())

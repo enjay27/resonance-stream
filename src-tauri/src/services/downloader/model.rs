@@ -1,6 +1,6 @@
 use super::{FolderStatus, ProgressPayload};
 use crate::{inject_system_message, SystemLogLevel};
-use resonance_core::download::replace_file;
+use resonance_core::download::{replace_file, sha256_file};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -58,8 +58,55 @@ pub async fn download_model(
     app: AppHandle,
     download_url: String,
     version: String,
+    expected_hash: String, // from the gist, via the UI
 ) -> Result<(), String> {
+    if expected_hash.trim().is_empty() {
+        return Err("No SHA-256 published for this model; refusing to download it".into());
+    }
     let model_dir = get_model_dir(&app)?;
+    fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
+    let dest_path = model_dir.join(MODEL_FILENAME);
+
+    // 1. FAST PATH: the installed model may already be this exact file.
+    if dest_path.exists() {
+        inject_system_message(
+            &app,
+            SystemLogLevel::Info,
+            "Model",
+            "Checking existing model integrity before downloading...",
+        );
+        let path = dest_path.clone();
+        let local_hash = tauri::async_runtime::spawn_blocking(move || sha256_file(&path))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        if local_hash.eq_ignore_ascii_case(expected_hash.trim()) {
+            inject_system_message(
+                &app,
+                SystemLogLevel::Success,
+                "Model",
+                "Existing model is a perfect match! Skipping download.",
+            );
+            let _ = app.emit(
+                "download-progress",
+                ProgressPayload {
+                    current_file: "로컬 AI 모델 확인 완료 (Skipped download)".to_string(),
+                    percent: 100,
+                    total_percent: 100,
+                },
+            );
+            let mut metadata = crate::config::load_metadata(&app);
+            metadata.current_model_version = version;
+            crate::config::save_metadata(&app, &metadata);
+            return Ok(());
+        }
+        inject_system_message(
+            &app,
+            SystemLogLevel::Warning,
+            "Model",
+            "Existing model is outdated or corrupted. Starting fresh download.",
+        );
+    }
 
     inject_system_message(
         &app,
@@ -68,17 +115,15 @@ pub async fn download_model(
         format!("Download Model version {}", version),
     );
 
-    // The current model stays in place until the new one is complete and
-    // verified: a failed download leaves a working translator behind.
-    fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
-    let dest_path = model_dir.join(MODEL_FILENAME);
+    // 2. DOWNLOAD + VERIFY: hashed while streaming; the current model stays
+    // in place until the new one is complete and matches.
     let staged = model_dir.join(format!("{}.new", MODEL_FILENAME));
     super::fetch::download_file(
         &app,
         &download_url,
         &staged,
         "AI 모델 다운로드 중...",
-        super::gist::published_sha256(&download_url).as_deref(),
+        Some(expected_hash.trim()),
     )
     .await?;
 

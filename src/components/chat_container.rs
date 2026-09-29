@@ -38,9 +38,14 @@ pub fn ChatContainer() -> impl IntoView {
         let min_level = signals.min_sender_level.get();
         let limit = display_limit.get();
 
+        let Some(key) = tab.view_key() else {
+            return Vec::new(); // the system tab lists no chat
+        };
         let filter = ChatFilter::new(tab, &filters, min_level, &search);
-        signals.chat_log.with(|log| {
-            newest_matching(log, limit, |sig| sig.with_untracked(|m| filter.matches(m)))
+        signals.chat.with(|store| {
+            newest_matching(store.tab(key), limit, |sig| {
+                sig.with_untracked(|m| filter.matches(m))
+            })
         })
     });
 

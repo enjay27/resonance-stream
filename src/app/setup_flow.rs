@@ -58,13 +58,15 @@ pub fn start_download(
         spawn_local(async move {
             // FETCH THE GIST METADATA FIRST
             let update_res = invoke("check_all_updates", JsValue::NULL).await;
-            let (model_url, model_version) = if let Ok(res) = update_res {
+            let (model_url, model_version, model_hash, dict_version) = if let Ok(res) = update_res {
                 if let Ok(data) =
                     serde_wasm_bindgen::from_value::<crate::ui_types::UpdateCheckResult>(res)
                 {
                     (
                         data.remote_data.model.download_url,
                         data.remote_data.model.latest_version,
+                        data.remote_data.model.sha256,
+                        data.remote_data.dictionary.version,
                     )
                 } else {
                     set_status_text.set("Error: Failed to parse update data".to_string());
@@ -94,7 +96,8 @@ pub fn start_download(
             // 2. Download the AI Model (.gguf)
             let args = serde_wasm_bindgen::to_value(&serde_json::json!({
                 "downloadUrl": model_url,
-                "version": model_version
+                "version": model_version,
+                "expectedHash": model_hash
             }))
             .unwrap();
 
@@ -126,7 +129,12 @@ pub fn start_download(
             }
 
             // 4. Sync dictionary
-            let sync_dict = invoke("sync_dictionary", JsValue::NULL).await;
+            let dict_args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                "version": dict_version
+            }))
+            .unwrap();
+
+            let sync_dict = invoke("sync_dictionary", dict_args).await;
             if let Err(e) = sync_dict {
                 set_downloading.set(false);
                 set_status_text.set(format!("Dict Error: {:?}", e));

@@ -33,6 +33,14 @@ impl ChatPipeline {
         self.keep_unknown_fields = keep;
     }
 
+    /// Teaches the duplicate check messages shown before (e.g. history
+    /// reloaded from disk), so the server re-sending them is ignored.
+    pub fn remember(&mut self, messages: &[ChatMessage]) {
+        for message in messages {
+            self.processor.commit_new_message(message);
+        }
+    }
+
     /// 100% Pure Logic: Takes raw network bytes and returns UI Actions.
     pub fn feed_network_packet(
         &mut self,
@@ -320,6 +328,20 @@ mod tests {
             [PipelineAction::EmitNewMessage(chat)] => assert!(chat.is_blocked),
             _ => panic!("expected one new message"),
         }
+    }
+
+    #[test]
+    fn remembered_messages_are_not_emitted_again() {
+        let mut pipeline = ChatPipeline::new();
+        // What a previous run saw and saved: seq 1 "Hello" from uid 100.
+        let first = emitted(&mut pipeline, &[chat_segment(1, "Hello")]);
+        let mut fresh = ChatPipeline::new();
+        fresh.remember(&first);
+        let again = emitted(
+            &mut fresh,
+            &[chat_segment(1, "Hello"), chat_segment(2, "New")],
+        );
+        assert_eq!(texts(&again), ["New"]);
     }
 
     /// App header + a chat whose payload carries an unknown field (tag 0x28 = field 5).

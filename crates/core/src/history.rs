@@ -2,6 +2,53 @@
 
 use resonance_types::ChatMessage;
 use std::collections::BTreeMap;
+use std::path::Path;
+
+/// Daily chat log file for `date` (YYYY-MM-DD) inside the chat_logs folder.
+pub fn chat_log_file_name(date: &str) -> String {
+    format!("{}.jsonl", date)
+}
+
+/// The newest `limit` messages saved in `dir` (one JSON `ChatMessage` per
+/// line, one `.jsonl` file per day), oldest first. Pids are renumbered
+/// 1..=n in that order: saved pids come from earlier runs and may collide,
+/// while new messages must sort after the loaded ones.
+pub fn load_recent(dir: &Path, limit: usize) -> Vec<ChatMessage> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<_> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .collect();
+    files.sort(); // YYYY-MM-DD names: sorted by day
+
+    // Newest day first, newest line first, until `limit` messages.
+    let mut newest_first = Vec::new();
+    for file in files.iter().rev() {
+        if newest_first.len() >= limit {
+            break;
+        }
+        let Ok(content) = std::fs::read_to_string(file) else {
+            continue;
+        };
+        for line in content.lines().rev() {
+            if newest_first.len() >= limit {
+                break;
+            }
+            if let Ok(message) = serde_json::from_str::<ChatMessage>(line) {
+                newest_first.push(message);
+            }
+        }
+    }
+
+    newest_first.reverse();
+    for (pid, message) in (1..).zip(newest_first.iter_mut()) {
+        message.pid = pid;
+    }
+    newest_first
+}
 
 /// Pids come from one increasing counter, so ordering by pid is arrival
 /// order, and dropping the oldest message is `pop_first` (O(log n)) instead
@@ -79,6 +126,53 @@ mod tests {
 
     fn pids(h: &ChatHistory) -> Vec<u64> {
         h.values().map(|m| m.pid).collect()
+    }
+
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("rs-history-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn line(pid: u64, text: &str) -> String {
+        serde_json::to_string(&ChatMessage {
+            pid,
+            message: text.into(),
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn load_recent_takes_the_newest_across_days() {
+        let dir = temp_dir("recent");
+        std::fs::write(
+            dir.join(chat_log_file_name("2026-09-28")),
+            [line(7, "a"), line(8, "b"), line(9, "c")].join("\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(chat_log_file_name("2026-09-29")),
+            [line(1, "d"), "not json".to_string(), line(2, "e")].join("\n") + "\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("notes.txt"), line(5, "ignored")).unwrap();
+
+        let got = load_recent(&dir, 4);
+        let texts: Vec<_> = got.iter().map(|m| m.message.as_str()).collect();
+        assert_eq!(texts, ["b", "c", "d", "e"]); // oldest first, bad line skipped
+        let pids: Vec<_> = got.iter().map(|m| m.pid).collect();
+        assert_eq!(pids, [1, 2, 3, 4]); // renumbered: old pids collided (1, 2 vs 7..9)
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_recent_without_logs_is_empty() {
+        let dir = temp_dir("none");
+        assert!(load_recent(&dir.join("missing"), 10).is_empty());
+        assert!(load_recent(&dir, 0).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

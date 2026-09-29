@@ -15,8 +15,8 @@ const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac
 // --- 1. Structs matching the unified Gist JSON: shared with the UI ---
 pub use resonance_types::{GistMetadata, RemoteDictionary, UpdateCheckResult, VersionInfo};
 
-/// The metadata from the last update check. Downloads look their expected
-/// SHA-256 up here by URL, so the hash comes from the gist, not the UI.
+/// The metadata from the last update check. The app updater looks its
+/// expected SHA-256 up here by URL, so the hash comes from the gist.
 static LAST_METADATA: Mutex<Option<GistMetadata>> = Mutex::new(None);
 
 /// The SHA-256 the gist published for `url`, if any.
@@ -26,7 +26,7 @@ pub fn published_sha256(url: &str) -> Option<String> {
     let entry = [&metadata.app, &metadata.model]
         .into_iter()
         .find(|entry| entry.download_url == url)?;
-    entry.sha256.clone()
+    Some(entry.sha256.clone()).filter(|hash| !hash.is_empty())
 }
 
 // --- 2. The Single Unified Fetch Command ---

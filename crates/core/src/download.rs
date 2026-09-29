@@ -62,12 +62,7 @@ impl DownloadCheck {
             }
         }
         if let Some(expected) = self.expected_sha256 {
-            let actual: String = self
-                .hasher
-                .finalize()
-                .iter()
-                .map(|b| format!("{:02x}", b))
-                .collect();
+            let actual = hex(&self.hasher.finalize());
             if actual != expected {
                 return Err(format!(
                     "Download corrupted: SHA-256 is {}, expected {}",
@@ -100,6 +95,27 @@ impl ProgressThrottle {
         self.last = Some(percent);
         Some(percent)
     }
+}
+
+/// SHA-256 (lowercase hex) of a file, read in large chunks -- the model is
+/// several GB. Run it off the async runtime.
+pub fn sha256_file(path: &Path) -> io::Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer = vec![0u8; 8 * 1024 * 1024];
+    let mut hasher = Sha256::new();
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(hex(&hasher.finalize()))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Moves `from` over `to`, retrying while `to` is still locked (on Windows a
@@ -205,6 +221,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn sha256_file_hashes_the_contents() {
+        let dir = temp_dir("sha");
+        let path = dir.join("hello.bin");
+        std::fs::write(&path, b"hello").unwrap();
+        assert_eq!(sha256_file(&path).unwrap(), HELLO_SHA256);
+        assert!(sha256_file(&dir.join("missing")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

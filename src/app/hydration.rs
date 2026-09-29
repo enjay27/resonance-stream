@@ -1,6 +1,7 @@
 //! Start-up: load config into the signals and, for a returning user, restore
 //! history, start the sniffer and translator, and check for updates.
 
+use crate::chat_view::ChatStore;
 use crate::hooks::use_events::setup_event_listeners;
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
@@ -19,13 +20,17 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
         set_status_text,
         set_model_ready,
         set_active_tab,
-        set_chat_log,
+        set_chat,
+        tab_limits,
+        set_tab_limits,
+        set_archive_ignored_channels,
+        set_message_spacing,
+        custom_filters,
         set_system_log,
         set_debug_mode,
         set_log_level,
         set_compact_mode,
         set_is_pinned,
-        set_chat_limit,
         set_custom_filters,
         set_theme,
         set_opacity,
@@ -64,7 +69,11 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                 set_compact_mode.set(config.compact_mode);
                 set_active_tab.set(config.active_tab);
                 set_is_pinned.set(config.always_on_top);
-                set_chat_limit.set(config.chat_limit);
+                if !config.tab_limits.is_empty() {
+                    set_tab_limits.set(config.tab_limits);
+                }
+                set_archive_ignored_channels.set(config.archive_ignored_channels);
+                set_message_spacing.set(config.message_spacing);
                 set_custom_filters.set(config.custom_tab_filters);
                 set_theme.set(config.theme);
                 set_opacity.set(config.overlay_opacity);
@@ -110,8 +119,14 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                     if let Ok(res) = invoke("get_chat_history", JsValue::NULL).await {
                         if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<ChatMessage>>(res) {
                             // Stickers/emotes arrive already normalized by the backend.
-                            set_chat_log
-                                .set(vec.into_iter().map(|p| (p.pid, RwSignal::new(p))).collect());
+                            let limits = tab_limits.get_untracked();
+                            let filters = custom_filters.get_untracked();
+                            let mut store = ChatStore::default();
+                            for p in vec {
+                                let (pid, channel) = (p.pid, p.channel.clone());
+                                store.add(pid, &channel, RwSignal::new(p), &filters, &limits);
+                            }
+                            set_chat.set(store);
                         }
                     }
 
@@ -201,7 +216,11 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                                 log!("data {:?}", update_data);
 
                                 // 1. Silent Dictionary Update
-                                if update_data.dict_update_available {
+                                // Only when auto-sync is on (off by default); the
+                                // settings button and the wizard always sync.
+                                if update_data.dict_update_available
+                                    && signals.auto_sync_latest_dict.get_untracked()
+                                {
                                     add_system_log(
                                         "info",
                                         "Updater",

@@ -47,7 +47,20 @@ pub fn Settings() -> impl IntoView {
     });
 
     let sync_dict_action = Action::new_local(|_: &()| async move {
-        match invoke("sync_dictionary", JsValue::NULL).await {
+        // sync_dictionary needs the gist's dictionary version: look it up first
+        let version = match invoke("check_all_updates", JsValue::NULL).await {
+            Ok(res) => {
+                match serde_wasm_bindgen::from_value::<crate::ui_types::UpdateCheckResult>(res) {
+                    Ok(data) => data.remote_data.dictionary.version,
+                    Err(_) => return "동기화 실패".to_string(),
+                }
+            }
+            Err(_) => return "동기화 실패".to_string(),
+        };
+        let args =
+            serde_wasm_bindgen::to_value(&serde_json::json!({ "version": version })).unwrap();
+
+        match invoke("sync_dictionary", args).await {
             Ok(_) => "최신 상태".to_string(),
             Err(_) => "동기화 실패".to_string(),
         }
@@ -55,9 +68,9 @@ pub fn Settings() -> impl IntoView {
     let save_chat_action = Action::new_local(move |_: &()| {
         // 1. Extract the raw chat messages from the signal map
         let logs_to_export: Vec<_> = signals
-            .chat_log
-            .get_untracked()
-            .values()
+            .chat
+            .with_untracked(|store| store.all())
+            .into_iter()
             .map(|sig| sig.get_untracked()) // Unpack the RwSignal<ChatMessage>
             .collect();
 

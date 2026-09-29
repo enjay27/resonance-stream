@@ -29,6 +29,9 @@ Kade's calls: sequential pids, both archives, gist has sha256, auto-sync off by 
 **Graft MCP start-up fix merged (PR #24, cee5842).** `.mcp.json` runs `.claude/helpers/graft-mcp.cjs`,
 which waits for the cloud install. Upgrading graft past 0.20.0 rewrites `.mcp.json` — re-point it.
 
+**CI runs once per change:** `push` only on `main`, `pull_request` for branches; both skip
+markdown/`docs/`/`.memory/`-only changes. If a required check is set, docs-only PRs stay pending.
+
 ## Where the detail is
 
 | read | when |

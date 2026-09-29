@@ -17,3 +17,7 @@ run as the real app.
 - **Phase 3 (`lib.rs` split).** Cross-check only. Worth a real run: tray menu (all four
   items), global tab shortcut, Exit → `llama-server.exe` killed. These are the paths
   whose code moved.
+- **Phase 4 (`App` / `Settings` split).** wasm check only; the UI has not been opened.
+  Worth a click-through: first-run wizard download, settings modal (each section,
+  close/reopen keeps typed keyword and last export result), app/model update modals,
+  tray toggles reflected in the UI.

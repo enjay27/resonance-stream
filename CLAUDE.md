@@ -55,7 +55,11 @@ crates/core/           resonance-core — pure logic, tested on any OS
   src/text.rs           translation pre/post-processing, dictionary, romaji
 crates/types/          resonance-types — DTOs shared across the Tauri boundary (serde only)
 src/                  ui crate (resonance-stream-ui)
-  components/           views; hooks/ (event + config wiring); store.rs (signals)
+  app/                  App shell; actions.rs (save_config, clear_history),
+                          hydration.rs (start-up load), setup_flow.rs (first-run wizard)
+  store.rs              AppSignals (all app-wide signals, AppSignals::new) + AppActions
+  components/           views; settings/ is one file per settings section
+  hooks/                backend event, config and tray wiring
   ui_types.rs           ui-only types (AppConfig) + re-export of resonance-types
 src-tauri/            app crate (resonance-stream, lib resonance_stream_lib)
   src/lib.rs            module list, crate-root re-exports, run() — start-up wiring only
@@ -87,6 +91,16 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
   `pub use <module>::*`.** A new command module needs both. A private `use` of the same
   name in a module shadows its glob re-export (rustc warns) — the item then silently
   stops being exported; call it by path instead.
+
+## Conventions (ui crate)
+
+- **State lives in `AppSignals` (context), not in component locals**, when more than one
+  component touches it. Components read it with `use_context::<AppSignals>()`.
+- **A component under `<Show>` is re-created each time it shows.** State that must
+  survive closing a modal (typed input, an `Action`'s last result) is created by the
+  parent outside the `<Show>` and passed down as props — see `components/settings/`.
+- Helpers that need many signals take `signals: AppSignals` and destructure only the
+  fields they use (`let AppSignals { a, set_b, .. } = signals;`).
 
 ## Guardrails
 

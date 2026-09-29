@@ -29,3 +29,8 @@ Hotspots: `inject_system_message` 19 callers, `read_varint` 14, `skip_field` 9.
   byte-identical; 11 `#[tauri::command]`s before and after. `kill_orphaned_servers`
   moved to `translator/server_manager.rs`. App cross-check: 0 errors, warnings 19 → 16
   (only unused-import warnings of `lib.rs` disappeared).
+- **Phase 4:** `App` 1033 → 136 lines, `Settings` 933 → 126 (+6 section files).
+  Checked mechanically: every moved range is a line-for-line subsequence of its new
+  file (whitespace-insensitive), except two re-wrapped by rustfmt, which match with all
+  whitespace removed (one trailing comma differs). Settings markup: 755/755 lines
+  identical. Call order in `App` unchanged. ui warnings: 8 before, 8 after.

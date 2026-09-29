@@ -1,8 +1,6 @@
 use crate::protocol::decoder::{find_int_by_tag, find_string_by_tag, read_varint, skip_field};
-pub(crate) use crate::ChatMessage;
-use crate::{inject_system_message, SystemLogLevel};
+use resonance_types::ChatMessage;
 use std::collections::HashMap;
-use tauri::AppHandle;
 
 #[derive(Debug)]
 pub enum Port5003Event {

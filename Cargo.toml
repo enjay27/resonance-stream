@@ -7,6 +7,7 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
+resonance-types = { path = "crates/types" }
 leptos = { version = "0.8", features = ["csr"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -24,4 +25,4 @@ chrono = "0.4.44"
 serde_with = "3.17.0"
 
 [workspace]
-members = ["src-tauri"]
+members = ["src-tauri", "crates/core", "crates/types"]

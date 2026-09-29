@@ -1,10 +1,6 @@
-mod message_processor;
 mod network;
-mod pipeline;
-mod stream_traacker;
 
 pub use self::network::*;
-pub use self::pipeline::*;
 
 use crate::{
     inject_system_message, store_and_emit, NetworkInterface, SnifferStatePayload, TranslationJob,
@@ -17,10 +13,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::protocol::types::{AppState, SystemLogLevel};
 use crate::services::sniffer::network::initialize_network_socket;
-use crate::services::sniffer::pipeline::PipelineAction;
 use crate::services::translator::core::contains_japanese;
-use crate::services::translator::processor::convert_to_romaji;
 use crossbeam_channel::Sender;
+use resonance_core::capture::{ChatPipeline, PipelineAction};
+use resonance_core::text::convert_to_romaji;
 use std::os::windows::process::CommandExt;
 
 // --- GLOBAL STATE ---
@@ -99,7 +95,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
         emit_sniffer_state(&app_handle, "Pending", "Listening for game traffic...");
 
         let mut buf = [0u8; 65535];
-        let mut pipeline = pipeline::ChatPipeline::new();
+        let mut pipeline = ChatPipeline::new();
 
         loop {
             if let Err(crossbeam_channel::TryRecvError::Disconnected) = rx_main.try_recv() {

@@ -9,7 +9,7 @@ env:
 
 jobs:
   ui:
-    name: ui gate (Linux)
+    name: core + ui gates (Linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +20,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: extractions/setup-just@v2
       - run: just fmt-check
+      - run: just core-check
       - run: just ui-check
 
   app:

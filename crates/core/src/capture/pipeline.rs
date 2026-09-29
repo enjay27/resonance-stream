@@ -1,8 +1,8 @@
+use crate::capture::message_processor::{MessageProcessor, ProcessAction};
+use crate::capture::stream_tracker::StreamTracker;
 use crate::protocol::parser::{parsing_pipeline, Port5003Event};
-use crate::protocol::types::ChatMessage;
-use crate::services::sniffer::message_processor::{MessageProcessor, ProcessAction};
-use crate::services::sniffer::stream_traacker::StreamTracker;
 use etherparse::{NetHeaders, PacketHeaders, TransportHeader};
+use resonance_types::ChatMessage;
 use std::collections::HashMap;
 
 pub enum PipelineAction {

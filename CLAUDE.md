@@ -1,20 +1,28 @@
 # Agent Operating Rules — resonance-stream
 
 Resonance Stream is a Windows desktop app: it sniffs Blue Protocol: Star Resonance
-chat packets (WinDivert, no client hooking), translates Japanese chat to Korean
+chat packets (raw socket, no client hooking), translates Japanese chat to Korean
 through a local llama.cpp server, and shows it in a Tauri overlay.
 
-It is one Cargo workspace in three parts. **Which part you touch decides which
+It is one Cargo workspace in four crates, three parts. **Which part you touch decides which
 gate applies.** That is the most important thing on this page.
 
 | tree | part | builds on | gate |
 |---|---|---|---|
+| `crates/core/` `crates/types/` | **core** — packet → chat pipeline, protocol decoding, translation text processing; DTOs shared by app and ui | any OS | `just core-check` |
 | `src/` | **ui** — Leptos 0.8 CSR frontend (wasm) | any OS | `just ui-check` |
-| `src-tauri/` | **app** — Tauri 2 backend: sniffer, translator, downloader, windows, tray | **Windows only** | `just app-check` |
+| `src-tauri/` | **app** — Tauri 2 backend: sockets, translator server, downloader, windows, tray | **Windows only** | `just app-check` (Windows) · `just app-cross-check` (Linux, compile only) |
 
-`just check` runs `fmt-check` plus every gate the current OS can run (`pip install
-rust-just` or `cargo install just`). CI (`.github/workflows/ci.yml`) runs the ui gate
-on Linux and the app gate on `windows-latest`, on every push and PR.
+`just check` runs `fmt-check`, then every gate the current OS can run (`pip install
+rust-just` or `cargo install just`). On Linux the app gate is a **compile-only**
+cross-check against `x86_64-pc-windows-gnu` (needs `rustup target add
+x86_64-pc-windows-gnu` and `apt install gcc-mingw-w64-x86-64`); it cannot link, so
+the app's own tests run only on Windows. CI (`.github/workflows/ci.yml`) runs core +
+ui on Linux and the full app gate on `windows-latest`, on every push and PR.
+
+**New pure logic goes in `crates/core`**, where it is tested on every OS. Anything that
+crosses the Tauri boundary is defined once, in `crates/types` (serde only — it compiles
+to wasm).
 
 ---
 
@@ -23,10 +31,11 @@ on Linux and the app gate on `windows-latest`, on every push and PR.
 - **Frontend:** Leptos 0.8 (CSR) → wasm via **Trunk**; Tailwind 4 + daisyUI through
   `npx @tailwindcss/cli` (Trunk pre-build hook, `cmd /c` — Windows shell).
 - **Backend:** Tauri 2 (`unstable`, tray, global-shortcut, fs, shell, opener).
-- **Capture:** WinDivert (`windivert` crate, vendored) + raw-socket fallback
-  (`windows-sys`). Needs **Administrator**. Port 5003 carries chat.
+- **Capture:** raw socket with `SIO_RCVALL` (`windows-sys`,
+  `src-tauri/src/services/sniffer/network.rs`). Needs **Administrator**. Port 5003
+  carries chat. The `pcap` and `windivert` crates are dependencies but unused.
 - **Translation:** llama.cpp server (Vulkan build, downloaded at runtime from this
-  repo's releases) on `127.0.0.1:8080`; pre/post-processing in `translator/processor.rs`.
+  repo's releases) on `127.0.0.1:8080`; pre/post-processing in `crates/core/src/text.rs`.
 - **Remote metadata:** a public gist (`downloader/gist.rs`) carries app/model/dictionary
   versions and the custom dictionary. Public URLs, not secrets.
 - **Packaging:** `package.bat` → `cargo tauri build` → NSIS installer in `dist/`.
@@ -40,11 +49,17 @@ on Linux and the app gate on `windows-latest`, on every push and PR.
 .memory/              working memory; see .memory/README.md
 .github/workflows/    CI — the gates, per OS
 justfile              the gates as commands
+crates/core/           resonance-core — pure logic, tested on any OS
+  src/protocol/         port 5003: packet reassembly + protobuf-style decoding of chat
+  src/capture/          ChatPipeline: raw IPv4/TCP bytes → dedup/blocked ChatMessages
+  src/text.rs           translation pre/post-processing, dictionary, romaji
+crates/types/          resonance-types — DTOs shared across the Tauri boundary (serde only)
 src/                  ui crate (resonance-stream-ui)
   components/           views; hooks/ (event + config wiring); store.rs (signals)
+  ui_types.rs           ui-only types (AppConfig) + re-export of resonance-types
 src-tauri/            app crate (resonance-stream, lib resonance_stream_lib)
-  src/protocol/         packet reassembly + protobuf-ish decoding of chat
-  src/services/         sniffer/ translator/ downloader/
+  src/protocol/types.rs AppState and backend-only types; re-exports resonance-types
+  src/services/         sniffer/ (sockets, workers) translator/ (llama server) downloader/
   src/config/ src/io/   config + metadata persistence, archive writer
 graft/                graft's generated cards — GITIGNORED, regenerable (`graft build`)
 style/ public/        CSS source, static assets

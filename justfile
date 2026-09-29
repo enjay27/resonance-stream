@@ -6,8 +6,8 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 default: check
 
 # Every gate the current OS can run (the app crate builds on Windows only).
-check: fmt-check ui-check
-    {{ if os() == "windows" { just_executable() + " app-check" } else { "echo 'app gate skipped: src-tauri builds on Windows only'" } }}
+check: fmt-check core-check ui-check
+    {{ if os() == "windows" { just_executable() + " app-check" } else { just_executable() + " app-cross-check" } }}
 
 # Formatting, whole workspace.
 fmt-check:
@@ -15,6 +15,10 @@ fmt-check:
 
 fmt:
     cargo fmt --all
+
+# core part: platform-independent logic + shared types. Runs anywhere.
+core-check:
+    cargo test -p resonance-core -p resonance-types
 
 # ui part: Leptos frontend, compiled for the browser target.
 ui-check:
@@ -26,3 +30,11 @@ ui-check:
 app-check:
     cargo check -p resonance-stream
     cargo test -p resonance-stream
+
+# app part from Linux: compile-only check against the Windows GNU target.
+# Catches type/import errors; cannot link, so it does not run the app tests.
+# Setup: rustup target add x86_64-pc-windows-gnu; apt install gcc-mingw-w64-x86-64
+[unix]
+app-cross-check:
+    mkdir -p dist && ( [ -f dist/index.html ] || echo '<!doctype html>' > dist/index.html )
+    cargo check -p resonance-stream --target x86_64-pc-windows-gnu

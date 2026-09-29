@@ -6,15 +6,18 @@
 
 **Graft-guided refactor, phases 0–5** —
 [`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).
-Phases 0–1 done (rules, memory, `justfile`, CI). Next: phase 2, `crates/core`.
+Phases 0–2 done. `crates/core` + `crates/types` exist: **31 tests now run on Linux**.
+Next: phase 3, split `src-tauri/src/lib.rs`.
 **CI has never run** — it runs on the first push (Kade's); the Windows job is the
 first ever automated build of `src-tauri/`.
 
-**The app part (`src-tauri/`) does not build on Linux.** Cloud sessions verify the ui
-part only; the app gate needs Windows (CI or Kade's machine). Anything that
+**The app part (`src-tauri/`) only cross-*checks* on Linux** (`just app-cross-check`,
+mingw) — it cannot link, so its tests and any run need Windows (CI or Kade's machine). Anything that
 skipped it is listed in
 [`.memory/active-issues/unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).
 
+**`AppConfig` is still defined twice** (ui has derived `Default`, app a hand-written one) —
+[`.memory/active-issues/duplicate-appconfig.md`](.memory/active-issues/duplicate-appconfig.md).
 **Docs are stale:** README/BUILD describe a Python sidecar; the code runs llama.cpp —
 [`.memory/active-issues/stale-docs.md`](.memory/active-issues/stale-docs.md).
 

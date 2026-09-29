@@ -1,5 +1,4 @@
 pub mod core;
-pub mod processor;
 pub mod server_manager;
 
 pub use server_manager::*;
@@ -14,8 +13,8 @@ use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorStatePayload
 use crate::{inject_system_message, kill_orphaned_servers};
 
 use self::core::{translate_text, AI_SERVER_URL};
-use self::processor::{load_dictionary, postprocess_text, preprocess_text};
 use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds, ServerGuard};
+use resonance_core::text::{load_dictionary, postprocess_text, preprocess_text};
 
 pub struct TranslationJob {
     pub chat: ChatMessage,

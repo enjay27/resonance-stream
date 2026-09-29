@@ -1,6 +1,11 @@
 use crossbeam_channel::Sender;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+
+pub use resonance_types::{
+    ChatMessage, NetworkInterface, SnifferStatePayload, SystemMessage, TranslationResult,
+    TranslatorStatePayload,
+};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Condvar, Mutex};
@@ -16,39 +21,6 @@ pub struct AppState {
     pub sniffer_tx: Mutex<Option<Sender<()>>>,
     pub dedup_cache: Mutex<HashMap<(u64, u64, u64), u64>>,
     pub blocked_users: Mutex<HashMap<u64, String>>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatMessage {
-    pub pid: u64,
-    pub channel: String,
-    pub nickname: String,
-    pub message: String,
-    pub timestamp: u64,
-    pub uid: u64,
-    pub class_id: u64,
-    pub level: u64,
-    pub sequence_id: u64,
-    #[serde(default)]
-    pub is_blocked: bool,
-    // --- Translation Support ---
-    #[serde(default)]
-    pub translated: Option<String>,
-    #[serde(default)]
-    pub nickname_romaji: Option<String>,
-    #[serde(default)]
-    pub unknown_fields: HashMap<String, Vec<u8>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SystemMessage {
-    pub pid: u64,        // Unique ID for Leptos 'For' loop keys
-    pub timestamp: u64,  // Milliseconds for sorting
-    pub level: String,   // "info", "warn", "error", "success"
-    pub source: String,  // "Backend", "Sniffer", "Translator"
-    pub message: String, // The actual log text
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -68,12 +40,6 @@ pub struct MessageRequest {
     pub text: String, // The Japanese message
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TranslationResult {
-    pub pid: u64,
-    pub translated: String,
-}
-
 #[derive(Deserialize)]
 pub struct ExportMessage {
     pub channel: String,
@@ -81,24 +47,6 @@ pub struct ExportMessage {
     pub message: String,
     pub translated: Option<String>,
     pub timestamp: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct NetworkInterface {
-    pub name: String,
-    pub ip: String,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct SnifferStatePayload {
-    pub state: String,   // "Starting", "Firewall", "Binding", "Active", "Error", "Off"
-    pub message: String, // Context or Error message
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct TranslatorStatePayload {
-    pub state: String, // "Starting", "Loading Model", "Active", "Error", "Off"
-    pub message: String,
 }
 
 pub struct TrayMenuState {

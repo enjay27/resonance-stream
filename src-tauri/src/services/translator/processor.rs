@@ -16,7 +16,8 @@ lazy_static! {
     static ref NUM_PATTERN_3: Regex = Regex::new(r"(\d+)周").unwrap();
     static ref NUM_PATTERN_4: Regex = Regex::new(r"(\d+)回").unwrap();
     static ref THINK_PATTERN: Regex = Regex::new(r"(?s)<think>.*?</think>\s*").unwrap();
-    static ref TURN_TAG_PATTERN: Regex = Regex::new(r"</?end_of_turn>|</?start_of_turn>|<bos>|<eos>").unwrap();
+    static ref TURN_TAG_PATTERN: Regex =
+        Regex::new(r"</?end_of_turn>|</?start_of_turn>|<bos>|<eos>").unwrap();
 }
 
 // --- PREPROCESSOR ---
@@ -526,10 +527,7 @@ mod tests {
     #[test]
     fn test_only_tags_no_content() {
         // Edge: output is nothing but tags — should produce empty string
-        assert_eq!(
-            postprocess_text("</end_of_turn>", &empty_shield()),
-            ""
-        );
+        assert_eq!(postprocess_text("</end_of_turn>", &empty_shield()), "");
     }
 
     #[test]

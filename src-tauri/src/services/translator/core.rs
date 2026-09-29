@@ -48,8 +48,7 @@ pub fn translate_text(client: &Client, server_url: &str, jp_text: &str) -> Strin
 }
 
 fn sanitize_input(text: &str) -> String {
-    text
-        .replace("<start_of_turn>", "")
+    text.replace("<start_of_turn>", "")
         .replace("<end_of_turn>", "")
         .replace("<bos>", "")
         .replace("<eos>", "")

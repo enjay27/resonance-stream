@@ -1,10 +1,11 @@
-use crate::protocol::types::SystemLogLevel;
 use crate::inject_system_message;
+use crate::protocol::types::SystemLogLevel;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::{AppHandle, Manager};
 
-const METADATA_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/metadata.json";
+const METADATA_URL: &str =
+    "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/metadata.json";
 const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/custom_dict.json";
 
 // --- 1. Structs matching your new unified Gist JSON ---
@@ -122,12 +123,14 @@ pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, 
         "Translator",
         "Dictionary successfully synchronized.",
     );
-    println!("Dictionary successfully synchronized. version {:?}", version);
+    println!(
+        "Dictionary successfully synchronized. version {:?}",
+        version
+    );
 
     let mut metadata = crate::config::load_metadata(&app);
     metadata.current_dict_version = version;
     crate::config::save_metadata(&app, &metadata);
-
 
     Ok("Dictionary updated and reloaded!".to_string())
 }

@@ -20,9 +20,11 @@ fmt:
 core-check:
     cargo test -p resonance-core -p resonance-types
 
-# ui part: Leptos frontend, compiled for the browser target.
+# ui part: Leptos frontend, compiled for the browser target; its pure
+# modules (e.g. chat_view) are unit-tested on the host.
 ui-check:
     cargo check -p resonance-stream-ui --target wasm32-unknown-unknown
+    cargo test -p resonance-stream-ui
 
 # Needs a `dist/` folder: tauri::generate_context! checks frontendDist exists.
 

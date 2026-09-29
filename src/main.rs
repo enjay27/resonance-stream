@@ -1,4 +1,5 @@
 mod app;
+pub mod chat_view;
 pub mod components;
 pub mod hooks;
 pub mod store;

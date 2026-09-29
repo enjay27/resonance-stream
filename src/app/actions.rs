@@ -4,8 +4,8 @@ use crate::hooks::use_config::save_app_config;
 use crate::store::{AppActions, AppSignals};
 use crate::ui_types::AppConfig;
 use futures::FutureExt;
-use indexmap::IndexMap;
 use leptos::prelude::*;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 pub fn create_actions(signals: AppSignals) -> AppActions {
@@ -92,7 +92,7 @@ pub fn create_actions(signals: AppSignals) -> AppActions {
         async move {
             if confirmed {
                 crate::hooks::use_events::clear_backend_history().await;
-                set_chat_log.set(IndexMap::new());
+                set_chat_log.set(BTreeMap::new());
                 set_system_log.set(Vec::new());
 
                 // NEW: Clear the badges when history is wiped

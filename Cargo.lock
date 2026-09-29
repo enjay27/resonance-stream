@@ -4514,7 +4514,6 @@ dependencies = [
  "console_error_panic_hook",
  "futures",
  "gloo-timers",
- "indexmap 2.14.2",
  "js-sys",
  "leptos",
  "resonance-types",

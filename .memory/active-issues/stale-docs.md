@@ -10,3 +10,8 @@ Found 2026-09-29 while planning the refactor.
 - **Build scripts.** `BUILD*.md` references `setup_libs.bat`, which is not in the repo,
   and says `package.bat` builds the sidecar and copies drivers; `package.bat` only runs
   `cargo tauri build` and moves the installer.
+- **Settings footer says "Resonance Stream v2.0"** (`src/components/settings/mod.rs`)
+  while the app is 0.4.0 and the title bar (now `CARGO_PKG_VERSION`) says v0.4.0.
+  Left as is: changing visible text is Kade's call.
+- **index.html `<title>` is "Tauri + Leptos App"** (template leftover). Left as is: not
+  verified whether Tauri propagates the document title to the window/taskbar.

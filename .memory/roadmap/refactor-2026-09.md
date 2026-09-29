@@ -34,3 +34,8 @@ Hotspots: `inject_system_message` 19 callers, `read_varint` 14, `skip_field` 9.
   file (whitespace-insensitive), except two re-wrapped by rustfmt, which match with all
   whitespace removed (one trailing comma differs). Settings markup: 755/755 lines
   identical. Call order in `App` unchanged. ui warnings: 8 before, 8 after.
+- **Phase 5a (build hygiene):** version set once (`[workspace.package]`), removed from
+  `tauri.conf.json` (falls back to src-tauri's Cargo version) and `package.bat` (unused
+  var); title bar reads `CARGO_PKG_VERSION`. `Cargo.lock` tracked. `package.json` /
+  lock metadata: name `resonance-stream`, MIT (matches LICENSE), private, no stub scripts.
+  `public/leptos.svg`, `public/tauri.svg` removed (unreferenced).

@@ -1,6 +1,6 @@
 [package]
 name = "resonance-types"
-version = "0.4.0"
+version.workspace = true
 authors = ["Enjay27 <kdkm2002@gmail.com>"]
 description = "Types that cross the Tauri boundary between the Resonance Stream backend and UI"
 edition = "2021"

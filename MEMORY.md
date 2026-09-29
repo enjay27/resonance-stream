@@ -7,7 +7,8 @@
 **Graft-guided refactor, phases 0–5** —
 [`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).
 Phases 0–4 done. `crates/core` + `crates/types` exist: **31 tests now run on Linux**;
-`lib.rs`, `App` and `Settings` are thin shells. Next: phase 5, hygiene.
+`lib.rs`, `App` and `Settings` are thin shells. Phase 5a (build hygiene) done;
+next: 5b, stale docs.
 **CI has never run** — it runs on the first push (Kade's); the Windows job is the
 first ever automated build of `src-tauri/`.
 

@@ -21,3 +21,9 @@ run as the real app.
   Worth a click-through: first-run wizard download, settings modal (each section,
   close/reopen keeps typed keyword and last export result), app/model update modals,
   tray toggles reflected in the UI.
+- **Phase 5a (version source).** `tauri.conf.json` no longer has `"version"`; Tauri should
+  fall back to src-tauri's Cargo version (0.4.0, inherited from the workspace). Check
+  the NSIS installer name/version and that the update check still reads 0.4.0
+  (`app.package_info().version` in `downloader/gist.rs`). `Cargo.lock` was generated in
+  this session from the local registry cache — Kade's previous local lock was untracked,
+  so its exact versions may differ.

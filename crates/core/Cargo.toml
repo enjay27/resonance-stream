@@ -1,6 +1,6 @@
 [package]
 name = "resonance-core"
-version = "0.4.0"
+version.workspace = true
 authors = ["Enjay27 <kdkm2002@gmail.com>"]
 description = "Platform-independent capture, protocol and text logic for Resonance Stream"
 edition = "2021"

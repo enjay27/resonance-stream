@@ -1,6 +1,6 @@
 [package]
 name = "resonance-stream-ui"
-version = "0.4.0"
+version.workspace = true
 authors = ["Enjay27 <kdkm2002@gmail.com>"]
 description = "Blue Protocol: Star Resonance Real-time Translator"
 edition = "2021"
@@ -26,3 +26,8 @@ serde_with = "3.17.0"
 
 [workspace]
 members = ["src-tauri", "crates/core", "crates/types"]
+
+# The one place the app version is set. src-tauri inherits it, and
+# tauri.conf.json has no "version", so Tauri falls back to src-tauri's.
+[workspace.package]
+version = "0.4.0"

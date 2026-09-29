@@ -1,26 +1,17 @@
 {
-  "name": "bpsr-translator",
-  "version": "1.0.0",
-  "description": "**Blue Protocol: Star Resonance (BPSR) Real-time Packet-Sniffing Translator**",
-  "main": "tailwind.config.js",
-  "directories": {
-    "lib": "lib"
-  },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "name": "resonance-stream",
+  "private": true,
+  "description": "Tailwind CSS build tooling for the Resonance Stream UI (run by Trunk's pre-build hook)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/enjay27/bpsr-translator.git"
+    "url": "git+https://github.com/enjay27/resonance-stream.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/enjay27/bpsr-translator/issues"
+    "url": "https://github.com/enjay27/resonance-stream/issues"
   },
-  "homepage": "https://github.com/enjay27/bpsr-translator#readme",
+  "homepage": "https://github.com/enjay27/resonance-stream#readme",
+  "license": "MIT",
+  "type": "commonjs",
   "devDependencies": {
     "autoprefixer": "^10.4.24",
     "daisyui": "^5.5.19",

@@ -41,6 +41,6 @@ Hotspots: `inject_system_message` 19 callers, `read_varint` 14, `skip_field` 9.
   `public/leptos.svg`, `public/tauri.svg` removed (unreferenced).
 - **Phase 5b (docs):** BUILD (ko/en) rewritten to the real toolchain; README_EN synced
   to README.md; TROUBLE_SHOOTING (ko/en) bannered as outdated. **Refactor plan complete.**
-- **Follow-up (Kade's decisions, 2026-09-29):** `pcap` + `windivert` removed (Cargo.lock
+- **Follow-up (Kade's decisions, 2026-09-29):** `pcap` + `windivert` + direct `windows` dep removed (Cargo.lock
   −136 lines, removals only); TROUBLE_SHOOTING deleted; Settings footer shows the app
   version; `AppConfig` split between ui and app is intentional architecture.

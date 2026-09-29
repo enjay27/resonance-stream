@@ -13,6 +13,39 @@
 - Gates this session: `just fmt-check` ✅, `just core-check` ✅ (31 tests pass).
   UI and app gates not run (no code changed).
 
+## Status — fixed the same day
+
+Every item was fixed test-first (a failing test before each change; pure logic moved to
+`crates/core` or `src/chat_view.rs` so it is tested on Linux), one commit per step:
+
+| commit | step | items |
+|---|---|---|
+| `fbfd552` | protocol robustness | B1, B3, P4, P10, R9 |
+| `a82f9fe` | stream framing | B2, P11 |
+| `59ddadb` | translation text | P6, P7, R7 (core), placeholder collision, B6 (core) |
+| `33fd198` | app hot path + state | P1, P2, P3, P5 (app), P13, P14, R3, R4, B4, B6 (app) |
+| `f3a0170` | downloads + lifecycle | B5, B7, P12, R1, R2, R5, R6, R8, R10 |
+| `0e07183` | UI | P5 (ui), P8, P9, R7 (ui) |
+| step 7 | dead code, deps, warnings | D1 — app 14 → 0 warnings, UI 8 → 0 |
+
+Tests: core 31 → 78, types 0 → 3, UI 0 → 8 (now run by `just ui-check`). Windows CI
+ran the app build + tests on `33fd198` (green); later commits are cross-checked here.
+
+Deviations from the text below, on purpose:
+- **R4**, second half, was wrong: `start_sniffer_command` resetting `IS_SNIFFER_ACTIVE`
+  is deliberate. It makes the next packet re-emit "Active" to a reloaded UI. Left as is.
+- **R6**: no host allow-list. The gist could not be fetched from this environment, so
+  the model's real host is unknown and a list could break downloads. Instead: HTTPS only,
+  and SHA-256 verification. The llama-server zip hash is pinned. For the model and
+  the app, the gist may add `"sha256"` per entry; it is optional and verified when present.
+- **R10**: semver comparison for the app only. Model and dictionary versions keep
+  "different means update" (republishing an older model is a legitimate rollback).
+- **P13**: stale-job skipping only (60 s); no prioritisation and no parallel slots.
+- **R5**: the archive moved to the app data folder; earlier records stay where they were.
+- **B2**: fixed against the framing the tests assume. A real captured burst should still
+  become a fixture test.
+- Not done: `reqwest` 0.11 → 0.12 (a suggestion, not a defect).
+
 ## Summary
 
 | # | Sev | Part | Finding | Effort |

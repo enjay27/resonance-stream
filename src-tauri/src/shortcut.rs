@@ -34,7 +34,7 @@ pub fn update_global_tab_shortcut(app: tauri::AppHandle, modifier: String, key: 
     if let Ok(shortcut) = shortcut_str.parse::<Shortcut>() {
         let _ = app
             .global_shortcut()
-            .on_shortcut(shortcut, move |app_handle, shortcut, event| {
+            .on_shortcut(shortcut, move |app_handle, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
                     // When the global shortcut is pressed, tell the frontend to switch tabs!
                     let _ = app_handle.emit("global-tab-switch", ());

@@ -28,9 +28,8 @@ pub fn ChatSection() -> impl IntoView {
                         let val = event_target_value(&ev).parse::<u32>().unwrap_or(14);
                         signals.set_font_size.set(val);
                     }
-                    on:change=move |ev| {
+                    on:change=move |_| {
                         // 2. Save to file when mouse is released
-                        let val = event_target_value(&ev).parse::<u32>().unwrap_or(14);
                         actions.save_config.dispatch(());
                     }
                 />

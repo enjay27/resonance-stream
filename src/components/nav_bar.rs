@@ -17,11 +17,11 @@ pub fn NavBar() -> impl IntoView {
     let (is_controls_open, set_is_controls_open) = signal(false);
 
     // --- NODE REFERENCES ---
-    let search_input_ref = create_node_ref::<Input>();
-    let search_container_ref = create_node_ref::<Div>(); // The absolute popup box
-    let search_btn_ref = create_node_ref::<Button>(); // The magnifier toggle button
-    let controls_container_ref = create_node_ref::<Div>();
-    let folder_btn_ref = create_node_ref::<Button>();
+    let search_input_ref = NodeRef::<Input>::new();
+    let search_container_ref = NodeRef::<Div>::new(); // The absolute popup box
+    let search_btn_ref = NodeRef::<Button>::new(); // The magnifier toggle button
+    let controls_container_ref = NodeRef::<Div>::new();
+    let folder_btn_ref = NodeRef::<Button>::new();
 
     // ==========================================
     // GLOBAL KEYBOARD SHORTCUT (Ctrl+F)

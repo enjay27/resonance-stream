@@ -14,7 +14,6 @@ use crate::inject_system_message;
 use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorStatePayload};
 
 use self::core::{server_url, translate_text};
-use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds};
 use resonance_core::text::{postprocess_text, preprocess_text};
 use resonance_core::workers::translation_is_stale;
 
@@ -48,14 +47,14 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         server_manager::kill_orphaned_servers(&app);
 
         // 1. Launch the Server
-        let _server_guard = match launch_ai_server(&app, &model_path, &config) {
+        let _server_guard = match server_manager::launch_ai_server(&app, &model_path, &config) {
             Some(guard) => guard,
             None => return,
         };
 
         // 2. Wait for Health
         emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
-        if !server_health_check_for_30_seconds(&app) {
+        if !server_manager::server_health_check_for_30_seconds(&app) {
             emit_translator_state(
                 &app,
                 "Error",

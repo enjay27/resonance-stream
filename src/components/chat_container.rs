@@ -10,7 +10,7 @@ use web_sys::{HtmlDivElement, MouseEvent};
 #[component]
 pub fn ChatContainer() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
-    let chat_container_ref = create_node_ref::<html::Div>();
+    let chat_container_ref = NodeRef::<html::Div>::new();
 
     // Start by only rendering the last 50 messages to keep the DOM blazing fast
     let (display_limit, set_display_limit) = signal(50);

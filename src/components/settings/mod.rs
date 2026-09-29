@@ -18,6 +18,7 @@ use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
 
+#[cfg(target_arch = "wasm32")] // only the wasm click handler builds it
 #[derive(serde::Serialize)]
 struct OpenBrowserArgs {
     url: String,

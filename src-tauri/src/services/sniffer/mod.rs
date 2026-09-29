@@ -2,16 +2,13 @@ mod network;
 
 pub use self::network::*;
 
-use crate::{
-    inject_system_message, store_and_emit, NetworkInterface, SnifferStatePayload, TranslationJob,
-};
+use crate::{inject_system_message, store_and_emit, SnifferStatePayload, TranslationJob};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::protocol::types::{AppState, SystemLogLevel};
-use crate::services::sniffer::network::initialize_network_socket;
 use crate::services::translator::core::contains_japanese;
 use crossbeam_channel::Sender;
 use resonance_core::capture::{ChatPipeline, PipelineAction};
@@ -39,7 +36,7 @@ pub fn emit_sniffer_state(app: &tauri::AppHandle, state: &str, message: &str) {
 }
 
 #[tauri::command]
-pub fn start_sniffer_command(window: tauri::Window, app: AppHandle, state: State<'_, AppState>) {
+pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
     let mut tx_lock = state.sniffer_tx.lock();
     if tx_lock.is_some() {
         inject_system_message(

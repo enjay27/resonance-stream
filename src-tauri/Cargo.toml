@@ -25,20 +25,14 @@ tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["fs", "io-util"] }
 reqwest = { version = "0.11", features = ["stream", "json", "blocking", "rustls-tls"] }
 futures-util = "0.3"
 tauri-plugin-fs = "2.4.5" # For handling the download stream
 # Network & Parsing
-byteorder = "1.5"  # For reading u16/u32 from packets
 is_elevated = "0.1"
 crossbeam-channel = "0.5"    # Blazing fast thread queues
 parking_lot = "0.12"         # Mutex/RwLock without poisoning
 
-# Cryptography (Matches BPSR-ZDPS logic)
-aes = "0.8"
-ctr = "0.9"
-hex = "0.4"
 chrono = "0.4.43"
 local-ip-address = "0.6.10"
 lazy_static = "1.5.0"
@@ -51,5 +45,4 @@ serde_with = "3.17.0"
 tauri-plugin-global-shortcut = "2.3.1"
 
 [dev-dependencies]
-pnet = "0.35"
 serde_json = "1.0"

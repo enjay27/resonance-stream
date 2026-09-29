@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ui:
+    name: ui gate (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v2
+      - run: just fmt-check
+      - run: just ui-check
+
+  app:
+    name: app gate (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v2
+      # tauri::generate_context! needs frontendDist to exist; the gate checks
+      # the backend, so a placeholder stands in for `trunk build`.
+      - name: Placeholder frontend dist
+        shell: bash
+        run: mkdir -p dist && echo '<!doctype html>' > dist/index.html
+      - run: just app-check

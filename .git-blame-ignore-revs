@@ -1,0 +1,3 @@
+# Formatting-only commits. `git config blame.ignoreRevsFile .git-blame-ignore-revs`
+# cargo fmt baseline
+8b15f923168166839f888098fa9e7c70da9452af

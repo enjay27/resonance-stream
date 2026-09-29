@@ -15,4 +15,4 @@ Baseline numbers (2026-09-29, `graft map`): 48 files, 274 symbols, 265 edges.
 Largest: `src/app.rs` 971 lines (one fn), `src/components/settings.rs` 933 (one fn),
 `src-tauri/src/protocol/parser.rs` 638, `src-tauri/src/lib.rs` 517.
 Hotspots: `inject_system_message` 19 callers, `read_varint` 14, `skip_field` 9.
-`cargo fmt --check`: 17 files differ.
+`cargo fmt --check`: 8 files differed (fixed in 8b15f92, listed in `.git-blame-ignore-revs`).

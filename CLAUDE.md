@@ -9,10 +9,12 @@ gate applies.** That is the most important thing on this page.
 
 | tree | part | builds on | gate |
 |---|---|---|---|
-| `src/` | **ui** — Leptos 0.8 CSR frontend (wasm) | any OS | `cargo check -p resonance-stream-ui --target wasm32-unknown-unknown` |
-| `src-tauri/` | **app** — Tauri 2 backend: sniffer, translator, downloader, windows, tray | **Windows only** | `cargo check -p resonance-stream` + `cargo test -p resonance-stream` |
+| `src/` | **ui** — Leptos 0.8 CSR frontend (wasm) | any OS | `just ui-check` |
+| `src-tauri/` | **app** — Tauri 2 backend: sniffer, translator, downloader, windows, tray | **Windows only** | `just app-check` |
 
-`cargo fmt --all -- --check` applies to every part.
+`just check` runs `fmt-check` plus every gate the current OS can run (`pip install
+rust-just` or `cargo install just`). CI (`.github/workflows/ci.yml`) runs the ui gate
+on Linux and the app gate on `windows-latest`, on every push and PR.
 
 ---
 
@@ -36,6 +38,8 @@ gate applies.** That is the most important thing on this page.
 ```
 .claude/              graft wiring (hooks, helpers), skills/: graft, workflow-control
 .memory/              working memory; see .memory/README.md
+.github/workflows/    CI — the gates, per OS
+justfile              the gates as commands
 src/                  ui crate (resonance-stream-ui)
   components/           views; hooks/ (event + config wiring); store.rs (signals)
 src-tauri/            app crate (resonance-stream, lib resonance_stream_lib)
@@ -71,7 +75,7 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
   release URLs are public and fine.
 - **Auto-correction restraint.** Self-correct at most **2** times, then stop and ask.
 - **Never report a gate as passed when it could not run.** A Linux session cannot
-  build `src-tauri/`; say so, and leave it to a Windows build.
+  build `src-tauri/`; say so, and leave it to the Windows CI job.
 
 ---
 

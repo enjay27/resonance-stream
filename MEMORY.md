@@ -6,7 +6,9 @@
 
 **Graft-guided refactor, phases 0–5** —
 [`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).
-Phase 0 (rules + memory) done. Next: phase 1, gates + CI.
+Phases 0–1 done (rules, memory, `justfile`, CI). Next: phase 2, `crates/core`.
+**CI has never run** — it runs on the first push (Kade's); the Windows job is the
+first ever automated build of `src-tauri/`.
 
 **The app part (`src-tauri/`) does not build on Linux.** Cloud sessions verify the ui
 part only; the app gate needs Windows (CI or Kade's machine). Anything that

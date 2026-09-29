@@ -1,7 +1,9 @@
 use super::{FolderStatus, ProgressPayload};
 use crate::{inject_system_message, SystemLogLevel};
+use resonance_core::download::replace_file;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 pub const MODEL_FOLDER: &str = "translation-model";
@@ -70,14 +72,38 @@ pub async fn download_model(
     // verified: a failed download leaves a working translator behind.
     fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
     let dest_path = model_dir.join(MODEL_FILENAME);
+    let staged = model_dir.join(format!("{}.new", MODEL_FILENAME));
     super::fetch::download_file(
         &app,
         &download_url,
-        &dest_path,
+        &staged,
         "AI 모델 다운로드 중...",
         super::gist::published_sha256(&download_url).as_deref(),
     )
     .await?;
+
+    // llama-server maps the current model file, and Windows will not replace
+    // a mapped file: stop the translator for the swap, then bring it back.
+    let state = app.state::<crate::AppState>();
+    let was_running = state.translator_tx.lock().take().is_some();
+    if was_running {
+        crate::services::translator::server_manager::kill_orphaned_servers(&app);
+    }
+    let (from, to) = (staged.clone(), dest_path.clone());
+    let replaced = tauri::async_runtime::spawn_blocking(move || {
+        replace_file(&from, &to, 20, Duration::from_millis(250))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if was_running {
+        let tx =
+            crate::services::translator::start_translator_worker(app.clone(), get_model_path(&app));
+        *state.translator_tx.lock() = Some(tx);
+    }
+    if let Err(e) = replaced {
+        let _ = fs::remove_file(&staged);
+        return Err(format!("Could not replace the model file: {}", e));
+    }
 
     // Remove leftovers of older models (several GB each)
     if let Ok(entries) = fs::read_dir(&model_dir) {

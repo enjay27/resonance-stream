@@ -3,6 +3,9 @@
 //! and version comparison.
 
 use sha2::{Digest, Sha256};
+use std::io;
+use std::path::Path;
+use std::time::Duration;
 
 /// Only HTTPS downloads: the app runs as Administrator and executes what it
 /// downloads (the updater, the llama server), so a plain-HTTP URL could be
@@ -99,6 +102,22 @@ impl ProgressThrottle {
     }
 }
 
+/// Moves `from` over `to`, retrying while `to` is still locked (on Windows a
+/// file stays locked for a moment after the process that mapped it exits).
+pub fn replace_file(from: &Path, to: &Path, attempts: u32, pause: Duration) -> io::Result<()> {
+    let mut last_err = None;
+    for attempt in 0..attempts.max(1) {
+        if attempt > 0 {
+            std::thread::sleep(pause);
+        }
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.expect("at least one attempt"))
+}
+
 /// Is `remote` a newer version than `current`? Versions that both parse as
 /// semver ("0.4.0", "v0.5.1") are compared; anything else falls back to
 /// "different means newer", as before.
@@ -179,6 +198,33 @@ mod tests {
         let mut p = ProgressThrottle::default();
         assert_eq!(p.update(2000, 1000), Some(100));
         assert_eq!(p.update(u64::MAX, u64::MAX), None); // still 100, no overflow
+    }
+
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("rs-download-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn replace_file_overwrites_the_target() {
+        let dir = temp_dir("replace");
+        let (new, old) = (dir.join("model.gguf.new"), dir.join("model.gguf"));
+        std::fs::write(&new, b"new").unwrap();
+        std::fs::write(&old, b"old").unwrap();
+        replace_file(&new, &old, 3, Duration::ZERO).unwrap();
+        assert_eq!(std::fs::read(&old).unwrap(), b"new");
+        assert!(!new.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn replace_file_gives_up_after_its_attempts() {
+        let dir = temp_dir("giveup");
+        let err = replace_file(&dir.join("missing"), &dir.join("x"), 2, Duration::ZERO);
+        assert!(err.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

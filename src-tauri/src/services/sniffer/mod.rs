@@ -247,7 +247,7 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn block_user_command(
     uid: u64,
     nickname: String,
@@ -274,7 +274,7 @@ pub fn block_user_command(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn unblock_user_command(uid: u64, app: tauri::AppHandle, state: tauri::State<'_, AppState>) {
     // 1. Remove from In-Memory AppState
     state.blocked_users.lock().remove(&uid);
@@ -296,18 +296,20 @@ pub fn unblock_user_command(uid: u64, app: tauri::AppHandle, state: tauri::State
 }
 
 #[tauri::command]
-pub fn restart_sniffer_command(app: tauri::AppHandle, state: tauri::State<'_, AppState>) {
-    {
+pub fn restart_sniffer_command(app: tauri::AppHandle) {
+    // On its own thread: the pause below would otherwise freeze the window
+    // (synchronous commands run on the main thread).
+    thread::spawn(move || {
+        let state = app.state::<AppState>();
+
         // 1. Drop the sender to safely terminate the old sniffer thread
-        let mut tx_lock = state.sniffer_tx.lock();
-        *tx_lock = None;
-    }
+        *state.sniffer_tx.lock() = None;
 
-    // 2. Wait a moment for the OS to release the socket binding
-    std::thread::sleep(std::time::Duration::from_millis(500));
+        // 2. Wait a moment for the OS to release the socket binding
+        thread::sleep(Duration::from_millis(500));
 
-    // 3. Start a fresh sniffer!
-    let mut tx_lock = state.sniffer_tx.lock();
-    let tx = crate::services::sniffer::start_sniffer_worker(app.clone());
-    *tx_lock = Some(tx);
+        // 3. Start a fresh sniffer!
+        let tx = start_sniffer_worker(app.clone());
+        *state.sniffer_tx.lock() = Some(tx);
+    });
 }

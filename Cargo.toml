@@ -31,3 +31,17 @@ members = ["src-tauri", "crates/core", "crates/types"]
 # tauri.conf.json has no "version", so Tauri falls back to src-tauri's.
 [workspace.package]
 version = "0.4.0"
+
+# Profiles only take effect here, at the workspace root (cargo ignored them
+# in src-tauri/Cargo.toml). They apply to every release build, the wasm UI
+# included.
+[profile.release]
+panic = "abort"      # 패닉 시 스택 추적을 생략하여 용량 감소
+codegen-units = 1    # 컴파일 단위를 하나로 합쳐 최적화 극대화
+lto = true           # Link Time Optimization 활성화
+opt-level = "s"      # 실행 파일 크기 최적화 (z도 가능)
+strip = true         # 바이너리 내 디버그 심볼 강제 제거
+
+# The capture and text hot path: speed over size.
+[profile.release.package.resonance-core]
+opt-level = 3

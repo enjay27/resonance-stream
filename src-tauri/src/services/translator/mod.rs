@@ -13,8 +13,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::inject_system_message;
 use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorStatePayload};
 
-use self::core::{translate_text, AI_SERVER_URL};
-use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds, ServerGuard};
+use self::core::{server_url, translate_text};
+use self::server_manager::{launch_ai_server, server_health_check_for_30_seconds};
 use resonance_core::text::{postprocess_text, preprocess_text};
 use resonance_core::workers::translation_is_stale;
 
@@ -48,11 +48,10 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         server_manager::kill_orphaned_servers(&app);
 
         // 1. Launch the Server
-        let server_process = match launch_ai_server(&app, &model_path, &config) {
-            Some(p) => p,
+        let _server_guard = match launch_ai_server(&app, &model_path, &config) {
+            Some(guard) => guard,
             None => return,
         };
-        let _server_guard = ServerGuard(server_process);
 
         // 2. Wait for Health
         emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
@@ -104,7 +103,7 @@ fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle
     };
 
     // 2. HTTP Request (Blocking)
-    let raw_translation = translate_text(client, AI_SERVER_URL, &shield.masked_text);
+    let raw_translation = translate_text(client, &server_url(), &shield.masked_text);
 
     // 3. Postprocess
     let final_str = postprocess_text(&raw_translation, &shield);

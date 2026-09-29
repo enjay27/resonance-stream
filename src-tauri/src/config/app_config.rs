@@ -141,7 +141,8 @@ pub fn load_config(app: AppHandle) -> AppConfig {
     current_config(&app)
 }
 
-#[tauri::command]
+/// async: writes the file and may start or stop workers -- not on the main thread.
+#[tauri::command(async)]
 pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) {
     let old_config = state.config.read().clone();
 

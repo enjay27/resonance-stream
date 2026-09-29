@@ -36,6 +36,18 @@ pub fn translator_change(old: TranslatorSettings, new: TranslatorSettings) -> Wo
 /// row has scrolled away, and translating it only delays the newer ones.
 pub const MAX_TRANSLATION_WAIT: Duration = Duration::from_secs(60);
 
+/// A port for the local translation server: `preferred` when it is free,
+/// otherwise one the OS picks. 8080 is a common development port, so the
+/// server must not assume it.
+pub fn pick_local_port(preferred: u16) -> u16 {
+    let bind = |port: u16| std::net::TcpListener::bind(("127.0.0.1", port));
+    bind(preferred)
+        .or_else(|_| bind(0))
+        .and_then(|listener| listener.local_addr())
+        .map(|addr| addr.port())
+        .unwrap_or(preferred)
+}
+
 pub fn translation_is_stale(queued_at: Instant, now: Instant) -> bool {
     now.saturating_duration_since(queued_at) > MAX_TRANSLATION_WAIT
 }
@@ -74,6 +86,26 @@ mod tests {
             translator_change(s(false, "cpu", "low"), s(false, "gpu", "high")),
             Keep
         );
+    }
+
+    #[test]
+    fn picks_the_preferred_port_when_free() {
+        // Ask the OS for a free port, release it, then prefer it.
+        let free = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        assert_eq!(pick_local_port(free), free);
+    }
+
+    #[test]
+    fn avoids_a_busy_preferred_port() {
+        let busy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let busy_port = busy.local_addr().unwrap().port();
+        let picked = pick_local_port(busy_port);
+        assert_ne!(picked, busy_port);
+        assert_ne!(picked, 0);
     }
 
     #[test]

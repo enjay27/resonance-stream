@@ -1,8 +1,6 @@
 use super::{FolderStatus, ProgressPayload};
 use crate::{inject_system_message, SystemLogLevel};
-use futures_util::StreamExt;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -68,49 +66,30 @@ pub async fn download_model(
         format!("Download Model version {}", version),
     );
 
-    // 1. Cleanup: If the folder exists, delete it first to remove old 4GB model files
-    if model_dir.exists() {
-        let _ = fs::remove_dir_all(&model_dir);
-    }
+    // The current model stays in place until the new one is complete and
+    // verified: a failed download leaves a working translator behind.
     fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
-
     let dest_path = model_dir.join(MODEL_FILENAME);
+    super::fetch::download_file(
+        &app,
+        &download_url,
+        &dest_path,
+        "AI 모델 다운로드 중...",
+        super::gist::published_sha256(&download_url).as_deref(),
+    )
+    .await?;
 
-    // 2. Download from the dynamic URL provided by the Gist
-    let client = reqwest::Client::new();
-    let res = client
-        .get(&download_url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !res.status().is_success() {
-        return Err(format!(
-            "Failed to download model. Server returned: {}",
-            res.status()
-        ));
-    }
-
-    let total_size = res.content_length().unwrap_or(0);
-    let mut file = fs::File::create(&dest_path).map_err(|e| e.to_string())?;
-    let mut downloaded: u64 = 0;
-    let mut stream = res.bytes_stream();
-
-    while let Some(item) = stream.next().await {
-        let chunk = item.map_err(|e| e.to_string())?;
-        file.write_all(&chunk).map_err(|e| e.to_string())?;
-        downloaded += chunk.len() as u64;
-
-        if total_size > 0 {
-            let percent = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
-            let _ = app.emit(
-                "download-progress",
-                ProgressPayload {
-                    current_file: "AI 모델 다운로드 중...".to_string(),
-                    percent,
-                    total_percent: percent,
-                },
-            );
+    // Remove leftovers of older models (several GB each)
+    if let Ok(entries) = fs::read_dir(&model_dir) {
+        for entry in entries.flatten() {
+            if entry.file_name() != MODEL_FILENAME {
+                let path = entry.path();
+                let _ = if path.is_dir() {
+                    fs::remove_dir_all(&path)
+                } else {
+                    fs::remove_file(&path)
+                };
+            }
         }
     }
 

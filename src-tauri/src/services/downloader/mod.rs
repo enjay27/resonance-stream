@@ -1,4 +1,5 @@
 mod app_updater;
+mod fetch;
 mod gist;
 pub mod model;
 pub mod server;

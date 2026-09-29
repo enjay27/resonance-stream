@@ -92,6 +92,10 @@ pub struct VersionInfo {
     pub latest_version: String,
     pub download_url: String,
     pub release_notes: String,
+    /// SHA-256 (hex) of the file at `download_url`. When the gist publishes
+    /// it, the download is verified against it; older gists omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -131,6 +135,23 @@ mod tests {
         // ...and the field still deserializes when absent.
         let back: ChatMessage = serde_json::from_value(json).unwrap();
         assert!(back.unknown_fields.is_empty());
+    }
+
+    #[test]
+    fn version_info_sha256_is_optional() {
+        // Today's gist has no sha256: it must still parse.
+        let old: VersionInfo = serde_json::from_str(
+            r#"{"latest_version":"0.4.0","download_url":"https://x/y","release_notes":""}"#,
+        )
+        .unwrap();
+        assert_eq!(old.sha256, None);
+        assert!(serde_json::to_value(&old).unwrap().get("sha256").is_none());
+
+        let new: VersionInfo = serde_json::from_str(
+            r#"{"latest_version":"0.5.0","download_url":"https://x/y","release_notes":"","sha256":"ab"}"#,
+        )
+        .unwrap();
+        assert_eq!(new.sha256.as_deref(), Some("ab"));
     }
 
     #[test]

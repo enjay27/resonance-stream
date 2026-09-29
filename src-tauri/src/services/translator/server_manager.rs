@@ -1,17 +1,75 @@
-use super::core::AI_SERVER_URL;
+use super::core::{server_url, set_server_port, PREFERRED_SERVER_PORT};
 use crate::protocol::types::SystemLogLevel;
 use crate::{inject_system_message, AI_SERVER_FILENAME, AI_SERVER_FOLDER};
 use reqwest::blocking::Client;
+use resonance_core::workers::pick_local_port;
+use std::fs;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
-pub struct ServerGuard(pub Child);
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// PID of the llama-server this app started (0: none). Only this process,
+/// or the one recorded in the PID file by a previous run, is ever killed --
+/// never other llama-server.exe instances the user may be running.
+static SERVER_PID: AtomicU32 = AtomicU32::new(0);
+
+fn pid_file(app: &AppHandle) -> Option<PathBuf> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .ok()?
+        .join("bin")
+        .join(AI_SERVER_FOLDER);
+    Some(dir.join("llama-server.pid"))
+}
+
+/// Kills `pid` only if it is still a llama-server (a PID can be reused).
+fn kill_server_pid(pid: u32) {
+    let _ = Command::new("taskkill")
+        .args([
+            "/F",
+            "/PID",
+            &pid.to_string(),
+            "/FI",
+            "IMAGENAME eq llama-server.exe",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+}
+
+pub struct ServerGuard {
+    child: Child,
+    pid_file: Option<PathBuf>,
+}
+
+impl ServerGuard {
+    fn new(app: &AppHandle, child: Child) -> Self {
+        let pid = child.id();
+        SERVER_PID.store(pid, Ordering::SeqCst);
+        let pid_file = pid_file(app);
+        if let Some(path) = &pid_file {
+            let _ = fs::write(path, pid.to_string());
+        }
+        Self { child, pid_file }
+    }
+}
+
 impl Drop for ServerGuard {
     fn drop(&mut self) {
-        let _ = self.0.kill();
+        let pid = self.child.id();
+        let _ = self.child.kill();
+        // A newer server may already have replaced these; only clear our own.
+        let _ = SERVER_PID.compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
+        if let Some(path) = &self.pid_file {
+            if fs::read_to_string(path).is_ok_and(|s| s.trim() == pid.to_string()) {
+                let _ = fs::remove_file(path);
+            }
+        }
     }
 }
 
@@ -19,7 +77,7 @@ pub fn launch_ai_server(
     app: &AppHandle,
     model_path: &PathBuf,
     config: &crate::config::AppConfig,
-) -> Option<Child> {
+) -> Option<ServerGuard> {
     let server_path = app
         .path()
         .app_data_dir()
@@ -30,7 +88,9 @@ pub fn launch_ai_server(
 
     let mut server_cmd = Command::new(server_path);
     server_cmd.arg("-m").arg(model_path);
-    server_cmd.arg("--port").arg("8080");
+    let port = pick_local_port(PREFERRED_SERVER_PORT);
+    set_server_port(port);
+    server_cmd.arg("--port").arg(port.to_string());
     server_cmd.arg("--log-disable");
 
     let gpu_layers = if config.compute_mode.to_lowercase() == "gpu" {
@@ -59,10 +119,10 @@ pub fn launch_ai_server(
         "--parallel",
         "1",
     ]);
-    server_cmd.creation_flags(0x08000000);
+    server_cmd.creation_flags(CREATE_NO_WINDOW);
 
     match server_cmd.spawn() {
-        Ok(child) => Some(child),
+        Ok(child) => Some(ServerGuard::new(app, child)),
         Err(e) => {
             let err_msg = format!("Failed to start llama-server.exe. ({})", e);
             inject_system_message(app, SystemLogLevel::Error, "Translator", &err_msg);
@@ -92,10 +152,10 @@ pub fn server_health_check_for_30_seconds(app: &AppHandle) -> bool {
             app,
             SystemLogLevel::Trace,
             "Translator",
-            format!("Polling {}/health...", AI_SERVER_URL),
+            format!("Polling {}/health...", server_url()),
         );
 
-        if let Ok(res) = client.get(format!("{}/health", AI_SERVER_URL)).send() {
+        if let Ok(res) = client.get(format!("{}/health", server_url())).send() {
             if res.status().is_success() {
                 inject_system_message(
                     app,
@@ -122,11 +182,11 @@ pub fn server_health_check_for_30_seconds(app: &AppHandle) -> bool {
 }
 
 #[tauri::command]
-pub fn ai_server_health_check(app: AppHandle) -> bool {
-    let client = Client::new();
-    match client.get(format!("{}/health", AI_SERVER_URL)).send() {
+pub async fn ai_server_health_check(app: AppHandle) -> bool {
+    // async: a blocking HTTP call here would freeze the window
+    match reqwest::get(format!("{}/health", server_url())).await {
         Ok(res) => res.status().is_success(),
-        Err(e) => {
+        Err(_) => {
             inject_system_message(
                 &app,
                 SystemLogLevel::Error,
@@ -138,6 +198,8 @@ pub fn ai_server_health_check(app: AppHandle) -> bool {
     }
 }
 
+/// Stops the llama-server this app started, and one left behind by a
+/// previous run that crashed (recorded in the PID file).
 pub fn kill_orphaned_servers(app: &AppHandle) {
     inject_system_message(
         app,
@@ -146,9 +208,19 @@ pub fn kill_orphaned_servers(app: &AppHandle) {
         "Cleaning up any orphaned AI server processes...",
     );
 
-    // Uses Windows taskkill to forcefully close any dangling llama-server.exe instances
-    let _ = Command::new("taskkill")
-        .args(["/F", "/IM", "llama-server.exe"])
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW so it doesn't flash a cmd prompt
-        .output(); // .output() waits for the command to finish
+    let current = SERVER_PID.swap(0, Ordering::SeqCst);
+    if current != 0 {
+        kill_server_pid(current);
+    }
+    if let Some(path) = pid_file(app) {
+        if let Some(pid) = fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+        {
+            if pid != current {
+                kill_server_pid(pid);
+            }
+        }
+        let _ = fs::remove_file(path);
+    }
 }

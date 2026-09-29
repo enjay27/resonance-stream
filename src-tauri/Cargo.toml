@@ -53,10 +53,3 @@ tauri-plugin-global-shortcut = "2.3.1"
 [dev-dependencies]
 pnet = "0.35"
 serde_json = "1.0"
-
-[profile.release]
-panic = "abort"      # 패닉 시 스택 추적을 생략하여 용량 감소
-codegen-units = 1    # 컴파일 단위를 하나로 합쳐 최적화 극대화
-lto = true           # Link Time Optimization 활성화
-opt-level = "s"      # 실행 파일 크기 최적화 (z도 가능)
-strip = true         # 바이너리 내 디버그 심볼 강제 제거

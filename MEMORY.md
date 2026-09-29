@@ -26,7 +26,8 @@ Windows run needed — [`unverified-on-windows.md`](.memory/active-issues/unveri
 [`.memory/sessions/2026-09-29-ui-improve-port.md`](.memory/sessions/2026-09-29-ui-improve-port.md).
 Kade's calls: sequential pids, both archives, gist has sha256, auto-sync off by default.
 
-**Graft MCP start-up fix is PR #24, open.** Until merged, cloud sessions get the CLI only.
+**Graft MCP start-up fix merged (PR #24, cee5842).** `.mcp.json` runs `.claude/helpers/graft-mcp.cjs`,
+which waits for the cloud install. Upgrading graft past 0.20.0 rewrites `.mcp.json` — re-point it.
 
 ## Where the detail is
 

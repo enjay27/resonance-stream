@@ -11,6 +11,8 @@
 //
 // Replaces graft's own SessionStart entry: re-running `graft init` adds that entry
 // back to .claude/settings.json, so remove it again afterwards.
+// It also resets .mcp.json's graft server to a bare `graft mcp`; point it back at
+// .claude/helpers/graft-mcp.cjs, which waits for the install this hook does.
 const fs = require('fs');
 const path = require('path');
 const { execSync, spawnSync } = require('child_process');

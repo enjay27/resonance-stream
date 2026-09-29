@@ -2,15 +2,14 @@
 
 **Index, not the record.** Only what would be *false* the moment it goes stale lives here.
 
-## Now — 2026-09-29 (refactor started)
+## Now — 2026-09-29 (refactor done, unpushed)
 
-**Graft-guided refactor, phases 0–5** —
+**Graft-guided refactor, phases 0–5: done** —
 [`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).
-Phases 0–4 done. `crates/core` + `crates/types` exist: **31 tests now run on Linux**;
-`lib.rs`, `App` and `Settings` are thin shells. Phase 5a (build hygiene) done;
-next: 5b, stale docs.
-**CI has never run** — it runs on the first push (Kade's); the Windows job is the
-first ever automated build of `src-tauri/`.
+Nothing pushed (push is Kade's). **CI has never run** — the first push runs it, and the
+Windows job is the first ever automated build + test of `src-tauri/`.
+Open decisions for Kade: `AppConfig` unification, unused `pcap`/`windivert` deps,
+TROUBLE_SHOOTING rewrite, the "v2.0" footer.
 
 **The app part (`src-tauri/`) only cross-*checks* on Linux** (`just app-cross-check`,
 mingw) — it cannot link, so its tests and any run need Windows (CI or Kade's machine). Anything that
@@ -19,7 +18,7 @@ skipped it is listed in
 
 **`AppConfig` is still defined twice** (ui has derived `Default`, app a hand-written one) —
 [`.memory/active-issues/duplicate-appconfig.md`](.memory/active-issues/duplicate-appconfig.md).
-**Docs are stale:** README/BUILD describe a Python sidecar; the code runs llama.cpp —
+**Docs:** BUILD/README_EN fixed; TROUBLE_SHOOTING flagged —
 [`.memory/active-issues/stale-docs.md`](.memory/active-issues/stale-docs.md).
 
 **Graft MCP start-up fix is PR #24, open.** Until merged, cloud sessions get the CLI only.

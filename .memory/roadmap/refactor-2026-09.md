@@ -39,3 +39,5 @@ Hotspots: `inject_system_message` 19 callers, `read_varint` 14, `skip_field` 9.
   var); title bar reads `CARGO_PKG_VERSION`. `Cargo.lock` tracked. `package.json` /
   lock metadata: name `resonance-stream`, MIT (matches LICENSE), private, no stub scripts.
   `public/leptos.svg`, `public/tauri.svg` removed (unreferenced).
+- **Phase 5b (docs):** BUILD (ko/en) rewritten to the real toolchain; README_EN synced
+  to README.md; TROUBLE_SHOOTING (ko/en) bannered as outdated. **Refactor plan complete.**

@@ -1,5 +1,8 @@
 # 🛠️ Resonance Stream 문제 해결 가이드 (Troubleshooting)
 
+> ⚠️ **이 문서는 v0.3.1 이전 버전(Python 사이드카, WinDivert) 기준으로 작성되어 현재 버전과 맞지 않습니다.**
+> 현재 버전의 트러블 슈팅은 [패킷 스니핑](https://github.com/enjay27/resonance-stream/issues/12) · [번역](https://github.com/enjay27/resonance-stream/issues/13) 이슈를 참고하세요.
+
 이 프로그램은 게임 패킷을 감지하기 위해 커널 레벨 드라이버(**WinDivert**)를 사용하며, 실시간 번역을 위해 **AI 엔진(Python Sidecar)**을 구동합니다. 대부분의 구동 실패는 권한 설정, 필수 런타임 미설치, 혹은 보안 프로그램의 차단으로 인해 발생합니다.
 
 ---

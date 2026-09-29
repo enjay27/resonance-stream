@@ -1,5 +1,8 @@
 # 🛠️ Resonance Stream Troubleshooting Guide
 
+> ⚠️ **This document describes versions before v0.3.1 (Python sidecar, WinDivert) and does not match the current app.**
+> For current troubleshooting see the [packet sniffing](https://github.com/enjay27/resonance-stream/issues/12) and [translation](https://github.com/enjay27/resonance-stream/issues/13) issues.
+
 This application utilizes a kernel-level driver (**WinDivert**) to capture game packets and runs an **AI Engine (Python Sidecar)** for real-time translation. Most execution failures are caused by permission issues, missing runtime components, or security software interference.
 
 ------

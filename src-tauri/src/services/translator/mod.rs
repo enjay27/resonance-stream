@@ -161,9 +161,10 @@ mod tests {
                             );
                             let _ = stream.write_all(response.as_bytes());
                         }
-                        // Route 2: Mock the Translation endpoint
-                        else if request.starts_with("POST /v1/chat/completions") {
-                            let body = r#"{"choices": [{"message": {"content": "116 정찰 우측 은나포"}}]}"#;
+                        // Route 2: Mock llama.cpp's native /completion endpoint,
+                        // which translate_text() calls (not the OpenAI-style one)
+                        else if request.starts_with("POST /completion") {
+                            let body = r#"{"content": " 116 정찰 우측 은나포 "}"#;
                             // FIXED: Added Content-Length and Connection: close
                             let response = format!(
                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",

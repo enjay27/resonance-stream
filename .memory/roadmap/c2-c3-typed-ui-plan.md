@@ -1,6 +1,8 @@
 # C2 / C3 — typed channels, states and tabs; grouped `AppSignals`
 
-**Status: plan, waiting for Kade's go** (2026-10-01). Not started. Both are behaviour-preserving
+**Status: approved by Kade 2026-10-01** (order C2a, C2b, C2c, C2d, C3; Beginner stays a
+separate feature; the four C3 groups as below). One PR at a time, each merged before the
+next starts (CLAUDE.md, *Several tasks in one session*). Both are behaviour-preserving
 refactors: no logic, no UI, no wire or file format change (CLAUDE.md, *Refactors do not change
 behaviour*). One step = one `claude/*` branch = one PR, test first, each step merges green
 before the next starts.
@@ -61,9 +63,28 @@ signals;` destructure keep working by taking the sub-struct they need. CLAUDE.md
 convention is updated with the step. Gate: ui; test first for `to_config`/`apply` round trip
 (every field set to a non-default value survives).
 
+**C2d — the other stringly-typed settings** (ideas added on Kade's request, same
+recipe: enum, same strings on disk, unknown value -> the default). `ComputeMode` (`"cpu"`,
+`"gpu"`, ...: `workers.rs` `TranslatorSettings`, `setup_wizard.rs`, `translation.rs`,
+`server_manager.rs`, `store.rs`), `Tier` (`"low" "middle" "high"`: same files),
+`Theme` (`"dark" "light"`: `appearance.rs`, `app/mod.rs`), `LogLevel` (`"trace"` .. `"error"`:
+`chat_container.rs` 13 hits, `hydration.rs`, `data_dev.rs`, `events.rs`, `commands.rs`;
+the ui's log-level filter becomes an ordered comparison instead of a string match),
+`TabSwitchModifier` (`"Ctrl" "Alt" "Shift"`: `shortcut_keys.rs`, `shortcut.rs`, `appearance.rs`).
+Split into two PRs if it grows: settings enums (`ComputeMode`, `Tier`, `Theme`) and
+`LogLevel` + `TabSwitchModifier`. Also folded into C2c: one `Channel::ALL` list feeds the
+nav tabs and the custom-tab checkboxes (today each writes the names out), and `ALL_TAB` /
+`CUSTOM_TAB` become associated constants of `Tab`.
+
+Not refactors, so **not** in this task (own tasks afterwards, in this order of value):
+plain `0x0003` `{3: channel, 5: chat}` history frames (a line is dropped today, see
+`core-review-2026-09-30.md`); `Channel::Beginner` (feature); W4 dedup capacity, W6 parser
+gaps (`class_id`, `SenderInfo.is_blocked`), W7 IPv6 watchdog, W8 `pick_local_port` race, W9
+sniffer busy loop.
+
 ## Order and size
 
-C2a -> C2b -> C2c -> C3. Each is about one to three sessions of work; C3 is the largest by
+C2a -> C2b -> C2c -> C2d -> C3. Each is about one to three sessions of work; C3 is the largest by
 files touched and the least risky by logic. After C2a a follow-up *feature* (not part of this
 refactor) adds `Channel::Beginner` (code 9, seen in the 2026-10-01 capture): a variant, a
 tab and its label -- separate because today code 9 shows as WORLD and adding the variant
@@ -78,7 +99,7 @@ sniffer restart, settings save and reload (every setting survives a restart), ch
 reload (old logs load, channels intact). Kade runs these; anything not run is named `NOT
 VERIFIED` in the step's commit body.
 
-## Questions for Kade
+## Questions for Kade (answered 2026-10-01: order as given; Beginner separate; groups OK)
 
 1. Order OK (C2a, C2b, C2c, then C3)? Or C3 first (it has no wire risk)?
 2. Beginner channel as its own follow-up feature (recommended), or fold `Channel::Beginner`

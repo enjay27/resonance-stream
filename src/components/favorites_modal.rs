@@ -1,6 +1,7 @@
 //! Favorite messages: copy one to the clipboard, or give it a global shortcut
 //! that pastes it into the game's chat box (the backend does the pasting).
 
+use crate::config_signals::ConfigSignals;
 use crate::shortcut_keys::{
     accelerator_from_event, display, find_conflict, tab_switch_accelerator, Conflict, Rejected,
 };
@@ -15,13 +16,16 @@ use leptos::task::spawn_local;
 pub fn FavoritesModal() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
     let actions = use_context::<AppActions>().expect("AppActions missing");
-    let AppSignals {
+    let ConfigSignals {
         favorite_messages,
         set_favorite_messages,
-        show_favorites,
-        set_show_favorites,
         tab_switch_modifier,
         tab_switch_key,
+        ..
+    } = signals.config;
+    let AppSignals {
+        show_favorites,
+        set_show_favorites,
         ..
     } = signals;
 

@@ -8,6 +8,7 @@ use crate::components::{
     AppUpdateModal, ChatContainer, DictionaryModal, FavoritesModal, ModelUpdateModal, NavBar,
     SetupWizard, Troubleshooter,
 };
+use crate::config_signals::ConfigSignals;
 use crate::hooks::use_tray::{setup_tray_listeners, sync_tray_menu};
 use crate::store::AppSignals;
 use crate::ui_types::Theme;
@@ -18,10 +19,13 @@ use leptos::task::spawn_local;
 pub fn App() -> impl IntoView {
     // --- STATE SIGNALS ---
     let signals = AppSignals::new();
-    let AppSignals {
+    let ConfigSignals {
         compact_mode,
         theme,
-        opacity,
+        overlay_opacity: opacity,
+        ..
+    } = signals.config;
+    let AppSignals {
         active_menu_id,
         set_active_menu_id,
         set_current_time,
@@ -97,7 +101,7 @@ pub fn App() -> impl IntoView {
                     format!("background-color: rgba(252, 252, 252, {}) !important;", current_opacity)
                 }
             }
-            // Note: Use `signals.opacity.get()` if your app.rs uses the signals struct instead of local signals.
+            // Note: Use `signals.config.overlay_opacity.get()` if your app.rs uses the signals struct instead of local signals.
         >
             <Show when=move || active_menu_id.get().is_some()>
                 <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
@@ -106,7 +110,7 @@ pub fn App() -> impl IntoView {
                 <TitleBar />
             </Show>
             <Show
-                when=move || signals.init_done.get()
+                when=move || signals.config.init_done.get()
                 fallback=move || view! {
                     <SetupWizard
                         finalize=Callback::new(finalize_setup)

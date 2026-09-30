@@ -45,12 +45,15 @@ pub fn NavBar() -> impl IntoView {
     Effect::new(move |_| {
         spawn_local(async move {
             let closure = Closure::wrap(Box::new(move |_: JsValue| {
-                let next_tab = Tab::switch_from(&signals.active_tab.get_untracked());
+                let next_tab = Tab::switch_from(&signals.config.active_tab.get_untracked());
 
-                signals.set_active_tab.set(next_tab.label().to_string());
+                signals
+                    .config
+                    .set_active_tab
+                    .set(next_tab.label().to_string());
                 signals.set_unread_count.set(0);
 
-                let filters = signals.custom_filters.get_untracked();
+                let filters = signals.config.custom_tab_filters.get_untracked();
                 signals
                     .set_unread_counts
                     .update(|counts| next_tab.clear_unread(counts, &filters));
@@ -110,14 +113,14 @@ pub fn NavBar() -> impl IntoView {
             // --- LEFT: DaisyUI Tabs ---
             <div class="join bg-base-300/50 p-0.5 rounded-lg border border-base-content/5 flex-shrink-0">
                 {move || {
-                    Tab::nav(signals.debug_mode.get()).into_iter().map(|tab| {
+                    Tab::nav(signals.config.debug_mode.get()).into_iter().map(|tab| {
                         let full = tab.label();
                         let db_key = tab.key();
                         let icon = tab.icon();
                         let has_archive_setting = tab.has_archive_setting();
                         let db_key_click = db_key.to_string();
                         let db_key_drop = db_key.to_string();
-                        let is_active = move || signals.active_tab.get() == full;
+                        let is_active = move || signals.config.active_tab.get() == full;
 
                         let unread = Memo::new(move |_| match tab {
                             Tab::Channel(_) | Tab::System => {
@@ -144,9 +147,9 @@ pub fn NavBar() -> impl IntoView {
                                         }
                                     )
                                     on:click=move |_| {
-                                        signals.set_active_tab.set(full.to_string());
+                                        signals.config.set_active_tab.set(full.to_string());
                                         signals.set_unread_count.set(0);
-                                        let filters = signals.custom_filters.get_untracked();
+                                        let filters = signals.config.custom_tab_filters.get_untracked();
                                         signals.set_unread_counts.update(|counts| tab.clear_unread(counts, &filters));
                                         signals.set_is_at_bottom.set(true);
                                         signals.set_system_at_bottom.set(true);
@@ -201,10 +204,10 @@ pub fn NavBar() -> impl IntoView {
                                                         <label class="label cursor-pointer flex justify-between px-1.5 py-0 hover:bg-base-content/10 rounded">
                                                             <span class="label-text text-[10px] font-bold">{channel.as_str()}</span>
                                                             <input type="checkbox" class="checkbox checkbox-xs checkbox-success"
-                                                                checked=move || signals.custom_filters.get().contains(&ch_clone)
+                                                                checked=move || signals.config.custom_tab_filters.get().contains(&ch_clone)
                                                                 on:change=move |ev| {
                                                                     let checked = event_target_checked(&ev);
-                                                                    signals.set_custom_filters.update(|f| {
+                                                                    signals.config.set_custom_tab_filters.update(|f| {
                                                                         if checked { f.push(ch.clone()); }
                                                                         else { f.retain(|x| x != &ch); }
                                                                     });
@@ -222,10 +225,10 @@ pub fn NavBar() -> impl IntoView {
                                             <div class="flex items-center justify-between">
                                                 <span class="text-xs font-bold text-base-content/80">"최대 메시지 유지:"</span>
                                                 <input type="number" class="input input-xs input-bordered w-16 text-right font-mono bg-base-200 focus:border-success"
-                                                    prop:value=move || signals.tab_limits.get().get(db_key).copied().unwrap_or(if tab == Tab::Channel(Channel::World) { 200 } else { 1000 }).to_string()
+                                                    prop:value=move || signals.config.tab_limits.get().get(db_key).copied().unwrap_or(if tab == Tab::Channel(Channel::World) { 200 } else { 1000 }).to_string()
                                                     on:change=move |ev| {
                                                         let val = event_target_value(&ev).parse::<usize>().unwrap_or(500);
-                                                        signals.set_tab_limits.update(|map| { map.insert(db_key.to_string(), val); });
+                                                        signals.config.set_tab_limits.update(|map| { map.insert(db_key.to_string(), val); });
                                                         actions.save_config.dispatch(());
                                                     }
                                                 />
@@ -238,10 +241,10 @@ pub fn NavBar() -> impl IntoView {
                                                 <label class="label cursor-pointer p-0 hover:bg-transparent">
                                                     <span class="label-text text-xs font-bold text-success">"디스크 자동 저장"</span>
                                                     <input type="checkbox" class="checkbox checkbox-xs checkbox-success"
-                                                        prop:checked=move || !signals.archive_ignored_channels.get().contains(&db_key.to_string())
+                                                        prop:checked=move || !signals.config.archive_ignored_channels.get().contains(&db_key.to_string())
                                                         on:change=move |ev| {
                                                             let is_checked = event_target_checked(&ev);
-                                                            signals.set_archive_ignored_channels.update(|list| {
+                                                            signals.config.set_archive_ignored_channels.update(|list| {
                                                                 if is_checked {
                                                                     // Enable saving = Remove from the ignored list
                                                                     list.retain(|c| c != db_key);
@@ -352,18 +355,18 @@ pub fn NavBar() -> impl IntoView {
 
                     <div class="tooltip tooltip-bottom" data-tip="Always on Top">
                         <button class="btn btn-xs"
-                            class:btn-success=move || signals.is_pinned.get()
-                            class:btn-ghost=move || !signals.is_pinned.get()
+                            class:btn-success=move || signals.config.always_on_top.get()
+                            class:btn-ghost=move || !signals.config.always_on_top.get()
                             on:click=move |_| {
-                                let new_state = !signals.is_pinned.get();
-                                signals.set_is_pinned.set(new_state);
+                                let new_state = !signals.config.always_on_top.get();
+                                signals.config.set_always_on_top.set(new_state);
                                 spawn_local(async move {
                                     let args = serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
                                     let _ = invoke("set_always_on_top", args).await;
                                 });
                                 actions.save_config.dispatch(());
                             }>
-                            <span class=move || if signals.is_pinned.get() { "rotate-45 block" } else { "block" }>"📌"</span>
+                            <span class=move || if signals.config.always_on_top.get() { "rotate-45 block" } else { "block" }>"📌"</span>
                         </button>
                     </div>
 
@@ -376,18 +379,18 @@ pub fn NavBar() -> impl IntoView {
                         <div class="absolute top-full right-1/2 translate-x-1/2 pt-1.5 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
                             <div class="bg-base-300 border border-base-content/10 rounded-lg shadow-xl p-3 w-32 flex flex-col gap-2 items-center cursor-default">
                                 <span class="text-[9px] font-black text-success uppercase tracking-widest opacity-80">
-                                    {move || format!("투명도: {:.0}%", signals.opacity.get() * 100.0)}
+                                    {move || format!("투명도: {:.0}%", signals.config.overlay_opacity.get() * 100.0)}
                                 </span>
                                 <input type="range" min="0.0" max="1.0" step="0.05"
                                     class="range range-xs range-success w-full"
-                                    prop:value=move || signals.opacity.get().to_string()
+                                    prop:value=move || signals.config.overlay_opacity.get().to_string()
                                     on:input=move |ev| {
                                         let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
-                                        signals.set_opacity.set(val);
+                                        signals.config.set_overlay_opacity.set(val);
                                     }
                                     on:change=move |ev| {
                                         let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
-                                        signals.set_opacity.set(val);
+                                        signals.config.set_overlay_opacity.set(val);
                                         actions.save_config.dispatch(());
                                     }
                                 />
@@ -398,15 +401,15 @@ pub fn NavBar() -> impl IntoView {
                     <div class="tooltip tooltip-bottom" data-tip="Compact Mode">
                         <button class="btn btn-ghost btn-xs text-lg"
                             on:click=move |_| {
-                                let new_compact_state = !signals.compact_mode.get_untracked();
-                                signals.set_compact_mode.set(new_compact_state);
+                                let new_compact_state = !signals.config.compact_mode.get_untracked();
+                                signals.config.set_compact_mode.set(new_compact_state);
 
-                                if new_compact_state && signals.active_tab.get_untracked() != Tab::System.label() {
-                                    signals.set_active_tab.set(Tab::Custom.label().to_string());
+                                if new_compact_state && signals.config.active_tab.get_untracked() != Tab::System.label() {
+                                    signals.config.set_active_tab.set(Tab::Custom.label().to_string());
                                 }
                                 actions.save_config.dispatch(());
                             }>
-                            {move || if signals.compact_mode.get() { "🔽" } else { "🔼" }}
+                            {move || if signals.config.compact_mode.get() { "🔽" } else { "🔼" }}
                         </button>
                     </div>
 

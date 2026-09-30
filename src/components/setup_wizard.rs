@@ -105,25 +105,25 @@ pub fn SetupWizard(
                                     <label class="label cursor-pointer">
                                         <span class="label-text font-bold">"실시간 번역 활성화"</span>
                                         <input type="checkbox" class="toggle toggle-success"
-                                            prop:checked=move || signals.use_translation.get()
-                                            on:change=move |ev| signals.set_use_translation.set(event_target_checked(&ev)) />
+                                            prop:checked=move || signals.config.use_translation.get()
+                                            on:change=move |ev| signals.config.set_use_translation.set(event_target_checked(&ev)) />
                                     </label>
                                 </div>
-                                <Show when=move || signals.use_translation.get()>
+                                <Show when=move || signals.config.use_translation.get()>
                                     <div class="space-y-2">
                                         <span class="text-xs font-bold opacity-50 uppercase">"연산 장치 (Compute Mode)"</span>
                                         <div class="join w-full">
                                             <button class="join-item btn btn-sm flex-1"
-                                                class:btn-success=move || signals.compute_mode.get() == ComputeMode::Cpu
-                                                on:click=move |_| signals.set_compute_mode.set(ComputeMode::Cpu)>"CPU"</button>
+                                                class:btn-success=move || signals.config.compute_mode.get() == ComputeMode::Cpu
+                                                on:click=move |_| signals.config.set_compute_mode.set(ComputeMode::Cpu)>"CPU"</button>
                                             <button class="join-item btn btn-sm flex-1"
-                                                class:btn-success=move || signals.compute_mode.get() == ComputeMode::Gpu
-                                                on:click=move |_| signals.set_compute_mode.set(ComputeMode::Gpu)>"GPU"</button>
+                                                class:btn-success=move || signals.config.compute_mode.get() == ComputeMode::Gpu
+                                                on:click=move |_| signals.config.set_compute_mode.set(ComputeMode::Gpu)>"GPU"</button>
                                         </div>
                                     </div>
                                 </Show>
                                 <button class="btn btn-success btn-block"
-                                    on:click=move |_| if signals.use_translation.get_untracked() { signals.set_wizard_step.set(2) } else { finalize.run(()) }>
+                                    on:click=move |_| if signals.config.use_translation.get_untracked() { signals.set_wizard_step.set(2) } else { finalize.run(()) }>
                                     "다음"
                                 </button>
                             </div>

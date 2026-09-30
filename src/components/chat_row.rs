@@ -23,6 +23,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
         let (text, translated) = sig.with_untracked(|m| (m.message.clone(), m.translated.clone()));
         let mut added = false;
         signals
+            .config
             .set_favorite_messages
             .update(|list| added = add_from_chat(list, &text, translated.as_deref()));
         if added {
@@ -83,7 +84,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
             raw_ts
         };
 
-        if signals.use_relative_time.get() {
+        if signals.config.use_relative_time.get() {
             let current_raw = signals.current_time.get();
             let current_secs = if current_raw > 10_000_000_000 {
                 current_raw / 1000
@@ -119,15 +120,15 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
     };
 
     view! {
-        <Show when=move || !(sig.with(|m| m.is_blocked) && signals.hide_blocked_messages.get())>
+        <Show when=move || !(sig.with(|m| m.is_blocked) && signals.config.hide_blocked_messages.get())>
             <Show
-                when=move || signals.compact_mode.get()
+                when=move || signals.config.compact_mode.get()
                 fallback=move || view! {
                     // ==========================================
                     // STANDARD VIEW (Stacked)
                     // ==========================================
                     <div class="flex flex-col items-start px-2 group transition-colors hover:bg-base-content/5"
-                         style=move || format!("padding-top: {0}px; padding-bottom: {0}px;", signals.message_spacing.get())>
+                         style=move || format!("padding-top: {0}px; padding-bottom: {0}px;", signals.config.message_spacing.get())>
                         <div class="opacity-90 mb-1 flex gap-2 items-center">
                             // 1. NICKNAME BUBBLE
                             <span
@@ -140,7 +141,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                     // ADDED: bg-base-200 and padding to create a solid pill shape!
                                     format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border border-base-content/5 {}", color_class)
                                 }
-                                style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(1).max(10))
+                                style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(1).max(10))
                                 on:click=move |ev| {
                                     ev.stop_propagation();
                                     if is_active.get() {
@@ -204,7 +205,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                                     let _ = invoke("block_user_command", args).await;
                                                 });
 
-                                                signals.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
+                                                signals.config.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
                                                 signals.set_active_menu_id.set(None);
                                             }>
                                             "🚫 Block User"
@@ -233,7 +234,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                     if msg.is_blocked {
                                         view! {
                                             <div class="italic opacity-50 text-base-content/50 font-bold"
-                                                style=move || format!("font-size: {}px;", signals.font_size.get())>
+                                                style=move || format!("font-size: {}px;", signals.config.font_size.get())>
                                                 "(차단된 사용자의 메시지입니다)"
                                             </div>
                                         }.into_any()
@@ -241,23 +242,23 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                         view! {
                                             <>
                                                 <div class="leading-relaxed font-bold"
-                                                    style=move || format!("font-size: {}px;", signals.font_size.get())>
+                                                    style=move || format!("font-size: {}px;", signals.config.font_size.get())>
                                                     {
-                                                        let show_original_prefix = is_japanese(&msg.message) && signals.use_translation.get();
+                                                        let show_original_prefix = is_japanese(&msg.message) && signals.config.use_translation.get();
                                                         if show_original_prefix {
                                                             view! { <span class="text-base-content/50 mr-1.5 font-bold">"[원문]"</span> }.into_any()
                                                         } else {
                                                             view! {}.into_any()
                                                         }
                                                     }
-                                                    {render_emphasized(&msg.message, &signals.emphasis_keywords.get())}
+                                                    {render_emphasized(&msg.message, &signals.config.emphasis_keywords.get())}
                                                 </div>
 
                                                 {msg.translated.clone().map(|text| view! {
                                                     <div class="mt-1.5 pt-1.5 border-t border-base-content/10 text-success font-bold animate-in slide-in-from-top-1 duration-200"
-                                                        style=move || format!("font-size: {}px;", signals.font_size.get())>
+                                                        style=move || format!("font-size: {}px;", signals.config.font_size.get())>
                                                          <span class="opacity-70 mr-1.5 font-bold">"[번역]"</span>
-                                                         {render_emphasized(&text, &signals.emphasis_keywords.get())}
+                                                         {render_emphasized(&text, &signals.config.emphasis_keywords.get())}
                                                     </div>
                                                 })}
                                             </>
@@ -282,7 +283,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                 // ==========================================
                 // 1. Parent is now a standard block with generous line-height for wrapping bubbles
                 <div class="block px-2 group transition-colors hover:bg-base-content/5 w-full leading-[1.7] text-left break-words"
-                     style=move || format!("padding-top: {0}px; padding-bottom: {0}px;", signals.message_spacing.get())>
+                     style=move || format!("padding-top: {0}px; padding-bottom: {0}px;", signals.config.message_spacing.get())>
 
                     // 2. NICKNAME BUBBLE (inline-block so it flows like text)
                     <span
@@ -294,7 +295,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                             };
                             format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border border-base-content/5 inline-block align-baseline mr-1.5 {}", color_class)
                         }
-                        style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))
+                        style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(2).max(10))
                         on:click=move |ev| {
                             ev.stop_propagation();
                             if is_active.get() {
@@ -358,7 +359,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                             let _ = invoke("block_user_command", args).await;
                                         });
 
-                                        signals.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
+                                        signals.config.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
                                         signals.set_active_menu_id.set(None);
                                     }>
                                     "🚫 Block User"
@@ -374,27 +375,27 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                         if msg.is_blocked {
                             view! {
                                 <span class="italic opacity-50 text-base-content/50 font-bold inline align-baseline"
-                                      style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
+                                      style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(2).max(10))>
                                     "(차단된 사용자의 메시지입니다)"
                                 </span>
                             }.into_any()
                         } else {
                             let emphasized_msg = msg.clone();
                             let has_translation = msg.translated.is_some();
-                            let hide_orig_pref = signals.hide_original_in_compact.get();
+                            let hide_orig_pref = signals.config.hide_original_in_compact.get();
 
                             // Original message view (inline, with box-decoration-clone to wrap backgrounds beautifully)
                             let original_view = view! {
                                 <span class=move || crate::chat_view::compact_original_class(hide_orig_pref, has_translation, channel_colors().1)
-                                style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
+                                style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(2).max(10))>
                                     {
-                                        if !hide_orig_pref && is_japanese(&msg.message) && signals.use_translation.get() {
+                                        if !hide_orig_pref && is_japanese(&msg.message) && signals.config.use_translation.get() {
                                             view! { <span class="text-base-content/50 mr-1 font-bold">"[원문]"</span> }.into_any()
                                         } else {
                                             view! {}.into_any()
                                         }
                                     }
-                                    {render_emphasized(&emphasized_msg.message, &signals.emphasis_keywords.get())}
+                                    {render_emphasized(&emphasized_msg.message, &signals.config.emphasis_keywords.get())}
                                 </span>
                             };
 
@@ -405,11 +406,11 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                         "text-success font-bold box-decoration-clone bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border border-base-content/5 inline align-baseline ml-1 {}",
                                         if hide_orig_pref { "inline group-hover:hidden" } else { "inline" }
                                     )
-                                    style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
+                                    style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(2).max(10))>
                                         <Show when=move || !hide_orig_pref>
                                             <span class="opacity-70 mr-1 font-bold">"[번역]"</span>
                                         </Show>
-                                        {render_emphasized(&text, &signals.emphasis_keywords.get())}
+                                        {render_emphasized(&text, &signals.config.emphasis_keywords.get())}
                                     </span>
                                 }
                             });

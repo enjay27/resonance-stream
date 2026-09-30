@@ -48,10 +48,10 @@ pub fn AppearanceSection() -> impl IntoView {
                         <span class="text-[9px] text-base-content/60 mt-1">"마우스로 채팅창 배경을 드래그하여 위아래로 스크롤합니다."</span>
                     </div>
                     <input type="checkbox" class="toggle toggle-success toggle-sm"
-                        prop:checked=move || signals.drag_to_scroll.get()
+                        prop:checked=move || signals.config.drag_to_scroll.get()
                         on:change=move |ev| {
                             let enabled = event_target_checked(&ev);
-                            signals.set_drag_to_scroll.set(enabled);
+                            signals.config.set_drag_to_scroll.set(enabled);
                             actions.save_config.dispatch(());
                         }
                     />
@@ -76,8 +76,8 @@ pub fn AppearanceSection() -> impl IntoView {
 
                             // Let users also press "Escape" to cancel/unbind!
                             if key_str == "Escape" {
-                                signals.set_tab_switch_modifier.set(TabSwitchModifier::NoModifier);
-                                signals.set_tab_switch_key.set("".to_string());
+                                signals.config.set_tab_switch_modifier.set(TabSwitchModifier::NoModifier);
+                                signals.config.set_tab_switch_key.set("".to_string());
                                 actions.save_config.dispatch(());
 
                                 spawn_local(async move {
@@ -101,8 +101,8 @@ pub fn AppearanceSection() -> impl IntoView {
                                     TabSwitchModifier::NoModifier
                                 };
 
-                                signals.set_tab_switch_modifier.set(modifier);
-                                signals.set_tab_switch_key.set(key_str.clone());
+                                signals.config.set_tab_switch_modifier.set(modifier);
+                                signals.config.set_tab_switch_key.set(key_str.clone());
                                 actions.save_config.dispatch(());
 
                                 let rust_mod = modifier.as_str();
@@ -119,8 +119,8 @@ pub fn AppearanceSection() -> impl IntoView {
                         }
                     >
                         {move || {
-                            let m = signals.tab_switch_modifier.get();
-                            let k = signals.tab_switch_key.get();
+                            let m = signals.config.tab_switch_modifier.get();
+                            let k = signals.config.tab_switch_key.get();
 
                             let key_display = match k.as_str() {
                                 " " => "Space".to_string(),
@@ -150,8 +150,8 @@ pub fn AppearanceSection() -> impl IntoView {
                     <div class="tooltip tooltip-top" data-tip="단축키 해제">
                         <button class="btn btn-outline btn-sm btn-error w-8 p-0 font-black focus:outline-none"
                             on:click=move |_| {
-                                signals.set_tab_switch_modifier.set(TabSwitchModifier::NoModifier);
-                                signals.set_tab_switch_key.set("".to_string());
+                                signals.config.set_tab_switch_modifier.set(TabSwitchModifier::NoModifier);
+                                signals.config.set_tab_switch_key.set("".to_string());
                                 actions.save_config.dispatch(());
 
                                 spawn_local(async move {
@@ -176,12 +176,12 @@ pub fn AppearanceSection() -> impl IntoView {
             // Theme Toggle
             <button class="btn btn-sm btn-block justify-between bg-base-200 border-base-content/5 font-bold hover:bg-base-content/10"
                     on:click=move |_| {
-                        signals.set_theme.set(signals.theme.get().toggled());
+                        signals.config.set_theme.set(signals.config.theme.get().toggled());
                         actions.save_config.dispatch(());
                     }>
                 <span class="text-xs">"Theme Mode"</span>
                 <span class="text-[10px] uppercase tracking-widest opacity-70">
-                    {move || if signals.theme.get() == Theme::Dark { "🌙 Dark" } else { "☀️ Light" }}
+                    {move || if signals.config.theme.get() == Theme::Dark { "🌙 Dark" } else { "☀️ Light" }}
                 </span>
             </button>
         </section>

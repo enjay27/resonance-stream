@@ -108,27 +108,29 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
             return;
         };
 
-        let limits = signals.tab_limits.get_untracked();
+        let limits = signals.config.tab_limits.get_untracked();
         // Blocked senders (and WORLD chat below the minimum level) never
         // ping and are not counted as unread.
-        let muted = is_muted(&packet, signals.min_sender_level.get_untracked());
+        let muted = is_muted(&packet, signals.config.min_sender_level.get_untracked());
         let alert = !muted
             && signals
+                .config
                 .alert_keywords
                 .with_untracked(|kws| kws.iter().any(|kw| packet.message.contains(kw.as_str())));
         let channel = packet.channel;
         let message_for_log = alert.then(|| packet.message.clone());
 
         let pid = packet.pid;
-        signals.custom_filters.with_untracked(|filters| {
+        signals.config.custom_tab_filters.with_untracked(|filters| {
             signals.set_chat.update(|store| {
                 store.add(pid, channel, ArcRwSignal::new(packet), filters, &limits);
             });
         });
 
-        let tab = Tab::from_label(&signals.active_tab.get_untracked());
+        let tab = Tab::from_label(&signals.config.active_tab.get_untracked());
         let is_visible = signals
-            .custom_filters
+            .config
+            .custom_tab_filters
             .with_untracked(|filters| tab.shows_channel(channel, filters));
 
         // Only increment if the message belongs to the tab we are currently looking at
@@ -143,7 +145,7 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
             });
         }
 
-        let volume = signals.alert_volume.get_untracked();
+        let volume = signals.config.alert_volume.get_untracked();
         if let Some(message) = message_for_log {
             // Fire and forget the audio ping
             if volume > 0.0 {
@@ -186,7 +188,7 @@ fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
             log.push(ArcRwSignal::new(packet));
         });
 
-        let active_tab = signals.active_tab.get_untracked();
+        let active_tab = signals.config.active_tab.get_untracked();
         if active_tab != Tab::All.label() && active_tab != Tab::System.label() {
             signals.set_unread_counts.update(|counts| {
                 *counts.entry(Tab::System.key().to_string()).or_insert(0) += 1;
@@ -229,7 +231,7 @@ fn create_update_message_handler(signals: AppSignals) -> Closure<dyn FnMut(JsVal
 fn create_firewall_missing_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |_| {
         // 1. Force the Setup Wizard to appear
-        signals.set_init_done.set(false);
+        signals.config.set_init_done.set(false);
 
         // 2. Make sure it starts on Step 0 (the Firewall Agreement page)
         signals.set_wizard_step.set(0);

@@ -21,7 +21,7 @@ pub fn ChatContainer() -> impl IntoView {
     let (saved_scroll_top, set_saved_scroll_top) = signal(0);
 
     Effect::new(move |_| {
-        signals.active_tab.track();
+        signals.config.active_tab.track();
         signals.search_term.track();
         set_display_limit.set(50);
     });
@@ -32,10 +32,10 @@ pub fn ChatContainer() -> impl IntoView {
     // arrival, so a translation landing in one row does not re-filter the
     // whole log, and no message is cloned to be looked at.
     let filtered_chat = Memo::new(move |_| {
-        let tab = Tab::from_label(&signals.active_tab.get());
+        let tab = Tab::from_label(&signals.config.active_tab.get());
         let search = signals.search_term.get();
-        let filters = signals.custom_filters.get();
-        let min_level = signals.min_sender_level.get();
+        let filters = signals.config.custom_tab_filters.get();
+        let min_level = signals.config.min_sender_level.get();
         let limit = display_limit.get();
 
         let Some(key) = tab.view_key() else {
@@ -54,7 +54,7 @@ pub fn ChatContainer() -> impl IntoView {
         let level_f = signals.system_level_filter.get();
         let source_f = signals.system_source_filter.get();
         let search = signals.search_term.get().to_lowercase();
-        let current_log_level = signals.log_level.get();
+        let current_log_level = signals.config.log_level.get();
 
         logs.into_iter()
             .filter(|sig| {
@@ -89,7 +89,7 @@ pub fn ChatContainer() -> impl IntoView {
 
     // --- DRAG EVENT HANDLERS ---
     let on_mouse_down = move |ev: MouseEvent| {
-        if !signals.drag_to_scroll.get() {
+        if !signals.config.drag_to_scroll.get() {
             return;
         }
         if let Some(el) = chat_container_ref.get() {
@@ -107,7 +107,7 @@ pub fn ChatContainer() -> impl IntoView {
     };
 
     let on_mouse_move = move |ev: MouseEvent| {
-        if is_dragging.get() && signals.drag_to_scroll.get() {
+        if is_dragging.get() && signals.config.drag_to_scroll.get() {
             // STOP the browser's native text selection and boundary-scroll physics!
             ev.prevent_default();
 
@@ -130,7 +130,7 @@ pub fn ChatContainer() -> impl IntoView {
                     let base = "flex-1 overflow-y-auto custom-scrollbar p-2 min-h-0";
 
                     // If drag-to-scroll is off, return normal classes
-                    if !signals.drag_to_scroll.get() {
+                    if !signals.config.drag_to_scroll.get() {
                         return base.to_string();
                     }
 
@@ -160,7 +160,7 @@ pub fn ChatContainer() -> impl IntoView {
                         set_display_limit.update(|limit| *limit += 50);
                     }
 
-                    if signals.active_tab.get_untracked() == Tab::System.label() {
+                    if signals.config.active_tab.get_untracked() == Tab::System.label() {
                         signals.set_system_at_bottom.set(at_bottom);
                     } else {
                         signals.set_is_at_bottom.set(at_bottom);
@@ -170,7 +170,7 @@ pub fn ChatContainer() -> impl IntoView {
             >
                 // --- SCROLLABLE CONTENT ---
                 <Show
-                    when=move || signals.active_tab.get() == Tab::System.label()
+                    when=move || signals.config.active_tab.get() == Tab::System.label()
                     fallback=move || view! {
                         <For
                             each=move || filtered_chat.get()
@@ -286,7 +286,7 @@ pub fn ChatContainer() -> impl IntoView {
             </Show>
 
             // --- OVERLAY: SCROLL LOCK TOAST ---
-            <Show when=move || signals.active_tab.get() == Tab::System.label() && !signals.is_system_at_bottom.get()>
+            <Show when=move || signals.config.active_tab.get() == Tab::System.label() && !signals.is_system_at_bottom.get()>
                 <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-50">
                     <button class="btn btn-warning btn-sm opacity-90 shadow-2xl"
                         on:click=move |_| {

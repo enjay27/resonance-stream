@@ -3,6 +3,7 @@ pub mod chat_view;
 pub mod components;
 pub mod favorites;
 pub mod hooks;
+pub mod service_state;
 pub mod shortcut_keys;
 pub mod store;
 pub mod tauri_bridge;

@@ -47,6 +47,14 @@ pub fn get_system_history(state: tauri::State<AppState>) -> Vec<SystemMessage> {
     history.iter().cloned().collect()
 }
 
+/// The last state each service reported. The UI asks once its listeners are
+/// registered: states emitted before that (the translator starts with the
+/// app) would otherwise be lost.
+#[tauri::command]
+pub fn get_service_states(state: tauri::State<AppState>) -> crate::ServiceStates {
+    state.service_states.lock().clone()
+}
+
 #[tauri::command]
 pub fn launch_translator(app: AppHandle, state: State<'_, AppState>) {
     // Idempotent: a translator that is already running is left alone.

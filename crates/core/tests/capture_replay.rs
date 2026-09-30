@@ -1,7 +1,7 @@
 //! Replays real captures (`tests/fixtures/*.capture.log`, made with the app's
 //! debug "Raw Capture" and kept out of git) through the pipeline. With no
-//! capture present this passes vacuously; W2 is finished by extending it with
-//! what the messages seen in game should have been.
+//! capture present this passes vacuously; it pins what the real capture must give:
+//! the chats counted by an independent decode.
 
 use resonance_core::capture::{replay, ChatPipeline, PipelineAction};
 use std::fs;
@@ -42,5 +42,11 @@ fn real_captures_replay_without_panicking() {
         }
         println!("{}: {packets} packets -> {chats} chats", path.display());
         assert!(packets > 0, "{} has no usable packets", path.display());
+        if path.ends_with("real1.capture.log") {
+            // 33 live lines + 127 history lines the client had not sent us
+            // live, counted by an independent decode (python + zstandard) of
+            // the same file with the app's dedup key (uid, time, id).
+            assert_eq!((packets, chats), (256, 160));
+        }
     }
 }

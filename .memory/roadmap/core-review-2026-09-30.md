@@ -12,15 +12,27 @@ One finding, one `claude/*` branch, one PR, test first (CLAUDE.md *TDD*).
 | P2 | "dictionary cloned per job" | **dropped: wrong** | `AppState.dictionary` is already `RwLock<Arc<Dictionary>>` |
 | P3 | `preprocess_text` 68 µs (2k terms) – 375 µs (10k) | **dropped** | < 0.1% of one LLM round trip; Aho-Corasick would change masking order (leftmost-longest vs longest-term-first) |
 | R1 | one protobuf field iterator (`decoder::Fields`) instead of six hand loops | **done** (this branch) | parser output pinned by `parser_output_is_pinned_across_refactors` (40k generated packets, hash unchanged); `parser.rs` production code 425 → 282 lines |
-| W2 | framing is guesswork (no TCP seq, app header not decoded; compressed frames would be dropped silently). **Integration tests (2026-09-30) found real loss around rich lines** -- see `sessions/2026-09-30-integration-tests.md`; pinned in `crates/llama/tests/capture.rs` | **blocked: needs a real capture** -- the capture tool is built (settings > debug > Raw Capture) | Kade captures port-5003 traffic at home (`captures/capture-*.log`, one `<unix_ms>\t<hex packet>` per line) and uploads it to a Gist; save it as `crates/core/tests/fixtures/<name>.capture.log` (gitignored; `tests/capture_replay.rs` replays it); then decode the header, split by length, drop retransmits by `tcp.sequence_number` |
+| W2 | framing is guesswork (no TCP seq, app header not decoded) | **done** (`claude/festive-hypatia-5r78o7`) | length-based `FrameAssembler` (`protocol/framing.rs`), `ruzstd` for bit-15 frames (`protocol/compression.rs`, 1 MiB cap), TCP seq in `StreamTracker` (retransmits trimmed, gap resets), `parser::history_pipeline`. Real capture: 256 packets -> 160 chats, matching an independent python decode |
 
-## W2 — what the capture should contain
+## W2 — what the first real capture showed (2026-10-01, 256 packets, 87 KB, no loss or retransmits)
 
-A `.pcap` (Wireshark/`dumpcap`, filter `tcp port 5003`, both directions) with: one short
-chat line; one **long** message; a **burst** of several messages in a few seconds; ideally a
-message with an item link. Note the wall-clock time of each message sent so frames can be
-matched. Open questions it answers: is the app header length-prefixed, is there a
-compression flag (hypothesis, unverified), are there frames the current framing drops.
+Frame = `[u32 BE total length incl. header][u16 type][body]`. It splits exactly on the lengths.
+
+| type | n | body | handled |
+|---|---|---|---|
+| `0x0002` | 40 | 16-byte header + root `{1: channel, 2: chat}` -- live chat (33) + a few non-chat roots | live |
+| `0x0003` | 21 | 12-byte header + root `{3: chat}` -- the player's **own** line echoed, always also sent as `0x0002` | skipped |
+| `0x0004` | 129 | none (6 bytes) -- keepalive | skipped |
+| `0x8003` | 11 | 12-byte header + zstd(root `{3: channel, 5: chat x ~30}`) -- channel history, newest first, re-sent now and then | history (oldest first) |
+| `0x8002` | 15 | 16-byte header + zstd -- big blob (urls, player data), not chat | skipped |
+
+Chat = `{1: id, 2: sender{1: uid, 2: name, ..}, 3: time, 4: message{3: text | 1: rich}}` in all of them.
+The 33 live lines were already all shown before W2; the win is the 127 history lines the
+client had not sent live (141 unique in history, 14 also seen live). What is not known:
+- Channel codes seen in live frames: 1, 2, 3, 4, 9 (and a bytes-typed field 1). The parser maps 2 LOCAL, 3 PARTY, 4 GUILD, everything else (1, **9**) WORLD -- 9 (the beginner channel, per Kade's test lines) is shown as WORLD. History carries the code in root field 3.
+- History lines from **other channels/lines** (ids in other ranges: 1205xxx, 6952) are shown too, as WORLD; each Japanese one is queued for translation (a refresh brings up to ~30). If that floods the translator, decide which history to keep.
+- What the 16/12-byte inner headers hold (`0x0002` header: 4 zero bytes, a u32 id, ...) and `0x8002`'s content.
+- The `0x0003` skip assumes it never carries a line `0x0002` lacks (true for all 7 here).
 
 ## Left open (low, no branch yet)
 

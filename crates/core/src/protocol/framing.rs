@@ -1,34 +1,58 @@
-//! Finds protobuf chat roots in a port-5003 TCP stream.
+//! Splits a port-5003 TCP stream into frames.
 //!
-//! The application frame header in front of each root is not decoded (its
-//! layout is not known), so a root is recognised by its shape: a `0x0A` tag
-//! whose varint length makes the root end *exactly* at the end of the data
-//! seen so far. That exact-end rule is what keeps random `0x0A` bytes inside
-//! other data from being taken for a root.
+//! Every frame is `[u32 total length, big endian, header included][u16 type][body]`
+//! (read off a real capture; the open questions are in `.memory/roadmap/core-review-2026-09-30.md`):
 //!
-//! On top of that rule, the assembler handles what TCP does to the stream:
-//! - several frames in one segment: `[hdr][root][hdr][root]` resolves as a
-//!   chain of roots separated by headers of one fixed size;
-//! - one frame over several segments: bytes that do not resolve yet are kept
-//!   (bounded in size and age) and retried with the next segment.
+//! | type     | body                                               | used |
+//! |----------|----------------------------------------------------|------|
+//! | `0x0002` | 16-byte header, then a protobuf root: live chat    | yes  |
+//! | `0x0003` | 12-byte header, then a root: the player's own line, echoed (always also sent as `0x0002`) | no |
+//! | `0x0004` | none: keepalive, 6 bytes                            | no   |
+//! | `0x8002` | 16-byte header, zstd: world state, not chat         | no   |
+//! | `0x8003` | 12-byte header, zstd, then a root: channel history  | yes  |
+//!
+//! A protobuf root starts with `0x0A`. Bit 15 of the type means the body after
+//! the header is a zstd frame.
+//!
+//! The sniffer can join a connection mid-frame, and a lost segment leaves the
+//! stream cut. The assembler is then *unsynced* and looks for the first spot
+//! where a run of plausible frame headers begins; it never trusts a length it
+//! has not checked.
 
-use crate::protocol::decoder::read_varint;
-use std::ops::Range;
-use std::time::{Duration, Instant};
+use crate::protocol::compression::decompress;
 
+/// A frame longer than this is not a frame (the biggest seen is ~4 KB).
+pub const MAX_FRAME_LEN: usize = 1 << 20;
+
+/// `[len][type]`.
+const PREFIX_LEN: usize = 6;
+const COMPRESSED: u16 = 0x8000;
+const TYPE_CHAT: u16 = 0x0002;
+const TYPE_OWN_LINE: u16 = 0x0003;
+const TYPE_KEEPALIVE: u16 = 0x0004;
 const ROOT_TAG: u8 = 0x0A;
-/// Unresolved bytes kept per stream while waiting for the rest of a frame.
-pub const MAX_PENDING: usize = 64 * 1024;
-/// A frame's segments arrive within milliseconds of each other; anything
-/// older than this is a lost cause (a missed segment), not a slow one.
-pub const PENDING_TIMEOUT: Duration = Duration::from_secs(1);
+const ZSTD_FIRST_BYTE: u8 = 0x28;
+
+/// What a frame's root holds; the parser reads each differently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameKind {
+    /// `0x0002`: one chat line, with its channel.
+    Live,
+    /// `0x8003`: the channel's recent lines, newest first.
+    History,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Frame {
+    pub kind: FrameKind,
+    /// A protobuf root (starts with `0x0A`), decompressed if it came compressed.
+    pub root: Vec<u8>,
+}
 
 #[derive(Debug, Default)]
 pub struct FrameAssembler {
-    pending: Vec<u8>,
-    pending_since: Option<Instant>,
-    /// Header size of the last frame that resolved on this stream.
-    header: Option<usize>,
+    buf: Vec<u8>,
+    synced: bool,
 }
 
 impl FrameAssembler {
@@ -36,117 +60,138 @@ impl FrameAssembler {
         Self::default()
     }
 
-    /// Feeds one TCP payload; returns every complete root it completes.
-    pub fn push(&mut self, segment: &[u8]) -> Vec<Vec<u8>> {
-        self.push_at(segment, Instant::now())
+    /// Feeds the next in-order TCP payload; returns every frame it completes.
+    pub fn push(&mut self, segment: &[u8]) -> Vec<Frame> {
+        self.buf.extend_from_slice(segment);
+        let mut frames = Vec::new();
+        loop {
+            if !self.synced {
+                match find_sync(&self.buf) {
+                    Some(start) => {
+                        self.buf.drain(..start);
+                        self.synced = true;
+                    }
+                    None => {
+                        // Nothing to trust: keep only what could be the start
+                        // of a header the next segment completes.
+                        let keep = self.buf.len().min(PREFIX_LEN - 1);
+                        self.buf.drain(..self.buf.len() - keep);
+                        return frames;
+                    }
+                }
+            }
+            if self.buf.len() < PREFIX_LEN {
+                return frames;
+            }
+            let Some(len) = header_len(&self.buf) else {
+                // Not a frame after all: look for the next real one.
+                self.synced = false;
+                self.buf.drain(..1);
+                continue;
+            };
+            if self.buf.len() < len {
+                return frames;
+            }
+            let ty = u16::from_be_bytes([self.buf[4], self.buf[5]]);
+            frames.extend(decode(ty, &self.buf[PREFIX_LEN..len]));
+            self.buf.drain(..len);
+        }
     }
 
-    /// [`push`](Self::push) with an explicit clock, for tests.
-    pub fn push_at(&mut self, segment: &[u8], now: Instant) -> Vec<Vec<u8>> {
-        if segment.is_empty() {
-            return Vec::new();
-        }
-        if self
-            .pending_since
-            .is_some_and(|since| now.saturating_duration_since(since) > PENDING_TIMEOUT)
-        {
-            self.clear();
-        }
-
-        // Two readings of the new bytes: they continue an unfinished frame
-        // (pending + segment), or they stand on their own.
-        let joined = (!self.pending.is_empty()).then(|| [&self.pending[..], segment].concat());
-        let as_continuation = joined
-            .as_deref()
-            .and_then(|data| best_chain(data, self.header));
-        let on_its_own = best_chain(segment, self.header);
-
-        // The more plausible framing wins: the header size already seen on
-        // this stream, else the smaller header. A tie goes to the continuation.
-        let rank = |header: usize| (Some(header) != self.header, header);
-        let chosen = match (as_continuation, on_its_own) {
-            (Some(c), Some(o)) if rank(o.0) < rank(c.0) => Some((segment, o)),
-            (Some(c), _) => Some((joined.as_deref().unwrap_or_default(), c)),
-            (None, Some(o)) => Some((segment, o)),
-            (None, None) => None,
-        };
-        if let Some((data, (header, roots))) = chosen {
-            let out = roots.into_iter().map(|r| data[r].to_vec()).collect();
-            self.clear();
-            self.header = Some(header);
-            return out;
-        }
-
-        // Not resolvable yet: keep the bytes for the next segment.
-        match joined {
-            Some(joined) => self.pending = joined,
-            None => {
-                self.pending.extend_from_slice(segment);
-                self.pending_since = Some(now);
-            }
-        }
-        if self.pending.len() > MAX_PENDING {
-            // Too much unresolved data in front: restart from this segment alone.
-            let tail = &segment[segment.len().saturating_sub(MAX_PENDING)..];
-            self.pending = tail.to_vec();
-            self.pending_since = Some(now);
-        }
-        Vec::new()
+    /// Forgets the partial frame: the stream is cut (a segment went missing).
+    pub fn reset(&mut self) {
+        self.buf.clear();
+        self.synced = false;
     }
 
     /// Bytes waiting for the rest of a frame.
     pub fn pending_len(&self) -> usize {
-        self.pending.len()
-    }
-
-    fn clear(&mut self) {
-        self.pending.clear();
-        self.pending_since = None;
+        self.buf.len()
     }
 }
 
-/// Splits `data` into `[hdr][root][hdr][root]...` where every header has the
-/// same size and the last root ends exactly at `data.len()`. Tries the
-/// `preferred` header size first, then sizes smallest first. Returns the
-/// header size used and the root ranges, or `None` if no size explains the
-/// whole buffer.
-fn best_chain(data: &[u8], preferred: Option<usize>) -> Option<(usize, Vec<Range<usize>>)> {
-    preferred
-        .into_iter()
-        .chain((0..data.len()).filter(|&header| data[header] == ROOT_TAG))
-        .find_map(|header| root_chain(data, header).map(|roots| (header, roots)))
+/// The length of the frame starting at `data[0]` if its header is plausible:
+/// a sane length, a type this protocol has, and -- when the bytes are already
+/// there -- what the type says comes first in the body.
+fn header_len(data: &[u8]) -> Option<usize> {
+    let len = usize::try_from(u32::from_be_bytes(data.get(..4)?.try_into().ok()?)).ok()?;
+    let ty = u16::from_be_bytes(data.get(4..PREFIX_LEN)?.try_into().ok()?);
+    if !(PREFIX_LEN..=MAX_FRAME_LEN).contains(&len) {
+        return None;
+    }
+    match ty & !COMPRESSED {
+        TYPE_KEEPALIVE => (ty == TYPE_KEEPALIVE && len == PREFIX_LEN).then_some(len),
+        TYPE_CHAT | TYPE_OWN_LINE => {
+            let body_start = PREFIX_LEN + inner_header(ty);
+            if len <= body_start {
+                return None;
+            }
+            let first = if ty & COMPRESSED != 0 {
+                ZSTD_FIRST_BYTE
+            } else {
+                ROOT_TAG
+            };
+            match data.get(body_start) {
+                Some(&byte) if byte != first => None,
+                _ => Some(len),
+            }
+        }
+        _ => None,
+    }
 }
 
-fn root_chain(data: &[u8], header: usize) -> Option<Vec<Range<usize>>> {
-    let mut roots = Vec::new();
-    let mut start = header;
-    loop {
-        if *data.get(start)? != ROOT_TAG {
-            return None;
-        }
-        let (len, varint_size) = read_varint(&data[start + 1..]);
-        if varint_size == 0 {
-            return None;
-        }
-        let end = usize::try_from(len)
-            .ok()
-            .and_then(|len| (start + 1 + varint_size).checked_add(len))?;
-        if end > data.len() {
-            return None;
-        }
-        roots.push(start..end);
-        if end == data.len() {
-            return Some(roots);
-        }
-        start = end.checked_add(header)?;
+/// Bytes between the type and the root (or zstd frame).
+fn inner_header(ty: u16) -> usize {
+    match ty & !COMPRESSED {
+        TYPE_CHAT => 16,
+        _ => 12,
     }
+}
+
+/// A length that could be a frame's, whatever its type.
+fn sane_len(data: &[u8]) -> Option<usize> {
+    let len = usize::try_from(u32::from_be_bytes(data.get(..4)?.try_into().ok()?)).ok()?;
+    (PREFIX_LEN..=MAX_FRAME_LEN).contains(&len).then_some(len)
+}
+
+/// The first offset in `data` where a frame this protocol has starts, and the
+/// frames after it (of any type) chain by sane lengths up to the end of the
+/// data; the last one may be unfinished.
+fn find_sync(data: &[u8]) -> Option<usize> {
+    (0..data.len().saturating_sub(PREFIX_LEN - 1)).find(|&start| {
+        let Some(first) = header_len(&data[start..]) else {
+            return false;
+        };
+        let mut at = start + first;
+        while data.len() - at.min(data.len()) >= PREFIX_LEN {
+            match sane_len(&data[at..]) {
+                Some(len) => at += len,
+                None => return false,
+            }
+        }
+        true
+    })
+}
+
+fn decode(ty: u16, body: &[u8]) -> Option<Frame> {
+    let kind = match ty {
+        TYPE_CHAT => FrameKind::Live,
+        t if t == COMPRESSED | TYPE_OWN_LINE => FrameKind::History,
+        _ => return None,
+    };
+    let payload = body.get(inner_header(ty)..)?;
+    let root = if ty & COMPRESSED != 0 {
+        decompress(payload)?
+    } else {
+        payload.to_vec()
+    };
+    (root.first() == Some(&ROOT_TAG)).then_some(Frame { kind, root })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const HDR: [u8; 4] = [0x00, 0x00, 0x11, 0x22];
+    use ruzstd::encoding::{compress_to_vec, CompressionLevel};
 
     fn root(body: &[u8]) -> Vec<u8> {
         let mut r = vec![ROOT_TAG, body.len() as u8];
@@ -154,105 +199,192 @@ mod tests {
         r
     }
 
-    fn frame(body: &[u8]) -> Vec<u8> {
-        [&HDR[..], &root(body)].concat()
+    /// `[len][type][inner header][payload]`
+    fn frame_of(ty: u16, payload: &[u8]) -> Vec<u8> {
+        let mut out = vec![0u8; 4];
+        out.extend(ty.to_be_bytes());
+        out.extend(vec![0xEE; inner_header(ty)]);
+        out.extend_from_slice(payload);
+        let len = out.len() as u32;
+        out[..4].copy_from_slice(&len.to_be_bytes());
+        out
+    }
+
+    fn live(body: &[u8]) -> Vec<u8> {
+        frame_of(TYPE_CHAT, &root(body))
+    }
+
+    fn history(body: &[u8]) -> Vec<u8> {
+        let packed = compress_to_vec(&root(body)[..], CompressionLevel::Fastest);
+        frame_of(COMPRESSED | TYPE_OWN_LINE, &packed)
+    }
+
+    fn keepalive() -> Vec<u8> {
+        vec![0, 0, 0, 6, 0, 4]
+    }
+
+    fn roots(frames: &[Frame]) -> Vec<&[u8]> {
+        frames.iter().map(|f| f.root.as_slice()).collect()
     }
 
     #[test]
-    fn one_frame_per_segment() {
-        let mut fa = FrameAssembler::new();
-        assert_eq!(fa.push(&frame(&[0xBB, 0xCC])), vec![root(&[0xBB, 0xCC])]);
-        assert_eq!(fa.pending_len(), 0);
-    }
-
-    #[test]
-    fn root_claiming_more_than_is_there_is_held_not_emitted() {
-        // Ported from strip_application_header's rejection case.
-        let mut fa = FrameAssembler::new();
-        assert!(fa.push(&[0x00, 0x11, 0x22, 0x0A, 0x09, 0xBB]).is_empty());
-        assert_eq!(fa.pending_len(), 6);
-    }
-
-    #[test]
-    fn coalesced_frames_resolve_as_a_chain() {
-        let mut fa = FrameAssembler::new();
-        let seg = [frame(b"one"), frame(b"two"), frame(b"three")].concat();
+    fn a_live_frame_yields_its_root() {
+        let got = FrameAssembler::new().push(&live(b"hello"));
         assert_eq!(
-            fa.push(&seg),
-            vec![root(b"one"), root(b"two"), root(b"three")]
+            got,
+            vec![Frame {
+                kind: FrameKind::Live,
+                root: root(b"hello")
+            }]
         );
     }
 
     #[test]
-    fn frame_split_over_segments_is_joined() {
-        let mut fa = FrameAssembler::new();
-        let whole = frame(b"hello world");
-        let (a, b) = whole.split_at(7);
-        assert!(fa.push(a).is_empty());
-        assert_eq!(fa.push(b), vec![root(b"hello world")]);
-        assert_eq!(fa.pending_len(), 0);
+    fn a_history_frame_is_inflated() {
+        let got = FrameAssembler::new().push(&history(b"backlog"));
+        assert_eq!(
+            got,
+            vec![Frame {
+                kind: FrameKind::History,
+                root: root(b"backlog")
+            }]
+        );
     }
 
     #[test]
-    fn retransmitted_first_half_does_not_block_the_frame() {
-        let mut fa = FrameAssembler::new();
-        let whole = frame(b"hello world");
-        let (a, b) = whole.split_at(7);
-        assert!(fa.push(a).is_empty());
-        assert!(fa.push(a).is_empty());
-        assert_eq!(fa.push(b), vec![root(b"hello world")]);
+    fn frames_that_are_not_chat_are_skipped_by_their_length() {
+        let stream = [
+            keepalive(),
+            frame_of(TYPE_OWN_LINE, &root(b"echo")),
+            frame_of(
+                COMPRESSED | TYPE_CHAT,
+                &compress_to_vec(&root(b"state")[..], CompressionLevel::Fastest),
+            ),
+            live(b"one"),
+            keepalive(),
+        ]
+        .concat();
+        let got = FrameAssembler::new().push(&stream);
+        assert_eq!(roots(&got), [&root(b"one")[..]]);
     }
 
     #[test]
-    fn garbage_in_front_does_not_hide_a_clean_segment() {
-        let mut fa = FrameAssembler::new();
-        assert!(fa.push(&[0x0A, 0x7F, 1, 2, 3]).is_empty()); // never completes
-        let seg = [frame(b"one"), frame(b"two")].concat();
-        assert_eq!(fa.push(&seg), vec![root(b"one"), root(b"two")]);
-        assert_eq!(fa.pending_len(), 0);
+    fn coalesced_frames_all_come_out_in_order() {
+        let stream = [live(b"one"), history(b"two"), live(b"three")].concat();
+        let got = FrameAssembler::new().push(&stream);
+        assert_eq!(
+            roots(&got),
+            [&root(b"one")[..], &root(b"two")[..], &root(b"three")[..]]
+        );
+        assert_eq!(got[1].kind, FrameKind::History);
     }
 
     #[test]
-    fn stale_pending_bytes_are_dropped() {
-        let mut fa = FrameAssembler::new();
-        let t0 = Instant::now();
-        let whole = frame(b"hello world");
-        let (a, b) = whole.split_at(7);
-        assert!(fa.push_at(a, t0).is_empty());
-        // The second half arrives after the timeout: the halves are not joined.
-        let late = t0 + PENDING_TIMEOUT + Duration::from_millis(1);
-        assert!(fa.push_at(b, late).is_empty());
-        assert_eq!(fa.pending_len(), b.len());
-    }
-
-    #[test]
-    fn pending_is_bounded() {
-        let mut fa = FrameAssembler::new();
-        // A root start claiming 65535 bytes, then zeros: never ends exactly.
-        let mut junk = vec![0x0A, 0xFF, 0xFF, 0x03];
-        junk.resize(4096, 0);
-        for _ in 0..40 {
-            assert!(fa.push(&junk).is_empty());
-            assert!(fa.pending_len() <= MAX_PENDING);
+    fn a_frame_cut_anywhere_is_joined() {
+        let whole = [live(b"before"), history(b"cut me up"), live(b"after")].concat();
+        for cut in 1..whole.len() {
+            let mut fa = FrameAssembler::new();
+            let mut got = fa.push(&whole[..cut]);
+            got.extend(fa.push(&whole[cut..]));
+            assert_eq!(
+                roots(&got),
+                [
+                    &root(b"before")[..],
+                    &root(b"cut me up")[..],
+                    &root(b"after")[..]
+                ],
+                "cut at {cut}"
+            );
+            assert_eq!(fa.pending_len(), 0);
         }
-        assert!(fa.pending_len() > 0);
     }
 
     #[test]
-    fn learned_header_size_beats_a_spurious_smaller_one() {
+    fn a_frame_one_byte_at_a_time_is_joined() {
         let mut fa = FrameAssembler::new();
-        assert_eq!(fa.push(&frame(b"x")), vec![root(b"x")]); // learns header = 4
-                                                             // This header happens to contain `0A 00` (an empty root), so the
-                                                             // segment also reads as a chain with 1-byte headers:
-                                                             // [00] [0A 00] [00] [0A 02 BB CC].
-        let seg = [0x00, 0x0A, 0x00, 0x00, 0x0A, 0x02, 0xBB, 0xCC];
-        assert_eq!(fa.push(&seg), vec![root(&[0xBB, 0xCC])]);
+        let mut got = Vec::new();
+        for byte in [live(b"slow"), history(b"slower")].concat() {
+            got.extend(fa.push(&[byte]));
+        }
+        assert_eq!(roots(&got), [&root(b"slow")[..], &root(b"slower")[..]]);
     }
 
     #[test]
-    fn huge_length_does_not_overflow() {
-        let mut seg = vec![0x0A];
-        seg.extend([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]);
-        assert!(FrameAssembler::new().push(&seg).is_empty());
+    fn joining_mid_frame_finds_the_next_frame() {
+        // The sniffer started in the middle of a frame: its tail comes first.
+        let tail_of_cut_frame = &live(b"cut off at the start")[9..];
+        let mut fa = FrameAssembler::new();
+        let mut got = fa.push(tail_of_cut_frame);
+        got.extend(fa.push(&[live(b"one"), live(b"two")].concat()));
+        assert_eq!(roots(&got), [&root(b"one")[..], &root(b"two")[..]]);
+    }
+
+    #[test]
+    fn garbage_in_front_does_not_hide_the_next_frame() {
+        let mut fa = FrameAssembler::new();
+        assert!(fa.push(&[0x0A, 0xFF, 0x13, 0x37]).is_empty());
+        let got = fa.push(&live(b"clean"));
+        assert_eq!(roots(&got), [&root(b"clean")[..]]);
+    }
+
+    #[test]
+    fn a_frame_after_an_unknown_type_is_still_found() {
+        let unknown = vec![0, 0, 0, 10, 0x12, 0x34, 1, 2, 3, 4];
+        let got = FrameAssembler::new().push(&[live(b"one"), unknown, live(b"two")].concat());
+        assert_eq!(roots(&got), [&root(b"one")[..], &root(b"two")[..]]);
+    }
+
+    #[test]
+    fn a_body_that_will_not_inflate_costs_its_frame_only() {
+        let bad = frame_of(COMPRESSED | TYPE_OWN_LINE, &[ZSTD_FIRST_BYTE, 1, 2, 3, 4]);
+        let got = FrameAssembler::new().push(&[bad, live(b"next")].concat());
+        assert_eq!(roots(&got), [&root(b"next")[..]]);
+    }
+
+    #[test]
+    fn a_length_that_cannot_be_true_resyncs() {
+        let mut bad = live(b"liar");
+        bad[..4].copy_from_slice(&u32::MAX.to_be_bytes());
+        let got = FrameAssembler::new().push(&[bad, live(b"honest")].concat());
+        assert_eq!(roots(&got), [&root(b"honest")[..]]);
+    }
+
+    #[test]
+    fn reset_forgets_the_partial_frame() {
+        let mut fa = FrameAssembler::new();
+        let whole = live(b"half");
+        assert!(fa.push(&whole[..8]).is_empty());
+        assert_eq!(fa.pending_len(), 8);
+        fa.reset();
+        assert_eq!(fa.pending_len(), 0);
+        assert_eq!(roots(&fa.push(&live(b"fresh"))), [&root(b"fresh")[..]]);
+    }
+
+    #[test]
+    fn pending_stays_bounded_on_endless_garbage() {
+        let mut fa = FrameAssembler::new();
+        for i in 0..1000u32 {
+            let junk: Vec<u8> = (0..1400u32)
+                .map(|b| (b.wrapping_mul(31) ^ i) as u8)
+                .collect();
+            fa.push(&junk);
+            assert!(
+                fa.pending_len() <= MAX_FRAME_LEN + 1400,
+                "{}",
+                fa.pending_len()
+            );
+        }
+    }
+
+    #[test]
+    fn a_huge_declared_length_waits_at_most_a_frame() {
+        // Plausible header, absurd (but allowed) length, then junk: never more
+        // than MAX_FRAME_LEN is held.
+        let mut head = vec![0x00, 0x0F, 0xFF, 0xFF, 0x00, 0x02];
+        head.extend(vec![0xEE; 16]);
+        head.push(ROOT_TAG);
+        let mut fa = FrameAssembler::new();
+        fa.push(&head);
+        assert!(fa.pending_len() <= MAX_FRAME_LEN);
     }
 }

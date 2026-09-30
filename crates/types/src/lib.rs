@@ -11,7 +11,7 @@ use std::collections::HashMap;
 // --- Chat and system log ---
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct ChatMessage {
     pub pid: u64,
     pub channel: String,
@@ -165,6 +165,17 @@ pub struct UpdateCheckResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_log_line_from_an_older_version_still_parses() {
+        // Regression (W3): a saved line without fields added later (classId,
+        // level, sequenceId ...) was skipped, so the history vanished.
+        let old =
+            r#"{"pid":3,"channel":"WORLD","nickname":"Bob","message":"hi","timestamp":5,"uid":9}"#;
+        let msg: ChatMessage = serde_json::from_str(old).expect("old line must parse");
+        assert_eq!((msg.pid, msg.uid, msg.message.as_str()), (3, 9, "hi"));
+        assert_eq!((msg.class_id, msg.level, msg.sequence_id), (0, 0, 0));
+    }
 
     #[test]
     fn empty_unknown_fields_are_left_off_the_wire() {

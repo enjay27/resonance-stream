@@ -29,6 +29,9 @@ pub struct AppState {
     /// takes a cheap `Arc` clone per job.
     pub dictionary: RwLock<Arc<Dictionary>>,
     pub translator_tx: Mutex<Option<Sender<crate::services::translator::TranslationJob>>>,
+    /// Japanese messages of this run still owed a translation; caught up at
+    /// each translator start (see `translator::catch_up`).
+    pub translation_ledger: Mutex<resonance_core::workers::TranslationLedger>,
     pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
     pub sniffer_tx: Mutex<Option<crate::services::sniffer::SnifferHandle>>,
     pub blocked_users: Mutex<HashMap<u64, String>>,

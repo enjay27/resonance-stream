@@ -87,6 +87,12 @@ pub struct FavoriteMessage {
     pub shortcut: String,
 }
 
+/// Missed Japanese messages a translator start translates when the config
+/// does not say (`translation_catch_up_limit`, both AppConfigs).
+pub fn default_catch_up_limit() -> usize {
+    100
+}
+
 /// What a fresh config starts with: common Japanese chat lines with their
 /// Korean meaning, no shortcuts.
 pub fn default_favorite_messages() -> Vec<FavoriteMessage> {

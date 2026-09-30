@@ -2,7 +2,7 @@ use crate::{inject_system_message, AppState, SystemLogLevel};
 use resonance_core::download::write_atomic;
 use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
-use resonance_types::{default_favorite_messages, FavoriteMessage};
+use resonance_types::{default_catch_up_limit, default_favorite_messages, FavoriteMessage};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
@@ -28,6 +28,10 @@ pub struct AppConfig {
     pub debug_mode: bool,
     pub log_level: String,
     pub tier: String,
+    /// Japanese messages missed since the app opened that a translator start
+    /// translates (the newest ones); 0 turns the catch-up off.
+    #[serde(default = "default_catch_up_limit")]
+    pub translation_catch_up_limit: usize,
     pub archive_chat: bool,
     pub hide_original_in_compact: bool,
     pub network_interface: String,
@@ -112,6 +116,7 @@ impl Default for AppConfig {
             debug_mode: false,
             log_level: "info".to_string(),
             tier: "middle".to_string(),
+            translation_catch_up_limit: default_catch_up_limit(),
             archive_chat: false,
             hide_original_in_compact: false,
             network_interface: "".to_string(),

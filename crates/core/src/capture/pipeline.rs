@@ -481,7 +481,7 @@ mod tests {
         let got = emitted(&mut pipeline, &[history_segment(&[(1, "old"), (2, "new")])]);
         let texts: Vec<_> = got.iter().map(|c| c.message.as_str()).collect();
         assert_eq!(texts, ["old", "new"]);
-        assert_eq!(got[0].channel, "WORLD");
+        assert_eq!(got[0].channel, resonance_types::Channel::World);
         assert_eq!(got[0].nickname, "Bob");
     }
 

@@ -1,7 +1,7 @@
 use crate::protocol::decoder::{
     field_end, find_int_by_tag, find_string_by_tag, read_varint, Fields, Value,
 };
-use resonance_types::ChatMessage;
+use resonance_types::{Channel, ChatMessage};
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -11,7 +11,7 @@ pub enum Port5003Event {
 
 #[derive(Debug)]
 pub struct SplitPayload<'a> {
-    pub channel: String,
+    pub channel: Channel,
     pub chat_blocks: Vec<(u32, &'a [u8])>,
 }
 
@@ -72,12 +72,12 @@ fn split_history(data: &[u8]) -> Option<SplitPayload<'_>> {
     let safe_end = field_end(body_start, total_len, data.len());
 
     let mut payload = SplitPayload {
-        channel: "WORLD".to_string(),
+        channel: Channel::World,
         chat_blocks: Vec::new(),
     };
     for field in Fields::new(&data[body_start..safe_end]) {
         match (field.number(), field.value) {
-            (3, Value::Varint(code)) => payload.channel = channel_name(code),
+            (3, Value::Varint(code)) => payload.channel = Channel::from_code(code),
             (5, Value::Bytes(block)) => payload.chat_blocks.push((2, block)),
             _ => {}
         }
@@ -85,21 +85,11 @@ fn split_history(data: &[u8]) -> Option<SplitPayload<'_>> {
     (!payload.chat_blocks.is_empty()).then_some(payload)
 }
 
-fn channel_name(code: u64) -> String {
-    match code {
-        2 => "LOCAL",
-        3 => "PARTY",
-        4 => "GUILD",
-        _ => "WORLD",
-    }
-    .into()
-}
-
 // --- STAGE 1: SPLIT ---
 // Separates the raw Protobuf packet into categorized byte blocks.
 pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload<'_>> {
     let mut payload = SplitPayload {
-        channel: "WORLD".to_string(),
+        channel: Channel::World,
         chat_blocks: Vec::new(),
     };
 
@@ -123,7 +113,7 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload<'_>> {
             }
             Value::Varint(val) => {
                 if matches!(field.number(), 1 | 2) {
-                    payload.channel = channel_name(val);
+                    payload.channel = Channel::from_code(val);
                 }
             }
             Value::Other => {}
@@ -145,7 +135,7 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
     // 1. Process Chat Blocks
     for (field_num, block) in raw.chat_blocks {
         let mut chat = ChatMessage {
-            channel: raw.channel.clone(),
+            channel: raw.channel,
             ..Default::default()
         };
 
@@ -173,8 +163,8 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
                     chat.message = msg;
                     if let Some(chan_id) = find_int_by_tag(block, 0x10) {
                         chat.channel = match chan_id {
-                            3 => "PARTY".into(),
-                            4 => "GUILD".into(),
+                            3 => Channel::Party,
+                            4 => Channel::Guild,
                             _ => chat.channel,
                         };
                     }
@@ -388,12 +378,18 @@ mod tests {
         assert_eq!(first.uid, 5);
         assert_eq!(first.sequence_id, 1);
         assert_eq!(first.timestamp, 10);
-        assert_eq!(first.channel, "WORLD");
+        assert_eq!(first.channel, Channel::World);
     }
 
     #[test]
     fn history_channel_follows_the_roots_channel_field() {
-        for (code, name) in [(2, "LOCAL"), (3, "PARTY"), (4, "GUILD"), (1, "WORLD")] {
+        for (code, name) in [
+            (2, Channel::Local),
+            (3, Channel::Party),
+            (4, Channel::Guild),
+            (1, Channel::World),
+            (9, Channel::World), // the beginner channel has no variant yet
+        ] {
             let events = history_pipeline(&history_root(code, &[entry(1, 5, "Bob", 10, "x")]));
             let Port5003Event::Chat(chat) = &events[0];
             assert_eq!(chat.channel, name);

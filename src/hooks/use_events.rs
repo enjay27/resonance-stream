@@ -116,20 +116,20 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
             && signals
                 .alert_keywords
                 .with_untracked(|kws| kws.iter().any(|kw| packet.message.contains(kw.as_str())));
-        let channel = packet.channel.clone();
+        let channel = packet.channel;
         let message_for_log = alert.then(|| packet.message.clone());
 
         let pid = packet.pid;
         signals.custom_filters.with_untracked(|filters| {
             signals.set_chat.update(|store| {
-                store.add(pid, &channel, ArcRwSignal::new(packet), filters, &limits);
+                store.add(pid, channel, ArcRwSignal::new(packet), filters, &limits);
             });
         });
 
         let tab = Tab::from_label(&signals.active_tab.get_untracked());
         let is_visible = signals
             .custom_filters
-            .with_untracked(|filters| tab.shows_channel(&channel, filters));
+            .with_untracked(|filters| tab.shows_channel(channel, filters));
 
         // Only increment if the message belongs to the tab we are currently looking at
         if muted {
@@ -139,7 +139,7 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
         } else if !is_visible {
             // Inactive tab -> Increment Tab Badge
             signals.set_unread_counts.update(|counts| {
-                *counts.entry(channel).or_insert(0) += 1;
+                *counts.entry(channel.to_string()).or_insert(0) += 1;
             });
         }
 

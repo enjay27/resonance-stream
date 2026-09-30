@@ -1,7 +1,7 @@
 use crate::favorites::add_from_chat;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
-use crate::ui_types::ChatMessage;
+use crate::ui_types::{Channel, ChatMessage};
 use crate::use_context;
 use crate::utils::{copy_to_clipboard, format_time, is_japanese};
 use leptos::portal::Portal;
@@ -67,13 +67,11 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
     let (menu_pos, set_menu_pos) = signal((0, 0));
 
     let channel_colors = move || {
-        sig.with(|m| match m.channel.as_str() {
-            "WORLD" => ("text-purple-500", "border-l-purple-500"),
-            "GUILD" => ("text-emerald-500", "border-l-emerald-500"),
-            "PARTY" => ("text-sky-500", "border-l-sky-500"),
-            "LOCAL" => ("text-base-content/70", "border-l-base-content/50"),
-            "SYSTEM" => ("text-warning", "border-l-warning"),
-            _ => ("text-base-content", "border-l-base-content"),
+        sig.with(|m| match m.channel {
+            Channel::World => ("text-purple-500", "border-l-purple-500"),
+            Channel::Guild => ("text-emerald-500", "border-l-emerald-500"),
+            Channel::Party => ("text-sky-500", "border-l-sky-500"),
+            Channel::Local => ("text-base-content/70", "border-l-base-content/50"),
         })
     };
 

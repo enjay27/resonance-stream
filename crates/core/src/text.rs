@@ -351,13 +351,25 @@ pub fn translation_prompt(jp_text: &str) -> String {
     )
 }
 
+/// Output tokens a translation may use, whatever its input.
+pub const MIN_OUTPUT_TOKENS: usize = 64;
+pub const MAX_OUTPUT_TOKENS: usize = 512;
+
+/// Output budget for one line: generous for a translation (3 tokens per
+/// input character, plus slack), but a model stuck repeating itself on a
+/// short line stops early instead of holding the queue for 512 tokens.
+pub fn output_token_limit(jp_text: &str) -> usize {
+    (jp_text.chars().count() * 3 + 32).clamp(MIN_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS)
+}
+
 /// Body of a llama.cpp native `/completion` request for one chat line.
 pub fn completion_request(jp_text: &str) -> serde_json::Value {
     serde_json::json!({
         "prompt": translation_prompt(jp_text),
         "stream": false,
         "temperature": 0.1,
-        "max_tokens": 512,
+        "n_predict": output_token_limit(jp_text),
+        "max_tokens": output_token_limit(jp_text),
         "stop": ["<end_of_turn>", "<eos>"]
     })
 }
@@ -852,7 +864,7 @@ mod tests {
         assert_eq!(req["prompt"], PINNED_PROMPT);
         assert_eq!(req["stream"], false);
         assert_eq!(req["temperature"], 0.1);
-        assert_eq!(req["max_tokens"], 512);
+        assert_eq!(req["max_tokens"], output_token_limit("[P0]に行く"));
         assert_eq!(req["stop"], serde_json::json!(["<end_of_turn>", "<eos>"]));
     }
 
@@ -863,5 +875,25 @@ mod tests {
         assert!(contains_japanese("漢字"));
         assert!(!contains_japanese("hello 123"));
         assert!(!contains_japanese("안녕하세요"));
+    }
+
+    #[test]
+    fn output_limit_follows_the_input_length() {
+        // Regression (A8): every line could generate 512 tokens; a model
+        // stuck in a loop on a short line blocked the queue for that long.
+        let short = output_token_limit("おk");
+        let long = output_token_limit(&"あ".repeat(100));
+        assert_eq!(short, MIN_OUTPUT_TOKENS);
+        assert!(short < long && long < MAX_OUTPUT_TOKENS);
+        assert_eq!(output_token_limit(&"あ".repeat(1000)), MAX_OUTPUT_TOKENS);
+    }
+
+    #[test]
+    fn the_limit_is_sent_under_both_names() {
+        // llama.cpp's native endpoint reads `n_predict`; newer builds also
+        // accept the OpenAI name.
+        let req = completion_request(&"あ".repeat(40));
+        assert_eq!(req["n_predict"], output_token_limit(&"あ".repeat(40)));
+        assert_eq!(req["max_tokens"], req["n_predict"]);
     }
 }

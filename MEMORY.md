@@ -6,7 +6,7 @@
 
 **Review round 2 (2026-09-30):** core + UI communication + LLM server —
 [`.memory/roadmap/review-2026-09-30-round2.md`](.memory/roadmap/review-2026-09-30-round2.md).
-Steps 1-7 in order, one PR each. Steps 1 (A1 `get_service_states`) 2 (A2/A9 translator supervisor), 3 (A3/A5 hydration), 4 (A6 row signal leak) done.
+Steps 1-7 in order, one PR each. Steps 1 (A1 `get_service_states`) 2 (A2/A9 translator supervisor), 3 (A3/A5 hydration), 4 (A6 row signal leak), 5 (C1 prompt in core, A8 output limit) done. **A4 (double `<bos>`) waits on Kade** — question in the file.
 
 **Core review follow-up (2026-09-30):** record and status in
 [`.memory/roadmap/core-review-2026-09-30.md`](.memory/roadmap/core-review-2026-09-30.md).

@@ -1,7 +1,7 @@
 use crate::chat_view::ChatStore;
 use crate::ui_types::{
-    default_catch_up_limit, default_favorite_messages, ChatMessage, FavoriteMessage, SnifferState,
-    SystemMessage, TranslatorState,
+    default_catch_up_limit, default_favorite_messages, Channel, ChatMessage, FavoriteMessage,
+    SnifferState, SystemMessage, TranslatorState, ALL_TAB,
 };
 use leptos::prelude::{signal, Action, ArcRwSignal, ReadSignal, WriteSignal};
 use std::collections::HashMap;
@@ -175,14 +175,14 @@ impl AppSignals {
         let (downloading, set_downloading) = signal(false);
         let (progress, set_progress) = signal(0u8);
 
-        let (active_tab, set_active_tab) = signal("전체".to_string());
+        let (active_tab, set_active_tab) = signal(ALL_TAB.to_string());
         let (search_term, set_search_term) = signal("".to_string());
         let (name_cache, set_name_cache) =
             signal(std::collections::HashMap::<String, String>::new());
         let (chat, set_chat) = signal(ChatStore::<ArcRwSignal<ChatMessage>>::default());
         let (tab_limits, set_tab_limits) = signal(HashMap::<String, usize>::new());
         let (archive_ignored_channels, set_archive_ignored_channels) =
-            signal(vec!["WORLD".to_string()]);
+            signal(vec![Channel::World.as_str().to_string()]);
         let (message_spacing, set_message_spacing) = signal(4u32);
         let (system_log, set_system_log) = signal(Vec::<ArcRwSignal<SystemMessage>>::new());
 
@@ -195,12 +195,8 @@ impl AppSignals {
         let (compact_mode, set_compact_mode) = signal(false);
         let (is_pinned, set_is_pinned) = signal(false);
         let (show_settings, set_show_settings) = signal(false);
-        let (custom_filters, set_custom_filters) = signal(vec![
-            "WORLD".to_string(),
-            "GUILD".to_string(),
-            "PARTY".to_string(),
-            "LOCAL".to_string(),
-        ]);
+        let (custom_filters, set_custom_filters) =
+            signal(Channel::ALL.map(|c| c.as_str().to_string()).to_vec());
         let (theme, set_theme) = signal("dark".to_string());
         let (opacity, set_opacity) = signal(0.85f32);
         let (tier, set_tier) = signal("middle".to_string());

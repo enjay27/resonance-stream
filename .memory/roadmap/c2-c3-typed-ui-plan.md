@@ -45,7 +45,7 @@ exact wire strings via `#[serde(rename)]`. `SnifferStatePayload/TranslatorStateP
 `workers.rs` (1). The `match ... .as_str()` blocks in `title_bar.rs` become exhaustive matches,
 which is the point. Gates: core, ui, app cross-check. Test first: wire strings pinned per variant.
 
-**C2c — `Tab` uses `Channel`.** `Tab::Channel(&'static str)` -> `Tab::Channel(Channel)`;
+**C2c — `Tab` uses `Channel`.** *(done: `claude/c2c-typed-tabs`; the persisted names `ALL_TAB`/`CUSTOM_TAB`/`SYSTEM_TAB` and `Channel::label`/`from_label` live in `resonance-types` (the app's config defaults need them too); `Channel::ALL` is in the nav/menu order World, Guild, Party, Local; `Tab` got `nav`, `label`, `key`, `icon`, `colors`, `switch_from`, `clear_unread`, so `nav_bar` lost its string tables, the shortcut's 5-arm match and the click handler's match.)* `Tab::Channel(&'static str)` -> `Tab::Channel(Channel)`;
 `from_label` and the tab labels (`nav_bar.rs` 28 hits, `chat_view.rs` 16, `chat_container.rs` 3)
 move to one `Tab::label`/`from_label` pair; the persisted keys (`"전체"`, `"커스텀"`, channel names)
 keep their strings. Ui only (+ core/app hits that only name the keys). Gate: ui (+ cross-check).

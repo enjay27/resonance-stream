@@ -2,7 +2,10 @@ use crate::{inject_system_message, AppState, SystemLogLevel, TranslatorState};
 use resonance_core::download::write_atomic;
 use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
-use resonance_types::{default_catch_up_limit, default_favorite_messages, FavoriteMessage};
+use resonance_types::{
+    default_catch_up_limit, default_favorite_messages, Channel, FavoriteMessage, ALL_TAB,
+    CUSTOM_TAB,
+};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
@@ -52,7 +55,7 @@ pub struct AppConfig {
     pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
     #[serde(default)]
     pub tab_switch_key: String, // e.g., "Tab", "ArrowRight", etc.
-    /// Messages each tab keeps (keys: channel names, "전체", "커스텀").
+    /// Messages each tab keeps (keys: channel names, `ALL_TAB`, `CUSTOM_TAB`).
     #[serde(default = "default_tab_limits")]
     pub tab_limits: std::collections::HashMap<String, usize>,
     /// Channels not written to the chat archive.
@@ -77,12 +80,12 @@ fn default_spacing() -> u32 {
 
 fn default_tab_limits() -> std::collections::HashMap<String, usize> {
     [
-        ("WORLD", 200), // World gets a small limit
-        ("LOCAL", 500),
-        ("PARTY", 1000), // Party/Guild get huge limits
-        ("GUILD", 1000),
-        ("전체", 1000),
-        ("커스텀", 1000),
+        (Channel::World.as_str(), 200), // World gets a small limit
+        (Channel::Local.as_str(), 500),
+        (Channel::Party.as_str(), 1000), // Party/Guild get huge limits
+        (Channel::Guild.as_str(), 1000),
+        (ALL_TAB, 1000),
+        (CUSTOM_TAB, 1000),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -90,7 +93,7 @@ fn default_tab_limits() -> std::collections::HashMap<String, usize> {
 }
 
 fn default_archive_ignored_channels() -> Vec<String> {
-    vec!["WORLD".to_string()]
+    vec![Channel::World.as_str().to_string()]
 }
 
 impl AppConfig {
@@ -109,13 +112,8 @@ impl Default for AppConfig {
             compute_mode: "cpu".into(),
             compact_mode: false,
             always_on_top: false,
-            active_tab: "전체".to_string(),
-            custom_tab_filters: vec![
-                "WORLD".into(),
-                "GUILD".into(),
-                "PARTY".into(),
-                "LOCAL".into(),
-            ],
+            active_tab: ALL_TAB.to_string(),
+            custom_tab_filters: Channel::ALL.map(|c| c.as_str().to_string()).to_vec(),
             theme: "dark".to_string(),
             overlay_opacity: 0.85,
             debug_mode: false,

@@ -10,6 +10,12 @@ use std::collections::HashMap;
 
 // --- Chat and system log ---
 
+/// Names of the tabs that are not a channel, as `config.json` stores them
+/// (`active_tab`, the keys of `tab_limits`).
+pub const ALL_TAB: &str = "전체";
+pub const CUSTOM_TAB: &str = "커스텀";
+pub const SYSTEM_TAB: &str = "시스템";
+
 /// A chat channel. On the wire and on disk it is its upper-case name
 /// (`"WORLD"`, `"GUILD"`, ...); a name this enum does not know -- an old log, a
 /// channel the game has that we do not show separately yet (the beginner
@@ -24,12 +30,12 @@ pub enum Channel {
 }
 
 impl Channel {
-    /// Every channel, in the order tabs and menus list them.
+    /// Every channel, in the order the tabs and the custom-tab menu list them.
     pub const ALL: [Channel; 4] = [
         Channel::World,
-        Channel::Local,
-        Channel::Party,
         Channel::Guild,
+        Channel::Party,
+        Channel::Local,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -39,6 +45,23 @@ impl Channel {
             Channel::Party => "PARTY",
             Channel::Guild => "GUILD",
         }
+    }
+
+    /// The channel's tab label (Korean), as `config.json` stores the active tab.
+    pub fn label(self) -> &'static str {
+        match self {
+            Channel::World => "월드",
+            Channel::Guild => "길드",
+            Channel::Party => "파티",
+            Channel::Local => "로컬",
+        }
+    }
+
+    /// The channel whose tab label is `label`.
+    pub fn from_label(label: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|channel| channel.label() == label)
     }
 
     /// The channel called `name` (exact, upper case); unknown names are world.
@@ -448,10 +471,35 @@ mod tests {
     }
 
     #[test]
+    fn a_channel_has_its_korean_tab_label() {
+        for (channel, label) in [
+            (Channel::World, "월드"),
+            (Channel::Guild, "길드"),
+            (Channel::Party, "파티"),
+            (Channel::Local, "로컬"),
+        ] {
+            assert_eq!(channel.label(), label);
+            assert_eq!(Channel::from_label(label), Some(channel));
+        }
+        assert_eq!(Channel::from_label("전체"), None);
+        assert_eq!(Channel::from_label("WORLD"), None);
+    }
+
+    #[test]
+    fn the_tabs_that_are_not_channels_keep_their_persisted_names() {
+        // config.json stores these (active_tab, tab_limits keys).
+        assert_eq!(
+            (ALL_TAB, CUSTOM_TAB, SYSTEM_TAB),
+            ("전체", "커스텀", "시스템")
+        );
+    }
+
+    #[test]
     fn every_channel_is_listed_once() {
         assert_eq!(Channel::ALL.len(), 4);
         let names: Vec<_> = Channel::ALL.iter().map(|c| c.as_str()).collect();
-        assert_eq!(names, ["WORLD", "LOCAL", "PARTY", "GUILD"]);
+        // The order the tabs and the custom-tab menu list them in.
+        assert_eq!(names, ["WORLD", "GUILD", "PARTY", "LOCAL"]);
         assert_eq!(Channel::default(), Channel::World);
         assert_eq!(Channel::Guild.to_string(), "GUILD");
     }

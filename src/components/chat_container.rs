@@ -179,7 +179,7 @@ pub fn ChatContainer() -> impl IntoView {
                         set_display_limit.update(|limit| *limit += 50);
                     }
 
-                    if signals.active_tab.get_untracked() == "시스템" {
+                    if signals.active_tab.get_untracked() == Tab::System.label() {
                         signals.set_system_at_bottom.set(at_bottom);
                     } else {
                         signals.set_is_at_bottom.set(at_bottom);
@@ -189,7 +189,7 @@ pub fn ChatContainer() -> impl IntoView {
             >
                 // --- SCROLLABLE CONTENT ---
                 <Show
-                    when=move || signals.active_tab.get() == "시스템"
+                    when=move || signals.active_tab.get() == Tab::System.label()
                     fallback=move || view! {
                         <For
                             each=move || filtered_chat.get()
@@ -308,7 +308,7 @@ pub fn ChatContainer() -> impl IntoView {
             </Show>
 
             // --- OVERLAY: SCROLL LOCK TOAST ---
-            <Show when=move || signals.active_tab.get() == "시스템" && !signals.is_system_at_bottom.get()>
+            <Show when=move || signals.active_tab.get() == Tab::System.label() && !signals.is_system_at_bottom.get()>
                 <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-50">
                     <button class="btn btn-warning btn-sm opacity-90 shadow-2xl"
                         on:click=move |_| {

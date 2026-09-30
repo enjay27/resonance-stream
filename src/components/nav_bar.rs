@@ -1,5 +1,7 @@
+use crate::chat_view::Tab;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
+use crate::ui_types::Channel;
 use leptos::ev::{click, keydown};
 use leptos::html::{Button, Div, Input};
 use leptos::prelude::*;
@@ -43,41 +45,15 @@ pub fn NavBar() -> impl IntoView {
     Effect::new(move |_| {
         spawn_local(async move {
             let closure = Closure::wrap(Box::new(move |_: JsValue| {
-                let sequence = vec!["커스텀", "월드", "길드", "파티", "로컬"];
-                let current = signals.active_tab.get_untracked();
+                let next_tab = Tab::switch_from(&signals.active_tab.get_untracked());
 
-                let next_tab = if let Some(idx) = sequence.iter().position(|&x| x == current) {
-                    sequence[(idx + 1) % sequence.len()].to_string()
-                } else {
-                    "커스텀".to_string()
-                };
-
-                signals.set_active_tab.set(next_tab.clone());
+                signals.set_active_tab.set(next_tab.label().to_string());
                 signals.set_unread_count.set(0);
 
+                let filters = signals.custom_filters.get_untracked();
                 signals
                     .set_unread_counts
-                    .update(|counts| match next_tab.as_str() {
-                        "커스텀" => {
-                            let filters = signals.custom_filters.get_untracked();
-                            for f in filters {
-                                counts.remove(&f);
-                            }
-                        }
-                        "월드" => {
-                            counts.remove("WORLD");
-                        }
-                        "길드" => {
-                            counts.remove("GUILD");
-                        }
-                        "파티" => {
-                            counts.remove("PARTY");
-                        }
-                        "로컬" => {
-                            counts.remove("LOCAL");
-                        }
-                        _ => {}
-                    });
+                    .update(|counts| next_tab.clear_unread(counts, &filters));
 
                 signals.set_is_at_bottom.set(true);
                 actions.save_config.dispatch(());
@@ -134,42 +110,23 @@ pub fn NavBar() -> impl IntoView {
             // --- LEFT: DaisyUI Tabs ---
             <div class="join bg-base-300/50 p-0.5 rounded-lg border border-base-content/5 flex-shrink-0">
                 {move || {
-                    let mut tabs = vec![
-                        ("전체", "전체", "♾️", false),
-                        ("커스텀", "커스텀", "⭐", false),
-                        ("월드", "WORLD", "🌐", true),
-                        ("길드", "GUILD", "🛡️", true),
-                        ("파티", "PARTY", "⚔️", true),
-                        ("로컬", "LOCAL", "📍", true),
-                    ];
-                    if signals.debug_mode.get() { tabs.push(("시스템", "SYSTEM", "⚙️", false)); }
-
-                    tabs.into_iter().map(|(full, db_key, icon, has_archive_setting)| {
-                        let t_full = full.to_string();
-                        let t_click = t_full.clone();
-                        let db_key_str = db_key.to_string();
+                    Tab::nav(signals.debug_mode.get()).into_iter().map(|tab| {
+                        let full = tab.label();
+                        let db_key = tab.key();
+                        let icon = tab.icon();
+                        let has_archive_setting = tab.has_archive_setting();
                         let db_key_click = db_key.to_string();
                         let db_key_drop = db_key.to_string();
-                        let is_active = move || signals.active_tab.get() == t_full;
+                        let is_active = move || signals.active_tab.get() == full;
 
-                        let unread = Memo::new(move |_| {
-                            let counts = signals.unread_counts.get();
-                            match db_key {
-                                "WORLD" | "GUILD" | "PARTY" | "LOCAL" | "SYSTEM" => *counts.get(db_key).unwrap_or(&0),
-                                _ => 0,
+                        let unread = Memo::new(move |_| match tab {
+                            Tab::Channel(_) | Tab::System => {
+                                *signals.unread_counts.get().get(db_key).unwrap_or(&0)
                             }
+                            Tab::All | Tab::Custom => 0,
                         });
 
-                        let (text_color, border_color) = match full {
-                            "전체" => ("text-base-content", "border-base-content"),
-                            "커스텀" => ("text-success", "border-success"),
-                            "월드" => ("text-purple-500", "border-purple-500"),
-                            "길드" => ("text-emerald-500", "border-emerald-500"),
-                            "파티" => ("text-sky-500", "border-sky-500"),
-                            "로컬" => ("text-base-content opacity-70", "border-base-content opacity-70"),
-                            "시스템" => ("text-warning", "border-warning"),
-                            _ => ("text-base-content", "border-transparent"),
-                        };
+                        let (text_color, border_color) = tab.colors();
 
                         view! {
                             // REMOVED dropdown classes, replaced with standard relative flex
@@ -187,25 +144,17 @@ pub fn NavBar() -> impl IntoView {
                                         }
                                     )
                                     on:click=move |_| {
-                                        signals.set_active_tab.set(t_click.clone());
+                                        signals.set_active_tab.set(full.to_string());
                                         signals.set_unread_count.set(0);
-                                        signals.set_unread_counts.update(|counts| {
-                                            match t_click.as_str() {
-                                                "전체" => counts.clear(),
-                                                "커스텀" => {
-                                                    let filters = signals.custom_filters.get_untracked();
-                                                    for f in filters { counts.remove(&f); }
-                                                },
-                                                _ => { counts.remove(&db_key_str); }
-                                            }
-                                        });
+                                        let filters = signals.custom_filters.get_untracked();
+                                        signals.set_unread_counts.update(|counts| tab.clear_unread(counts, &filters));
                                         signals.set_is_at_bottom.set(true);
                                         signals.set_system_at_bottom.set(true);
                                         actions.save_config.dispatch(());
                                     }
                                     on:contextmenu=move |ev| {
                                         ev.prevent_default();
-                                        if db_key != "SYSTEM" && db_key != "전체" {
+                                        if !matches!(tab, Tab::System | Tab::All) {
                                             set_context_menu_open.set(Some(db_key_click.clone()));
                                         }
                                     }
@@ -242,15 +191,15 @@ pub fn NavBar() -> impl IntoView {
                                         </h3>
 
                                         // --- ONLY FOR CUSTOM TAB: Channel filter selection ---
-                                        <Show when=move || db_key == "커스텀">
+                                        <Show when=move || tab == Tab::Custom>
                                             <div class="space-y-1 mb-2">
                                                 <span class="text-[10px] font-bold text-success">"표시할 채널 선택:"</span>
-                                                {vec!["WORLD", "GUILD", "PARTY", "LOCAL"].into_iter().map(|channel| {
-                                                    let ch = channel.to_string();
+                                                {Channel::ALL.into_iter().map(|channel| {
+                                                    let ch = channel.as_str().to_string();
                                                     let ch_clone = ch.clone();
                                                     view! {
                                                         <label class="label cursor-pointer flex justify-between px-1.5 py-0 hover:bg-base-content/10 rounded">
-                                                            <span class="label-text text-[10px] font-bold">{channel}</span>
+                                                            <span class="label-text text-[10px] font-bold">{channel.as_str()}</span>
                                                             <input type="checkbox" class="checkbox checkbox-xs checkbox-success"
                                                                 checked=move || signals.custom_filters.get().contains(&ch_clone)
                                                                 on:change=move |ev| {
@@ -269,11 +218,11 @@ pub fn NavBar() -> impl IntoView {
                                         </Show>
 
                                         // --- MAX RAM LIMIT INPUT (Hidden for Custom since it aggregates dynamically) ---
-                                        <Show when=move || db_key != "커스텀">
+                                        <Show when=move || tab != Tab::Custom>
                                             <div class="flex items-center justify-between">
                                                 <span class="text-xs font-bold text-base-content/80">"최대 메시지 유지:"</span>
                                                 <input type="number" class="input input-xs input-bordered w-16 text-right font-mono bg-base-200 focus:border-success"
-                                                    prop:value=move || signals.tab_limits.get().get(db_key).copied().unwrap_or(if db_key == "WORLD" { 200 } else { 1000 }).to_string()
+                                                    prop:value=move || signals.tab_limits.get().get(db_key).copied().unwrap_or(if tab == Tab::Channel(Channel::World) { 200 } else { 1000 }).to_string()
                                                     on:change=move |ev| {
                                                         let val = event_target_value(&ev).parse::<usize>().unwrap_or(500);
                                                         signals.set_tab_limits.update(|map| { map.insert(db_key.to_string(), val); });
@@ -452,8 +401,8 @@ pub fn NavBar() -> impl IntoView {
                                 let new_compact_state = !signals.compact_mode.get_untracked();
                                 signals.set_compact_mode.set(new_compact_state);
 
-                                if new_compact_state && signals.active_tab.get_untracked() != "시스템" {
-                                    signals.set_active_tab.set("커스텀".to_string());
+                                if new_compact_state && signals.active_tab.get_untracked() != Tab::System.label() {
+                                    signals.set_active_tab.set(Tab::Custom.label().to_string());
                                 }
                                 actions.save_config.dispatch(());
                             }>

@@ -384,6 +384,63 @@ fn sanitize_input(text: &str) -> String {
         .replace("</end_of_turn>", "")
 }
 
+/// Lines the translator remembers (`TranslationCache`).
+pub const TRANSLATION_CACHE_SIZE: usize = 512;
+
+/// Model output by masked input, for the most recently used lines. WORLD
+/// chat repeats itself (recruiting, trade calls), and a hit skips a whole
+/// model round trip. The raw output is kept, not the final text: the
+/// masked input holds placeholders, and `postprocess_text` restores each
+/// line's own terms.
+pub struct TranslationCache {
+    capacity: usize,
+    tick: u64,
+    entries: HashMap<String, (String, u64)>,
+}
+
+impl TranslationCache {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            tick: 0,
+            entries: HashMap::new(),
+        }
+    }
+
+    pub fn get(&mut self, masked: &str) -> Option<String> {
+        self.tick += 1;
+        let tick = self.tick;
+        self.entries.get_mut(masked).map(|(raw, used)| {
+            *used = tick;
+            raw.clone()
+        })
+    }
+
+    pub fn put(&mut self, masked: &str, raw: &str) {
+        self.tick += 1;
+        if !self.entries.contains_key(masked) && self.entries.len() >= self.capacity {
+            let oldest = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(key, _)| key.clone());
+            if let Some(oldest) = oldest {
+                self.entries.remove(&oldest);
+            }
+        }
+        self.entries
+            .insert(masked.to_string(), (raw.to_string(), self.tick));
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 pub fn contains_japanese(text: &str) -> bool {
     text.chars().any(|c| {
         let u = c as u32;
@@ -895,5 +952,43 @@ mod tests {
         let req = completion_request(&"あ".repeat(40));
         assert_eq!(req["n_predict"], output_token_limit(&"あ".repeat(40)));
         assert_eq!(req["max_tokens"], req["n_predict"]);
+    }
+
+    #[test]
+    fn a_repeated_line_is_served_from_the_cache() {
+        let mut cache = TranslationCache::new(8);
+        assert_eq!(cache.get("[P0]募集"), None);
+        cache.put("[P0]募集", "[P0] 모집");
+        assert_eq!(cache.get("[P0]募集").as_deref(), Some("[P0] 모집"));
+    }
+
+    #[test]
+    fn the_least_recently_used_line_leaves_first() {
+        let mut cache = TranslationCache::new(2);
+        cache.put("a", "A");
+        cache.put("b", "B");
+        cache.get("a"); // a is now newer than b
+        cache.put("c", "C");
+        assert_eq!(cache.get("b"), None);
+        assert!(cache.get("a").is_some() && cache.get("c").is_some());
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn a_cached_translation_is_restored_with_the_new_lines_terms() {
+        // Two lines that differ only in a masked nickname share one entry;
+        // each gets its own name back.
+        let dict = Dictionary::default();
+        let mut names = HashMap::new();
+        names.insert("たろう".to_string(), "Taro".to_string());
+        names.insert("はなこ".to_string(), "Hanako".to_string());
+        let first = preprocess_text("たろうさん", &dict, Some(&names));
+        let second = preprocess_text("はなこさん", &dict, Some(&names));
+        assert_eq!(first.masked_text, second.masked_text);
+
+        let mut cache = TranslationCache::new(8);
+        cache.put(&first.masked_text, "[P0]님");
+        let raw = cache.get(&second.masked_text).unwrap();
+        assert_eq!(postprocess_text(&raw, &second), "Hanako님");
     }
 }

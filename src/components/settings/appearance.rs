@@ -25,12 +25,12 @@ pub fn AppearanceSection() -> impl IntoView {
                         <span class="text-[9px] text-warning mt-1">"주의: 비활성화 하려면 시스템 트레이(우측 하단 아이콘)를 사용하세요."</span>
                     </div>
                     <input type="checkbox" class="toggle toggle-success toggle-sm"
-                        prop:checked=move || signals.click_through.get()
+                        prop:checked=move || signals.ui.click_through.get()
                         on:change=move |ev| {
                             let enabled = event_target_checked(&ev);
-                            signals.set_click_through.set(enabled);
+                            signals.ui.set_click_through.set(enabled);
                             actions.save_config.dispatch(());
-                            signals.set_show_settings.set(false);
+                            signals.ui.set_show_settings.set(false);
 
                             spawn_local(async move {
                                 let _ = invoke("set_click_through", serde_wasm_bindgen::to_value(&serde_json::json!({ "enabled": enabled })).unwrap()).await;

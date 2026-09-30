@@ -48,7 +48,7 @@ pub fn TitleBar() -> impl IntoView {
                         let current_state = store.service.sniffer_state.get();
                         // Open troubleshooter if it's explicitly broken, or if the user wants to test it manually
                         if matches!(current_state, SnifferState::Error | SnifferState::Off) {
-                            store.set_show_troubleshooter.set(true);
+                            store.ui.set_show_troubleshooter.set(true);
                         }
                     }
                 >

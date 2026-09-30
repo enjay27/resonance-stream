@@ -7,6 +7,7 @@ use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
 use crate::ui_types::{AppConfig, ChatMessage, FolderStatus, SystemLogLevel, SystemMessage};
 use crate::utils::add_system_log;
+use crate::view_signals::ChatSignals;
 use leptos::leptos_dom::log;
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
@@ -24,11 +25,11 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
         set_pending_update_data,
         ..
     } = signals.updates;
-    let AppSignals {
+    let ChatSignals {
         set_chat,
         set_system_log,
         ..
-    } = signals;
+    } = signals.chat;
     let set_status_text = signals.setup.set_status_text;
 
     log!("App component hydration started...");

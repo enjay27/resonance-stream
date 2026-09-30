@@ -1,125 +1,38 @@
-use crate::chat_view::ChatStore;
 use crate::config_signals::ConfigSignals;
 use crate::status_signals::{ServiceSignals, SetupSignals, UpdateSignals};
-use crate::ui_types::{ChatMessage, SystemLogLevel, SystemMessage};
-use leptos::prelude::{signal, Action, ArcRwSignal, ReadSignal, WriteSignal};
-use std::collections::HashMap;
+use crate::view_signals::{ChatSignals, UiSignals};
+use leptos::prelude::Action;
 
+/// Every app-wide signal, in groups by what it describes; components reach a
+/// signal as `signals.<group>.<name>` (`signals.config.theme`,
+/// `signals.service.model_ready`, `signals.chat.search_term`).
 #[derive(Copy, Clone, Debug)]
 pub struct AppSignals {
-    /// The signals that mirror `config.json`; see `config_signals.rs`.
+    /// Mirrors `config.json`, one signal per `AppConfig` field (`config_signals.rs`).
     pub config: ConfigSignals,
+    /// What the translator and the sniffer report (`status_signals.rs`).
     pub service: ServiceSignals,
+    /// The first-run wizard and its download progress (`status_signals.rs`).
     pub setup: SetupSignals,
+    /// The app and model update dialogs (`status_signals.rs`).
     pub updates: UpdateSignals,
-    // Add other global controls here
-    pub search_term: ReadSignal<String>,
-    pub set_search_term: WriteSignal<String>,
-    /// Chat messages by pid, plus each tab's list (per-tab limits).
-    /// `ArcRwSignal`: rows are created in event callbacks, where no reactive
-    /// owner exists, so an arena `RwSignal` would never be freed; an Arc one
-    /// is freed with the last clone (evicted here, and its row unmounted).
-    pub chat: ReadSignal<ChatStore<ArcRwSignal<ChatMessage>>>,
-    pub set_chat: WriteSignal<ChatStore<ArcRwSignal<ChatMessage>>>,
-    pub system_log: ReadSignal<Vec<ArcRwSignal<SystemMessage>>>,
-    pub set_system_log: WriteSignal<Vec<ArcRwSignal<SystemMessage>>>,
-    pub is_system_at_bottom: ReadSignal<bool>,
-    pub set_system_at_bottom: WriteSignal<bool>,
-    pub system_level_filter: ReadSignal<Option<SystemLogLevel>>,
-    pub set_system_level_filter: WriteSignal<Option<SystemLogLevel>>,
-    pub system_source_filter: ReadSignal<Option<String>>,
-    pub set_system_source_filter: WriteSignal<Option<String>>,
-    pub show_settings: ReadSignal<bool>,
-    pub set_show_settings: WriteSignal<bool>,
-    pub is_at_bottom: ReadSignal<bool>,
-    pub set_is_at_bottom: WriteSignal<bool>,
-    pub unread_count: ReadSignal<i32>,
-    pub set_unread_count: WriteSignal<i32>,
-    pub active_menu_id: ReadSignal<Option<u64>>,
-    pub set_active_menu_id: WriteSignal<Option<u64>>,
-    pub click_through: ReadSignal<bool>,
-    pub set_click_through: WriteSignal<bool>,
-    pub current_time: ReadSignal<u64>,
-    pub set_current_time: WriteSignal<u64>,
-    pub show_dictionary: ReadSignal<bool>,
-    pub set_show_dictionary: WriteSignal<bool>,
-    pub unread_counts: ReadSignal<HashMap<String, usize>>,
-    pub set_unread_counts: WriteSignal<HashMap<String, usize>>,
-    pub show_troubleshooter: ReadSignal<bool>,
-    pub set_show_troubleshooter: WriteSignal<bool>,
-    pub show_favorites: ReadSignal<bool>,
-    pub set_show_favorites: WriteSignal<bool>,
+    /// The chat list, the system log, scroll and unread state (`view_signals.rs`).
+    pub chat: ChatSignals,
+    /// Open dialogs and menus, click-through (`view_signals.rs`).
+    pub ui: UiSignals,
 }
 
 impl AppSignals {
     /// Creates every app-wide signal with its pre-config default. `load_config`
     /// (see `app::hydration`) overwrites most of them at start-up.
     pub fn new() -> Self {
-        let (search_term, set_search_term) = signal("".to_string());
-        let (chat, set_chat) = signal(ChatStore::<ArcRwSignal<ChatMessage>>::default());
-        let (system_log, set_system_log) = signal(Vec::<ArcRwSignal<SystemMessage>>::new());
-
-        let (is_system_at_bottom, set_system_at_bottom) = signal(true);
-        let (system_level_filter, set_system_level_filter) = signal(None::<SystemLogLevel>);
-        let (system_source_filter, set_system_source_filter) = signal(None::<String>);
-
-        let (show_settings, set_show_settings) = signal(false);
-        let (is_at_bottom, set_is_at_bottom) = signal(true);
-        let (unread_count, set_unread_count) = signal(0);
-        let (active_menu_id, set_active_menu_id) = signal(None::<u64>);
-        let (click_through, set_click_through) = signal(false);
-
-        let (current_time, set_current_time) =
-            signal(chrono::Local::now().timestamp_millis() as u64);
-
-        // --- APP UPDATE TRACKING STATES ---
-
-        // --- MODEL UPDATE TRACKING STATES ---
-
-        let (show_dictionary, set_show_dictionary) = signal(false);
-        let (unread_counts, set_unread_counts) =
-            signal::<std::collections::HashMap<String, usize>>(HashMap::new());
-
-        let (show_troubleshooter, set_show_troubleshooter) = signal(false);
-        let (show_favorites, set_show_favorites) = signal(false);
-
         AppSignals {
             config: ConfigSignals::new(),
             service: ServiceSignals::new(),
             setup: SetupSignals::new(),
             updates: UpdateSignals::new(),
-            search_term,
-            set_search_term,
-            chat,
-            set_chat,
-            system_log,
-            set_system_log,
-            is_system_at_bottom,
-            set_system_at_bottom,
-            system_level_filter,
-            set_system_level_filter,
-            system_source_filter,
-            set_system_source_filter,
-            show_settings,
-            set_show_settings,
-            is_at_bottom,
-            set_is_at_bottom,
-            unread_count,
-            set_unread_count,
-            active_menu_id,
-            set_active_menu_id,
-            click_through,
-            set_click_through,
-            current_time,
-            set_current_time,
-            show_dictionary,
-            set_show_dictionary,
-            unread_counts,
-            set_unread_counts,
-            show_troubleshooter,
-            set_show_troubleshooter,
-            show_favorites,
-            set_show_favorites,
+            chat: ChatSignals::new(),
+            ui: UiSignals::new(),
         }
     }
 }
@@ -167,5 +80,31 @@ mod tests {
         assert_eq!(s.updates.model_update_step.get_untracked(), 0);
         assert_eq!(s.updates.app_update_progress.get_untracked(), 0);
         assert_eq!(s.updates.model_update_progress.get_untracked(), 0);
+    }
+
+    #[test]
+    fn the_chat_signals_start_empty_and_at_the_bottom() {
+        let s = AppSignals::new();
+        assert!(s.chat.search_term.get_untracked().is_empty());
+        assert_eq!(s.chat.chat.get_untracked().len(), 0);
+        assert!(s.chat.system_log.get_untracked().is_empty());
+        assert!(s.chat.is_system_at_bottom.get_untracked());
+        assert!(s.chat.is_at_bottom.get_untracked());
+        assert!(s.chat.system_level_filter.get_untracked().is_none());
+        assert!(s.chat.system_source_filter.get_untracked().is_none());
+        assert_eq!(s.chat.unread_count.get_untracked(), 0);
+        assert!(s.chat.unread_counts.get_untracked().is_empty());
+        assert!(s.chat.current_time.get_untracked() > 1_700_000_000_000); // a real clock, in ms
+    }
+
+    #[test]
+    fn the_ui_signals_start_closed() {
+        let s = AppSignals::new();
+        assert!(!s.ui.show_settings.get_untracked());
+        assert!(!s.ui.show_dictionary.get_untracked());
+        assert!(!s.ui.show_troubleshooter.get_untracked());
+        assert!(!s.ui.show_favorites.get_untracked());
+        assert!(s.ui.active_menu_id.get_untracked().is_none());
+        assert!(!s.ui.click_through.get_untracked());
     }
 }

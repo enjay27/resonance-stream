@@ -8,6 +8,7 @@ use crate::shortcut_keys::{
 use crate::store::{AppActions, AppSignals};
 use crate::ui_types::FavoriteMessage;
 use crate::utils::copy_to_clipboard;
+use crate::view_signals::UiSignals;
 use leptos::ev::KeyboardEvent;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -23,11 +24,11 @@ pub fn FavoritesModal() -> impl IntoView {
         tab_switch_key,
         ..
     } = signals.config;
-    let AppSignals {
+    let UiSignals {
         show_favorites,
         set_show_favorites,
         ..
-    } = signals;
+    } = signals.ui;
 
     // Index being edited; `len()` means a new entry not in the list yet.
     let (editing, set_editing) = signal(None::<usize>);

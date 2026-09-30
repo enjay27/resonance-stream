@@ -3,18 +3,19 @@
 use crate::chat_view::ChatStore;
 use crate::hooks::use_config::save_app_config;
 use crate::store::{AppActions, AppSignals};
+use crate::view_signals::ChatSignals;
 use futures::FutureExt;
 use leptos::prelude::*;
 use std::collections::HashMap;
 
 pub fn create_actions(signals: AppSignals) -> AppActions {
-    let AppSignals {
+    let ChatSignals {
         set_chat,
         set_system_log,
         set_unread_count,
         set_unread_counts,
         ..
-    } = signals;
+    } = signals.chat;
 
     // --- CONFIG ACTIONS ---
     let save_config = Action::new_local(move |_: &()| {

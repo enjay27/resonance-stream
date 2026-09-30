@@ -11,6 +11,7 @@ pub mod store;
 pub mod tauri_bridge;
 pub mod ui_types;
 pub mod utils;
+pub mod view_signals;
 
 use app::*;
 use leptos::prelude::*;

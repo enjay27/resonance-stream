@@ -3,6 +3,7 @@
 use crate::config_signals::ConfigSignals;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::{invoke, listen};
+use crate::view_signals::UiSignals;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
@@ -14,11 +15,11 @@ pub fn setup_tray_listeners(signals: AppSignals, actions: AppActions) {
         set_always_on_top: set_is_pinned,
         ..
     } = signals.config;
-    let AppSignals {
+    let UiSignals {
         click_through,
         set_click_through,
         ..
-    } = signals;
+    } = signals.ui;
 
     spawn_local(async move {
         // 1. Click-Through Listener (Existing)
@@ -66,7 +67,7 @@ pub fn sync_tray_menu(signals: AppSignals) {
         always_on_top: is_pinned,
         ..
     } = signals.config;
-    let AppSignals { click_through, .. } = signals;
+    let UiSignals { click_through, .. } = signals.ui;
 
     Effect::new(move |_| {
         let ct = click_through.get();

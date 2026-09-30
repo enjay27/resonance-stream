@@ -69,6 +69,7 @@ src/                  ui crate (resonance-stream-ui)
   store.rs              AppSignals (app-wide signals, AppSignals::new) + AppActions
   config_signals.rs     ConfigSignals: the signals that mirror AppConfig; to_config() / apply()
   status_signals.rs     ServiceSignals / SetupSignals / UpdateSignals: backend status, wizard, update dialogs
+  view_signals.rs       ChatSignals / UiSignals: chat list, system log, scroll + unread, open dialogs
   chat_view.rs          chat list: per-tab views + limits (ChatStore), filter, paging -- pure, host-tested
   components/           views; settings/ is one file per settings section
   hooks/                backend event, config and tray wiring
@@ -107,12 +108,14 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
 ## Conventions (ui crate)
 
 - **State lives in `AppSignals` (context), not in component locals**, when more than one
-  component touches it. Components read it with `use_context::<AppSignals>()`.
+  component touches it. Components read it with `use_context::<AppSignals>()` and reach a
+  signal through its group: `signals.config` (settings), `.service`, `.setup`, `.updates`,
+  `.chat`, `.ui`. A new signal goes in the group it describes.
 - **A component under `<Show>` is re-created each time it shows.** State that must
   survive closing a modal (typed input, an `Action`'s last result) is created by the
   parent outside the `<Show>` and passed down as props — see `components/settings/`.
 - Helpers that need many signals take `signals: AppSignals` and destructure only the
-  fields they use (`let AppSignals { a, set_b, .. } = signals;`).
+  fields they use (`let ChatSignals { a, set_b, .. } = signals.chat;`).
 - **A setting that lives in `config.json` is a field of `AppConfig` (ui) and a signal of
   `signals.config` (`ConfigSignals`, named like the field).** Adding one means adding it
   to `ConfigSignals` -- `to_config` / `apply` list every field, so forgetting is a compile

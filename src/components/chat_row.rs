@@ -49,7 +49,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
 
     Effect::new(move |_| {
         if sig.with(|m| m.translated.is_some()) {
-            if signals.is_at_bottom.get_untracked() {
+            if signals.chat.is_at_bottom.get_untracked() {
                 request_animation_frame(move || {
                     if let Some(window) = web_sys::window() {
                         if let Some(doc) = window.document() {
@@ -64,7 +64,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
     });
 
     let is_active =
-        Memo::new(move |_| signals.active_menu_id.get() == Some(sig.with_untracked(|m| m.pid)));
+        Memo::new(move |_| signals.ui.active_menu_id.get() == Some(sig.with_untracked(|m| m.pid)));
     let (menu_pos, set_menu_pos) = signal((0, 0));
 
     let channel_colors = move || {
@@ -85,7 +85,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
         };
 
         if signals.config.use_relative_time.get() {
-            let current_raw = signals.current_time.get();
+            let current_raw = signals.chat.current_time.get();
             let current_secs = if current_raw > 10_000_000_000 {
                 current_raw / 1000
             } else {
@@ -133,7 +133,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                             // 1. NICKNAME BUBBLE
                             <span
                                 class=move || {
-                                    let color_class = if signals.search_term.with(|s| sig.with(|m| *s == m.nickname)) {
+                                    let color_class = if signals.chat.search_term.with(|s| sig.with(|m| *s == m.nickname)) {
                                         "text-success underline decoration-2"
                                     } else {
                                         channel_colors().0
@@ -145,10 +145,10 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                 on:click=move |ev| {
                                     ev.stop_propagation();
                                     if is_active.get() {
-                                        signals.set_active_menu_id.set(None);
+                                        signals.ui.set_active_menu_id.set(None);
                                     } else {
                                         set_menu_pos.set((ev.client_x(), ev.client_y()));
-                                        signals.set_active_menu_id.set(Some(sig.with_untracked(|m| m.pid)));
+                                        signals.ui.set_active_menu_id.set(Some(sig.with_untracked(|m| m.pid)));
                                     }
                                 }
                             >
@@ -173,7 +173,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                         <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
                                             on:click=move |_| {
                                                 sig.with_untracked(|m| copy_to_clipboard(&m.nickname));
-                                                signals.set_active_menu_id.set(None);
+                                                signals.ui.set_active_menu_id.set(None);
                                             }>
                                             "📋 Copy Name"
                                         </button>
@@ -181,12 +181,12 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                         <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
                                             on:click=move |_| {
                                                 let n = sig.with_untracked(|m| m.nickname.clone());
-                                                if signals.search_term.get_untracked() == n {
-                                                    signals.set_search_term.set("".into());
+                                                if signals.chat.search_term.get_untracked() == n {
+                                                    signals.chat.set_search_term.set("".into());
                                                 } else {
-                                                    signals.set_search_term.set(n);
+                                                    signals.chat.set_search_term.set(n);
                                                 }
-                                                signals.set_active_menu_id.set(None);
+                                                signals.ui.set_active_menu_id.set(None);
                                             }>
                                             "🔍 Filter Chat"
                                         </button>
@@ -206,7 +206,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                                 });
 
                                                 signals.config.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
-                                                signals.set_active_menu_id.set(None);
+                                                signals.ui.set_active_menu_id.set(None);
                                             }>
                                             "🚫 Block User"
                                         </button>
@@ -288,7 +288,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                     // 2. NICKNAME BUBBLE (inline-block so it flows like text)
                     <span
                         class=move || {
-                            let color_class = if signals.search_term.with(|s| sig.with(|m| *s == m.nickname)) {
+                            let color_class = if signals.chat.search_term.with(|s| sig.with(|m| *s == m.nickname)) {
                                 "text-success underline decoration-2"
                             } else {
                                 channel_colors().0
@@ -299,10 +299,10 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                         on:click=move |ev| {
                             ev.stop_propagation();
                             if is_active.get() {
-                                signals.set_active_menu_id.set(None);
+                                signals.ui.set_active_menu_id.set(None);
                             } else {
                                 set_menu_pos.set((ev.client_x(), ev.client_y()));
-                                signals.set_active_menu_id.set(Some(sig.with_untracked(|m| m.pid)));
+                                signals.ui.set_active_menu_id.set(Some(sig.with_untracked(|m| m.pid)));
                             }
                         }
                     >
@@ -327,7 +327,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                 <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
                                     on:click=move |_| {
                                         sig.with_untracked(|m| copy_to_clipboard(&m.nickname));
-                                        signals.set_active_menu_id.set(None);
+                                        signals.ui.set_active_menu_id.set(None);
                                     }>
                                     "📋 Copy Name"
                                 </button>
@@ -335,12 +335,12 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                 <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
                                     on:click=move |_| {
                                         let n = sig.with_untracked(|m| m.nickname.clone());
-                                        if signals.search_term.get_untracked() == n {
-                                            signals.set_search_term.set("".into());
+                                        if signals.chat.search_term.get_untracked() == n {
+                                            signals.chat.set_search_term.set("".into());
                                         } else {
-                                            signals.set_search_term.set(n);
+                                            signals.chat.set_search_term.set(n);
                                         }
-                                        signals.set_active_menu_id.set(None);
+                                        signals.ui.set_active_menu_id.set(None);
                                     }>
                                     "🔍 Filter Chat"
                                 </button>
@@ -360,7 +360,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                         });
 
                                         signals.config.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
-                                        signals.set_active_menu_id.set(None);
+                                        signals.ui.set_active_menu_id.set(None);
                                     }>
                                     "🚫 Block User"
                                 </button>

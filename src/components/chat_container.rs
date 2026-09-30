@@ -22,7 +22,7 @@ pub fn ChatContainer() -> impl IntoView {
 
     Effect::new(move |_| {
         signals.config.active_tab.track();
-        signals.search_term.track();
+        signals.chat.search_term.track();
         set_display_limit.set(50);
     });
 
@@ -33,7 +33,7 @@ pub fn ChatContainer() -> impl IntoView {
     // whole log, and no message is cloned to be looked at.
     let filtered_chat = Memo::new(move |_| {
         let tab = Tab::from_label(&signals.config.active_tab.get());
-        let search = signals.search_term.get();
+        let search = signals.chat.search_term.get();
         let filters = signals.config.custom_tab_filters.get();
         let min_level = signals.config.min_sender_level.get();
         let limit = display_limit.get();
@@ -42,7 +42,7 @@ pub fn ChatContainer() -> impl IntoView {
             return Vec::new(); // the system tab lists no chat
         };
         let filter = ChatFilter::new(tab, &filters, min_level, &search);
-        signals.chat.with(|store| {
+        signals.chat.chat.with(|store| {
             newest_matching(store.tab(key), limit, |sig| {
                 sig.with_untracked(|m| filter.matches(m))
             })
@@ -50,10 +50,10 @@ pub fn ChatContainer() -> impl IntoView {
     });
 
     let filtered_system_logs = Memo::new(move |_| {
-        let logs = signals.system_log.get();
-        let level_f = signals.system_level_filter.get();
-        let source_f = signals.system_source_filter.get();
-        let search = signals.search_term.get().to_lowercase();
+        let logs = signals.chat.system_log.get();
+        let level_f = signals.chat.system_level_filter.get();
+        let source_f = signals.chat.system_source_filter.get();
+        let search = signals.chat.search_term.get().to_lowercase();
         let current_log_level = signals.config.log_level.get();
 
         logs.into_iter()
@@ -78,7 +78,7 @@ pub fn ChatContainer() -> impl IntoView {
     // --- AUTO-SCROLL EFFECT ---
     Effect::new(move |_| {
         filtered_chat.track();
-        if signals.is_at_bottom.get_untracked() {
+        if signals.chat.is_at_bottom.get_untracked() {
             request_animation_frame(move || {
                 if let Some(el) = chat_container_ref.get() {
                     el.set_scroll_top(el.scroll_height());
@@ -161,10 +161,10 @@ pub fn ChatContainer() -> impl IntoView {
                     }
 
                     if signals.config.active_tab.get_untracked() == Tab::System.label() {
-                        signals.set_system_at_bottom.set(at_bottom);
+                        signals.chat.set_is_system_at_bottom.set(at_bottom);
                     } else {
-                        signals.set_is_at_bottom.set(at_bottom);
-                        if at_bottom { signals.set_unread_count.set(0); }
+                        signals.chat.set_is_at_bottom.set(at_bottom);
+                        if at_bottom { signals.chat.set_unread_count.set(0); }
                     }
                 }
             >
@@ -202,14 +202,14 @@ pub fn ChatContainer() -> impl IntoView {
                                                     SystemLogLevel::Info => "text-info" // Default info color
                                                 }
                                             )
-                                            on:click=move |_| signals.set_system_level_filter.set(Some(level))
+                                            on:click=move |_| signals.chat.set_system_level_filter.set(Some(level))
                                         >
                                             "[" {move || level.label()} "]"
                                         </span>
 
                                         // --- SOURCE BADGE (Clickable) ---
                                         <span class="cursor-pointer hover:brightness-125 font-black mr-2 text-base-content/50 transition-all"
-                                            on:click=move |_| signals.set_system_source_filter.set(Some(source_badge.clone()))
+                                            on:click=move |_| signals.chat.set_system_source_filter.set(Some(source_badge.clone()))
                                         >
                                             "[" {move || source.clone().to_uppercase()} "]"
                                         </span>
@@ -237,7 +237,7 @@ pub fn ChatContainer() -> impl IntoView {
 
             // --- OVERLAY: ACTIVE SEARCH / LOG FILTER TOAST ---
             // CHANGED: Expanded to show up when ANY filter is active (Level, Source, or General Search)
-            <Show when=move || !signals.search_term.get().is_empty() || signals.system_level_filter.get().is_some() || signals.system_source_filter.get().is_some()>
+            <Show when=move || !signals.chat.search_term.get().is_empty() || signals.chat.system_level_filter.get().is_some() || signals.chat.system_source_filter.get().is_some()>
                 <div class="absolute top-4 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-2 duration-200">
                     <div class="badge badge-success badge-lg gap-2 shadow-2xl font-black p-4 border border-white/20 text-success-content backdrop-blur-md bg-success/90">
                         <span class="opacity-70 text-[10px] uppercase tracking-widest">"🔍 필터링:"</span>
@@ -245,10 +245,10 @@ pub fn ChatContainer() -> impl IntoView {
                         <span class="text-sm">
                             {move || {
                                 let mut filters = Vec::new();
-                                if let Some(l) = signals.system_level_filter.get() { filters.push(l.label()); }
-                                if let Some(s) = signals.system_source_filter.get() { filters.push(s.to_uppercase()); }
+                                if let Some(l) = signals.chat.system_level_filter.get() { filters.push(l.label()); }
+                                if let Some(s) = signals.chat.system_source_filter.get() { filters.push(s.to_uppercase()); }
 
-                                let st = signals.search_term.get();
+                                let st = signals.chat.search_term.get();
                                 if !st.is_empty() { filters.push(st); }
 
                                 filters.join(" + ")
@@ -258,9 +258,9 @@ pub fn ChatContainer() -> impl IntoView {
                         <button class="btn btn-ghost btn-xs btn-circle ml-1 hover:bg-black/20 text-current"
                             on:click=move |_| {
                                 // Clear ALL filters at once
-                                signals.set_search_term.set("".to_string());
-                                signals.set_system_level_filter.set(None);
-                                signals.set_system_source_filter.set(None);
+                                signals.chat.set_search_term.set("".to_string());
+                                signals.chat.set_system_level_filter.set(None);
+                                signals.chat.set_system_source_filter.set(None);
                             }>
                             "✕"
                         </button>
@@ -269,30 +269,30 @@ pub fn ChatContainer() -> impl IntoView {
             </Show>
 
             // --- OVERLAY: NEW MESSAGE TOAST ---
-            <Show when=move || signals.unread_count.get().gt(&0) && !signals.is_at_bottom.get()>
+            <Show when=move || signals.chat.unread_count.get().gt(&0) && !signals.chat.is_at_bottom.get()>
                 <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-50">
                     <button class="btn btn-success btn-sm shadow-2xl gap-2 animate-bounce"
                         on:click=move |_| {
                             if let Some(el) = chat_container_ref.get() {
                                 el.set_scroll_top(el.scroll_height());
-                                signals.set_is_at_bottom.set(true);
-                                signals.set_unread_count.set(0);
+                                signals.chat.set_is_at_bottom.set(true);
+                                signals.chat.set_unread_count.set(0);
                             }
                         }>
-                        <span class="badge badge-neutral badge-sm">{move || signals.unread_count.get()}</span>
+                        <span class="badge badge-neutral badge-sm">{move || signals.chat.unread_count.get()}</span>
                         "새로운 메시지"
                     </button>
                 </div>
             </Show>
 
             // --- OVERLAY: SCROLL LOCK TOAST ---
-            <Show when=move || signals.config.active_tab.get() == Tab::System.label() && !signals.is_system_at_bottom.get()>
+            <Show when=move || signals.config.active_tab.get() == Tab::System.label() && !signals.chat.is_system_at_bottom.get()>
                 <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-50">
                     <button class="btn btn-warning btn-sm opacity-90 shadow-2xl"
                         on:click=move |_| {
                             if let Some(el) = chat_container_ref.get() {
                                 el.set_scroll_top(el.scroll_height());
-                                signals.set_system_at_bottom.set(true);
+                                signals.chat.set_is_system_at_bottom.set(true);
                             }
                         }>
                         "⬆️ Scroll Locked"

@@ -1,5 +1,5 @@
 use crate::capture::message_processor::{MessageProcessor, ProcessAction};
-use crate::capture::stream_tracker::StreamTracker;
+use crate::capture::stream_tracker::{StreamKey, StreamTracker};
 use crate::protocol::parser::{parsing_pipeline, Port5003Event};
 use crate::text::normalize_emotes;
 use etherparse::{NetHeaders, PacketHeaders, TransportHeader};
@@ -73,10 +73,12 @@ impl ChatPipeline {
             return actions;
         };
 
-        // 2. Build the unique TCP stream key
-        let mut stream_key = [0u8; 6];
+        // 2. Build the unique TCP connection key (both ends)
+        let mut stream_key: StreamKey = [0u8; 12];
         stream_key[0..4].copy_from_slice(&ipv4.source);
         stream_key[4..6].copy_from_slice(&tcp.source_port.to_be_bytes());
+        stream_key[6..10].copy_from_slice(&ipv4.destination);
+        stream_key[10..12].copy_from_slice(&tcp.destination_port.to_be_bytes());
 
         // 3. Assemble fragmented bytes into complete Protobuf packets
         let assembled_packets = self.tracker.process_bytes(stream_key, payload);
@@ -187,6 +189,45 @@ mod tests {
         let mut out = Vec::new();
         builder.write(&mut out, payload).unwrap();
         out
+    }
+
+    /// Like `tcp_from_5003`, but to a chosen client (address and port).
+    fn tcp_from_5003_to(client: [u8; 4], port: u16, payload: &[u8]) -> Vec<u8> {
+        let builder = PacketBuilder::ipv4([192, 168, 1, 1], client, 64).tcp(5003, port, 1, 0);
+        let mut out = Vec::new();
+        builder.write(&mut out, payload).unwrap();
+        out
+    }
+
+    #[test]
+    fn two_clients_on_one_server_are_reassembled_independently() {
+        // W1: the stream key was server address + port only, so the halves of
+        // two clients' split frames were joined into one buffer and lost.
+        let mut pipeline = ChatPipeline::new();
+        let hello = chat_segment(1, "Hello");
+        let world = chat_segment(2, "World");
+        let (a1, a2) = hello.split_at(10);
+        let (b1, b2) = world.split_at(10);
+        let order = [
+            ([10, 0, 0, 1], 40000, a1),
+            ([10, 0, 0, 2], 40001, b1),
+            ([10, 0, 0, 1], 40000, a2),
+            ([10, 0, 0, 2], 40001, b2),
+        ];
+        let mut got = Vec::new();
+        for (client, port, part) in order {
+            for action in pipeline.feed_network_packet(
+                &tcp_from_5003_to(client, port, part),
+                |_| false,
+                || 1,
+                || {},
+            ) {
+                if let PipelineAction::EmitNewMessage(chat) = action {
+                    got.push(chat.message);
+                }
+            }
+        }
+        assert_eq!(got, ["Hello", "World"]);
     }
 
     /// App header + root { field 4: { tag 0x1A text } } -- a "Me" message.

@@ -514,4 +514,28 @@ mod tests {
         let pids: Vec<_> = store.views.pids("WORLD").collect();
         assert_eq!(pids, [4, 9]);
     }
+
+    /// Counts drops of the value a row signal holds.
+    struct Tracked(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    impl Drop for Tracked {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn an_evicted_row_signal_is_freed() {
+        // Regression (A6): rows were `RwSignal::new` in event callbacks, with
+        // no reactive owner, so an evicted row's value was never freed.
+        use leptos::prelude::ArcRwSignal;
+        let dropped = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (filters, limits) = (vec![], limits(&[("WORLD", 1)]));
+        let mut store = ChatStore::default();
+        for pid in 1..=3 {
+            let row = ArcRwSignal::new(Tracked(dropped.clone()));
+            store.add(pid, "WORLD", row, &filters, &limits);
+        }
+        assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
 }

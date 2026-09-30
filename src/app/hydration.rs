@@ -131,7 +131,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                             let filters = custom_filters.get_untracked();
                             let history = vec
                                 .into_iter()
-                                .map(|p| (p.pid, p.channel.clone(), RwSignal::new(p)))
+                                .map(|p| (p.pid, p.channel.clone(), ArcRwSignal::new(p)))
                                 .collect();
                             set_chat.update(|store| {
                                 store.merge_history(
@@ -147,7 +147,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                     // Hydrate SYSTEM History
                     if let Ok(res) = invoke("get_system_history", JsValue::NULL).await {
                         if let Ok(vec) = serde_wasm_bindgen::from_value::<Vec<SystemMessage>>(res) {
-                            set_system_log.set(vec.into_iter().map(|p| RwSignal::new(p)).collect());
+                            set_system_log.set(vec.into_iter().map(ArcRwSignal::new).collect());
                         }
                     }
                     set_is_sniffer_active.set(true);

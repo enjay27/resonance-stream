@@ -3,6 +3,7 @@
 //! reports is `status_signals.rs`.)
 
 use crate::chat_view::ChatStore;
+use crate::settings_nav::SettingsCategory;
 use crate::ui_types::{ChatMessage, SystemLogLevel, SystemMessage};
 use leptos::prelude::{signal, ArcRwSignal, ReadSignal, WriteSignal};
 use std::collections::HashMap;
@@ -79,6 +80,9 @@ impl ChatSignals {
 pub struct UiSignals {
     pub show_settings: ReadSignal<bool>,
     pub set_show_settings: WriteSignal<bool>,
+    /// The settings pane shown; kept while the settings view is closed.
+    pub settings_category: ReadSignal<SettingsCategory>,
+    pub set_settings_category: WriteSignal<SettingsCategory>,
     pub show_dictionary: ReadSignal<bool>,
     pub set_show_dictionary: WriteSignal<bool>,
     pub show_troubleshooter: ReadSignal<bool>,
@@ -94,6 +98,8 @@ pub struct UiSignals {
 impl UiSignals {
     pub fn new() -> Self {
         let (show_settings, set_show_settings) = signal::<bool>(false);
+        let (settings_category, set_settings_category) =
+            signal::<SettingsCategory>(SettingsCategory::default());
         let (show_dictionary, set_show_dictionary) = signal::<bool>(false);
         let (show_troubleshooter, set_show_troubleshooter) = signal::<bool>(false);
         let (show_favorites, set_show_favorites) = signal::<bool>(false);
@@ -102,6 +108,8 @@ impl UiSignals {
         UiSignals {
             show_settings,
             set_show_settings,
+            settings_category,
+            set_settings_category,
             show_dictionary,
             set_show_dictionary,
             show_troubleshooter,

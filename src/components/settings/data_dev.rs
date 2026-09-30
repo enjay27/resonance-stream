@@ -24,9 +24,6 @@ pub fn DataDevSection(
         // SECTION: DATA & DEVELOPER
         // ==========================================
         <section class="space-y-3">
-            <h3 class="text-[10px] font-bold text-warning uppercase tracking-widest opacity-80">
-                "데이터 및 개발자 (Data & Dev)"
-            </h3>
 
             <div class="bg-base-200 p-3 rounded-xl border border-base-content/5 space-y-4">
                 // Sync Dictionary Option
@@ -78,7 +75,7 @@ pub fn DataDevSection(
                 <div class="divider m-0 opacity-10"></div>
 
                 <div class="flex items-center justify-between">
-                    <label class="label cursor-pointer px-0">
+                    <label class="label cursor-pointer px-0 w-full justify-between gap-3">
                         <div class="flex flex-col">
                             <span class="text-xs font-bold text-base-content/80">"사전 자동 동기화"</span>
                             <span class="text-[9px] opacity-60">"시작 시 사용자 사전 최신 버전을 체크하고 다운받습니다."</span>

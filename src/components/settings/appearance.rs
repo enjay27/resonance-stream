@@ -15,11 +15,10 @@ pub fn AppearanceSection() -> impl IntoView {
         // SECTION: APPEARANCE
         // ==========================================
         <section class="space-y-4">
-            <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"Appearance"</h3>
 
             // Click Through Mode
             <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
-                <label class="label cursor-pointer p-0">
+                <label class="label cursor-pointer p-0 w-full justify-between gap-3">
                     <div class="flex flex-col">
                         <span class="label-text text-xs font-bold text-base-content/80">"클릭 관통 모드 (Click-Through)"</span>
                         <span class="text-[9px] text-warning mt-1">"주의: 비활성화 하려면 시스템 트레이(우측 하단 아이콘)를 사용하세요."</span>
@@ -42,7 +41,7 @@ pub fn AppearanceSection() -> impl IntoView {
 
             // --- DRAG TO SCROLL TOGGLE ---
             <div class="form-control bg-base-200 p-3 rounded-lg border border-base-content/5">
-                <label class="label cursor-pointer p-0">
+                <label class="label cursor-pointer p-0 w-full justify-between gap-3">
                     <div class="flex flex-col">
                         <span class="label-text text-xs font-bold text-base-content/80">"드래그 스크롤 (Drag to Scroll)"</span>
                         <span class="text-[9px] text-base-content/60 mt-1">"마우스로 채팅창 배경을 드래그하여 위아래로 스크롤합니다."</span>

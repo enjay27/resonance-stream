@@ -8,4 +8,5 @@ pub mod history;
 pub mod paste;
 pub mod protocol;
 pub mod text;
+pub mod window;
 pub mod workers;

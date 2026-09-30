@@ -16,10 +16,9 @@ pub fn TranslationSection() -> impl IntoView {
         // SECTION: AI TRANSLATION
         // ==========================================
         <section class="space-y-3">
-            <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"AI Translation Features"</h3>
 
             <div class="form-control">
-                <label class="label cursor-pointer bg-base-100 rounded-lg px-4 py-3 border border-base-content/5 hover:border-success/30 transition-all">
+                <label class="label cursor-pointer w-full justify-between gap-3 bg-base-100 rounded-lg px-4 py-3 border border-base-content/5 hover:border-success/30 transition-all">
                     <span class="label-text font-bold text-base-content">"실시간 번역 기능 사용"</span>
                     <input type="checkbox" class="toggle toggle-success toggle-sm"
                         prop:checked=move || signals.config.use_translation.get()

@@ -53,16 +53,81 @@ pub struct TranslationResult {
 
 // --- Service state events ---
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// Orders state changes: every change of either service gets a larger `seq`,
+/// so the UI can drop a snapshot (`get_service_states`) that an event
+/// overtook. 0: no order known (a payload from before `seq` existed).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct SnifferStatePayload {
-    pub state: String,   // "Starting", "Firewall", "Binding", "Active", "Error", "Off"
+    pub state: String,   // "Starting", "Pending", "Active", "Error", "Off"
     pub message: String, // Context or Error message
+    #[serde(default)]
+    pub seq: u64,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct TranslatorStatePayload {
-    pub state: String, // "Starting", "Loading Model", "Active", "Error", "Off"
+    pub state: String, // "Starting", "Loading Model", "Catching Up", "Active", "Error", "Off"
     pub message: String,
+    #[serde(default)]
+    pub seq: u64,
+}
+
+impl Default for SnifferStatePayload {
+    fn default() -> Self {
+        Self {
+            state: "Off".into(),
+            message: String::new(),
+            seq: 0,
+        }
+    }
+}
+
+impl Default for TranslatorStatePayload {
+    fn default() -> Self {
+        Self {
+            state: "Off".into(),
+            message: String::new(),
+            seq: 0,
+        }
+    }
+}
+
+/// The last state each service reported. The backend keeps it so a UI that
+/// started listening late (or reloaded) can ask for it instead of waiting
+/// for the next event.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct ServiceStates {
+    pub sniffer: SnifferStatePayload,
+    pub translator: TranslatorStatePayload,
+    #[serde(skip)]
+    last_seq: u64,
+}
+
+impl ServiceStates {
+    fn next_seq(&mut self) -> u64 {
+        self.last_seq += 1;
+        self.last_seq
+    }
+
+    /// Records a sniffer state; returns the payload to emit.
+    pub fn set_sniffer(&mut self, state: &str, message: &str) -> SnifferStatePayload {
+        self.sniffer = SnifferStatePayload {
+            state: state.to_string(),
+            message: message.to_string(),
+            seq: self.next_seq(),
+        };
+        self.sniffer.clone()
+    }
+
+    /// Records a translator state; returns the payload to emit.
+    pub fn set_translator(&mut self, state: &str, message: &str) -> TranslatorStatePayload {
+        self.translator = TranslatorStatePayload {
+            state: state.to_string(),
+            message: message.to_string(),
+            seq: self.next_seq(),
+        };
+        self.translator.clone()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -220,6 +285,37 @@ mod tests {
         assert_eq!(fav.text, "hi");
         assert!(fav.note.is_empty());
         assert!(fav.shortcut.is_empty());
+    }
+
+    #[test]
+    fn service_states_start_off() {
+        let states = ServiceStates::default();
+        assert_eq!(states.sniffer.state, "Off");
+        assert_eq!(states.translator.state, "Off");
+        assert_eq!((states.sniffer.seq, states.translator.seq), (0, 0));
+    }
+
+    #[test]
+    fn every_state_change_is_newer_than_the_last_across_services() {
+        // Regression (A1): the UI had no way to ask for the current state, and
+        // could not tell a snapshot from an event that raced it.
+        let mut states = ServiceStates::default();
+        let a = states.set_translator("Starting", "init");
+        let b = states.set_sniffer("Active", "listening");
+        let c = states.set_translator("Active", "ready");
+        assert!(0 < a.seq && a.seq < b.seq && b.seq < c.seq);
+        assert_eq!(states.translator, c);
+        assert_eq!(states.sniffer, b);
+    }
+
+    #[test]
+    fn state_payload_carries_seq_and_an_older_one_still_parses() {
+        let json =
+            serde_json::to_value(ServiceStates::default().set_sniffer("Error", "x")).unwrap();
+        assert_eq!(json["seq"], 1);
+        let old: TranslatorStatePayload =
+            serde_json::from_str(r#"{"state":"Active","message":"m"}"#).unwrap();
+        assert_eq!(old.seq, 0);
     }
 
     #[test]

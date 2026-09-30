@@ -12,7 +12,7 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::inject_system_message;
-use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorStatePayload};
+use crate::protocol::types::{ChatMessage, SystemLogLevel};
 
 use self::core::{server_url, translate_text};
 use resonance_core::text::{postprocess_text, preprocess_text};
@@ -250,14 +250,15 @@ fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle
     );
 }
 
+/// Records the state (for `get_service_states`) and emits it. The lock is
+/// held across the emit so events leave in `seq` order.
 pub fn emit_translator_state(app: &tauri::AppHandle, state: &str, message: &str) {
-    let _ = app.emit(
-        "translator-state",
-        TranslatorStatePayload {
-            state: state.to_string(),
-            message: message.to_string(),
-        },
-    );
+    let Some(app_state) = app.try_state::<crate::AppState>() else {
+        return;
+    };
+    let mut states = app_state.service_states.lock();
+    let payload = states.set_translator(state, message);
+    let _ = app.emit("translator-state", payload);
 }
 
 #[cfg(test)]

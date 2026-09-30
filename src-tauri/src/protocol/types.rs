@@ -6,8 +6,8 @@ use resonance_core::text::Dictionary;
 use serde::{Deserialize, Serialize};
 
 pub use resonance_types::{
-    ChatMessage, NetworkInterface, SnifferStatePayload, SystemMessage, TranslationResult,
-    TranslatorStatePayload,
+    ChatMessage, NetworkInterface, ServiceStates, SnifferStatePayload, SystemMessage,
+    TranslationResult, TranslatorStatePayload,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicU64;
@@ -34,6 +34,9 @@ pub struct AppState {
     pub translation_ledger: Mutex<resonance_core::workers::TranslationLedger>,
     pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
     pub sniffer_tx: Mutex<Option<crate::services::sniffer::SnifferHandle>>,
+    /// The last state each service emitted (`get_service_states`): a UI that
+    /// was not listening yet still learns it.
+    pub service_states: Mutex<ServiceStates>,
     pub blocked_users: Mutex<HashMap<u64, String>>,
     /// What the global shortcuts are bound to (see `shortcut.rs`).
     pub shortcuts: Mutex<crate::shortcut::GlobalShortcuts>,

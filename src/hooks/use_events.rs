@@ -1,8 +1,10 @@
 use crate::chat_view::{is_muted, Tab};
+use crate::service_state::SeqGate;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
 use crate::ui_types::{
-    ChatMessage, SnifferStatePayload, SystemMessage, TranslationResult, TranslatorStatePayload,
+    ChatMessage, ServiceStates, SnifferStatePayload, SystemMessage, TranslationResult,
+    TranslatorStatePayload,
 };
 use leptos::logging::log;
 use leptos::prelude::*;
@@ -48,6 +50,40 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     translation_closure.forget();
     update_message_closure.forget();
     firewall_closure.forget();
+
+    // 4. States emitted before we listened (the translator starts with the
+    // app; a reloaded page missed everything): ask once, now that no later
+    // event can be missed. The seq gates drop it if an event overtook it.
+    if let Ok(res) = invoke("get_service_states", JsValue::NULL).await {
+        if let Ok(states) = serde_wasm_bindgen::from_value::<ServiceStates>(res) {
+            apply_sniffer_state(signals, states.sniffer);
+            apply_translator_state(signals, states.translator);
+        }
+    }
+}
+
+static SNIFFER_SEQ: SeqGate = SeqGate::new();
+static TRANSLATOR_SEQ: SeqGate = SeqGate::new();
+
+fn apply_translator_state(signals: AppSignals, payload: TranslatorStatePayload) {
+    if !TRANSLATOR_SEQ.accept(payload.seq) {
+        return;
+    }
+    signals.set_translator_state.set(payload.state.clone());
+    if payload.state == "Error" {
+        signals.set_translator_error.set(payload.message);
+    }
+}
+
+fn apply_sniffer_state(signals: AppSignals, payload: SnifferStatePayload) {
+    if !SNIFFER_SEQ.accept(payload.seq) {
+        return;
+    }
+    signals.set_sniffer_state.set(payload.state.clone());
+    // If it's an error, save the message so the user can click the badge to read it
+    if payload.state == "Error" {
+        signals.set_sniffer_error.set(payload.message);
+    }
 }
 
 // --- EXTRACTED HANDLER FUNCTIONS ---
@@ -161,26 +197,16 @@ fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
 
 fn create_translator_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |event_obj: JsValue| {
-        let Some(payload) = payload::<TranslatorStatePayload>(event_obj) else {
-            return;
-        };
-        signals.set_translator_state.set(payload.state.clone());
-        if payload.state == "Error" {
-            signals.set_translator_error.set(payload.message);
+        if let Some(payload) = payload::<TranslatorStatePayload>(event_obj) {
+            apply_translator_state(signals, payload);
         }
     }) as Box<dyn FnMut(JsValue)>)
 }
 
 fn create_sniffer_state_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |event_obj: JsValue| {
-        let Some(payload) = payload::<SnifferStatePayload>(event_obj) else {
-            return;
-        };
-        signals.set_sniffer_state.set(payload.state.clone());
-
-        // If it's an error, save the message so the user can click the badge to read it
-        if payload.state == "Error" {
-            signals.set_sniffer_error.set(payload.message);
+        if let Some(payload) = payload::<SnifferStatePayload>(event_obj) {
+            apply_sniffer_state(signals, payload);
         }
     }) as Box<dyn FnMut(JsValue)>)
 }

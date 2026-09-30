@@ -49,6 +49,7 @@ pub fn run() {
                 translation_ledger: Mutex::new(Default::default()),
                 data_factory_tx: Mutex::new(None),
                 sniffer_tx: Mutex::new(None),
+                service_states: Mutex::new(Default::default()),
                 blocked_users: Mutex::new(config.blocked_users.clone()),
                 shortcuts: Mutex::new(shortcut::GlobalShortcuts {
                     tab_modifier: config.tab_switch_modifier.clone(),
@@ -138,6 +139,7 @@ pub fn run() {
             start_sniffer_command,
             get_chat_history,
             get_system_history,
+            get_service_states,
             check_all_updates,
             ignore_update,
             download_app_update,

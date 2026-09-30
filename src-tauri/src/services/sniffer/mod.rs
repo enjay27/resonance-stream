@@ -2,7 +2,7 @@ mod network;
 
 pub use self::network::*;
 
-use crate::{inject_system_message, store_and_emit, SnifferStatePayload, TranslationJob};
+use crate::{inject_system_message, store_and_emit, TranslationJob};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -50,14 +50,15 @@ fn feed_watchdog() {
     LAST_TRAFFIC_TIME.store(since_the_epoch.as_secs(), Ordering::Relaxed);
 }
 
+/// Records the state (for `get_service_states`) and emits it. The lock is
+/// held across the emit so events leave in `seq` order.
 pub fn emit_sniffer_state(app: &tauri::AppHandle, state: &str, message: &str) {
-    let _ = app.emit(
-        "sniffer-state",
-        SnifferStatePayload {
-            state: state.to_string(),
-            message: message.to_string(),
-        },
-    );
+    let Some(app_state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let mut states = app_state.service_states.lock();
+    let payload = states.set_sniffer(state, message);
+    let _ = app.emit("sniffer-state", payload);
 }
 
 #[tauri::command]

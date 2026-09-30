@@ -53,6 +53,72 @@ pub fn translation_is_stale(queued_at: Instant, now: Instant) -> bool {
     now.saturating_duration_since(queued_at) > MAX_TRANSLATION_WAIT
 }
 
+/// How long a starting llama-server may take to answer `/health`. Loading
+/// a model from a cold disk can take a while; a server that dies is noticed
+/// at once (the wait checks the process), so a generous limit costs nothing.
+pub const SERVER_START_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// First wait before restarting a failed server; doubled for each restart
+/// within `RESTART_WINDOW`.
+pub const RESTART_BACKOFF: Duration = Duration::from_secs(2);
+/// Restarts allowed within `RESTART_WINDOW` before giving up.
+pub const MAX_RESTARTS: usize = 3;
+pub const RESTART_WINDOW: Duration = Duration::from_secs(10 * 60);
+/// Failed jobs in a row, with the process still alive, that mark the server
+/// as hung.
+pub const HUNG_AFTER_FAILURES: u32 = 3;
+
+/// What the translator worker does after a job or a server check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorAction {
+    Continue,
+    /// Kill the server, wait this long, start a new one.
+    Restart(Duration),
+    /// Too many restarts: leave translation stopped until the user restarts it.
+    GiveUp,
+}
+
+/// Decides when the translator's llama-server is restarted: when its process
+/// exited, or when it stopped answering while alive (hung). Restarts back
+/// off, and stop after `MAX_RESTARTS` within `RESTART_WINDOW`.
+#[derive(Debug, Default)]
+pub struct ServerSupervisor {
+    restarts: Vec<Instant>,
+    failures_in_a_row: u32,
+}
+
+impl ServerSupervisor {
+    pub fn on_job_ok(&mut self) {
+        self.failures_in_a_row = 0;
+    }
+
+    /// A job failed while the server process is still running.
+    pub fn on_job_failed(&mut self, now: Instant) -> SupervisorAction {
+        self.failures_in_a_row += 1;
+        if self.failures_in_a_row < HUNG_AFTER_FAILURES {
+            return SupervisorAction::Continue;
+        }
+        self.restart(now)
+    }
+
+    /// The server process is gone.
+    pub fn on_server_exited(&mut self, now: Instant) -> SupervisorAction {
+        self.restart(now)
+    }
+
+    fn restart(&mut self, now: Instant) -> SupervisorAction {
+        self.failures_in_a_row = 0;
+        self.restarts
+            .retain(|at| now.saturating_duration_since(*at) <= RESTART_WINDOW);
+        if self.restarts.len() >= MAX_RESTARTS {
+            return SupervisorAction::GiveUp;
+        }
+        let backoff = RESTART_BACKOFF * 2u32.pow(self.restarts.len() as u32);
+        self.restarts.push(now);
+        SupervisorAction::Restart(backoff)
+    }
+}
+
 /// Most pids the ledger holds; the oldest go first. Only the newest few are
 /// ever caught up, so this only bounds memory while translation stays off.
 pub const LEDGER_CAPACITY: usize = 5000;
@@ -221,5 +287,75 @@ mod tests {
         assert_eq!(ledger.len(), LEDGER_CAPACITY);
         assert!(!ledger.is_owed(2));
         assert!(ledger.is_owed(3));
+    }
+
+    fn t0() -> Instant {
+        Instant::now()
+    }
+
+    #[test]
+    fn a_server_that_exited_is_restarted_with_growing_backoff() {
+        // Regression (A2): a crashed llama-server was never noticed; every
+        // later job failed silently while the badge said "Active".
+        let mut sup = ServerSupervisor::default();
+        let now = t0();
+        assert_eq!(
+            sup.on_server_exited(now),
+            SupervisorAction::Restart(RESTART_BACKOFF)
+        );
+        assert_eq!(
+            sup.on_server_exited(now + Duration::from_secs(10)),
+            SupervisorAction::Restart(RESTART_BACKOFF * 2)
+        );
+    }
+
+    #[test]
+    fn a_server_that_keeps_crashing_is_given_up_on() {
+        let mut sup = ServerSupervisor::default();
+        let now = t0();
+        for i in 0..MAX_RESTARTS {
+            let at = now + Duration::from_secs(i as u64);
+            assert!(matches!(
+                sup.on_server_exited(at),
+                SupervisorAction::Restart(_)
+            ));
+        }
+        assert_eq!(
+            sup.on_server_exited(now + Duration::from_secs(60)),
+            SupervisorAction::GiveUp
+        );
+    }
+
+    #[test]
+    fn crashes_long_ago_do_not_count() {
+        let mut sup = ServerSupervisor::default();
+        let now = t0();
+        for _ in 0..MAX_RESTARTS {
+            sup.on_server_exited(now);
+        }
+        let later = now + RESTART_WINDOW + Duration::from_secs(1);
+        assert_eq!(
+            sup.on_server_exited(later),
+            SupervisorAction::Restart(RESTART_BACKOFF)
+        );
+    }
+
+    #[test]
+    fn a_live_server_is_restarted_only_after_several_failures_in_a_row() {
+        let mut sup = ServerSupervisor::default();
+        let now = t0();
+        for _ in 1..HUNG_AFTER_FAILURES {
+            assert_eq!(sup.on_job_failed(now), SupervisorAction::Continue);
+        }
+        sup.on_job_ok();
+        for _ in 1..HUNG_AFTER_FAILURES {
+            assert_eq!(sup.on_job_failed(now), SupervisorAction::Continue);
+        }
+        assert_eq!(
+            sup.on_job_failed(now),
+            SupervisorAction::Restart(RESTART_BACKOFF)
+        );
+        // ...and the count starts over for the new server.
+        assert_eq!(sup.on_job_failed(now), SupervisorAction::Continue);
     }
 }

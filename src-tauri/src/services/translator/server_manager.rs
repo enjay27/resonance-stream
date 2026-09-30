@@ -2,7 +2,7 @@ use super::core::{server_url, set_server_port, PREFERRED_SERVER_PORT};
 use crate::protocol::types::SystemLogLevel;
 use crate::{inject_system_message, AI_SERVER_FILENAME, AI_SERVER_FOLDER};
 use reqwest::blocking::Client;
-use resonance_core::workers::pick_local_port;
+use resonance_core::workers::{pick_local_port, SERVER_START_TIMEOUT};
 use std::fs;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
@@ -57,6 +57,15 @@ impl ServerGuard {
         }
         Self { child, pid_file }
     }
+
+    /// How the server ended, or `None` while it still runs.
+    pub fn exit_status(&mut self) -> Option<String> {
+        match self.child.try_wait() {
+            Ok(Some(status)) => Some(status.to_string()),
+            Ok(None) => None,
+            Err(e) => Some(format!("state unknown: {e}")),
+        }
+    }
 }
 
 impl Drop for ServerGuard {
@@ -78,10 +87,13 @@ pub fn launch_ai_server(
     model_path: &PathBuf,
     config: &crate::config::AppConfig,
 ) -> Option<ServerGuard> {
-    let server_path = app
-        .path()
-        .app_data_dir()
-        .unwrap()
+    let Ok(data_dir) = app.path().app_data_dir() else {
+        let msg = "Failed to start llama-server.exe. (no app data folder)";
+        inject_system_message(app, SystemLogLevel::Error, "Translator", msg);
+        super::emit_translator_state(app, "Error", msg);
+        return None;
+    };
+    let server_path = data_dir
         .join("bin")
         .join(AI_SERVER_FOLDER)
         .join(AI_SERVER_FILENAME);
@@ -136,10 +148,14 @@ pub fn launch_ai_server(
     }
 }
 
-pub fn server_health_check_for_30_seconds(
+/// Waits until the server answers `/health`. Gives up when the process
+/// exits (at once, with its exit status), after `SERVER_START_TIMEOUT`, or
+/// when `keep_waiting` turns false.
+pub fn wait_for_server(
     app: &AppHandle,
+    server: &mut ServerGuard,
     keep_waiting: &dyn Fn() -> bool,
-) -> bool {
+) -> Result<(), String> {
     let client = Client::new();
     let start_wait = Instant::now();
 
@@ -150,9 +166,14 @@ pub fn server_health_check_for_30_seconds(
         "Waiting for AI Engine to warm up...",
     );
 
-    while start_wait.elapsed().as_secs() < 30 {
+    while start_wait.elapsed() < SERVER_START_TIMEOUT {
         if !keep_waiting() {
-            return false;
+            return Err("AI Engine start cancelled.".into());
+        }
+        if let Some(status) = server.exit_status() {
+            return Err(format!(
+                "AI Engine failed to start: llama-server exited ({status}). Out of memory or a broken model?"
+            ));
         }
         inject_system_message(
             app,
@@ -172,19 +193,16 @@ pub fn server_health_check_for_30_seconds(
                         start_wait.elapsed().as_millis()
                     ),
                 );
-                return true;
+                return Ok(());
             }
         }
         std::thread::sleep(Duration::from_millis(1000));
     }
 
-    inject_system_message(
-        app,
-        SystemLogLevel::Error,
-        "Translator",
-        "AI Engine failed to initialize within 30s.",
-    );
-    false
+    Err(format!(
+        "AI Engine failed to initialize within {}s.",
+        SERVER_START_TIMEOUT.as_secs()
+    ))
 }
 
 #[tauri::command]

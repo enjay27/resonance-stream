@@ -6,7 +6,7 @@
 
 **Review round 2 (2026-09-30):** core + UI communication + LLM server —
 [`.memory/roadmap/review-2026-09-30-round2.md`](.memory/roadmap/review-2026-09-30-round2.md).
-Steps 1-7 in order, one PR each. Step 1 (A1, `get_service_states`) done.
+Steps 1-7 in order, one PR each. Steps 1 (A1 `get_service_states`) and 2 (A2/A9 translator supervisor) done.
 
 **Core review follow-up (2026-09-30):** record and status in
 [`.memory/roadmap/core-review-2026-09-30.md`](.memory/roadmap/core-review-2026-09-30.md).

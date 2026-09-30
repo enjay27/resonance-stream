@@ -1,6 +1,7 @@
 use crate::{inject_system_message, AppState, SystemLogLevel};
 use resonance_core::download::write_atomic;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
+use resonance_types::{default_favorite_messages, FavoriteMessage};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
@@ -55,6 +56,9 @@ pub struct AppConfig {
     pub archive_ignored_channels: Vec<String>,
     #[serde(default = "default_spacing")]
     pub message_spacing: u32,
+    /// Chat lines to copy or paste by shortcut; see `shortcut.rs`.
+    #[serde(default = "default_favorite_messages")]
+    pub favorite_messages: Vec<FavoriteMessage>,
 }
 
 fn default_spacing() -> u32 {
@@ -135,6 +139,7 @@ impl Default for AppConfig {
             tab_limits: default_tab_limits(),
             archive_ignored_channels: default_archive_ignored_channels(),
             message_spacing: default_spacing(),
+            favorite_messages: default_favorite_messages(),
         }
     }
 }
@@ -234,6 +239,11 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
     }
     *state.config.write() = config.clone();
     state.chat_history.lock().set_limit(config.history_limit());
+
+    if old_config.favorite_messages != config.favorite_messages {
+        state.shortcuts.lock().favorites = config.favorite_messages.clone();
+        crate::shortcut::apply_global_shortcuts(&app);
+    }
 
     // --- MANAGE THE SNIFFER THREAD (NETWORK ADAPTER CHANGE) ---
     if old_config.network_interface != config.network_interface {

@@ -43,3 +43,12 @@ run as the real app.
   with archiving on reloads chat (no duplicates after re-login); right-click tab menu
   (limits, archive toggle, custom channels); message spacing; window position restored;
   no silent dictionary sync unless auto-sync is on.
+- **Favorite messages (2026-09-30, `claude/favorite-messages`).** Core/types/ui tests on
+  Linux; app cross-checked (incl. `--tests`) only. Worth a real run, as Administrator:
+  ⭐ in the nav controls opens the list; 📋 copies; ✏️ edits text + records a shortcut
+  (modifier required, F-keys alone OK; conflicts with tab-switch/another favorite refused);
+  add / 🗑 (click twice). With the game focused and its chat box open, the shortcut
+  should paste the message (clipboard + synthetic Ctrl+V on key release). **Open risk:**
+  the game or its anti-cheat may ignore `SendInput` -- if so, text is still on the
+  clipboard. Also: changing the tab-switch shortcut must keep favorite shortcuts working
+  (all shortcuts now re-registered together in `shortcut.rs::apply_global_shortcuts`).

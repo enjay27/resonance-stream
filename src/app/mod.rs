@@ -5,8 +5,8 @@ mod setup_flow;
 use crate::components::settings::Settings;
 use crate::components::title_bar::TitleBar;
 use crate::components::{
-    AppUpdateModal, ChatContainer, DictionaryModal, ModelUpdateModal, NavBar, SetupWizard,
-    Troubleshooter,
+    AppUpdateModal, ChatContainer, DictionaryModal, FavoritesModal, ModelUpdateModal, NavBar,
+    SetupWizard, Troubleshooter,
 };
 use crate::hooks::use_tray::{setup_tray_listeners, sync_tray_menu};
 use crate::store::AppSignals;
@@ -127,6 +127,9 @@ pub fn App() -> impl IntoView {
 
             // Dictionary Modal
             <DictionaryModal />
+
+            // Favorite Messages Modal
+            <FavoritesModal />
 
             // Settings Modal
             <Settings />

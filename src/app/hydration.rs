@@ -54,6 +54,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
         set_auto_sync_latest_dict,
         set_tab_switch_modifier,
         set_tab_switch_key,
+        set_favorite_messages,
         ..
     } = signals;
 
@@ -103,6 +104,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                 } else {
                     config.tab_switch_modifier
                 });
+                set_favorite_messages.set(config.favorite_messages);
                 set_tab_switch_key.set(if config.tab_switch_key.is_empty() {
                     "Tab".to_string()
                 } else {

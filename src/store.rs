@@ -1,5 +1,5 @@
 use crate::chat_view::ChatStore;
-use crate::ui_types::{ChatMessage, SystemMessage};
+use crate::ui_types::{default_favorite_messages, ChatMessage, FavoriteMessage, SystemMessage};
 use leptos::prelude::{signal, Action, ReadSignal, RwSignal, WriteSignal};
 use std::collections::HashMap;
 
@@ -140,6 +140,10 @@ pub struct AppSignals {
     pub set_tab_switch_key: WriteSignal<String>,
     pub show_troubleshooter: ReadSignal<bool>,
     pub set_show_troubleshooter: WriteSignal<bool>,
+    pub favorite_messages: ReadSignal<Vec<FavoriteMessage>>,
+    pub set_favorite_messages: WriteSignal<Vec<FavoriteMessage>>,
+    pub show_favorites: ReadSignal<bool>,
+    pub set_show_favorites: WriteSignal<bool>,
 }
 
 impl AppSignals {
@@ -236,6 +240,8 @@ impl AppSignals {
         let (tab_switch_key, set_tab_switch_key) = signal("Tab".to_string());
 
         let (show_troubleshooter, set_show_troubleshooter) = signal(false);
+        let (favorite_messages, set_favorite_messages) = signal(default_favorite_messages());
+        let (show_favorites, set_show_favorites) = signal(false);
 
         AppSignals {
             init_done,
@@ -368,6 +374,10 @@ impl AppSignals {
             set_tab_switch_key,
             show_troubleshooter,
             set_show_troubleshooter,
+            favorite_messages,
+            set_favorite_messages,
+            show_favorites,
+            set_show_favorites,
         }
     }
 }

@@ -32,6 +32,8 @@ pub struct AppState {
     pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
     pub sniffer_tx: Mutex<Option<Sender<()>>>,
     pub blocked_users: Mutex<HashMap<u64, String>>,
+    /// What the global shortcuts are bound to (see `shortcut.rs`).
+    pub shortcuts: Mutex<crate::shortcut::GlobalShortcuts>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

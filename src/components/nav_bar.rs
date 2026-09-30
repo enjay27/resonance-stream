@@ -394,6 +394,13 @@ pub fn NavBar() -> impl IntoView {
                         </button>
                     </div>
 
+                    <div class="tooltip tooltip-bottom" data-tip="자주 쓰는 메시지">
+                        <button class="btn btn-ghost btn-xs text-lg"
+                            on:click=move |_| signals.set_show_favorites.set(true)>
+                            "⭐"
+                        </button>
+                    </div>
+
                     <div class="tooltip tooltip-bottom" data-tip="Always on Top">
                         <button class="btn btn-xs"
                             class:btn-success=move || signals.is_pinned.get()

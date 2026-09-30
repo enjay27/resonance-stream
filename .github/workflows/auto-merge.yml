@@ -1,8 +1,9 @@
 name: Auto-merge
 
 # A pull request from a `claude/*` branch is merged (and its branch deleted)
-# once the CI workflow has passed on its latest commit. Anything else -- a
-# failed run, another branch prefix, a stale run -- is left for a human.
+# once the CI workflow has passed on its latest commit. Only `claude/*` branches
+# of this repository are ever merged or deleted; anything else -- a failed run,
+# another branch prefix, a fork, a stale run -- is left for a human.
 # `workflow_run` workflows are read from the default branch, so this file only
 # takes effect once it is on main.
 on:
@@ -21,7 +22,8 @@ jobs:
     if: >
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'claude/')
+      startsWith(github.event.workflow_run.head_branch, 'claude/') &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     steps:
       - name: Merge the pull request
         env:
@@ -37,4 +39,9 @@ jobs:
           head=$(jq -r .headRefOid <<<"$pr")
           # The green run must be for the PR's latest commit, not an older push.
           if [ "$head" != "$RUN_SHA" ]; then echo "run is for $RUN_SHA, PR head is $head; waiting for its run"; exit 0; fi
-          gh pr merge "$number" --repo "$REPO" --merge --delete-branch
+          gh pr merge "$number" --repo "$REPO" --merge
+          # Delete only a claude/* branch, and never anything else.
+          case "$BRANCH" in
+            claude/*) gh api -X DELETE "repos/$REPO/git/refs/heads/$BRANCH" ;;
+            *) echo "not a claude/* branch; leaving $BRANCH" ;;
+          esac

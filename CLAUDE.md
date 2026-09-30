@@ -154,7 +154,7 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
    here is named in the last commit body (`NOT VERIFIED: app gate -- no Windows
    toolchain in this session`) and left to CI.
 4. **Open the PR** against `main` (check for a PR template first). Do not merge it by
-   hand: `.github/workflows/auto-merge.yml` merges it and deletes the branch once the CI
+   hand: `.github/workflows/auto-merge.yml` merges it and deletes its `claude/*` branch (never any other branch) once the CI
    workflow passes on the PR's latest commit. If CI fails, fix on the same branch and
    push again -- the run for the new commit decides. Never skip, disable or edit a
    test/gate to get green.

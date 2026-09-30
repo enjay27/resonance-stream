@@ -22,19 +22,27 @@ async fn delay(ms: i32) {
     let _ = JsFuture::from(promise).await;
 }
 
+/// Where the adapter scan is; only this dialog reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScanStatus {
+    Idle,
+    Scanning,
+    Success,
+    Fail,
+}
+
 #[component]
 pub fn Troubleshooter() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("Signals missing");
     let actions = use_context::<AppActions>().expect("Actions missing");
 
-    // "idle", "scanning", "success", "fail"
-    let (status, set_status) = signal("idle".to_string());
+    let (status, set_status) = signal(ScanStatus::Idle);
     let (current_test, set_current_test) = signal("".to_string());
     let (progress, set_progress) = signal(0.0);
 
     let start_scan = move |_| {
         spawn_local(async move {
-            set_status.set("scanning".to_string());
+            set_status.set(ScanStatus::Scanning);
             set_progress.set(0.0);
 
             if let Ok(res) = invoke("get_network_interfaces", JsValue::NULL).await {
@@ -61,7 +69,7 @@ pub fn Troubleshooter() -> impl IntoView {
                             // As long as the game is running, background packets will trigger this instantly!
                             if signals.service.sniffer_state.get_untracked() == SnifferState::Active
                             {
-                                set_status.set("success".to_string());
+                                set_status.set(ScanStatus::Success);
                                 set_progress.set(100.0);
                                 return; // We found the working adapter!
                             }
@@ -72,7 +80,7 @@ pub fn Troubleshooter() -> impl IntoView {
             }
 
             // If we loop through everything and nothing worked...
-            set_status.set("fail".to_string());
+            set_status.set(ScanStatus::Fail);
             set_progress.set(100.0);
             signals.config.set_network_interface.set("".to_string()); // Reset to auto
             actions.save_config.dispatch(());
@@ -101,8 +109,8 @@ pub fn Troubleshooter() -> impl IntoView {
             <div class="modal modal-open backdrop-blur-sm z-[30000]">
                 <div class="modal-box bg-base-300 border border-base-content/10 shadow-2xl w-full max-w-md p-6">
 
-                    {move || match status.get().as_str() {
-                        "idle" => view! {
+                    {move || match status.get() {
+                        ScanStatus::Idle => view! {
                             <div class="space-y-4">
                                 // --- STEP 1: FIREWALL (Primary Action) ---
                                 <div class="bg-error/10 p-3 rounded-lg border border-error/20">
@@ -128,7 +136,7 @@ pub fn Troubleshooter() -> impl IntoView {
                             </div>
                         }.into_any(),
 
-                        "scanning" => view! {
+                        ScanStatus::Scanning => view! {
                             <div class="space-y-4 text-center py-4">
                                 <div class="text-xs font-bold text-success animate-pulse mb-2">"⚠️ 중요: 게임이 켜져 있는지 확인해 주세요!"</div>
 
@@ -142,7 +150,7 @@ pub fn Troubleshooter() -> impl IntoView {
                             </div>
                         }.into_any(),
 
-                        "success" => view! {
+                        ScanStatus::Success => view! {
                             <div class="space-y-4 text-center py-2">
                                 <div class="text-4xl mb-2">"🎉"</div>
                                 <h3 class="text-lg font-bold text-success">"어댑터 복구 완료!"</h3>
@@ -152,7 +160,7 @@ pub fn Troubleshooter() -> impl IntoView {
                             </div>
                         }.into_any(),
 
-                        "fail" => view! {
+                        ScanStatus::Fail => view! {
                             <div class="space-y-4 text-center py-2">
                                 <div class="text-4xl mb-2">"❌"</div>
                                 <h3 class="text-lg font-bold text-error">"감지 실패"</h3>
@@ -165,11 +173,10 @@ pub fn Troubleshooter() -> impl IntoView {
                             </div>
                         }.into_any(),
 
-                        _ => view! { <div></div> }.into_any(),
                     }}
                 </div>
                 <div class="modal-backdrop bg-black/50" on:click=move |_| {
-                    if status.get() != "scanning" { signals.ui.set_show_troubleshooter.set(false); }
+                    if status.get() != ScanStatus::Scanning { signals.ui.set_show_troubleshooter.set(false); }
                 }></div>
             </div>
         </Show>

@@ -25,6 +25,7 @@ impl Tab {
             Tab::Channel(Channel::Guild),
             Tab::Channel(Channel::Party),
             Tab::Channel(Channel::Local),
+            Tab::Channel(Channel::Beginner),
         ];
         if debug_mode {
             tabs.push(Tab::System);
@@ -33,12 +34,13 @@ impl Tab {
     }
 
     /// The tabs the tab-switch shortcut cycles through, in order.
-    const SWITCH_ORDER: [Tab; 5] = [
+    const SWITCH_ORDER: [Tab; 6] = [
         Tab::Custom,
         Tab::Channel(Channel::World),
         Tab::Channel(Channel::Guild),
         Tab::Channel(Channel::Party),
         Tab::Channel(Channel::Local),
+        Tab::Channel(Channel::Beginner),
     ];
 
     /// The tab the shortcut switches to from the tab labelled `current`: the
@@ -99,6 +101,7 @@ impl Tab {
             Tab::Channel(Channel::Guild) => "🛡️",
             Tab::Channel(Channel::Party) => "⚔️",
             Tab::Channel(Channel::Local) => "📍",
+            Tab::Channel(Channel::Beginner) => "🌱",
         }
     }
 
@@ -115,6 +118,7 @@ impl Tab {
                 "text-base-content opacity-70",
                 "border-base-content opacity-70",
             ),
+            Tab::Channel(Channel::Beginner) => ("text-amber-500", "border-amber-500"),
         }
     }
 
@@ -455,6 +459,7 @@ mod tests {
         assert_eq!(Tab::from_label("파티"), Tab::Channel(Channel::Party));
         assert_eq!(Tab::from_label("길드"), Tab::Channel(Channel::Guild));
         assert_eq!(Tab::from_label("월드"), Tab::Channel(Channel::World));
+        assert_eq!(Tab::from_label("초보자"), Tab::Channel(Channel::Beginner));
         assert_eq!(
             Tab::from_label("anything else"),
             Tab::Channel(Channel::World)
@@ -464,12 +469,15 @@ mod tests {
     #[test]
     fn the_nav_lists_the_tabs_in_their_order() {
         let labels: Vec<_> = Tab::nav(false).iter().map(|t| t.label()).collect();
-        assert_eq!(labels, ["전체", "커스텀", "월드", "길드", "파티", "로컬"]);
+        assert_eq!(
+            labels,
+            ["전체", "커스텀", "월드", "길드", "파티", "로컬", "초보자"]
+        );
         let debug: Vec<_> = Tab::nav(true).iter().map(|t| t.label()).collect();
         assert_eq!(debug.last(), Some(&"시스템"));
-        assert_eq!(debug.len(), 7);
+        assert_eq!(debug.len(), 8);
         let icons: Vec<_> = Tab::nav(true).iter().map(|t| t.icon()).collect();
-        assert_eq!(icons, ["♾️", "⭐", "🌐", "🛡️", "⚔️", "📍", "⚙️"]);
+        assert_eq!(icons, ["♾️", "⭐", "🌐", "🛡️", "⚔️", "📍", "🌱", "⚙️"]);
     }
 
     #[test]
@@ -488,6 +496,7 @@ mod tests {
                 "GUILD",
                 "PARTY",
                 "LOCAL",
+                "BEGINNER",
                 "SYSTEM"
             ]
         );
@@ -502,7 +511,7 @@ mod tests {
             .into_iter()
             .filter(|t| t.has_archive_setting())
             .collect();
-        assert_eq!(with.len(), 4);
+        assert_eq!(with.len(), 5);
         assert!(with.iter().all(|t| matches!(t, Tab::Channel(_))));
         assert_eq!(Tab::Custom.colors(), ("text-success", "border-success"));
         assert_eq!(
@@ -518,12 +527,15 @@ mod tests {
     fn the_tab_switch_shortcut_cycles_and_falls_back_to_custom() {
         let mut label = "커스텀";
         let mut seen = Vec::new();
-        for _ in 0..6 {
+        for _ in 0..7 {
             let next = Tab::switch_from(label);
             label = next.label();
             seen.push(label);
         }
-        assert_eq!(seen, ["월드", "길드", "파티", "로컬", "커스텀", "월드"]);
+        assert_eq!(
+            seen,
+            ["월드", "길드", "파티", "로컬", "초보자", "커스텀", "월드"]
+        );
         for outside in ["전체", "시스템", "nonsense", ""] {
             assert_eq!(Tab::switch_from(outside), Tab::Custom, "{outside:?}");
         }

@@ -48,6 +48,7 @@ pub enum Channel {
     Local,
     Party,
     Guild,
+    Beginner,
 }
 
 impl Channel {
@@ -57,6 +58,7 @@ impl Channel {
             Channel::Local => 2,
             Channel::Party => 3,
             Channel::Guild => 4,
+            Channel::Beginner => 9,
         }
     }
 
@@ -66,6 +68,7 @@ impl Channel {
             Channel::Local => "LOCAL",
             Channel::Party => "PARTY",
             Channel::Guild => "GUILD",
+            Channel::Beginner => "BEGINNER",
         }
     }
 }

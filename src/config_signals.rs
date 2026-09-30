@@ -392,7 +392,7 @@ mod tests {
         assert_eq!(config.active_tab, ALL_TAB);
         assert_eq!(
             config.custom_tab_filters,
-            ["WORLD", "GUILD", "PARTY", "LOCAL"]
+            ["WORLD", "GUILD", "PARTY", "LOCAL", "BEGINNER"]
         );
         assert_eq!(config.archive_ignored_channels, ["WORLD"]);
         assert_eq!((config.font_size, config.message_spacing), (14, 4));

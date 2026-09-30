@@ -27,15 +27,17 @@ pub enum Channel {
     Local,
     Party,
     Guild,
+    Beginner,
 }
 
 impl Channel {
     /// Every channel, in the order the tabs and the custom-tab menu list them.
-    pub const ALL: [Channel; 4] = [
+    pub const ALL: [Channel; 5] = [
         Channel::World,
         Channel::Guild,
         Channel::Party,
         Channel::Local,
+        Channel::Beginner,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -44,6 +46,7 @@ impl Channel {
             Channel::Local => "LOCAL",
             Channel::Party => "PARTY",
             Channel::Guild => "GUILD",
+            Channel::Beginner => "BEGINNER",
         }
     }
 
@@ -54,6 +57,7 @@ impl Channel {
             Channel::Guild => "길드",
             Channel::Party => "파티",
             Channel::Local => "로컬",
+            Channel::Beginner => "초보자",
         }
     }
 
@@ -73,12 +77,13 @@ impl Channel {
     }
 
     /// The channel for the number the game sends in a chat frame: 2 local,
-    /// 3 party, 4 guild; anything else (1 world, 9 beginner, ...) is world.
+    /// 3 party, 4 guild, 9 beginner; anything else (1 world, ...) is world.
     pub fn from_code(code: u64) -> Self {
         match code {
             2 => Channel::Local,
             3 => Channel::Party,
             4 => Channel::Guild,
+            9 => Channel::Beginner,
             _ => Channel::World,
         }
     }
@@ -555,6 +560,7 @@ mod tests {
             (Channel::Local, "LOCAL"),
             (Channel::Party, "PARTY"),
             (Channel::Guild, "GUILD"),
+            (Channel::Beginner, "BEGINNER"),
         ] {
             assert_eq!(serde_json::to_value(channel).unwrap(), name);
             assert_eq!(
@@ -568,8 +574,8 @@ mod tests {
 
     #[test]
     fn a_channel_name_nobody_knows_reads_as_world() {
-        // Old logs, and channels the parser has no variant for yet.
-        for unknown in ["", "BEGINNER", "world", "9", "길드"] {
+        // Old logs, and channels the game has that the app has no variant for.
+        for unknown in ["", "beginner", "world", "9", "길드"] {
             assert_eq!(Channel::from_name(unknown), Channel::World, "{unknown:?}");
             let json = serde_json::Value::String(unknown.into());
             assert_eq!(
@@ -582,7 +588,7 @@ mod tests {
     #[test]
     fn the_game_sends_channels_as_numbers() {
         // One table (was in the parser twice): 2 local, 3 party, 4 guild,
-        // anything else -- 1 is world, 9 the beginner channel -- world.
+        // 9 beginner, anything else -- 1 is world -- world.
         let got: Vec<_> = [1, 2, 3, 4, 9, 0, 1000].map(Channel::from_code).to_vec();
         assert_eq!(
             got,
@@ -591,7 +597,7 @@ mod tests {
                 Channel::Local,
                 Channel::Party,
                 Channel::Guild,
-                Channel::World,
+                Channel::Beginner,
                 Channel::World,
                 Channel::World
             ]
@@ -605,6 +611,7 @@ mod tests {
             (Channel::Guild, "길드"),
             (Channel::Party, "파티"),
             (Channel::Local, "로컬"),
+            (Channel::Beginner, "초보자"),
         ] {
             assert_eq!(channel.label(), label);
             assert_eq!(Channel::from_label(label), Some(channel));
@@ -624,10 +631,10 @@ mod tests {
 
     #[test]
     fn every_channel_is_listed_once() {
-        assert_eq!(Channel::ALL.len(), 4);
+        assert_eq!(Channel::ALL.len(), 5);
         let names: Vec<_> = Channel::ALL.iter().map(|c| c.as_str()).collect();
         // The order the tabs and the custom-tab menu list them in.
-        assert_eq!(names, ["WORLD", "GUILD", "PARTY", "LOCAL"]);
+        assert_eq!(names, ["WORLD", "GUILD", "PARTY", "LOCAL", "BEGINNER"]);
         assert_eq!(Channel::default(), Channel::World);
         assert_eq!(Channel::Guild.to_string(), "GUILD");
     }

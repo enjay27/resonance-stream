@@ -4,7 +4,7 @@
 
 ## Now — 2026-10-01
 
-**Open-items series (2026-10-01):** 1 `claude/plain-history-frames` (plain `0x0003` `{3: channel, 5: chat}` history is now decoded; framing.rs), then 2 `claude/beginner-channel`, 3 `claude/core-review-leftovers` (W4/W6-W9). One PR at a time. A4 waits on Kade; compact-mode hover needs a Windows look.
+**Open-items series (2026-10-01) -- PAUSED by Kade after task 2:** 1 plain `0x0003` history merged (#67); 2 `Channel::Beginner` (code 9, 초보자 tab) PR #68; **3 `claude/core-review-leftovers` (W4/W6-W9) not started**. Handoff, order and file pointers: [`sessions/2026-10-01-open-items-handoff.md`](.memory/sessions/2026-10-01-open-items-handoff.md). A4 waits on Kade; compact-mode hover needs a Windows look. NOT VERIFIED on Windows: the beginner tab, badge, colours, limit menu.
 
 **CI build cache (2026-10-01, `claude/friendly-johnson-sqmhjl`):** the Windows gate took ~3m54s; logs showed a ~1 GB rust-cache re-saved by every PR (PR caches are readable by that PR only, and evict main's), `cargo check` + `cargo test` building every dependency twice, and full debug info. Now: only `main` saves the cache (`save-if`), `auto-merge.yml` dispatches CI on main after each merge (GITHUB_TOKEN merges start no push run), `app-check` is `cargo test` only, `CARGO_PROFILE_DEV_DEBUG=line-tables-only`. **Open:** `auto-merge.yml` is read from main, so the first dispatch needs a manual *Run workflow* on main after this merges; compare job times on the next PRs. NOT VERIFIED: the Windows job and `ui-check` (no Windows / wasm target in that session) -- CI decides.
 

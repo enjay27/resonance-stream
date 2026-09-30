@@ -78,3 +78,5 @@ run as the real app.
   translator worker and `wait_for_server` use `resonance_llama::client()` (2 s connect,
   30 s request); an empty model reply is a failed job. Tested against a mock server on
   Linux; app cross-checked only, not run against a real llama-server.
+
+- **Beginner channel (2026-10-01, `claude/beginner-channel`).** Core/ui/app-cross gates green; not run on Windows: the new 초보자 tab (nav, 🌱 icon, unread badge, colours), its limit and archive entries in the right-click menu, the custom-tab list showing BEGINNER, and the tab-switch shortcut cycle (now six tabs). Beginner lines from old logs stay WORLD.

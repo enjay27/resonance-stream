@@ -84,6 +84,7 @@ fn default_tab_limits() -> std::collections::HashMap<String, usize> {
         (Channel::Local.as_str(), 500),
         (Channel::Party.as_str(), 1000), // Party/Guild get huge limits
         (Channel::Guild.as_str(), 1000),
+        (Channel::Beginner.as_str(), 500),
         (ALL_TAB, 1000),
         (CUSTOM_TAB, 1000),
     ]

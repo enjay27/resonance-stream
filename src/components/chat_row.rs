@@ -73,6 +73,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
             Channel::Guild => ("text-emerald-500", "border-l-emerald-500"),
             Channel::Party => ("text-sky-500", "border-l-sky-500"),
             Channel::Local => ("text-base-content/70", "border-l-base-content/50"),
+            Channel::Beginner => ("text-amber-500", "border-l-amber-500"),
         })
     };
 

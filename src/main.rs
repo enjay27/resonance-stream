@@ -2,6 +2,7 @@ mod app;
 pub mod chat_view;
 pub mod components;
 pub mod hooks;
+pub mod shortcut_keys;
 pub mod store;
 pub mod tauri_bridge;
 pub mod ui_types;

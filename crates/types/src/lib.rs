@@ -71,6 +71,38 @@ pub struct NetworkInterface {
     pub ip: String,
 }
 
+// --- Favorite messages ---
+
+/// A saved chat line: copied from the favorites panel, or pasted into the
+/// game by its global shortcut. `shortcut` is a Tauri accelerator built from
+/// `KeyboardEvent.code` ("Ctrl+Shift+Digit1"); empty means none.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoriteMessage {
+    pub text: String,
+    #[serde(default)]
+    pub shortcut: String,
+}
+
+/// What a fresh config starts with: common Japanese chat lines, no shortcuts.
+pub fn default_favorite_messages() -> Vec<FavoriteMessage> {
+    [
+        "こんにちは！",
+        "おはようございます！",
+        "よろしくお願いします！",
+        "ありがとうございます！",
+        "お疲れ様でした！",
+        "すみません！",
+        "またね！",
+    ]
+    .into_iter()
+    .map(|text| FavoriteMessage {
+        text: text.to_string(),
+        shortcut: String::new(),
+    })
+    .collect()
+}
+
 // --- Downloads and updates ---
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -152,6 +184,17 @@ mod tests {
         )
         .unwrap();
         assert!(without.sha256.is_empty());
+    }
+
+    #[test]
+    fn favorite_defaults_have_no_shortcut_and_shortcut_is_optional() {
+        let defaults = default_favorite_messages();
+        assert!(!defaults.is_empty());
+        assert!(defaults.iter().all(|f| f.shortcut.is_empty()));
+
+        let fav: FavoriteMessage = serde_json::from_str(r#"{"text":"hi"}"#).unwrap();
+        assert_eq!(fav.text, "hi");
+        assert!(fav.shortcut.is_empty());
     }
 
     #[test]

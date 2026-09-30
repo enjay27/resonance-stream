@@ -135,21 +135,12 @@ pub fn launch_ai_server(
         }
     };
 
-    let gpu_layers = if config.compute_mode.to_lowercase() == "gpu" {
-        match config.tier.to_lowercase().as_str() {
-            "low" => "12",
-            "middle" => "24",
-            "high" => "32",
-            "very high" => "99",
-            _ => "24",
-        }
-    } else {
-        "0"
-    };
+    let gpu_layers =
+        resonance_core::workers::gpu_layers(config.compute_mode, config.tier).to_string();
 
     server_cmd.args([
         "-ngl",
-        gpu_layers,
+        &gpu_layers,
         "-c",
         "1536",
         "-b",

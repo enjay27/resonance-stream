@@ -1,5 +1,6 @@
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
+use crate::ui_types::Theme;
 use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 
@@ -175,13 +176,12 @@ pub fn AppearanceSection() -> impl IntoView {
             // Theme Toggle
             <button class="btn btn-sm btn-block justify-between bg-base-200 border-base-content/5 font-bold hover:bg-base-content/10"
                     on:click=move |_| {
-                        let new_theme = if signals.theme.get() == "dark" { "light" } else { "dark" };
-                        signals.set_theme.set(new_theme.to_string());
+                        signals.set_theme.set(signals.theme.get().toggled());
                         actions.save_config.dispatch(());
                     }>
                 <span class="text-xs">"Theme Mode"</span>
                 <span class="text-[10px] uppercase tracking-widest opacity-70">
-                    {move || if signals.theme.get() == "dark" { "🌙 Dark" } else { "☀️ Light" }}
+                    {move || if signals.theme.get() == Theme::Dark { "🌙 Dark" } else { "☀️ Light" }}
                 </span>
             </button>
         </section>

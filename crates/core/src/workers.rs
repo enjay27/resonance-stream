@@ -1,6 +1,7 @@
 //! Decisions about the app's background workers, kept free of Tauri so they
 //! can be tested on any OS.
 
+use resonance_types::{ComputeMode, Tier};
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
@@ -15,10 +16,22 @@ pub enum WorkerChange {
 
 /// The settings that decide whether and how the translator runs.
 #[derive(Debug, Clone, Copy)]
-pub struct TranslatorSettings<'a> {
+pub struct TranslatorSettings {
     pub enabled: bool,
-    pub compute_mode: &'a str,
-    pub tier: &'a str,
+    pub compute_mode: ComputeMode,
+    pub tier: Tier,
+}
+
+/// How many model layers llama-server puts on the GPU (`-ngl`): none on the
+/// CPU, by VRAM tier on the GPU.
+pub fn gpu_layers(compute_mode: ComputeMode, tier: Tier) -> u32 {
+    match (compute_mode, tier) {
+        (ComputeMode::Cpu, _) => 0,
+        (ComputeMode::Gpu, Tier::Low) => 12,
+        (ComputeMode::Gpu, Tier::Middle) => 24,
+        (ComputeMode::Gpu, Tier::High) => 32,
+        (ComputeMode::Gpu, Tier::VeryHigh) => 99,
+    }
 }
 
 /// Exactly one change for the translator, given old and new settings.
@@ -202,11 +215,26 @@ impl TranslationLedger {
 mod tests {
     use super::*;
 
-    fn s(enabled: bool, mode: &'static str, tier: &'static str) -> TranslatorSettings<'static> {
+    use ComputeMode::{Cpu, Gpu};
+    use Tier::{High, Low, Middle, VeryHigh};
+
+    fn s(enabled: bool, compute_mode: ComputeMode, tier: Tier) -> TranslatorSettings {
         TranslatorSettings {
             enabled,
-            compute_mode: mode,
+            compute_mode,
             tier,
+        }
+    }
+
+    #[test]
+    fn the_gpu_takes_layers_by_tier_and_the_cpu_none() {
+        // The numbers llama-server's `-ngl` has always been given.
+        assert_eq!(
+            [Low, Middle, High, VeryHigh].map(|tier| gpu_layers(Gpu, tier)),
+            [12, 24, 32, 99]
+        );
+        for tier in Tier::ALL {
+            assert_eq!(gpu_layers(Cpu, *tier), 0, "{tier:?}");
         }
     }
 
@@ -214,7 +242,7 @@ mod tests {
     fn turning_translation_on_starts_exactly_one_worker() {
         // Regression (review B4): save_config started two.
         assert_eq!(
-            translator_change(s(false, "cpu", "middle"), s(true, "cpu", "middle")),
+            translator_change(s(false, Cpu, Middle), s(true, Cpu, Middle)),
             WorkerChange::Start
         );
     }
@@ -222,14 +250,14 @@ mod tests {
     #[test]
     fn translator_transitions() {
         use WorkerChange::*;
-        let on = s(true, "gpu", "high");
-        assert_eq!(translator_change(on, s(false, "gpu", "high")), Stop);
+        let on = s(true, Gpu, High);
+        assert_eq!(translator_change(on, s(false, Gpu, High)), Stop);
         assert_eq!(translator_change(on, on), Keep);
-        assert_eq!(translator_change(on, s(true, "gpu", "low")), Restart);
-        assert_eq!(translator_change(on, s(true, "cpu", "high")), Restart);
+        assert_eq!(translator_change(on, s(true, Gpu, Low)), Restart);
+        assert_eq!(translator_change(on, s(true, Cpu, High)), Restart);
         // Spec changes while off do not start anything.
         assert_eq!(
-            translator_change(s(false, "cpu", "low"), s(false, "gpu", "high")),
+            translator_change(s(false, Cpu, Low), s(false, Gpu, High)),
             Keep
         );
     }

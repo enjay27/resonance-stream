@@ -296,6 +296,88 @@ pub struct NetworkInterface {
     pub ip: String,
 }
 
+// --- Settings with a fixed set of values ---
+
+/// A setting that `config.json` stores as a lowercase name. Reads leniently:
+/// the case is ignored and a name nobody knows is the default, so one bad
+/// value never costs the whole file.
+macro_rules! string_enum {
+    ($(#[$meta:meta])* $name:ident { $($variant:ident => $wire:literal),+ $(,)? } default $default:ident) => {
+        $(#[$meta])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum $name {
+            $($variant),+
+        }
+
+        impl $name {
+            /// Every value, in the order a menu lists them.
+            pub const ALL: &'static [$name] = &[$($name::$variant),+];
+
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $($name::$variant => $wire),+
+                }
+            }
+
+            /// The value called `name` (any case); unknown names are the default.
+            pub fn from_name(name: &str) -> Self {
+                Self::ALL
+                    .iter()
+                    .copied()
+                    .find(|value| value.as_str().eq_ignore_ascii_case(name))
+                    .unwrap_or_default()
+            }
+
+            /// Upper-case text for a button.
+            pub fn label(self) -> String {
+                self.as_str().to_uppercase()
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                $name::$default
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_str(self.as_str())
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                Ok(Self::from_name(&String::deserialize(deserializer)?))
+            }
+        }
+    };
+}
+
+string_enum! {
+    /// Where the translator runs.
+    ComputeMode { Cpu => "cpu", Gpu => "gpu" } default Cpu
+}
+
+string_enum! {
+    /// How much of the model goes to the GPU (VRAM use); only with `Gpu`.
+    Tier { Low => "low", Middle => "middle", High => "high", VeryHigh => "very high" } default Middle
+}
+
+string_enum! {
+    /// The window's colour scheme.
+    Theme { Dark => "dark", Light => "light" } default Dark
+}
+
+impl Theme {
+    pub fn toggled(self) -> Self {
+        match self {
+            Theme::Dark => Theme::Light,
+            Theme::Light => Theme::Dark,
+        }
+    }
+}
+
 // --- Favorite messages ---
 
 /// A saved chat line: copied from the favorites panel, or pasted into the
@@ -605,6 +687,65 @@ mod tests {
             assert_eq!(from_value::<TranslatorState>(json!(name)).unwrap(), state);
             assert_eq!(state.label(), name.to_uppercase());
         }
+    }
+
+    #[test]
+    fn settings_are_their_lowercase_names_on_disk() {
+        use serde_json::{from_value, json, to_value};
+        for (value, name) in [(ComputeMode::Cpu, "cpu"), (ComputeMode::Gpu, "gpu")] {
+            assert_eq!(to_value(value).unwrap(), name);
+            assert_eq!(from_value::<ComputeMode>(json!(name)).unwrap(), value);
+            assert_eq!(value.label(), name.to_uppercase());
+        }
+        for (value, name) in [
+            (Tier::Low, "low"),
+            (Tier::Middle, "middle"),
+            (Tier::High, "high"),
+            (Tier::VeryHigh, "very high"),
+        ] {
+            assert_eq!(to_value(value).unwrap(), name);
+            assert_eq!(from_value::<Tier>(json!(name)).unwrap(), value);
+            assert_eq!(value.label(), name.to_uppercase());
+        }
+        for (value, name) in [(Theme::Dark, "dark"), (Theme::Light, "light")] {
+            assert_eq!(to_value(value).unwrap(), name);
+            assert_eq!(from_value::<Theme>(json!(name)).unwrap(), value);
+        }
+        assert_eq!(
+            ComputeMode::ALL.len() + Tier::ALL.len() + Theme::ALL.len(),
+            8
+        );
+    }
+
+    #[test]
+    fn a_setting_nobody_knows_reads_as_its_default_and_case_does_not_matter() {
+        use serde_json::{from_value, json};
+        // The defaults are what a fresh config has.
+        assert_eq!(ComputeMode::default(), ComputeMode::Cpu);
+        assert_eq!(Tier::default(), Tier::Middle);
+        assert_eq!(Theme::default(), Theme::Dark);
+        assert_eq!(
+            from_value::<ComputeMode>(json!("vulkan")).unwrap(),
+            ComputeMode::Cpu
+        );
+        assert_eq!(from_value::<Tier>(json!("extreme")).unwrap(), Tier::Middle);
+        assert_eq!(from_value::<Theme>(json!("")).unwrap(), Theme::Dark);
+        // The backend always compared these ignoring case.
+        assert_eq!(
+            from_value::<ComputeMode>(json!("GPU")).unwrap(),
+            ComputeMode::Gpu
+        );
+        assert_eq!(
+            from_value::<Tier>(json!("Very High")).unwrap(),
+            Tier::VeryHigh
+        );
+        assert_eq!(from_value::<Theme>(json!("LIGHT")).unwrap(), Theme::Light);
+    }
+
+    #[test]
+    fn the_theme_toggles() {
+        assert_eq!(Theme::Dark.toggled(), Theme::Light);
+        assert_eq!(Theme::Light.toggled(), Theme::Dark);
     }
 
     #[test]

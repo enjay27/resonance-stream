@@ -10,6 +10,7 @@ use crate::components::{
 };
 use crate::hooks::use_tray::{setup_tray_listeners, sync_tray_menu};
 use crate::store::AppSignals;
+use crate::ui_types::Theme;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -45,7 +46,7 @@ pub fn App() -> impl IntoView {
             if let Some(doc) = window.document() {
                 // 1. Apply theme to <html> (DaisyUI standard) and FORCE transparency
                 if let Some(html) = doc.document_element() {
-                    let _ = html.set_attribute("data-theme", &theme.get());
+                    let _ = html.set_attribute("data-theme", theme.get().as_str());
                     // This strips DaisyUI's solid background so the Tauri window is clear
                     let _ =
                         html.set_attribute("style", "background-color: transparent !important;");
@@ -90,7 +91,7 @@ pub fn App() -> impl IntoView {
             // style:background-color=move || {
             style=move || {
                 let current_opacity = opacity.get();
-                if theme.get() == "dark" {
+                if theme.get() == Theme::Dark {
                     format!("background-color: rgba(18, 18, 18, {}) !important;", current_opacity)
                 } else {
                     format!("background-color: rgba(252, 252, 252, {}) !important;", current_opacity)

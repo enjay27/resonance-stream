@@ -4,7 +4,9 @@
 
 ## Now — 2026-10-01
 
-**Settings view (2026-09-30, `claude/settings-sidebar`):** macOS-style -- category sidebar (`settings_nav::SettingsCategory`, remembered in `signals.ui.settings_category`) and one pane per category; a window smaller than 900x640 grows while settings is open (`grow_window`/`restore_window`, fit logic `resonance_core::window::grow_to_fit`). NOT VERIFIED on Windows -- [`unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).
+**UI check method (2026-10-01, `claude/ui-preview-skill`):** every UI task is screenshotted with the `ui-preview` skill -- wasm build + mocked `__TAURI__` + Playwright, on Linux. Steps and limits in [`.claude/skills/ui-preview/SKILL.md`](.claude/skills/ui-preview/SKILL.md).
+
+**Settings view (2026-09-30, `claude/settings-sidebar`):** macOS-style -- category sidebar (`settings_nav::SettingsCategory`, remembered in `signals.ui.settings_category`) and one pane per category; a window smaller than 900x640 grows while settings is open (`grow_window`/`restore_window`, fit logic `resonance_core::window::grow_to_fit`). Merged (#70). NOT VERIFIED on Windows -- [`unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).
 
 **Open-items series (2026-10-01): done** -- plain `0x0003` history (#67), `Channel::Beginner` (#68), then `claude/core-review-leftovers`: W4 (dedup grows with reloaded history), W6 (chunk payload before type, one channel-code table, dead `SenderInfo.is_blocked` removed), W7 (IPv6 no longer feeds the watchdog), W9 (`read_error_backoff`), W8 (server that dies while loading is retried with a fresh port via the supervisor). **Still open:** `class_id` (sender tag 24 -- meaning unknown, needs a capture), A4 (Kade's re-fine-tune), compact-mode hover. NOT VERIFIED on Windows: the beginner tab; W8/W9 glue. Handoff: [`sessions/2026-10-01-open-items-handoff.md`](.memory/sessions/2026-10-01-open-items-handoff.md).
 

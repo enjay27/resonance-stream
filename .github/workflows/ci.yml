@@ -1,17 +1,17 @@
 name: CI
 
 # Branch pushes are covered by their pull_request run; push only runs on main.
-# Docs and other non-source files don't need the gates.
+# Pull requests always run: auto-merge.yml merges on a green run, so a
+# docs-only PR must produce one too. Pushes to main skip non-source changes.
 on:
   push:
     branches: [main]
-    paths-ignore: &non-source
+    paths-ignore:
       - '**.md'
       - 'docs/**'
       - '.memory/**'
       - 'LICENSE*'
   pull_request:
-    paths-ignore: *non-source
 
 env:
   CARGO_TERM_COLOR: always

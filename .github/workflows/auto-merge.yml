@@ -1,0 +1,40 @@
+name: Auto-merge
+
+# A pull request from a `claude/*` branch is merged (and its branch deleted)
+# once the CI workflow has passed on its latest commit. Anything else -- a
+# failed run, another branch prefix, a stale run -- is left for a human.
+# `workflow_run` workflows are read from the default branch, so this file only
+# takes effect once it is on main.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    name: merge when CI is green
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'claude/')
+    steps:
+      - name: Merge the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number,headRefOid --jq '.[0]')
+          if [ -z "$pr" ] || [ "$pr" = "null" ]; then echo "no open PR for $BRANCH"; exit 0; fi
+          number=$(jq -r .number <<<"$pr")
+          head=$(jq -r .headRefOid <<<"$pr")
+          # The green run must be for the PR's latest commit, not an older push.
+          if [ "$head" != "$RUN_SHA" ]; then echo "run is for $RUN_SHA, PR head is $head; waiting for its run"; exit 0; fi
+          gh pr merge "$number" --repo "$REPO" --merge --delete-branch

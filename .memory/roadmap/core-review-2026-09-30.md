@@ -58,7 +58,7 @@ More shapes of `0x0003` (12-byte header = u64 counter + 4 zero bytes; the counte
 - root `{4: 1}` -- an ack (sent right after a line is sent), root `{}` -- empty;
 - **root `{3: channel, 5: chat}`, uncompressed, one line** -- channel history with a single
   entry (a `0x8003` is the same thing compressed, ~30 entries). Example: a 2-week-old line
-  "ごろごろ" (ts 1789555005). **W2 skips plain `0x0003` frames, so this line is dropped.**
+  "ごろごろ" (ts 1789555005). **W2 skipped plain `0x0003` frames, so this line was dropped -- fixed 2026-10-01 (`claude/plain-history-frames`): a `0x0003` root with field 5 is history, `{3: chat}` stays an echo.**
   Fix (small, test first): decide a `0x0003` frame's kind by its root's shape (has field 5 ->
   history), not by the type; `{3: chat}` stays an echo.
 - `0x8003` history frame here: 30 lines of world chat (ids 155697-155726), 9.5 KB inflated

@@ -4,7 +4,7 @@ use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use resonance_types::{
     default_catch_up_limit, default_favorite_messages, Channel, ComputeMode, FavoriteMessage,
-    LogLevel, Theme, Tier, ALL_TAB, CUSTOM_TAB,
+    LogLevel, TabSwitchModifier, Theme, Tier, ALL_TAB, CUSTOM_TAB,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -52,7 +52,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub auto_sync_latest_dict: bool,
     #[serde(default)]
-    pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
+    pub tab_switch_modifier: TabSwitchModifier,
     #[serde(default)]
     pub tab_switch_key: String, // e.g., "Tab", "ArrowRight", etc.
     /// Messages each tab keeps (keys: channel names, `ALL_TAB`, `CUSTOM_TAB`).
@@ -132,7 +132,7 @@ impl Default for AppConfig {
             blocked_users: std::collections::HashMap::new(),
             min_sender_level: 1,
             auto_sync_latest_dict: false,
-            tab_switch_modifier: "Ctrl".to_string(),
+            tab_switch_modifier: TabSwitchModifier::default(),
             tab_switch_key: "Tab".to_string(),
             tab_limits: default_tab_limits(),
             archive_ignored_channels: default_archive_ignored_channels(),
@@ -350,6 +350,27 @@ mod tests {
         assert_eq!(config.compute_mode, ComputeMode::Gpu);
         assert_eq!(config.tier, Tier::Middle);
         assert_eq!(config.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn the_tab_switch_modifier_is_ctrl_when_missing_or_empty() {
+        // A config saved before the shortcut existed has no modifier (and no
+        // key, so nothing is registered); the ui always showed that as Ctrl.
+        // The backend used to read the missing value as "no modifier".
+        for json in [
+            r#"{"init_done": true}"#,
+            r#"{"tab_switch_modifier": ""}"#,
+            r#"{"tab_switch_modifier": "Ctrl", "tab_switch_key": "Tab"}"#,
+        ] {
+            let config: AppConfig = serde_json::from_str(json).unwrap();
+            assert_eq!(
+                config.tab_switch_modifier,
+                TabSwitchModifier::Ctrl,
+                "{json}"
+            );
+        }
+        let bare: AppConfig = serde_json::from_str(r#"{"tab_switch_modifier": "None"}"#).unwrap();
+        assert_eq!(bare.tab_switch_modifier, TabSwitchModifier::NoModifier);
     }
 
     #[test]

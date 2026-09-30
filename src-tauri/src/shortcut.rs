@@ -8,7 +8,7 @@
 use crate::{inject_system_message, AppState, SystemLogLevel};
 use parking_lot::Mutex;
 use resonance_core::paste::RepeatGuard;
-use resonance_types::FavoriteMessage;
+use resonance_types::{FavoriteMessage, TabSwitchModifier};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -28,7 +28,7 @@ static PASTE_LOCK: Mutex<()> = Mutex::new(());
 /// What the global shortcuts are bound to.
 #[derive(Debug, Clone, Default)]
 pub struct GlobalShortcuts {
-    pub tab_modifier: String,
+    pub tab_modifier: TabSwitchModifier,
     pub tab_key: String,
     pub favorites: Vec<FavoriteMessage>,
 }
@@ -38,7 +38,7 @@ pub fn update_global_tab_shortcut(app: tauri::AppHandle, modifier: String, key: 
     {
         let state = app.state::<AppState>();
         let mut shortcuts = state.shortcuts.lock();
-        shortcuts.tab_modifier = modifier;
+        shortcuts.tab_modifier = TabSwitchModifier::from_name(&modifier);
         shortcuts.tab_key = key;
     }
     apply_global_shortcuts(&app);
@@ -46,15 +46,16 @@ pub fn update_global_tab_shortcut(app: tauri::AppHandle, modifier: String, key: 
 
 /// The tab-switch shortcut as Tauri reads it ("CommandOrControl+TAB"), or
 /// `None` when unset.
-fn tab_accelerator(modifier: &str, key: &str) -> Option<String> {
+fn tab_accelerator(modifier: TabSwitchModifier, key: &str) -> Option<String> {
     if key.trim().is_empty() || key == "None" {
         return None;
     }
     // Tauri expects "CommandOrControl" instead of "Ctrl"
     let tauri_mod = match modifier {
-        "Ctrl" => "CommandOrControl",
-        "None" | "" => "",
-        other => other,
+        TabSwitchModifier::Ctrl => "CommandOrControl",
+        TabSwitchModifier::Alt => "Alt",
+        TabSwitchModifier::Shift => "Shift",
+        TabSwitchModifier::NoModifier => "",
     };
     // Tauri expects uppercase letters for standard keys
     let tauri_key = key.to_uppercase();
@@ -76,7 +77,7 @@ pub fn apply_global_shortcuts(app: &AppHandle) {
     };
     let mut taken: Vec<Shortcut> = Vec::new();
 
-    if let Some(accel) = tab_accelerator(&current.tab_modifier, &current.tab_key) {
+    if let Some(accel) = tab_accelerator(current.tab_modifier, &current.tab_key) {
         match accel.parse::<Shortcut>() {
             Ok(shortcut) => {
                 let registered = global.on_shortcut(shortcut, |app_handle, _shortcut, event| {
@@ -206,12 +207,19 @@ mod tests {
     #[test]
     fn tab_accelerator_matches_the_old_format() {
         assert_eq!(
-            tab_accelerator("Ctrl", "Tab").as_deref(),
+            tab_accelerator(TabSwitchModifier::Ctrl, "Tab").as_deref(),
             Some("CommandOrControl+TAB")
         );
-        assert_eq!(tab_accelerator("None", "F2").as_deref(), Some("F2"));
-        assert_eq!(tab_accelerator("Ctrl", ""), None);
-        assert_eq!(tab_accelerator("None", "None"), None);
+        assert_eq!(
+            tab_accelerator(TabSwitchModifier::Alt, "q").as_deref(),
+            Some("Alt+Q")
+        );
+        assert_eq!(
+            tab_accelerator(TabSwitchModifier::NoModifier, "F2").as_deref(),
+            Some("F2")
+        );
+        assert_eq!(tab_accelerator(TabSwitchModifier::Ctrl, ""), None);
+        assert_eq!(tab_accelerator(TabSwitchModifier::NoModifier, "None"), None);
     }
 
     #[test]

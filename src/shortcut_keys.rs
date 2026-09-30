@@ -5,6 +5,8 @@
 //! not change with the Korean/Japanese IME or keyboard layout, and the
 //! backend's shortcut parser reads it as-is.
 
+use crate::ui_types::TabSwitchModifier;
+
 /// Why a key press did not become a shortcut.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rejected {
@@ -163,7 +165,7 @@ pub fn display(accelerator: &str) -> String {
 
 /// The tab-switch shortcut (stored as modifier + `KeyboardEvent.key`) in the
 /// same form, so a favorite can be checked against it. `None` when unset.
-pub fn tab_switch_accelerator(modifier: &str, key: &str) -> Option<String> {
+pub fn tab_switch_accelerator(modifier: TabSwitchModifier, key: &str) -> Option<String> {
     if key.trim().is_empty() || key == "None" {
         return None;
     }
@@ -176,8 +178,8 @@ pub fn tab_switch_accelerator(modifier: &str, key: &str) -> Option<String> {
         _ => key.to_string(),
     };
     Some(match modifier {
-        "Ctrl" | "Alt" | "Shift" => format!("{modifier}+{code}"),
-        _ => code,
+        TabSwitchModifier::NoModifier => code,
+        modifier => format!("{}+{code}", modifier.as_str()),
     })
 }
 
@@ -268,19 +270,29 @@ mod tests {
     #[test]
     fn tab_switch_shortcut_converts_to_the_same_form() {
         assert_eq!(
-            tab_switch_accelerator("Ctrl", "Tab").as_deref(),
+            tab_switch_accelerator(TabSwitchModifier::Ctrl, "Tab").as_deref(),
             Some("Ctrl+Tab")
         );
         assert_eq!(
-            tab_switch_accelerator("Ctrl", "`").as_deref(),
+            tab_switch_accelerator(TabSwitchModifier::Ctrl, "`").as_deref(),
             Some("Ctrl+Backquote")
         );
         assert_eq!(
-            tab_switch_accelerator("Alt", "q").as_deref(),
+            tab_switch_accelerator(TabSwitchModifier::Alt, "q").as_deref(),
             Some("Alt+KeyQ")
         );
-        assert_eq!(tab_switch_accelerator("None", "F2").as_deref(), Some("F2"));
-        assert_eq!(tab_switch_accelerator("None", ""), None);
+        assert_eq!(
+            tab_switch_accelerator(TabSwitchModifier::NoModifier, "F2").as_deref(),
+            Some("F2")
+        );
+        assert_eq!(
+            tab_switch_accelerator(TabSwitchModifier::NoModifier, ""),
+            None
+        );
+        assert_eq!(
+            tab_switch_accelerator(TabSwitchModifier::Shift, "x").as_deref(),
+            Some("Shift+KeyX")
+        );
     }
 
     #[test]

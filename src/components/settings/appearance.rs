@@ -1,6 +1,6 @@
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
-use crate::ui_types::Theme;
+use crate::ui_types::{TabSwitchModifier, Theme};
 use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 
@@ -76,13 +76,13 @@ pub fn AppearanceSection() -> impl IntoView {
 
                             // Let users also press "Escape" to cancel/unbind!
                             if key_str == "Escape" {
-                                signals.set_tab_switch_modifier.set("None".to_string());
+                                signals.set_tab_switch_modifier.set(TabSwitchModifier::NoModifier);
                                 signals.set_tab_switch_key.set("".to_string());
                                 actions.save_config.dispatch(());
 
                                 spawn_local(async move {
                                     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                                        "modifier": "None",
+                                        "modifier": TabSwitchModifier::NoModifier.as_str(),
                                         "key": ""
                                     })).unwrap();
                                     let _ = invoke("update_global_tab_shortcut", args).await;
@@ -91,21 +91,21 @@ pub fn AppearanceSection() -> impl IntoView {
                             }
 
                             if !ignored.contains(&key_str.as_str()) {
-                                let modifier_str = if ev.ctrl_key() || ev.meta_key() {
-                                    "Ctrl"
+                                let modifier = if ev.ctrl_key() || ev.meta_key() {
+                                    TabSwitchModifier::Ctrl
                                 } else if ev.alt_key() {
-                                    "Alt"
+                                    TabSwitchModifier::Alt
                                 } else if ev.shift_key() {
-                                    "Shift"
+                                    TabSwitchModifier::Shift
                                 } else {
-                                    "None"
+                                    TabSwitchModifier::NoModifier
                                 };
 
-                                signals.set_tab_switch_modifier.set(modifier_str.to_string());
+                                signals.set_tab_switch_modifier.set(modifier);
                                 signals.set_tab_switch_key.set(key_str.clone());
                                 actions.save_config.dispatch(());
 
-                                let rust_mod = modifier_str.to_string();
+                                let rust_mod = modifier.as_str();
                                 let rust_key = key_str.clone();
 
                                 spawn_local(async move {
@@ -138,10 +138,10 @@ pub fn AppearanceSection() -> impl IntoView {
                                 }
                             };
 
-                            if m == "None" || m.is_empty() {
+                            if m == TabSwitchModifier::NoModifier {
                                 key_display
                             } else {
-                                format!("{} + {}", m, key_display)
+                                format!("{} + {}", m.as_str(), key_display)
                             }
                         }}
                     </button>
@@ -150,14 +150,14 @@ pub fn AppearanceSection() -> impl IntoView {
                     <div class="tooltip tooltip-top" data-tip="단축키 해제">
                         <button class="btn btn-outline btn-sm btn-error w-8 p-0 font-black focus:outline-none"
                             on:click=move |_| {
-                                signals.set_tab_switch_modifier.set("None".to_string());
+                                signals.set_tab_switch_modifier.set(TabSwitchModifier::NoModifier);
                                 signals.set_tab_switch_key.set("".to_string());
                                 actions.save_config.dispatch(());
 
                                 spawn_local(async move {
                                     // Sending empty strings unregisters the current key without adding a new one
                                     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                                        "modifier": "None",
+                                        "modifier": TabSwitchModifier::NoModifier.as_str(),
                                         "key": ""
                                     })).unwrap();
                                     let _ = invoke("update_global_tab_shortcut", args).await;

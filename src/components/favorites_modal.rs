@@ -121,7 +121,7 @@ pub fn FavoritesModal() -> impl IntoView {
                     .map(|f| f.shortcut)
                     .collect();
                 let tab = tab_switch_accelerator(
-                    &tab_switch_modifier.get_untracked(),
+                    tab_switch_modifier.get_untracked(),
                     &tab_switch_key.get_untracked(),
                 );
                 match find_conflict(&accelerator, own, &others, tab.as_deref()) {

@@ -234,6 +234,12 @@ impl<'a> ChatFilter<'a> {
     }
 }
 
+/// A message that neither pings (keyword alert) nor counts as unread: a
+/// blocked sender, or WORLD chat below the minimum sender level.
+pub fn is_muted(m: &ChatMessage, min_level: u64) -> bool {
+    m.is_blocked || (m.channel == "WORLD" && m.level < min_level)
+}
+
 /// The newest `limit` items accepted by `keep`, oldest first -- walking
 /// from the newest end, so a short page of a long list stops early.
 pub fn newest_matching<T>(
@@ -418,5 +424,16 @@ mod tests {
         store.clear();
         assert_eq!(store.len(), 0);
         assert_eq!(store.tab(ALL_TAB).count(), 0);
+    }
+
+    #[test]
+    fn blocked_and_low_level_world_senders_are_muted() {
+        let mut m = msg("WORLD", 5, "a", "hi");
+        assert!(!is_muted(&m, 5));
+        assert!(is_muted(&m, 6));
+        m.channel = "GUILD".into();
+        assert!(!is_muted(&m, 6)); // the level rule is WORLD only
+        m.is_blocked = true;
+        assert!(is_muted(&m, 0));
     }
 }

@@ -89,6 +89,9 @@ impl ChannelLimits {
     }
 }
 
+/// Most log lines a start-up reload examines (see [`load_recent_within`]).
+pub const MAX_SCAN_LINES: usize = 50_000;
+
 /// The newest messages saved in `dir` (one JSON `ChatMessage` per line, one
 /// `.jsonl` file per day), up to each channel's limit, oldest first. Reading
 /// stops once every channel with a limit of its own is full. A message saved
@@ -97,6 +100,17 @@ impl ChannelLimits {
 /// renumbered 1..=n in that order: saved pids come from earlier runs and may
 /// collide, while new messages must sort after the loaded ones.
 pub fn load_recent(dir: &Path, limits: &ChannelLimits) -> Vec<ChatMessage> {
+    load_recent_within(dir, limits, MAX_SCAN_LINES)
+}
+
+/// [`load_recent`] examining at most `max_lines` log lines (newest first), so
+/// the start-up cost does not grow with the age of the log folder: a channel
+/// that never fills (LOCAL, PARTY) would otherwise read every line ever saved.
+pub fn load_recent_within(
+    dir: &Path,
+    limits: &ChannelLimits,
+    max_lines: usize,
+) -> Vec<ChatMessage> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -116,8 +130,9 @@ pub fn load_recent(dir: &Path, limits: &ChannelLimits) -> Vec<ChatMessage> {
             .channels()
             .all(|c| counts.get(c).copied().unwrap_or(0) >= limits.of(c))
     };
-    for file in files.iter().rev() {
-        if all_full(&counts) {
+    let mut scanned = 0usize;
+    'files: for file in files.iter().rev() {
+        if all_full(&counts) || scanned >= max_lines {
             break;
         }
         let Ok(content) = std::fs::read_to_string(file) else {
@@ -127,6 +142,10 @@ pub fn load_recent(dir: &Path, limits: &ChannelLimits) -> Vec<ChatMessage> {
             if all_full(&counts) {
                 break;
             }
+            if scanned >= max_lines {
+                break 'files;
+            }
+            scanned += 1;
             let Ok(message) = serde_json::from_str::<ChatMessage>(line) else {
                 continue;
             };
@@ -304,6 +323,32 @@ mod tests {
         assert_eq!(texts, ["b", "c", "d", "e"]); // oldest first, bad line skipped
         let pids: Vec<_> = got.iter().map(|m| m.pid).collect();
         assert_eq!(pids, [1, 2, 3, 4]); // renumbered: old pids collided (1, 2 vs 7..9)
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_recent_stops_after_its_line_budget() {
+        // P1: with no retention, every launch used to read every log ever
+        // written. The scan now ends after `max_lines`, newest first.
+        let dir = temp_dir("budget");
+        std::fs::write(
+            dir.join(chat_log_file_name("2026-09-28")),
+            [line_on("GUILD", 1, "g1"), line_on("GUILD", 2, "g2")].join("\n"),
+        )
+        .unwrap();
+        let world: Vec<_> = (0..10)
+            .map(|i| line_on("WORLD", i, &format!("w{i}")))
+            .collect();
+        std::fs::write(dir.join(chat_log_file_name("2026-09-29")), world.join("\n")).unwrap();
+
+        let limits = limits(&[("WORLD", 100), ("GUILD", 5)]);
+        let got = load_recent_within(&dir, &limits, 10);
+        let texts: Vec<_> = got.iter().map(|m| m.message.as_str()).collect();
+        assert_eq!(texts.len(), 10, "only the newest 10 lines are examined");
+        assert!(texts.iter().all(|t| t.starts_with('w')), "{texts:?}");
+
+        // A budget that covers everything finds the old GUILD lines too.
+        assert_eq!(load_recent_within(&dir, &limits, 12).len(), 12);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

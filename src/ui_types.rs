@@ -5,10 +5,10 @@ use serde_with::DisplayFromStr;
 // Types shared with the backend live in crates/types.
 pub use resonance_types::{
     contains_japanese, default_catch_up_limit, default_favorite_messages, Channel, ChatMessage,
-    ComputeMode, FavoriteMessage, FolderStatus, GistMetadata, NetworkInterface, ProgressPayload,
-    RemoteDictionary, ServiceStates, SnifferState, SnifferStatePayload, SystemMessage, Theme, Tier,
-    TranslationResult, TranslatorState, TranslatorStatePayload, UpdateCheckResult, VersionInfo,
-    ALL_TAB, CUSTOM_TAB, SYSTEM_TAB,
+    ComputeMode, FavoriteMessage, FolderStatus, GistMetadata, LogLevel, NetworkInterface,
+    ProgressPayload, RemoteDictionary, ServiceStates, SnifferState, SnifferStatePayload,
+    SystemLogLevel, SystemMessage, Theme, Tier, TranslationResult, TranslatorState,
+    TranslatorStatePayload, UpdateCheckResult, VersionInfo, ALL_TAB, CUSTOM_TAB, SYSTEM_TAB,
 };
 
 #[serde_as]
@@ -24,7 +24,7 @@ pub struct AppConfig {
     pub theme: Theme,
     pub overlay_opacity: f32,
     pub debug_mode: bool,
-    pub log_level: String,
+    pub log_level: LogLevel,
     pub tier: Tier,
     /// Missed Japanese messages a translator start translates; 0 = none.
     #[serde(default = "default_catch_up_limit")]

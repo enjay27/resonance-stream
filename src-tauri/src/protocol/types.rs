@@ -3,11 +3,11 @@ use crossbeam_channel::Sender;
 use parking_lot::{Mutex, RwLock};
 use resonance_core::history::ChatHistory;
 use resonance_core::text::Dictionary;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 pub use resonance_types::{
-    ChatMessage, NetworkInterface, ServiceStates, SnifferState, SnifferStatePayload, SystemMessage,
-    TranslationResult, TranslatorState, TranslatorStatePayload,
+    ChatMessage, LogLevel, NetworkInterface, ServiceStates, SnifferState, SnifferStatePayload,
+    SystemLogLevel, SystemMessage, TranslationResult, TranslatorState, TranslatorStatePayload,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicU64;
@@ -40,16 +40,6 @@ pub struct AppState {
     pub blocked_users: Mutex<HashMap<u64, String>>,
     /// What the global shortcuts are bound to (see `shortcut.rs`).
     pub shortcuts: Mutex<crate::shortcut::GlobalShortcuts>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum SystemLogLevel {
-    Info,    // Normal initialization logs
-    Warning, // Sniffer not active, GPU memory low
-    Error,   // Driver init failed, Sidecar crashed
-    Success, // Dictionary updated, Model ready
-    Debug,   // high-frequency, technical events
-    Trace,   // extremely-frequency
 }
 
 #[derive(Deserialize)]

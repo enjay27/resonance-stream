@@ -3,7 +3,7 @@
 use crate::hooks::use_events::setup_event_listeners;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
-use crate::ui_types::TauriEvent;
+use crate::ui_types::{SystemLogLevel, TauriEvent};
 use crate::utils::add_system_log;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -22,11 +22,19 @@ pub fn finalize_setup(
 
     move |_| {
         set_init_done.set(true);
-        add_system_log("success", "Setup", "Initial configuration completed.");
+        add_system_log(
+            SystemLogLevel::Success,
+            "Setup",
+            "Initial configuration completed.",
+        );
         save_config.dispatch(());
 
         spawn_local(async move {
-            add_system_log("info", "Sniffer", "Initializing packet capture...");
+            add_system_log(
+                SystemLogLevel::Info,
+                "Sniffer",
+                "Initializing packet capture...",
+            );
             setup_event_listeners(signals).await;
             set_is_sniffer_active.set(true);
             let _ = invoke("start_sniffer_command", JsValue::NULL).await;
@@ -106,7 +114,7 @@ pub fn start_download(
                 set_downloading.set(false);
                 set_status_text.set(format!("Model Error: {:?}", e));
                 add_system_log(
-                    "error",
+                    SystemLogLevel::Error,
                     "ModelManager",
                     &format!("Model download failed: {:?}", e),
                 );
@@ -120,7 +128,7 @@ pub fn start_download(
                 set_downloading.set(false);
                 set_status_text.set(format!("Server Error: {:?}", e));
                 add_system_log(
-                    "error",
+                    SystemLogLevel::Error,
                     "ModelManager",
                     &format!("Server download failed: {:?}", e),
                 );
@@ -139,7 +147,7 @@ pub fn start_download(
                 set_downloading.set(false);
                 set_status_text.set(format!("Dict Error: {:?}", e));
                 add_system_log(
-                    "error",
+                    SystemLogLevel::Error,
                     "ModelManager",
                     &format!("Sync dictionary failed: {:?}", e),
                 );

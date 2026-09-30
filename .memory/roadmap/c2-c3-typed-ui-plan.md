@@ -63,7 +63,7 @@ signals;` destructure keep working by taking the sub-struct they need. CLAUDE.md
 convention is updated with the step. Gate: ui; test first for `to_config`/`apply` round trip
 (every field set to a non-default value survives).
 
-**C2d — the other stringly-typed settings** *(split: `claude/c2d1-settings-enums` = `ComputeMode`, `Tier`, `Theme` via a `string_enum!` macro in resonance-types (case-insensitive, unknown -> default); core `workers::gpu_layers` replaces `server_manager`'s string match; the dead `"extreme"` tier class is gone. Next PR: `LogLevel` + `TabSwitchModifier`.)* (ideas added on Kade's request, same
+**C2d — the other stringly-typed settings** *(split: `claude/c2d1-settings-enums` = `ComputeMode`, `Tier`, `Theme` via a `string_enum!` macro in resonance-types (case-insensitive, unknown -> default); core `workers::gpu_layers` replaces `server_manager`'s string match; the dead `"extreme"` tier class is gone. Part 2, `claude/c2d2-log-level-modifier`: `LogLevel` (the config filter, ordered) and `SystemLogLevel` (message severity, moved from the app into resonance-types with the lowercase wire names; `SystemMessage.level` uses it; the ui's log filter is `severity() >= log_level`). Part 3 (own PR): `TabSwitchModifier` -- it also carries the accelerator logic in `shortcut_keys.rs` and the app's `shortcut.rs`.)* (ideas added on Kade's request, same
 recipe: enum, same strings on disk, unknown value -> the default). `ComputeMode` (`"cpu"`,
 `"gpu"`, ...: `workers.rs` `TranslatorSettings`, `setup_wizard.rs`, `translation.rs`,
 `server_manager.rs`, `store.rs`), `Tier` (`"low" "middle" "high"`: same files),
@@ -75,6 +75,8 @@ Split into two PRs if it grows: settings enums (`ComputeMode`, `Tier`, `Theme`) 
 `LogLevel` + `TabSwitchModifier`. Also folded into C2c: one `Channel::ALL` list feeds the
 nav tabs and the custom-tab checkboxes (today each writes the names out), and `ALL_TAB` /
 `CUSTOM_TAB` become associated constants of `Tab`.
+
+Found on the way, ui-local and small (do after C3, or fold into it): `network_troubleshooter.rs` keeps its scan status as strings (`"idle" "scanning" "success" "fail"`) -- a private enum.
 
 Not refactors, so **not** in this task (own tasks afterwards, in this order of value):
 plain `0x0003` `{3: channel, 5: chat}` history frames (a line is dropped today, see

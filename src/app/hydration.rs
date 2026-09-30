@@ -4,7 +4,7 @@
 use crate::hooks::use_events::setup_event_listeners;
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
-use crate::ui_types::{AppConfig, ChatMessage, FolderStatus, SystemMessage};
+use crate::ui_types::{AppConfig, ChatMessage, FolderStatus, SystemLogLevel, SystemMessage};
 use crate::utils::add_system_log;
 use leptos::leptos_dom::log;
 use leptos::prelude::*;
@@ -117,7 +117,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                 // 2. If the user hasn't finished the wizard, stop here
                 if config.init_done {
                     log!("Existing user detected. Auto-starting services.");
-                    add_system_log("info", "Sniffer", "Auto-starting services...");
+                    add_system_log(SystemLogLevel::Info, "Sniffer", "Auto-starting services...");
                     setup_event_listeners(signals).await;
 
                     // Hydrate GAME History
@@ -157,16 +157,28 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                         let model = folder_exists("check_model_status").await;
                         let server = folder_exists("check_ai_server_status").await;
                         if model == Some(false) {
-                            add_system_log("warn", "Sidecar", "Model missing. AI is disabled.");
+                            add_system_log(
+                                SystemLogLevel::Warning,
+                                "Sidecar",
+                                "Model missing. AI is disabled.",
+                            );
                         }
                         if server == Some(false) {
-                            add_system_log("warn", "Sidecar", "AI Server missing. AI is disabled.");
+                            add_system_log(
+                                SystemLogLevel::Warning,
+                                "Sidecar",
+                                "AI Server missing. AI is disabled.",
+                            );
                         }
                         // The backend already started the translator at
                         // launch and reports its state through events.
                         match translator_ready(model, server) {
                             Some(true) => {
-                                add_system_log("info", "UI", "Starting AI translation engine...");
+                                add_system_log(
+                                    SystemLogLevel::Info,
+                                    "UI",
+                                    "Starting AI translation engine...",
+                                );
                                 set_model_ready.set(true);
                                 set_status_text.set("AI Engine Starting...".to_string());
                             }
@@ -183,7 +195,11 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                         let _ = invoke("set_always_on_top", args).await;
                     }
 
-                    add_system_log("info", "Updater", "Checking for remote updates...");
+                    add_system_log(
+                        SystemLogLevel::Info,
+                        "Updater",
+                        "Checking for remote updates...",
+                    );
                     match invoke("check_all_updates", JsValue::NULL).await {
                         Ok(update_res) => {
                             if let Ok(update_data) = serde_wasm_bindgen::from_value::<
@@ -199,7 +215,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                                     && signals.auto_sync_latest_dict.get_untracked()
                                 {
                                     add_system_log(
-                                        "info",
+                                        SystemLogLevel::Info,
                                         "Updater",
                                         "New dictionary found. Applying silently...",
                                     );
@@ -226,14 +242,22 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                         }
                         Err(e) => {
                             log!("FATAL: check_all_updates failed: {:?}", e);
-                            add_system_log("error", "Updater", &format!("Check failed: {:?}", e));
+                            add_system_log(
+                                SystemLogLevel::Error,
+                                "Updater",
+                                &format!("Check failed: {:?}", e),
+                            );
                         }
                     }
 
                     set_status_text.set("Ready".to_string());
                 } else {
                     log!("New user detected. Showing Wizard.");
-                    add_system_log("info", "Setup", "Awaiting initial configuration.");
+                    add_system_log(
+                        SystemLogLevel::Info,
+                        "Setup",
+                        "Awaiting initial configuration.",
+                    );
                 }
             }
         }

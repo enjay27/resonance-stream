@@ -1,7 +1,7 @@
 use crate::chat_view::{newest_matching, ChatFilter, Tab};
 use crate::components::ChatRow;
 use crate::store::AppSignals;
-use crate::ui_types::SystemMessage;
+use crate::ui_types::{SystemLogLevel, SystemMessage};
 use crate::utils::format_time;
 use leptos::html;
 use leptos::prelude::*;
@@ -60,32 +60,13 @@ pub fn ChatContainer() -> impl IntoView {
             .filter(|sig| {
                 let m = sig.get();
 
-                // 1. Assign numeric values to create a hierarchy
-                let msg_val = match m.level.as_str() {
-                    "trace" => 0,
-                    "debug" => 1,
-                    "info" | "success" => 2,
-                    "warn" => 3,
-                    "error" => 4,
-                    _ => 2, // default unknown to info
-                };
-
-                let filter_val = match current_log_level.as_str() {
-                    "trace" => 0,
-                    "debug" => 1,
-                    "info" => 2,
-                    "warn" => 3,
-                    "error" => 4,
-                    _ => 2,
-                };
-
-                // 2. Hide messages that are beneath the chosen log level
-                if msg_val < filter_val {
+                // 1. Hide messages that are beneath the chosen log level
+                if m.level.severity() < current_log_level {
                     return false;
                 }
 
                 // 3. Apply standard UI filters
-                let matches_level = level_f.as_ref().map_or(true, |f| &m.level == f);
+                let matches_level = level_f.map_or(true, |f| m.level == f);
                 let matches_source = source_f.as_ref().map_or(true, |f| &m.source == f);
                 matches_level
                     && matches_source
@@ -203,10 +184,7 @@ pub fn ChatContainer() -> impl IntoView {
                         key=|sig| sig.with_untracked(|m| m.pid)
                         children={move |sig: ArcRwSignal<SystemMessage>| {
                             let sig = RwSignal::from(sig);
-                            let level = sig.get().level.clone();
-                            let level_badge = level.clone();
-                            let level_filter = level.clone();
-                            let level_match = level.clone();
+                            let level = sig.get().level;
                             let source = sig.get().source.clone();
                             let source_badge = sig.get().source.clone();
                             view! {
@@ -215,18 +193,18 @@ pub fn ChatContainer() -> impl IntoView {
 
                                         // --- LEVEL BADGE (Clickable) ---
                                         <span class=move || format!("cursor-pointer hover:brightness-125 font-black mr-1 transition-all {}",
-                                                match level_badge.as_str() {
-                                                    "error" => "text-error",
-                                                    "warning" | "warn" => "text-warning",
-                                                    "success" => "text-success",
-                                                    "trace" => "text-base-content/40", // Make trace very faded
-                                                    "debug" => "text-base-content/70", // Make debug slightly faded
-                                                    _ => "text-info" // Default info color
+                                                match level {
+                                                    SystemLogLevel::Error => "text-error",
+                                                    SystemLogLevel::Warning => "text-warning",
+                                                    SystemLogLevel::Success => "text-success",
+                                                    SystemLogLevel::Trace => "text-base-content/40", // Make trace very faded
+                                                    SystemLogLevel::Debug => "text-base-content/70", // Make debug slightly faded
+                                                    SystemLogLevel::Info => "text-info" // Default info color
                                                 }
                                             )
-                                            on:click=move |_| signals.set_system_level_filter.set(Some(level_filter.clone()))
+                                            on:click=move |_| signals.set_system_level_filter.set(Some(level))
                                         >
-                                            "[" {move || level.clone().to_uppercase()} "]"
+                                            "[" {move || level.label()} "]"
                                         </span>
 
                                         // --- SOURCE BADGE (Clickable) ---
@@ -237,11 +215,11 @@ pub fn ChatContainer() -> impl IntoView {
                                         </span>
 
                                         // --- MESSAGE TEXT ---
-                                        <span class=move || match level_match.to_lowercase().as_str() {
-                                            "error" => "text-error",
-                                            "warning" | "warn" => "text-warning",
-                                            "success" => "text-success",
-                                            "trace" => "text-base-content/50", // Dimmer text for trace
+                                        <span class=move || match level {
+                                            SystemLogLevel::Error => "text-error",
+                                            SystemLogLevel::Warning => "text-warning",
+                                            SystemLogLevel::Success => "text-success",
+                                            SystemLogLevel::Trace => "text-base-content/50", // Dimmer text for trace
                                             _ => "text-base-content/90"
                                         }>
                                             {move || sig.get().message.clone()}
@@ -267,7 +245,7 @@ pub fn ChatContainer() -> impl IntoView {
                         <span class="text-sm">
                             {move || {
                                 let mut filters = Vec::new();
-                                if let Some(l) = signals.system_level_filter.get() { filters.push(l.to_uppercase()); }
+                                if let Some(l) = signals.system_level_filter.get() { filters.push(l.label()); }
                                 if let Some(s) = signals.system_source_filter.get() { filters.push(s.to_uppercase()); }
 
                                 let st = signals.search_term.get();

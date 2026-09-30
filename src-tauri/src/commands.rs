@@ -21,16 +21,7 @@ pub fn ui_system_message(
     source: String,  // Use concrete String for frontend IPC
     message: String, // Use concrete String for frontend IPC
 ) {
-    let sys_level = match level.to_lowercase().as_str() {
-        "warn" | "warning" => SystemLogLevel::Warning,
-        "error" => SystemLogLevel::Error,
-        "success" => SystemLogLevel::Success,
-        "debug" => SystemLogLevel::Debug,
-        "trace" => SystemLogLevel::Trace,
-        _ => SystemLogLevel::Info, // Default fallback
-    };
-
-    inject_system_message(&app, sys_level, &source, message);
+    inject_system_message(&app, SystemLogLevel::parse(&level), &source, message);
 }
 
 #[tauri::command]

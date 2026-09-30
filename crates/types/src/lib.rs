@@ -130,9 +130,9 @@ pub struct ChatMessage {
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemMessage {
-    pub pid: u64,        // Unique ID for Leptos 'For' loop keys
-    pub timestamp: u64,  // Milliseconds for sorting
-    pub level: String,   // "info", "warn", "error", "success", "debug"
+    pub pid: u64,       // Unique ID for Leptos 'For' loop keys
+    pub timestamp: u64, // Milliseconds for sorting
+    pub level: SystemLogLevel,
     pub source: String,  // "Backend", "Sniffer", "Translator"
     pub message: String, // The actual log text
 }
@@ -304,7 +304,7 @@ pub struct NetworkInterface {
 macro_rules! string_enum {
     ($(#[$meta:meta])* $name:ident { $($variant:ident => $wire:literal),+ $(,)? } default $default:ident) => {
         $(#[$meta])*
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub enum $name {
             $($variant),+
         }
@@ -367,6 +367,46 @@ string_enum! {
 string_enum! {
     /// The window's colour scheme.
     Theme { Dark => "dark", Light => "light" } default Dark
+}
+
+string_enum! {
+    /// The least severe system-log line the log shows (`config.json` `log_level`).
+    LogLevel { Trace => "trace", Debug => "debug", Info => "info", Warn => "warn", Error => "error" } default Info
+}
+
+string_enum! {
+    /// How severe a system-log line is; the wire form of `SystemMessage.level`.
+    SystemLogLevel {
+        Trace => "trace",
+        Debug => "debug",
+        Info => "info",
+        Success => "success",
+        Warning => "warn",
+        Error => "error",
+    } default Info
+}
+
+impl SystemLogLevel {
+    /// [`from_name`](Self::from_name), also taking `"warning"` (what the
+    /// UI's `ui_system_message` command has always accepted).
+    pub fn parse(name: &str) -> Self {
+        if name.eq_ignore_ascii_case("warning") {
+            SystemLogLevel::Warning
+        } else {
+            Self::from_name(name)
+        }
+    }
+
+    /// Where the line ranks for the log-level filter: success counts as info.
+    pub fn severity(self) -> LogLevel {
+        match self {
+            SystemLogLevel::Trace => LogLevel::Trace,
+            SystemLogLevel::Debug => LogLevel::Debug,
+            SystemLogLevel::Info | SystemLogLevel::Success => LogLevel::Info,
+            SystemLogLevel::Warning => LogLevel::Warn,
+            SystemLogLevel::Error => LogLevel::Error,
+        }
+    }
 }
 
 impl Theme {
@@ -740,6 +780,67 @@ mod tests {
             Tier::VeryHigh
         );
         assert_eq!(from_value::<Theme>(json!("LIGHT")).unwrap(), Theme::Light);
+    }
+
+    #[test]
+    fn log_levels_are_ordered_by_severity() {
+        use LogLevel::*;
+        assert!(Trace < Debug && Debug < Info && Info < Warn && Warn < Error);
+        assert_eq!(LogLevel::default(), Info);
+        assert_eq!(LogLevel::from_name("WARN"), Warn);
+        assert_eq!(LogLevel::from_name("warning"), Info); // not a config name
+        assert_eq!(serde_json::to_value(Error).unwrap(), "error");
+    }
+
+    #[test]
+    fn a_system_message_level_is_its_lowercase_name_on_the_wire() {
+        use serde_json::{from_value, json, to_value};
+        for (level, name) in [
+            (SystemLogLevel::Trace, "trace"),
+            (SystemLogLevel::Debug, "debug"),
+            (SystemLogLevel::Info, "info"),
+            (SystemLogLevel::Success, "success"),
+            (SystemLogLevel::Warning, "warn"),
+            (SystemLogLevel::Error, "error"),
+        ] {
+            assert_eq!(to_value(level).unwrap(), name);
+            assert_eq!(from_value::<SystemLogLevel>(json!(name)).unwrap(), level);
+            assert_eq!(level.label(), name.to_uppercase());
+        }
+        // The UI's command has always taken "warning" too; anything else is info.
+        assert_eq!(SystemLogLevel::parse("Warning"), SystemLogLevel::Warning);
+        assert_eq!(SystemLogLevel::parse("ERROR"), SystemLogLevel::Error);
+        assert_eq!(SystemLogLevel::parse("nonsense"), SystemLogLevel::Info);
+        assert_eq!(SystemLogLevel::default(), SystemLogLevel::Info);
+    }
+
+    #[test]
+    fn a_system_message_ranks_as_a_log_level() {
+        // What the log-level filter compares: success counts as info.
+        let ranks: Vec<_> = [
+            SystemLogLevel::Trace,
+            SystemLogLevel::Debug,
+            SystemLogLevel::Info,
+            SystemLogLevel::Success,
+            SystemLogLevel::Warning,
+            SystemLogLevel::Error,
+        ]
+        .map(SystemLogLevel::severity)
+        .to_vec();
+        use LogLevel::*;
+        assert_eq!(ranks, [Trace, Debug, Info, Info, Warn, Error]);
+    }
+
+    #[test]
+    fn an_old_system_message_still_parses() {
+        let old = r#"{"pid":1,"timestamp":2,"level":"warn","source":"Sniffer","message":"m"}"#;
+        let msg: SystemMessage = serde_json::from_str(old).unwrap();
+        assert_eq!(msg.level, SystemLogLevel::Warning);
+        let odd = r#"{"pid":1,"timestamp":2,"level":"loud","source":"s","message":"m"}"#;
+        assert_eq!(
+            serde_json::from_str::<SystemMessage>(odd).unwrap().level,
+            SystemLogLevel::Info
+        );
     }
 
     #[test]

@@ -25,39 +25,19 @@ pub fn inject_system_message<S: Into<String>>(
     if let Some(state) = app.try_state::<AppState>() {
         let current_pid = state.next_pid.fetch_add(1, Ordering::SeqCst);
 
-        // Map the Enum to the string expected by the frontend SystemMessage struct
         let log_message = format!("[{}] {}", source, msg);
-        let level_str = match level {
-            SystemLogLevel::Info => {
-                log::info!("{}", log_message);
-                "info"
-            }
-            SystemLogLevel::Warning => {
-                log::warn!("{}", log_message);
-                "warn"
-            }
-            SystemLogLevel::Error => {
-                log::error!("{}", log_message);
-                "error"
-            }
-            SystemLogLevel::Success => {
-                log::info!("{}", log_message);
-                "success"
-            }
-            SystemLogLevel::Debug => {
-                log::debug!("{}", log_message);
-                "debug"
-            }
-            SystemLogLevel::Trace => {
-                log::trace!("{}", log_message);
-                "trace"
-            }
-        };
+        match level {
+            SystemLogLevel::Info | SystemLogLevel::Success => log::info!("{}", log_message),
+            SystemLogLevel::Warning => log::warn!("{}", log_message),
+            SystemLogLevel::Error => log::error!("{}", log_message),
+            SystemLogLevel::Debug => log::debug!("{}", log_message),
+            SystemLogLevel::Trace => log::trace!("{}", log_message),
+        }
 
         let system_message = SystemMessage {
             pid: current_pid,
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            level: level_str.to_string(),
+            level,
             source: source.to_string(),
             message: msg,
         };

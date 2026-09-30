@@ -4,9 +4,9 @@ use serde_with::DisplayFromStr;
 
 // Types shared with the backend live in crates/types.
 pub use resonance_types::{
-    ChatMessage, FolderStatus, GistMetadata, NetworkInterface, ProgressPayload, RemoteDictionary,
-    SnifferStatePayload, SystemMessage, TranslationResult, TranslatorStatePayload,
-    UpdateCheckResult, VersionInfo,
+    default_favorite_messages, ChatMessage, FavoriteMessage, FolderStatus, GistMetadata,
+    NetworkInterface, ProgressPayload, RemoteDictionary, SnifferStatePayload, SystemMessage,
+    TranslationResult, TranslatorStatePayload, UpdateCheckResult, VersionInfo,
 };
 
 #[serde_as]
@@ -53,6 +53,8 @@ pub struct AppConfig {
     pub archive_ignored_channels: Vec<String>,
     #[serde(default = "default_spacing")]
     pub message_spacing: u32,
+    #[serde(default = "default_favorite_messages")]
+    pub favorite_messages: Vec<FavoriteMessage>,
 }
 
 pub fn default_spacing() -> u32 {

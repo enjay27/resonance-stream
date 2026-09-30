@@ -37,6 +37,10 @@ is green, PR opened by Claude, `.github/workflows/auto-merge.yml` merges it when
 [`.memory/active-issues/review-2026-09-30.md`](.memory/active-issues/review-2026-09-30.md).
 Steps 1 (translator lifecycle) 2 (UI: N2/N4/N5/N11) 3 (config safety: N3) and 4 (translate/archive/dedup: N7-N9) done; app parts cross-checked only.
 
+**Favorite messages (2026-09-30, `claude/favorite-messages`):** ⭐ list -- copy, edit, global
+shortcut pastes into the game (clipboard + `SendInput` Ctrl+V). Needs a Windows run --
+[`unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).
+
 ## Where the detail is
 
 | read | when |

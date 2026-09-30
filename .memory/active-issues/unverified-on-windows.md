@@ -70,16 +70,11 @@ run as the real app.
   `shortcut.rs` -- if the game pastes the *old* text, raise it). Configs saved by #32
   keep their entries without notes (defaults only apply to a fresh config).
 - **N11/N12/N13 (2026-09-30, `claude/review-n11-n12-n13`).** Core + ui tested on Linux,
-  app cross-checked (incl. `--tests`). Worth a real run: pull the network cable / pick a
-  wrong adapter so the socket fails, then the title-bar sniffer badge must restart it
-  (no "already active"); with archiving on, a busy WORLD day no longer pushes GUILD/PARTY
+  app cross-checked (incl. `--tests`). The sniffer restart badge was run on Windows by Kade
+  (2026-10-01): works. Still worth a real run: with archiving on, a busy WORLD day no longer pushes GUILD/PARTY
   out of the reloaded history (each channel reloads up to its own tab limit); a blocked
   sender's message raises no unread badge.
 - **llama client timeouts (2026-09-30, `claude/integration-test-harness`).** The
   translator worker and `wait_for_server` use `resonance_llama::client()` (2 s connect,
   30 s request); an empty model reply is a failed job. Tested against a mock server on
   Linux; app cross-checked only, not run against a real llama-server.
-- **Raw capture (2026-09-30, `claude/festive-hypatia-5r78o7`).** Core + ui tested on Linux,
-  app cross-checked. Worth a real run (as Administrator): debug mode on, toggle *Raw
-  Capture*, chat in game -> `captures/capture-*.log` grows a line per server packet and
-  the "폴더" button opens it; toggling off closes the file (a new toggle-on = a new file).

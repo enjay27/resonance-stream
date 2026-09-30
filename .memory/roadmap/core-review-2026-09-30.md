@@ -34,6 +34,37 @@ client had not sent live (141 unique in history, 14 also seen live). What is not
 - What the 16/12-byte inner headers hold (`0x0002` header: 4 zero bytes, a u32 id, ...) and `0x8002`'s content.
 - The `0x0003` skip assumes it never carries a line `0x0002` lacks (true for all 7 here).
 
+## W2 — second capture (2026-10-01): channel test lines + more frame shapes
+
+Kade typed one line into each channel ("Here's world channel", "Guild channel", ...). Decoded
+(`0x0002` = live, `0x0003` = same line again, sent to the sender):
+
+| said in | `0x0002` root field 1 | text |
+|---|---|---|
+| world | 1 | "Here's world channel", "world channel number "4548"" |
+| local | 2 | "local channel" |
+| party | 3 | "party channel" |
+| guild | 4 | "Guild channel" |
+| **beginner** | **9** | "beginner channel number "985"" |
+
+So the code table is 1 WORLD, 2 LOCAL, 3 PARTY, 4 GUILD, 9 BEGINNER; the parser maps 9 to WORLD
+(no variant yet -- a feature for after C2's `Channel` enum). Ids in a chat are per channel
+(6, then 7 for world; 612098 guild; 2 party; 47 local; 3 beginner).
+
+More shapes of `0x0003` (12-byte header = u64 counter + 4 zero bytes; the counter runs
+0x9f, 0xa0 (a `0x8003` history), 0xa1, ... one step per `0x0003`/`0x8003` frame):
+- root `{3: chat, 4: server time}` -- echo of the sender's own line (with the time the server took it);
+  `{3: chat}` without the time in some;
+- root `{4: 1}` -- an ack (sent right after a line is sent), root `{}` -- empty;
+- **root `{3: channel, 5: chat}`, uncompressed, one line** -- channel history with a single
+  entry (a `0x8003` is the same thing compressed, ~30 entries). Example: a 2-week-old line
+  "ごろごろ" (ts 1789555005). **W2 skips plain `0x0003` frames, so this line is dropped.**
+  Fix (small, test first): decide a `0x0003` frame's kind by its root's shape (has field 5 ->
+  history), not by the type; `{3: chat}` stays an echo.
+- `0x8003` history frame here: 30 lines of world chat (ids 155697-155726), 9.5 KB inflated
+  from 3.9 KB; the `0x0002` header (`00000000 09d4a768 00000000 00000001`) was identical in
+  both captures.
+
 ## Left open (low, no branch yet)
 
 - W4 dedup capacity (4096) is fixed; limits above ~4096 in total re-emit old reloaded lines.

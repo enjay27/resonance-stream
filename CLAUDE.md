@@ -167,6 +167,23 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
    push again -- the run for the new commit decides. Never skip, disable or edit a
    test/gate to get green.
 
+### Several tasks in one session
+
+When a session is given a series of tasks (or one task split into steps, one PR each):
+
+1. **One PR at a time, in order.** Finish a task (gate green, pushed), open its PR, then
+   **wait until the PR is merged** -- the auto-merge workflow merges it once CI passes on
+   the latest commit. Do not start the next task, or push anything for it, before that.
+2. **CI failed?** Fix it first, on the same branch, and push again. The run for the new
+   commit decides. Never skip, disable or edit a test/gate to get green. Retry until the
+   PR merges; if a failure is not this PR's (red on `main` too), say so on the PR.
+3. **Before the next task, check it is really done:** the PR is closed as *merged* and its
+   `claude/*` branch is gone. Then start from `main` again: `git fetch origin main &&
+   git checkout -B claude/<next> origin/main`. A later task never stacks on an unmerged one.
+4. Waiting is done with the PR event subscription (`subscribe_pr_activity`) and a
+   check-in (`send_later`), not with `sleep` loops. Update `MEMORY.md` in each task's own
+   branch, so a merged task never leaves the index behind.
+
 ```bash
 git status            # check BEFORE -A, never after
 git add -A && git commit

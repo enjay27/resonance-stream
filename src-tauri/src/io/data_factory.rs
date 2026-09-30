@@ -1,7 +1,8 @@
 use crate::{inject_system_message, ChatMessage, SystemLogLevel};
 use chrono::Local;
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use resonance_core::history::chat_log_file_name;
+use resonance_core::history::{chat_log_file_name, dataset_file_name};
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
@@ -15,14 +16,41 @@ pub struct DataFactoryJob {
 }
 
 /// The archive lives in the app data folder -- the one "앱 데이터 폴더 열기"
-/// opens. (It used to be written three levels up, into the user's home.)
-fn dataset_path(app: &AppHandle) -> std::io::Result<PathBuf> {
+/// opens: one training-pair file per channel (tab), plus the daily chat logs.
+fn data_dir(app: &AppHandle) -> std::io::Result<PathBuf> {
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|e| std::io::Error::other(e.to_string()))?;
     std::fs::create_dir_all(&dir)?;
-    Ok(dir.join("dataset_raw.jsonl"))
+    Ok(dir)
+}
+
+/// The training-pair files, opened on a channel's first message and kept open
+/// for the worker's life.
+struct Datasets {
+    dir: PathBuf,
+    files: HashMap<String, BufWriter<File>>,
+}
+
+impl Datasets {
+    fn write(&mut self, channel: &str, line: &str) -> std::io::Result<()> {
+        if !self.files.contains_key(channel) {
+            let path = self.dir.join(dataset_file_name(channel));
+            let file = OpenOptions::new().create(true).append(true).open(path)?;
+            self.files.insert(channel.to_string(), BufWriter::new(file));
+        }
+        match self.files.get_mut(channel) {
+            Some(writer) => writeln!(writer, "{}", line),
+            None => Ok(()),
+        }
+    }
+
+    fn flush(&mut self) {
+        for writer in self.files.values_mut() {
+            let _ = writer.flush();
+        }
+    }
 }
 
 /// Is `channel` archived? (Channels can be switched off per tab, right-click
@@ -101,12 +129,8 @@ pub fn start_data_factory_worker(app: AppHandle) -> Sender<DataFactoryJob> {
     let (tx, rx): (Sender<DataFactoryJob>, Receiver<DataFactoryJob>) = unbounded();
 
     thread::spawn(move || {
-        let opened = dataset_path(&app).and_then(|path| {
-            let file = OpenOptions::new().create(true).append(true).open(&path)?;
-            Ok((path, file))
-        });
-        let (path, file) = match opened {
-            Ok(opened) => opened,
+        let dir = match data_dir(&app) {
+            Ok(dir) => dir,
             Err(e) => {
                 inject_system_message(
                     &app,
@@ -121,19 +145,23 @@ pub fn start_data_factory_worker(app: AppHandle) -> Sender<DataFactoryJob> {
             &app,
             SystemLogLevel::Info,
             "DataFactory",
-            format!("Archiving chat to {}", path.display()),
+            format!("Archiving chat to {}", dir.display()),
         );
 
-        // Two archives, as before the merge of both designs: the training
-        // pairs (dataset_raw.jsonl) and the full daily chat logs. Files stay
-        // open for the worker's life and are flushed whenever the queue runs
-        // dry, so a burst is one write and nothing waits long on disk.
-        let mut dataset = BufWriter::new(file);
+        // Two archives: the training pairs (dataset_<channel>.jsonl) and the
+        // full daily chat logs. Files stay open for the worker's life and are
+        // flushed whenever the queue runs dry, so a burst is one write and
+        // nothing waits long on disk.
+        let mut datasets = Datasets {
+            dir: dir.clone(),
+            files: HashMap::new(),
+        };
         let mut daily = DailyLog {
             dir: chat_logs_dir(&app),
             day: String::new(),
             writer: None,
         };
+        let mut failing = false; // one report per streak of failures
         while let Ok(job) = rx.recv() {
             let chat = job.chat;
             let entry = serde_json::json!({
@@ -142,20 +170,33 @@ pub fn start_data_factory_worker(app: AppHandle) -> Sender<DataFactoryJob> {
                 "translated": chat.translated, // Some("text") or null
                 "timestamp": now_ms()
             });
-            let _ = writeln!(dataset, "{}", entry);
+            let dataset_result = datasets.write(&chat.channel, &entry.to_string());
             let day_before = daily.day.clone();
-            if let Err(e) = daily.write(&chat) {
-                log::warn!("[DataFactory] Chat log write failed: {}", e);
-            }
+            let daily_result = daily.write(&chat);
             if !day_before.is_empty() && daily.day != day_before {
                 prune_chat_logs(&app); // a new day: yesterday's cut-off moved
             }
+            match dataset_result.and(daily_result) {
+                Ok(()) => failing = false,
+                Err(e) => {
+                    log::warn!("[DataFactory] Archive write failed: {}", e);
+                    if !failing {
+                        failing = true;
+                        inject_system_message(
+                            &app,
+                            SystemLogLevel::Error,
+                            "DataFactory",
+                            format!("Chat archive write failed: {}", e),
+                        );
+                    }
+                }
+            }
             if rx.is_empty() {
-                let _ = dataset.flush();
+                datasets.flush();
                 daily.flush();
             }
         }
-        let _ = dataset.flush();
+        datasets.flush();
         daily.flush();
     });
 

@@ -428,15 +428,15 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                     }}
 
                     // 4. TIMESTAMP & COPY BUTTON (Inline-block at the end of the text)
-                    <div class="inline-block align-baseline ml-2 opacity-90 bg-base-200 rounded-md shadow-sm">
+                    <div class="inline-flex items-center align-baseline whitespace-nowrap ml-2 opacity-90 bg-base-200 rounded-md shadow-sm">
                         <time class="text-[10px] text-base-content/50 whitespace-nowrap block group-hover:hidden min-h-0 px-1.5 py-0">
                             {display_time}
                         </time>
 
                         // --- NEW: HIDE COPY BUTTON ON BLOCKED MESSAGES ---
-                        {star_button("hidden group-hover:flex btn btn-ghost btn-xs text-[10px] h-5 min-h-0 px-1.5 py-0 hover:bg-base-content/10 leading-none")}
+                        {star_button("hidden group-hover:flex btn btn-ghost btn-xs text-[10px] h-5 min-h-0 px-1 py-0 hover:bg-base-content/10 leading-none")}
                         <Show when=move || !sig.with(|m| m.is_blocked)>
-                            <button class="hidden group-hover:flex btn btn-ghost btn-xs text-[10px] font-bold text-base-content/50 h-5 min-h-0 px-1.5 py-0 hover:bg-base-content/10 hover:text-base-content leading-none"
+                            <button class="hidden group-hover:flex btn btn-ghost btn-xs text-[10px] font-bold text-base-content/50 h-5 min-h-0 px-1 py-0 hover:bg-base-content/10 hover:text-base-content leading-none"
                                 on:click=move |_| sig.with_untracked(|m| copy_to_clipboard(&m.message))>
                                 "COPY"
                             </button>

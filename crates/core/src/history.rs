@@ -10,6 +10,25 @@ pub fn chat_log_file_name(date: &str) -> String {
     format!("{}.jsonl", date)
 }
 
+/// Training-pair file of one channel (tab) in the app data folder. Anything a
+/// file name cannot hold becomes `_`, so a channel name is never a path.
+pub fn dataset_file_name(channel: &str) -> String {
+    let safe: String = channel
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    let safe = if safe.trim().is_empty() {
+        "unknown".to_string()
+    } else {
+        safe
+    };
+    format!("dataset_{}.jsonl", safe)
+}
+
 /// Daily chat logs in `dir` that `keep_days` no longer covers: today's file
 /// and those of the `keep_days - 1` days before it stay. 0 keeps every file.
 /// A file whose name is not a `YYYY-MM-DD.jsonl` date is never touched.
@@ -301,6 +320,15 @@ mod tests {
             ..Default::default()
         })
         .unwrap()
+    }
+
+    #[test]
+    fn dataset_files_are_one_per_channel_with_safe_names() {
+        assert_eq!(dataset_file_name("GUILD"), "dataset_GUILD.jsonl");
+        assert_eq!(dataset_file_name("길드 채팅"), "dataset_길드 채팅.jsonl");
+        // A channel name is never a path.
+        assert_eq!(dataset_file_name("../a\\b:c"), "dataset_.._a_b_c.jsonl");
+        assert_eq!(dataset_file_name(""), "dataset_unknown.jsonl");
     }
 
     #[test]

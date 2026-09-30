@@ -115,11 +115,9 @@ pub fn run() {
                     ));
             }
 
-            // --- START DATA LOGGING IF NEEDED ---
-            if config.archive_chat {
-                *state.data_factory_tx.lock() =
-                    Some(crate::io::start_data_factory_worker(handle.clone()));
-            }
+            // --- START THE CHAT ARCHIVE (each tab decides what it takes) ---
+            *state.data_factory_tx.lock() =
+                Some(crate::io::start_data_factory_worker(handle.clone()));
 
             crate::tray::setup_tray(app)?;
 

@@ -8,6 +8,7 @@ pub use resonance_types::{
     FavoriteMessage, FolderStatus, GistMetadata, NetworkInterface, ProgressPayload,
     RemoteDictionary, ServiceStates, SnifferState, SnifferStatePayload, SystemMessage,
     TranslationResult, TranslatorState, TranslatorStatePayload, UpdateCheckResult, VersionInfo,
+    ALL_TAB, CUSTOM_TAB, SYSTEM_TAB,
 };
 
 #[serde_as]

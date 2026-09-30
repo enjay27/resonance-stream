@@ -187,9 +187,9 @@ fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
         });
 
         let active_tab = signals.active_tab.get_untracked();
-        if active_tab != "전체" && active_tab != "시스템" {
+        if active_tab != Tab::All.label() && active_tab != Tab::System.label() {
             signals.set_unread_counts.update(|counts| {
-                *counts.entry("SYSTEM".to_string()).or_insert(0) += 1;
+                *counts.entry(Tab::System.key().to_string()).or_insert(0) += 1;
             });
         }
     }) as Box<dyn FnMut(JsValue)>)

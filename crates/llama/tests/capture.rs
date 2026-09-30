@@ -44,7 +44,11 @@ fn every_channel_is_told_apart() {
         .into_iter()
         .map(|c| c.channel)
         .collect();
-    assert_eq!(channels, resonance_types::Channel::ALL);
+    use resonance_types::Channel as Wire;
+    assert_eq!(
+        channels,
+        [Wire::World, Wire::Local, Wire::Party, Wire::Guild]
+    );
 }
 
 #[test]

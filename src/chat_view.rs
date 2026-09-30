@@ -4,8 +4,7 @@
 use crate::ui_types::{Channel, ChatMessage};
 use std::collections::{HashMap, VecDeque};
 
-pub const ALL_TAB: &str = "전체";
-pub const CUSTOM_TAB: &str = "커스텀";
+pub use crate::ui_types::{ALL_TAB, CUSTOM_TAB, SYSTEM_TAB};
 
 /// What a tab shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,20 +12,115 @@ pub enum Tab {
     All,
     Custom,
     System,
-    Channel(&'static str),
+    Channel(Channel),
 }
 
 impl Tab {
-    pub fn from_label(label: &str) -> Self {
-        match label {
-            "전체" => Tab::All,
-            "커스텀" => Tab::Custom,
-            "시스템" => Tab::System,
-            "로컬" => Tab::Channel("LOCAL"),
-            "파티" => Tab::Channel("PARTY"),
-            "길드" => Tab::Channel("GUILD"),
-            _ => Tab::Channel("WORLD"),
+    /// The tabs in the order the nav bar lists them (System only in debug mode).
+    pub fn nav(debug_mode: bool) -> Vec<Tab> {
+        let mut tabs = vec![
+            Tab::All,
+            Tab::Custom,
+            Tab::Channel(Channel::World),
+            Tab::Channel(Channel::Guild),
+            Tab::Channel(Channel::Party),
+            Tab::Channel(Channel::Local),
+        ];
+        if debug_mode {
+            tabs.push(Tab::System);
         }
+        tabs
+    }
+
+    /// The tabs the tab-switch shortcut cycles through, in order.
+    const SWITCH_ORDER: [Tab; 5] = [
+        Tab::Custom,
+        Tab::Channel(Channel::World),
+        Tab::Channel(Channel::Guild),
+        Tab::Channel(Channel::Party),
+        Tab::Channel(Channel::Local),
+    ];
+
+    /// The tab the shortcut switches to from the tab labelled `current`: the
+    /// next in [`SWITCH_ORDER`](Self::SWITCH_ORDER), or the custom tab when
+    /// `current` is not in it (the all-tab, the system tab).
+    pub fn switch_from(current: &str) -> Tab {
+        match Self::SWITCH_ORDER
+            .iter()
+            .position(|tab| tab.label() == current)
+        {
+            Some(i) => Self::SWITCH_ORDER[(i + 1) % Self::SWITCH_ORDER.len()],
+            None => Tab::Custom,
+        }
+    }
+
+    /// The tab labelled `label` (how `active_tab` is stored), if there is one.
+    pub fn parse(label: &str) -> Option<Self> {
+        match label {
+            ALL_TAB => Some(Tab::All),
+            CUSTOM_TAB => Some(Tab::Custom),
+            SYSTEM_TAB => Some(Tab::System),
+            other => Channel::from_label(other).map(Tab::Channel),
+        }
+    }
+
+    /// Like [`parse`](Self::parse); a label nobody knows is the world tab.
+    pub fn from_label(label: &str) -> Self {
+        Self::parse(label).unwrap_or(Tab::Channel(Channel::World))
+    }
+
+    /// The tab's label: what the nav bar shows and `active_tab` stores.
+    pub fn label(self) -> &'static str {
+        match self {
+            Tab::All => ALL_TAB,
+            Tab::Custom => CUSTOM_TAB,
+            Tab::System => SYSTEM_TAB,
+            Tab::Channel(channel) => channel.label(),
+        }
+    }
+
+    /// The tab's key in `tab_limits`, the unread counts and the context menu:
+    /// its label, or for a channel its name; `"SYSTEM"` for the system tab.
+    pub fn key(self) -> &'static str {
+        match self {
+            Tab::All => ALL_TAB,
+            Tab::Custom => CUSTOM_TAB,
+            Tab::System => "SYSTEM",
+            Tab::Channel(channel) => channel.as_str(),
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Tab::All => "♾️",
+            Tab::Custom => "⭐",
+            Tab::System => "⚙️",
+            Tab::Channel(Channel::World) => "🌐",
+            Tab::Channel(Channel::Guild) => "🛡️",
+            Tab::Channel(Channel::Party) => "⚔️",
+            Tab::Channel(Channel::Local) => "📍",
+        }
+    }
+
+    /// Text and border colour classes of the tab button.
+    pub fn colors(self) -> (&'static str, &'static str) {
+        match self {
+            Tab::All => ("text-base-content", "border-base-content"),
+            Tab::Custom => ("text-success", "border-success"),
+            Tab::System => ("text-warning", "border-warning"),
+            Tab::Channel(Channel::World) => ("text-purple-500", "border-purple-500"),
+            Tab::Channel(Channel::Guild) => ("text-emerald-500", "border-emerald-500"),
+            Tab::Channel(Channel::Party) => ("text-sky-500", "border-sky-500"),
+            Tab::Channel(Channel::Local) => (
+                "text-base-content opacity-70",
+                "border-base-content opacity-70",
+            ),
+        }
+    }
+
+    /// Does the right-click menu have the "save to disk" switch? (Channels only.)
+    pub fn has_archive_setting(self) -> bool {
+        matches!(self, Tab::Channel(_))
     }
 
     /// Does a message on `channel` belong to this tab? (No level or search
@@ -36,20 +130,30 @@ impl Tab {
             Tab::All => true,
             Tab::Custom => custom_filters.iter().any(|c| c == channel.as_str()),
             Tab::System => false,
-            Tab::Channel(key) => channel.as_str() == key,
+            Tab::Channel(own) => channel == own,
         }
     }
-}
 
-impl Tab {
-    /// Key of the tab's message list in [`TabViews`] (and in `tab_limits`).
-    pub fn view_key(self) -> Option<&'static str> {
+    /// Drops the unread counts that opening this tab clears: all of them for
+    /// the all-tab, the selected channels' for the custom tab, else its own.
+    pub fn clear_unread(self, counts: &mut HashMap<String, usize>, custom_filters: &[String]) {
         match self {
-            Tab::All => Some(ALL_TAB),
-            Tab::Custom => Some(CUSTOM_TAB),
-            Tab::System => None,
-            Tab::Channel(channel) => Some(channel),
+            Tab::All => counts.clear(),
+            Tab::Custom => {
+                for channel in custom_filters {
+                    counts.remove(channel);
+                }
+            }
+            Tab::System | Tab::Channel(_) => {
+                counts.remove(self.key());
+            }
         }
+    }
+
+    /// Key of the tab's message list in [`TabViews`] (and in `tab_limits`);
+    /// the system tab has no list.
+    pub fn view_key(self) -> Option<&'static str> {
+        (self != Tab::System).then(|| self.key())
     }
 }
 
@@ -63,13 +167,19 @@ pub fn tab_limit(limits: &HashMap<String, usize>, key: &str, custom_filters: &[S
         limits
             .get(key)
             .copied()
-            .unwrap_or(if key == "WORLD" { 200 } else { 1000 })
+            .unwrap_or(if key == Channel::World.as_str() {
+                200
+            } else {
+                1000
+            })
     };
     let limit = match key {
         ALL_TAB => {
             let sum: usize = limits
                 .iter()
-                .filter(|(k, _)| !matches!(k.as_str(), ALL_TAB | CUSTOM_TAB | "SYSTEM"))
+                .filter(|(k, _)| {
+                    !matches!(k.as_str(), ALL_TAB | CUSTOM_TAB) && k.as_str() != Tab::System.key()
+                })
                 .map(|(_, v)| *v)
                 .sum();
             if sum == 0 {
@@ -341,11 +451,110 @@ mod tests {
         assert_eq!(Tab::from_label("전체"), Tab::All);
         assert_eq!(Tab::from_label("커스텀"), Tab::Custom);
         assert_eq!(Tab::from_label("시스템"), Tab::System);
-        assert_eq!(Tab::from_label("로컬"), Tab::Channel("LOCAL"));
-        assert_eq!(Tab::from_label("파티"), Tab::Channel("PARTY"));
-        assert_eq!(Tab::from_label("길드"), Tab::Channel("GUILD"));
-        assert_eq!(Tab::from_label("월드"), Tab::Channel("WORLD"));
-        assert_eq!(Tab::from_label("anything else"), Tab::Channel("WORLD"));
+        assert_eq!(Tab::from_label("로컬"), Tab::Channel(Channel::Local));
+        assert_eq!(Tab::from_label("파티"), Tab::Channel(Channel::Party));
+        assert_eq!(Tab::from_label("길드"), Tab::Channel(Channel::Guild));
+        assert_eq!(Tab::from_label("월드"), Tab::Channel(Channel::World));
+        assert_eq!(
+            Tab::from_label("anything else"),
+            Tab::Channel(Channel::World)
+        );
+    }
+
+    #[test]
+    fn the_nav_lists_the_tabs_in_their_order() {
+        let labels: Vec<_> = Tab::nav(false).iter().map(|t| t.label()).collect();
+        assert_eq!(labels, ["전체", "커스텀", "월드", "길드", "파티", "로컬"]);
+        let debug: Vec<_> = Tab::nav(true).iter().map(|t| t.label()).collect();
+        assert_eq!(debug.last(), Some(&"시스템"));
+        assert_eq!(debug.len(), 7);
+        let icons: Vec<_> = Tab::nav(true).iter().map(|t| t.icon()).collect();
+        assert_eq!(icons, ["♾️", "⭐", "🌐", "🛡️", "⚔️", "📍", "⚙️"]);
+    }
+
+    #[test]
+    fn a_tab_is_found_again_by_its_label_and_has_a_key() {
+        for tab in Tab::nav(true) {
+            assert_eq!(Tab::parse(tab.label()), Some(tab), "{tab:?}");
+        }
+        assert_eq!(Tab::parse("anything else"), None);
+        let keys: Vec<_> = Tab::nav(true).iter().map(|t| t.key()).collect();
+        assert_eq!(
+            keys,
+            [
+                "전체",
+                "커스텀",
+                "WORLD",
+                "GUILD",
+                "PARTY",
+                "LOCAL",
+                "SYSTEM"
+            ]
+        );
+        assert_eq!(Tab::System.view_key(), None);
+        assert_eq!(Tab::Custom.view_key(), Some(CUSTOM_TAB));
+        assert_eq!(Tab::Channel(Channel::Guild).view_key(), Some("GUILD"));
+    }
+
+    #[test]
+    fn only_channel_tabs_have_the_archive_switch_and_their_own_colours() {
+        let with: Vec<_> = Tab::nav(true)
+            .into_iter()
+            .filter(|t| t.has_archive_setting())
+            .collect();
+        assert_eq!(with.len(), 4);
+        assert!(with.iter().all(|t| matches!(t, Tab::Channel(_))));
+        assert_eq!(Tab::Custom.colors(), ("text-success", "border-success"));
+        assert_eq!(
+            Tab::Channel(Channel::Local).colors(),
+            (
+                "text-base-content opacity-70",
+                "border-base-content opacity-70"
+            )
+        );
+    }
+
+    #[test]
+    fn the_tab_switch_shortcut_cycles_and_falls_back_to_custom() {
+        let mut label = "커스텀";
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            let next = Tab::switch_from(label);
+            label = next.label();
+            seen.push(label);
+        }
+        assert_eq!(seen, ["월드", "길드", "파티", "로컬", "커스텀", "월드"]);
+        for outside in ["전체", "시스템", "nonsense", ""] {
+            assert_eq!(Tab::switch_from(outside), Tab::Custom, "{outside:?}");
+        }
+    }
+
+    #[test]
+    fn opening_a_tab_clears_its_unread_counts() {
+        let counts = || {
+            ["WORLD", "GUILD", "PARTY", "SYSTEM"]
+                .iter()
+                .map(|k| (k.to_string(), 3))
+                .collect::<HashMap<_, _>>()
+        };
+        let custom = vec!["GUILD".to_string(), "PARTY".to_string()];
+
+        let mut c = counts();
+        Tab::All.clear_unread(&mut c, &custom);
+        assert!(c.is_empty());
+
+        let mut c = counts();
+        Tab::Custom.clear_unread(&mut c, &custom);
+        assert_eq!(c.len(), 2);
+        assert!(c.contains_key("WORLD") && c.contains_key("SYSTEM"));
+
+        let mut c = counts();
+        Tab::Channel(Channel::World).clear_unread(&mut c, &custom);
+        assert!(!c.contains_key("WORLD") && c.len() == 3);
+
+        let mut c = counts();
+        Tab::System.clear_unread(&mut c, &custom);
+        assert!(!c.contains_key("SYSTEM") && c.len() == 3);
     }
 
     #[test]
@@ -355,8 +564,8 @@ mod tests {
         assert!(!Tab::System.shows_channel(Channel::Party, &custom));
         assert!(Tab::Custom.shows_channel(Channel::Guild, &custom));
         assert!(!Tab::Custom.shows_channel(Channel::World, &custom));
-        assert!(Tab::Channel("PARTY").shows_channel(Channel::Party, &custom));
-        assert!(!Tab::Channel("PARTY").shows_channel(Channel::Guild, &custom));
+        assert!(Tab::Channel(Channel::Party).shows_channel(Channel::Party, &custom));
+        assert!(!Tab::Channel(Channel::Party).shows_channel(Channel::Guild, &custom));
     }
 
     #[test]

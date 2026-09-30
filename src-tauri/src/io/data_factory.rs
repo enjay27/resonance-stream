@@ -2,6 +2,7 @@ use crate::{inject_system_message, ChatMessage, SystemLogLevel};
 use chrono::Local;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use resonance_core::history::{chat_log_file_name, dataset_file_name};
+use resonance_types::Channel;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -30,17 +31,17 @@ fn data_dir(app: &AppHandle) -> std::io::Result<PathBuf> {
 /// for the worker's life.
 struct Datasets {
     dir: PathBuf,
-    files: HashMap<String, BufWriter<File>>,
+    files: HashMap<Channel, BufWriter<File>>,
 }
 
 impl Datasets {
-    fn write(&mut self, channel: &str, line: &str) -> std::io::Result<()> {
-        if !self.files.contains_key(channel) {
-            let path = self.dir.join(dataset_file_name(channel));
+    fn write(&mut self, channel: Channel, line: &str) -> std::io::Result<()> {
+        if !self.files.contains_key(&channel) {
+            let path = self.dir.join(dataset_file_name(channel.as_str()));
             let file = OpenOptions::new().create(true).append(true).open(path)?;
-            self.files.insert(channel.to_string(), BufWriter::new(file));
+            self.files.insert(channel, BufWriter::new(file));
         }
-        match self.files.get_mut(channel) {
+        match self.files.get_mut(&channel) {
             Some(writer) => writeln!(writer, "{}", line),
             None => Ok(()),
         }
@@ -56,14 +57,14 @@ impl Datasets {
 /// Is `channel` archived? (Channels can be switched off per tab, right-click
 /// menu; the translator path asks too, so a translated message of a
 /// switched-off channel is not written either.)
-pub fn archives_channel(app: &AppHandle, channel: &str) -> bool {
+pub fn archives_channel(app: &AppHandle, channel: Channel) -> bool {
     app.try_state::<crate::AppState>().is_none_or(|state| {
         !state
             .config
             .read()
             .archive_ignored_channels
             .iter()
-            .any(|c| c == channel)
+            .any(|c| c == channel.as_str())
     })
 }
 
@@ -170,7 +171,7 @@ pub fn start_data_factory_worker(app: AppHandle) -> Sender<DataFactoryJob> {
                 "translated": chat.translated, // Some("text") or null
                 "timestamp": now_ms()
             });
-            let dataset_result = datasets.write(&chat.channel, &entry.to_string());
+            let dataset_result = datasets.write(chat.channel, &entry.to_string());
             let day_before = daily.day.clone();
             let daily_result = daily.write(&chat);
             if !day_before.is_empty() && daily.day != day_before {

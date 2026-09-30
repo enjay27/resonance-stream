@@ -307,7 +307,7 @@ fn catch_up(
 /// is archived.
 pub fn archive_chat(app: &AppHandle, chat: &ChatMessage) {
     let state = app.state::<crate::AppState>();
-    if !crate::io::archives_channel(app, &chat.channel) {
+    if !crate::io::archives_channel(app, chat.channel) {
         return;
     }
     let df_tx = state.data_factory_tx.lock().clone();
@@ -365,7 +365,7 @@ fn process_translation_job(
 
     // 4. Dispatch Side Effects
     let archive = state.data_factory_tx.lock().clone();
-    if let Some(df_tx) = archive.filter(|_| crate::io::archives_channel(app, &chat.channel)) {
+    if let Some(df_tx) = archive.filter(|_| crate::io::archives_channel(app, chat.channel)) {
         let mut archived = chat.clone();
         archived.translated = Some(final_str.clone());
         let _ = df_tx.send(crate::io::DataFactoryJob { chat: archived });

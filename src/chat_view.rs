@@ -1,7 +1,7 @@
 //! Which chat messages a view shows. Pure functions, so they are tested on
 //! the host (`cargo test -p resonance-stream-ui`) without a browser.
 
-use crate::ui_types::ChatMessage;
+use crate::ui_types::{Channel, ChatMessage};
 use std::collections::{HashMap, VecDeque};
 
 pub const ALL_TAB: &str = "전체";
@@ -31,12 +31,12 @@ impl Tab {
 
     /// Does a message on `channel` belong to this tab? (No level or search
     /// filtering: this decides unread badges.)
-    pub fn shows_channel(self, channel: &str, custom_filters: &[String]) -> bool {
+    pub fn shows_channel(self, channel: Channel, custom_filters: &[String]) -> bool {
         match self {
             Tab::All => true,
-            Tab::Custom => custom_filters.iter().any(|c| c == channel),
+            Tab::Custom => custom_filters.iter().any(|c| c == channel.as_str()),
             Tab::System => false,
-            Tab::Channel(key) => channel == key,
+            Tab::Channel(key) => channel.as_str() == key,
         }
     }
 }
@@ -99,12 +99,12 @@ impl TabViews {
     pub fn add(
         &mut self,
         pid: u64,
-        channel: &str,
+        channel: Channel,
         custom_filters: &[String],
         limits: &HashMap<String, usize>,
     ) -> Vec<u64> {
-        let mut keys = vec![ALL_TAB, channel];
-        if custom_filters.iter().any(|c| c == channel) {
+        let mut keys = vec![ALL_TAB, channel.as_str()];
+        if custom_filters.iter().any(|c| c == channel.as_str()) {
             keys.push(CUSTOM_TAB);
         }
         let mut dropped = Vec::new();
@@ -163,7 +163,7 @@ impl<T: Clone> ChatStore<T> {
     pub fn add(
         &mut self,
         pid: u64,
-        channel: &str,
+        channel: Channel,
         message: T,
         custom_filters: &[String],
         limits: &HashMap<String, usize>,
@@ -185,13 +185,13 @@ impl<T: Clone> ChatStore<T> {
     /// events may already have updated.
     pub fn merge_history(
         &mut self,
-        history: Vec<(u64, String, T)>,
-        channel_of: impl Fn(&T) -> String,
+        history: Vec<(u64, Channel, T)>,
+        channel_of: impl Fn(&T) -> Channel,
         custom_filters: &[String],
         limits: &HashMap<String, usize>,
     ) {
         let live = std::mem::take(self);
-        let mut rows: Vec<(u64, String, T)> = history
+        let mut rows: Vec<(u64, Channel, T)> = history
             .into_iter()
             .filter(|(pid, _, _)| !live.messages.contains_key(pid))
             .collect();
@@ -202,7 +202,7 @@ impl<T: Clone> ChatStore<T> {
         );
         rows.sort_unstable_by_key(|(pid, _, _)| *pid);
         for (pid, channel, message) in rows {
-            self.add(pid, &channel, message, custom_filters, limits);
+            self.add(pid, channel, message, custom_filters, limits);
         }
     }
 
@@ -250,10 +250,10 @@ impl<'a> ChatFilter<'a> {
     }
 
     pub fn matches(&self, m: &ChatMessage) -> bool {
-        if !self.tab.shows_channel(&m.channel, self.custom_filters) {
+        if !self.tab.shows_channel(m.channel, self.custom_filters) {
             return false;
         }
-        if m.channel == "WORLD" && m.level < self.min_level {
+        if m.channel == Channel::World && m.level < self.min_level {
             return false;
         }
         self.search_lower.is_empty()
@@ -265,7 +265,7 @@ impl<'a> ChatFilter<'a> {
 /// A message that neither pings (keyword alert) nor counts as unread: a
 /// blocked sender, or WORLD chat below the minimum sender level.
 pub fn is_muted(m: &ChatMessage, min_level: u64) -> bool {
-    m.is_blocked || (m.channel == "WORLD" && m.level < min_level)
+    m.is_blocked || (m.channel == Channel::World && m.level < min_level)
 }
 
 /// The newest `limit` items accepted by `keep`, oldest first -- walking
@@ -326,9 +326,9 @@ mod tests {
 
     use super::*;
 
-    fn msg(channel: &str, level: u64, nickname: &str, message: &str) -> ChatMessage {
+    fn msg(channel: Channel, level: u64, nickname: &str, message: &str) -> ChatMessage {
         ChatMessage {
-            channel: channel.into(),
+            channel,
             level,
             nickname: nickname.into(),
             message: message.into(),
@@ -351,34 +351,34 @@ mod tests {
     #[test]
     fn tab_membership() {
         let custom = vec!["GUILD".to_string()];
-        assert!(Tab::All.shows_channel("PARTY", &custom));
-        assert!(!Tab::System.shows_channel("PARTY", &custom));
-        assert!(Tab::Custom.shows_channel("GUILD", &custom));
-        assert!(!Tab::Custom.shows_channel("WORLD", &custom));
-        assert!(Tab::Channel("PARTY").shows_channel("PARTY", &custom));
-        assert!(!Tab::Channel("PARTY").shows_channel("GUILD", &custom));
+        assert!(Tab::All.shows_channel(Channel::Party, &custom));
+        assert!(!Tab::System.shows_channel(Channel::Party, &custom));
+        assert!(Tab::Custom.shows_channel(Channel::Guild, &custom));
+        assert!(!Tab::Custom.shows_channel(Channel::World, &custom));
+        assert!(Tab::Channel("PARTY").shows_channel(Channel::Party, &custom));
+        assert!(!Tab::Channel("PARTY").shows_channel(Channel::Guild, &custom));
     }
 
     #[test]
     fn level_filter_applies_to_world_chat_only() {
         let f = ChatFilter::new(Tab::All, &[], 10, "");
-        assert!(!f.matches(&msg("WORLD", 5, "a", "hi")));
-        assert!(f.matches(&msg("WORLD", 10, "a", "hi")));
-        assert!(f.matches(&msg("PARTY", 1, "a", "hi")));
+        assert!(!f.matches(&msg(Channel::World, 5, "a", "hi")));
+        assert!(f.matches(&msg(Channel::World, 10, "a", "hi")));
+        assert!(f.matches(&msg(Channel::Party, 1, "a", "hi")));
     }
 
     #[test]
     fn search_is_case_insensitive_on_nickname_or_message() {
         let f = ChatFilter::new(Tab::All, &[], 0, "BoB");
-        assert!(f.matches(&msg("WORLD", 1, "bobby", "x")));
-        assert!(f.matches(&msg("WORLD", 1, "x", "hello BOB")));
-        assert!(!f.matches(&msg("WORLD", 1, "alice", "hello")));
+        assert!(f.matches(&msg(Channel::World, 1, "bobby", "x")));
+        assert!(f.matches(&msg(Channel::World, 1, "x", "hello BOB")));
+        assert!(!f.matches(&msg(Channel::World, 1, "alice", "hello")));
     }
 
     #[test]
     fn system_tab_shows_no_chat() {
         let f = ChatFilter::new(Tab::System, &[], 0, "");
-        assert!(!f.matches(&msg("WORLD", 1, "a", "b")));
+        assert!(!f.matches(&msg(Channel::World, 1, "a", "b")));
     }
 
     use std::collections::BTreeMap;
@@ -435,8 +435,8 @@ mod tests {
         let mut v = TabViews::default();
         let custom = vec!["GUILD".to_string()];
         let l = HashMap::new();
-        v.add(1, "WORLD", &custom, &l);
-        v.add(2, "GUILD", &custom, &l);
+        v.add(1, Channel::World, &custom, &l);
+        v.add(2, Channel::Guild, &custom, &l);
         assert_eq!(v.pids(ALL_TAB).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(v.pids("WORLD").collect::<Vec<_>>(), [1]);
         assert_eq!(v.pids("GUILD").collect::<Vec<_>>(), [2]);
@@ -448,10 +448,10 @@ mod tests {
     fn busy_world_chat_does_not_evict_guild_messages() {
         let mut v = TabViews::default();
         let l = limits(&[("WORLD", 3), ("GUILD", 2)]); // all-tab: 5
-        v.add(1, "GUILD", &[], &l);
+        v.add(1, Channel::Guild, &[], &l);
         let mut dropped = Vec::new();
         for pid in 2..=20 {
-            dropped.extend(v.add(pid, "WORLD", &[], &l));
+            dropped.extend(v.add(pid, Channel::World, &[], &l));
         }
         assert_eq!(v.pids("WORLD").collect::<Vec<_>>(), [18, 19, 20]);
         assert_eq!(v.len(ALL_TAB), 5);
@@ -466,11 +466,11 @@ mod tests {
     fn a_pid_is_dropped_only_when_its_last_view_lets_go() {
         let mut v = TabViews::default();
         let l = limits(&[("GUILD", 1), ("PARTY", 1)]); // all-tab: 2
-        assert!(v.add(1, "GUILD", &[], &l).is_empty());
-        assert!(v.add(2, "PARTY", &[], &l).is_empty());
+        assert!(v.add(1, Channel::Guild, &[], &l).is_empty());
+        assert!(v.add(2, Channel::Party, &[], &l).is_empty());
         // 3 pushes 1 out of the all-tab (limit 2) and out of GUILD (limit 1):
         // now no view holds 1.
-        let dropped = v.add(3, "GUILD", &[], &l);
+        let dropped = v.add(3, Channel::Guild, &[], &l);
         assert_eq!(dropped, [1]);
         v.clear();
         assert_eq!(v.len(ALL_TAB), 0);
@@ -480,10 +480,10 @@ mod tests {
     fn chat_store_keeps_a_message_while_a_tab_lists_it() {
         let mut store = ChatStore::default();
         let l = limits(&[("WORLD", 2)]); // all-tab: 2
-        store.add(1, "GUILD", "g1", &[], &l);
-        store.add(2, "WORLD", "w2", &[], &l);
-        store.add(3, "WORLD", "w3", &[], &l);
-        store.add(4, "WORLD", "w4", &[], &l);
+        store.add(1, Channel::Guild, "g1", &[], &l);
+        store.add(2, Channel::World, "w2", &[], &l);
+        store.add(3, Channel::World, "w3", &[], &l);
+        store.add(4, Channel::World, "w4", &[], &l);
         // w2 left both WORLD and the all-tab; g1 left the all-tab but GUILD keeps it.
         assert_eq!(store.get(2), None);
         assert_eq!(store.get(1), Some(&"g1"));
@@ -498,21 +498,21 @@ mod tests {
 
     #[test]
     fn blocked_and_low_level_world_senders_are_muted() {
-        let mut m = msg("WORLD", 5, "a", "hi");
+        let mut m = msg(Channel::World, 5, "a", "hi");
         assert!(!is_muted(&m, 5));
         assert!(is_muted(&m, 6));
-        m.channel = "GUILD".into();
+        m.channel = Channel::Guild;
         assert!(!is_muted(&m, 6)); // the level rule is WORLD only
         m.is_blocked = true;
         assert!(is_muted(&m, 0));
     }
 
-    type Row = (String, &'static str);
-    fn row(channel: &str, tag: &'static str) -> Row {
-        (channel.to_string(), tag)
+    type Row = (Channel, &'static str);
+    fn row(channel: Channel, tag: &'static str) -> Row {
+        (channel, tag)
     }
-    fn channel_of(r: &Row) -> String {
-        r.0.clone()
+    fn channel_of(r: &Row) -> Channel {
+        r.0
     }
 
     #[test]
@@ -521,10 +521,16 @@ mod tests {
         // dropping messages that arrived (live) during the fetch.
         let (filters, limits) = (vec![], HashMap::new());
         let mut store = ChatStore::default();
-        store.add(7, "WORLD", row("WORLD", "live"), &filters, &limits);
+        store.add(
+            7,
+            Channel::World,
+            row(Channel::World, "live"),
+            &filters,
+            &limits,
+        );
         let history = vec![
-            (3, "PARTY".to_string(), row("PARTY", "old-a")),
-            (5, "WORLD".to_string(), row("WORLD", "old-b")),
+            (3, Channel::Party, row(Channel::Party, "old-a")),
+            (5, Channel::World, row(Channel::World, "old-b")),
         ];
         store.merge_history(history, channel_of, &filters, &limits);
         let tags: Vec<_> = store.tab(ALL_TAB).map(|r| r.1).collect();
@@ -536,8 +542,14 @@ mod tests {
     fn a_message_both_live_and_in_history_keeps_the_live_copy() {
         let (filters, limits) = (vec![], HashMap::new());
         let mut store = ChatStore::default();
-        store.add(5, "WORLD", row("WORLD", "live"), &filters, &limits);
-        let history = vec![(5, "WORLD".to_string(), row("WORLD", "snapshot"))];
+        store.add(
+            5,
+            Channel::World,
+            row(Channel::World, "live"),
+            &filters,
+            &limits,
+        );
+        let history = vec![(5, Channel::World, row(Channel::World, "snapshot"))];
         store.merge_history(history, channel_of, &filters, &limits);
         assert_eq!(store.len(), 1);
         assert_eq!(store.get(5).unwrap().1, "live");
@@ -548,9 +560,15 @@ mod tests {
         let filters = vec![];
         let limits = limits(&[("WORLD", 2)]);
         let mut store = ChatStore::default();
-        store.add(9, "WORLD", row("WORLD", "live"), &filters, &limits);
+        store.add(
+            9,
+            Channel::World,
+            row(Channel::World, "live"),
+            &filters,
+            &limits,
+        );
         let history = (1..=4)
-            .map(|pid| (pid, "WORLD".to_string(), row("WORLD", "old")))
+            .map(|pid| (pid, Channel::World, row(Channel::World, "old")))
             .collect();
         store.merge_history(history, channel_of, &filters, &limits);
         let pids: Vec<_> = store.views.pids("WORLD").collect();
@@ -575,7 +593,7 @@ mod tests {
         let mut store = ChatStore::default();
         for pid in 1..=3 {
             let row = ArcRwSignal::new(Tracked(dropped.clone()));
-            store.add(pid, "WORLD", row, &filters, &limits);
+            store.add(pid, Channel::World, row, &filters, &limits);
         }
         assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 2);
     }

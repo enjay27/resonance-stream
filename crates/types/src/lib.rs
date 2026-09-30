@@ -10,11 +10,80 @@ use std::collections::HashMap;
 
 // --- Chat and system log ---
 
+/// A chat channel. On the wire and on disk it is its upper-case name
+/// (`"WORLD"`, `"GUILD"`, ...); a name this enum does not know -- an old log, a
+/// channel the game has that we do not show separately yet (the beginner
+/// channel, code 9) -- reads as [`Channel::World`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Channel {
+    #[default]
+    World,
+    Local,
+    Party,
+    Guild,
+}
+
+impl Channel {
+    /// Every channel, in the order tabs and menus list them.
+    pub const ALL: [Channel; 4] = [
+        Channel::World,
+        Channel::Local,
+        Channel::Party,
+        Channel::Guild,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Channel::World => "WORLD",
+            Channel::Local => "LOCAL",
+            Channel::Party => "PARTY",
+            Channel::Guild => "GUILD",
+        }
+    }
+
+    /// The channel called `name` (exact, upper case); unknown names are world.
+    pub fn from_name(name: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|channel| channel.as_str() == name)
+            .unwrap_or_default()
+    }
+
+    /// The channel for the number the game sends in a chat frame: 2 local,
+    /// 3 party, 4 guild; anything else (1 world, 9 beginner, ...) is world.
+    pub fn from_code(code: u64) -> Self {
+        match code {
+            2 => Channel::Local,
+            3 => Channel::Party,
+            4 => Channel::Guild,
+            _ => Channel::World,
+        }
+    }
+}
+
+impl std::fmt::Display for Channel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for Channel {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Channel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::from_name(&String::deserialize(deserializer)?))
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ChatMessage {
     pub pid: u64,
-    pub channel: String,
+    pub channel: Channel,
     pub nickname: String,
     pub message: String,
     pub timestamp: u64,
@@ -258,6 +327,85 @@ mod tests {
         let msg: ChatMessage = serde_json::from_str(old).expect("old line must parse");
         assert_eq!((msg.pid, msg.uid, msg.message.as_str()), (3, 9, "hi"));
         assert_eq!((msg.class_id, msg.level, msg.sequence_id), (0, 0, 0));
+    }
+
+    #[test]
+    fn a_channel_is_its_upper_case_name_on_the_wire() {
+        for (channel, name) in [
+            (Channel::World, "WORLD"),
+            (Channel::Local, "LOCAL"),
+            (Channel::Party, "PARTY"),
+            (Channel::Guild, "GUILD"),
+        ] {
+            assert_eq!(serde_json::to_value(channel).unwrap(), name);
+            assert_eq!(
+                serde_json::from_value::<Channel>(name.into()).unwrap(),
+                channel
+            );
+            assert_eq!(channel.as_str(), name);
+            assert_eq!(Channel::from_name(name), channel);
+        }
+    }
+
+    #[test]
+    fn a_channel_name_nobody_knows_reads_as_world() {
+        // Old logs, and channels the parser has no variant for yet.
+        for unknown in ["", "BEGINNER", "world", "9", "길드"] {
+            assert_eq!(Channel::from_name(unknown), Channel::World, "{unknown:?}");
+            let json = serde_json::Value::String(unknown.into());
+            assert_eq!(
+                serde_json::from_value::<Channel>(json).unwrap(),
+                Channel::World
+            );
+        }
+    }
+
+    #[test]
+    fn the_game_sends_channels_as_numbers() {
+        // One table (was in the parser twice): 2 local, 3 party, 4 guild,
+        // anything else -- 1 is world, 9 the beginner channel -- world.
+        let got: Vec<_> = [1, 2, 3, 4, 9, 0, 1000].map(Channel::from_code).to_vec();
+        assert_eq!(
+            got,
+            [
+                Channel::World,
+                Channel::Local,
+                Channel::Party,
+                Channel::Guild,
+                Channel::World,
+                Channel::World,
+                Channel::World
+            ]
+        );
+    }
+
+    #[test]
+    fn every_channel_is_listed_once() {
+        assert_eq!(Channel::ALL.len(), 4);
+        let names: Vec<_> = Channel::ALL.iter().map(|c| c.as_str()).collect();
+        assert_eq!(names, ["WORLD", "LOCAL", "PARTY", "GUILD"]);
+        assert_eq!(Channel::default(), Channel::World);
+        assert_eq!(Channel::Guild.to_string(), "GUILD");
+    }
+
+    #[test]
+    fn a_chat_message_keeps_its_channel_string_on_the_wire() {
+        let msg = ChatMessage {
+            channel: Channel::Guild,
+            ..Default::default()
+        };
+        assert_eq!(serde_json::to_value(&msg).unwrap()["channel"], "GUILD");
+        let old = r#"{"pid":1,"channel":"PARTY","message":"x"}"#;
+        assert_eq!(
+            serde_json::from_str::<ChatMessage>(old).unwrap().channel,
+            Channel::Party
+        );
+        // A line saved without a channel, or with one we never had, is WORLD.
+        let none = r#"{"pid":1,"message":"x"}"#;
+        assert_eq!(
+            serde_json::from_str::<ChatMessage>(none).unwrap().channel,
+            Channel::World
+        );
     }
 
     #[test]

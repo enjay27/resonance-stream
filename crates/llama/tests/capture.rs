@@ -17,7 +17,7 @@ fn a_chat_line_arrives_with_its_sender_and_ids() {
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
     assert_eq!(row.message, "こんにちは");
-    assert_eq!(row.channel, "GUILD");
+    assert_eq!(row.channel, resonance_types::Channel::Guild);
     assert_eq!(row.nickname, "あずるる");
     assert_eq!(row.uid, 37_276_266);
     assert_eq!(row.level, 60);
@@ -44,7 +44,7 @@ fn every_channel_is_told_apart() {
         .into_iter()
         .map(|c| c.channel)
         .collect();
-    assert_eq!(channels, ["WORLD", "LOCAL", "PARTY", "GUILD"]);
+    assert_eq!(channels, resonance_types::Channel::ALL);
 }
 
 #[test]

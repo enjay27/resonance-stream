@@ -131,12 +131,12 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                             let filters = custom_filters.get_untracked();
                             let history = vec
                                 .into_iter()
-                                .map(|p| (p.pid, p.channel.clone(), ArcRwSignal::new(p)))
+                                .map(|p| (p.pid, p.channel, ArcRwSignal::new(p)))
                                 .collect();
                             set_chat.update(|store| {
                                 store.merge_history(
                                     history,
-                                    |m| m.with_untracked(|m| m.channel.clone()),
+                                    |m| m.with_untracked(|m| m.channel),
                                     &filters,
                                     &limits,
                                 )

@@ -16,6 +16,7 @@ use crate::protocol::types::{AppState, SnifferState, SystemLogLevel};
 use crossbeam_channel::Sender;
 use resonance_core::capture::{ChatPipeline, PipelineAction};
 use resonance_core::text::{contains_japanese, convert_to_romaji};
+use resonance_core::workers::read_error_backoff;
 
 // --- GLOBAL STATE ---
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
@@ -182,6 +183,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
         pipeline.set_keep_unknown_fields(config.debug_mode);
         set_raw_capture(config.raw_capture);
         let mut raw_capture = RawCapture::default();
+        let mut read_failures = 0u32;
 
         loop {
             if let Err(crossbeam_channel::TryRecvError::Disconnected) = rx_main.try_recv() {
@@ -201,14 +203,32 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
                 )
             };
             let n = match socket.recv(uninit_buf) {
-                Ok(n) => n,
+                Ok(n) => {
+                    read_failures = 0;
+                    n
+                }
+                // The read timeout: nothing arrived, nothing is wrong.
                 Err(ref e)
                     if e.kind() == std::io::ErrorKind::WouldBlock
                         || e.kind() == std::io::ErrorKind::TimedOut =>
                 {
                     continue
                 }
-                Err(_) => continue,
+                // A real failure: say so once per streak and back off, so a
+                // socket that keeps failing does not spin a core.
+                Err(e) => {
+                    read_failures += 1;
+                    if read_failures == 1 {
+                        inject_system_message(
+                            &app_handle,
+                            SystemLogLevel::Warning,
+                            "Sniffer",
+                            format!("Socket read failed ({e}); retrying."),
+                        );
+                    }
+                    thread::sleep(read_error_backoff(read_failures));
+                    continue;
+                }
             };
 
             // Debug capture of the untouched packet, before anything parses it.

@@ -62,6 +62,16 @@ pub fn pick_local_port(preferred: u16) -> u16 {
         .unwrap_or(preferred)
 }
 
+/// How long the sniffer waits before reading again after `failures_in_a_row`
+/// failed reads (1 = the first): doubling from 10 ms up to 1 s, so a socket
+/// that keeps failing does not spin a core.
+pub fn read_error_backoff(failures_in_a_row: u32) -> Duration {
+    const FIRST: Duration = Duration::from_millis(10);
+    const MAX: Duration = Duration::from_secs(1);
+    let doublings = failures_in_a_row.saturating_sub(1).min(16);
+    FIRST.saturating_mul(1 << doublings).min(MAX)
+}
+
 pub fn translation_is_stale(queued_at: Instant, now: Instant) -> bool {
     now.saturating_duration_since(queued_at) > MAX_TRANSLATION_WAIT
 }
@@ -421,6 +431,15 @@ mod tests {
         );
         assert_eq!(log_tail("", 3), "");
         assert_eq!(log_tail("one", 3), "one");
+    }
+
+    #[test]
+    fn a_failing_socket_read_backs_off_up_to_a_second() {
+        let ms = |n| read_error_backoff(n).as_millis();
+        assert_eq!((ms(1), ms(2), ms(3), ms(4)), (10, 20, 40, 80));
+        assert_eq!(ms(8), 1000); // 10 * 2^7 = 1280, capped
+        assert_eq!(ms(1_000_000), 1000); // no overflow
+        assert!(ms(0) <= 10); // not a failure yet: no wait to speak of
     }
 
     #[test]

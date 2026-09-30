@@ -12,9 +12,20 @@ on:
       - '.memory/**'
       - 'LICENSE*'
   pull_request:
+  # auto-merge.yml dispatches this on main after each merge (merges made with
+  # GITHUB_TOKEN start no push run), so main's build cache stays current.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+  # Line tables only: the gate needs test results, not debugger symbols. Much
+  # smaller PDBs on Windows -- faster linking, a smaller build cache.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+# Build cache policy (both jobs): every run restores, only main saves. A cache
+# saved by a PR ref is readable by that PR alone and counts against the repo's
+# 10 GB limit, so PR saves cost time and evict main's entry, which every PR
+# restores from.
 
 jobs:
   ui:
@@ -27,6 +38,9 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-bin: false
       - uses: extractions/setup-just@v2
       - run: just fmt-check
       - run: just core-check
@@ -39,6 +53,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-bin: false
       - uses: extractions/setup-just@v2
       # tauri::generate_context! needs frontendDist to exist; the gate checks
       # the backend, so a placeholder stands in for `trunk build`.

@@ -1,0 +1,135 @@
+//! Window geometry decisions, kept free of Tauri so they can be tested on any OS.
+
+use resonance_types::WindowRect;
+
+/// The rect a window should take to be at least `min_width` x `min_height`
+/// (physical pixels) without leaving `work_area`, the monitor minus the taskbar.
+/// It grows around its current centre and is pushed back inside the work area;
+/// a side already larger than the minimum keeps its size. `None` when the
+/// window is already big enough.
+pub fn grow_to_fit(
+    current: WindowRect,
+    min_width: u32,
+    min_height: u32,
+    work_area: WindowRect,
+) -> Option<WindowRect> {
+    let (x, width) = grow_axis(
+        current.x,
+        current.width,
+        min_width,
+        work_area.x,
+        work_area.width,
+    );
+    let (y, height) = grow_axis(
+        current.y,
+        current.height,
+        min_height,
+        work_area.y,
+        work_area.height,
+    );
+    let grown = WindowRect {
+        x,
+        y,
+        width,
+        height,
+    };
+    (grown != current).then_some(grown)
+}
+
+/// One axis of [`grow_to_fit`]: the new start and length. An axis that does not
+/// grow keeps both; one that grows is centred on the old centre, then clamped.
+fn grow_axis(pos: i32, len: u32, min: u32, area_pos: i32, area_len: u32) -> (i32, u32) {
+    let target = min.min(area_len);
+    if len >= target {
+        return (pos, len);
+    }
+    let centred = pos as i64 - (target as i64 - len as i64) / 2;
+    let last = area_pos as i64 + area_len as i64 - target as i64;
+    (centred.clamp(area_pos as i64, last) as i32, target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn r(x: i32, y: i32, width: u32, height: u32) -> WindowRect {
+        WindowRect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    const SCREEN: WindowRect = WindowRect {
+        x: 0,
+        y: 0,
+        width: 1920,
+        height: 1040,
+    };
+
+    #[test]
+    fn a_big_enough_window_is_left_alone() {
+        assert_eq!(grow_to_fit(r(100, 100, 1000, 700), 900, 640, SCREEN), None);
+        assert_eq!(grow_to_fit(r(100, 100, 900, 640), 900, 640, SCREEN), None);
+    }
+
+    #[test]
+    fn a_small_window_grows_around_its_centre() {
+        // centre (500, 400) stays put
+        assert_eq!(
+            grow_to_fit(r(300, 250, 400, 300), 900, 640, SCREEN),
+            Some(r(50, 80, 900, 640))
+        );
+    }
+
+    #[test]
+    fn only_the_short_side_grows() {
+        assert_eq!(
+            grow_to_fit(r(100, 100, 1200, 300), 900, 640, SCREEN),
+            Some(r(100, 0, 1200, 640))
+        );
+    }
+
+    #[test]
+    fn a_window_near_an_edge_is_pushed_back_inside() {
+        // bottom-right corner: would overflow right and bottom
+        assert_eq!(
+            grow_to_fit(r(1700, 900, 200, 100), 900, 640, SCREEN),
+            Some(r(1020, 400, 900, 640))
+        );
+        // partly off the top-left of the screen
+        assert_eq!(
+            grow_to_fit(r(-150, -50, 400, 300), 900, 640, SCREEN),
+            Some(r(0, 0, 900, 640))
+        );
+    }
+
+    #[test]
+    fn a_side_that_does_not_grow_keeps_its_position() {
+        // wider than the screen: the width is not touched, only the height grows
+        assert_eq!(
+            grow_to_fit(r(-50, 500, 2000, 300), 900, 640, SCREEN),
+            Some(r(-50, 330, 2000, 640))
+        );
+    }
+
+    #[test]
+    fn it_never_grows_past_the_work_area() {
+        let small = r(0, 0, 800, 600);
+        assert_eq!(
+            grow_to_fit(r(100, 100, 400, 300), 900, 640, small),
+            Some(r(0, 0, 800, 600))
+        );
+    }
+
+    #[test]
+    fn a_work_area_off_the_origin_is_respected() {
+        // second monitor to the left, taskbar on top
+        let left = r(-1920, 40, 1920, 1040);
+        assert_eq!(
+            grow_to_fit(r(-100, 100, 400, 300), 900, 640, left),
+            Some(r(-900, 40, 900, 640))
+        );
+    }
+}

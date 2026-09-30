@@ -5,6 +5,7 @@ pub mod config_signals;
 pub mod favorites;
 pub mod hooks;
 pub mod service_state;
+pub mod settings_nav;
 pub mod shortcut_keys;
 pub mod status_signals;
 pub mod store;

@@ -966,3 +966,15 @@ mod tests {
         assert_eq!(json["unknownFields"]["chat_40"][0], 7);
     }
 }
+
+// --- Window ---
+
+/// A window's outer position and size in physical pixels. `grow_window` returns
+/// the rect it replaced; the UI hands it back to `restore_window`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}

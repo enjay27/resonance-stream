@@ -106,5 +106,9 @@ mod tests {
         assert!(!s.ui.show_favorites.get_untracked());
         assert!(s.ui.active_menu_id.get_untracked().is_none());
         assert!(!s.ui.click_through.get_untracked());
+        assert_eq!(
+            s.ui.settings_category.get_untracked(),
+            crate::settings_nav::SettingsCategory::Translation
+        );
     }
 }

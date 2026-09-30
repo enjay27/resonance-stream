@@ -8,8 +8,8 @@ pub use resonance_types::{
     ComputeMode, FavoriteMessage, FolderStatus, GistMetadata, LogLevel, NetworkInterface,
     ProgressPayload, RemoteDictionary, ServiceStates, SnifferState, SnifferStatePayload,
     SystemLogLevel, SystemMessage, TabSwitchModifier, Theme, Tier, TranslationResult,
-    TranslatorState, TranslatorStatePayload, UpdateCheckResult, VersionInfo, ALL_TAB, CUSTOM_TAB,
-    SYSTEM_TAB,
+    TranslatorState, TranslatorStatePayload, UpdateCheckResult, VersionInfo, WindowRect, ALL_TAB,
+    CUSTOM_TAB, SYSTEM_TAB,
 };
 
 #[serde_as]

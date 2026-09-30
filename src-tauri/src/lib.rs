@@ -158,6 +158,8 @@ pub fn run() {
             open_browser,
             get_network_interfaces,
             set_click_through,
+            grow_window,
+            restore_window,
             update_tray_menu,
             launch_translator,
             block_user_command,

@@ -19,8 +19,6 @@ pub fn KeywordSection(
         // ==========================================
         <section class="space-y-4">
 
-            <h3 class="text-[10px] font-bold text-success uppercase tracking-widest opacity-80">"키워드 설정 (Keyword Settings)"</h3>
-
             // Emphasis Keywords
             <div class="bg-base-200 p-3 rounded-lg border border-base-content/5 space-y-3 mt-4">
                 <span class="text-[11px] font-bold text-base-content/60">"강조 키워드 (Emphasis Keywords) - 채팅창에서 다른 색상으로 굵게 표시됩니다."</span>
@@ -134,7 +132,7 @@ pub fn KeywordSection(
                         <span class="text-success">{move || format!("{:.0}%", signals.config.alert_volume.get() * 100.0)}</span>
                     </div>
                     <input type="range" min="0.0" max="1.0" step="0.05"
-                        class="range range-xs range-success"
+                        class="range range-xs range-success w-full"
                         prop:value=move || signals.config.alert_volume.get().to_string()
                         on:input=move |ev| {
                             // 1. Update the UI state smoothly while dragging (no sound)

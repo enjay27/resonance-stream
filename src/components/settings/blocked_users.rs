@@ -11,9 +11,7 @@ pub fn BlockedUsersSection() -> impl IntoView {
 
     view! {
         // --- SECTION: BLOCKED USERS ---
-        <div class="space-y-2 mt-6 pt-4 border-t border-base-content/10">
-            <div class="text-[11px] font-bold text-error mb-2">"차단된 사용자 (Blocked Users)"</div>
-
+        <div class="space-y-2">
             // HIDE BLOCKED MESSAGES TOGGLE
             <div class="flex items-center justify-between bg-base-200/50 p-2 rounded-lg border border-base-content/5 mb-2">
                 <div class="flex flex-col">

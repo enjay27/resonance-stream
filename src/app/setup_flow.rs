@@ -2,6 +2,7 @@
 
 use crate::config_signals::ConfigSignals;
 use crate::hooks::use_events::setup_event_listeners;
+use crate::status_signals::{ServiceSignals, SetupSignals};
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
 use crate::ui_types::{SystemLogLevel, TauriEvent};
@@ -16,10 +17,10 @@ pub fn finalize_setup(
     save_config: Action<(), ()>,
 ) -> impl Fn(()) + Copy + Send + Sync + 'static {
     let ConfigSignals { set_init_done, .. } = signals.config;
-    let AppSignals {
+    let ServiceSignals {
         set_is_sniffer_active,
         ..
-    } = signals;
+    } = signals.service;
 
     move |_| {
         set_init_done.set(true);
@@ -49,13 +50,15 @@ pub fn start_download(
     signals: AppSignals,
     finalize_setup: impl Fn(()) + Copy + Send + Sync + 'static,
 ) -> impl Fn(web_sys::MouseEvent) + Copy + Send + Sync + 'static {
-    let AppSignals {
+    let SetupSignals {
         set_status_text,
-        set_model_ready,
         set_downloading,
         set_progress,
         ..
-    } = signals;
+    } = signals.setup;
+    let ServiceSignals {
+        set_model_ready, ..
+    } = signals.service;
 
     move |ev: web_sys::MouseEvent| {
         // Prevent the default button behavior if necessary

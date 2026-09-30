@@ -21,11 +21,11 @@ pub fn SetupWizard(
                     // --- PROGRESS STEPS ---
                     <ul class="steps steps-horizontal w-full mb-4">
                         <li class="step step-success"></li>
-                        <li class=move || format!("step {}", if signals.wizard_step.get() >= 1 { "step-success" } else { "" })></li>
-                        <li class=move || format!("step {}", if signals.wizard_step.get() >= 2 { "step-success" } else { "" })></li>
+                        <li class=move || format!("step {}", if signals.setup.wizard_step.get() >= 1 { "step-success" } else { "" })></li>
+                        <li class=move || format!("step {}", if signals.setup.wizard_step.get() >= 2 { "step-success" } else { "" })></li>
                     </ul>
 
-                    {move || match signals.wizard_step.get() {
+                    {move || match signals.setup.wizard_step.get() {
                         0 => view! {
                             <div class="space-y-4 animate-in fade-in slide-in-from-bottom-4 text-left">
                                 <h1 class="text-3xl font-black tracking-tighter text-success text-center">"RESONANCE STREAM"</h1>
@@ -78,7 +78,7 @@ pub fn SetupWizard(
                                                 match invoke("ensure_firewall_rule_command", JsValue::NULL).await {
                                                     Ok(_) => {
                                                         // 3a. User clicked YES! Move to the next step.
-                                                        signals.set_wizard_step.set(1);
+                                                        signals.setup.set_wizard_step.set(1);
                                                     },
                                                     Err(_) => {
                                                         // 3b. User clicked NO!
@@ -123,7 +123,7 @@ pub fn SetupWizard(
                                     </div>
                                 </Show>
                                 <button class="btn btn-success btn-block"
-                                    on:click=move |_| if signals.config.use_translation.get_untracked() { signals.set_wizard_step.set(2) } else { finalize.run(()) }>
+                                    on:click=move |_| if signals.config.use_translation.get_untracked() { signals.setup.set_wizard_step.set(2) } else { finalize.run(()) }>
                                     "다음"
                                 </button>
                             </div>
@@ -133,11 +133,11 @@ pub fn SetupWizard(
                             <div class="space-y-4 text-center">
                                 <h2 class="text-lg font-bold">"AI 모델 설치"</h2>
                                 <p class="text-xs opacity-60">"번역을 위해 약 2.4GB의 AI 모델 파일 다운로드가 필요합니다."</p>
-                                <Show when=move || signals.downloading.get() fallback=move || view! {
+                                <Show when=move || signals.setup.downloading.get() fallback=move || view! {
                                     <button class="btn btn-success btn-block" on:click=move |ev| start_download.run(ev)>"다운로드 시작"</button>
                                 }>
-                                    <progress class="progress progress-success w-full h-4" value=move || signals.progress.get().to_string() max="100"></progress>
-                                    <span class="text-xs font-mono">{move || format!("{}%", signals.progress.get())}</span>
+                                    <progress class="progress progress-success w-full h-4" value=move || signals.setup.progress.get().to_string() max="100"></progress>
+                                    <span class="text-xs font-mono">{move || format!("{}%", signals.setup.progress.get())}</span>
                                 </Show>
                             </div>
                         }.into_any(),

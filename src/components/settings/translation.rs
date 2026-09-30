@@ -41,7 +41,7 @@ pub fn TranslationSection() -> impl IntoView {
                                                 has_error = true;
                                                 if let Some(w) = web_sys::window() {
                                                     if w.confirm_with_message("AI 모델 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
-                                                        signals.set_wizard_step.set(2);
+                                                        signals.setup.set_wizard_step.set(2);
                                                         signals.set_show_settings.set(false);
                                                         signals.config.set_init_done.set(false);
                                                     }
@@ -58,7 +58,7 @@ pub fn TranslationSection() -> impl IntoView {
                                                     has_error = true;
                                                     if let Some(w) = web_sys::window() {
                                                         if w.confirm_with_message("AI 실행 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
-                                                            signals.set_wizard_step.set(2);
+                                                            signals.setup.set_wizard_step.set(2);
                                                             signals.set_show_settings.set(false);
                                                             signals.config.set_init_done.set(false);
                                                         }
@@ -101,7 +101,7 @@ pub fn TranslationSection() -> impl IntoView {
                                     on:click=move |_| {
                                         signals.config.set_compute_mode.set(m);
                                         actions.save_config.dispatch(());
-                                        signals.set_restart_required.set(true);
+                                        signals.service.set_restart_required.set(true);
                                     }
                                 >
                                     {m.label()}
@@ -123,7 +123,7 @@ pub fn TranslationSection() -> impl IntoView {
                                         on:click=move |_| {
                                             signals.config.set_tier.set(t);
                                             actions.save_config.dispatch(());
-                                            signals.set_restart_required.set(true);
+                                            signals.service.set_restart_required.set(true);
                                         }
                                     >
                                         {t.label()}
@@ -159,7 +159,7 @@ pub fn TranslationSection() -> impl IntoView {
                         </div>
                     </div>
 
-                    <Show when=move || signals.restart_required.get()>
+                    <Show when=move || signals.service.restart_required.get()>
                         <div class="text-[10px] text-warning font-bold animate-pulse mt-2 p-2 bg-warning/10 rounded">
                             "⚠️ 변경 사항 적용을 위해 AI 번역기가 재시작 됩니다. 번역을 위해 잠시 시간이 소요됩니다."
                         </div>

@@ -68,6 +68,7 @@ src/                  ui crate (resonance-stream-ui)
                           hydration.rs (start-up load), setup_flow.rs (first-run wizard)
   store.rs              AppSignals (app-wide signals, AppSignals::new) + AppActions
   config_signals.rs     ConfigSignals: the signals that mirror AppConfig; to_config() / apply()
+  status_signals.rs     ServiceSignals / SetupSignals / UpdateSignals: backend status, wizard, update dialogs
   chat_view.rs          chat list: per-tab views + limits (ChatStore), filter, paging -- pure, host-tested
   components/           views; settings/ is one file per settings section
   hooks/                backend event, config and tray wiring

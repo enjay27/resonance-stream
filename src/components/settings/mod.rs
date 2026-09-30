@@ -42,7 +42,7 @@ pub fn Settings() -> impl IntoView {
                 }
             });
         } else {
-            signals.set_restart_required.set(false);
+            signals.service.set_restart_required.set(false);
         }
     });
 

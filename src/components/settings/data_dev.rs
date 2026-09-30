@@ -36,14 +36,14 @@ pub fn DataDevSection(
                         <span class="text-[9px] opacity-60">"GitHub에서 최신 단어장을 불러옵니다."</span>
                     </div>
                     <button class="btn btn-xs btn-outline relative"
-                        class:btn-success=move || signals.dict_update_available.get()
+                        class:btn-success=move || signals.service.dict_update_available.get()
                         disabled=move || is_syncing.get()
                         on:click=move |_| {
                             sync_dict_action.dispatch(());
-                            signals.set_dict_update_available.set(false);
+                            signals.service.set_dict_update_available.set(false);
                         }
                     >
-                        <Show when=move || signals.dict_update_available.get()>
+                        <Show when=move || signals.service.dict_update_available.get()>
                             <span class="absolute -top-1 -right-1 flex h-2 w-2">
                               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
                               <span class="relative inline-flex rounded-full h-2 w-2 bg-success"></span>
@@ -237,7 +237,7 @@ pub fn DataDevSection(
                                 on:change=move |ev| {
                                     signals.config.set_network_interface.set(event_target_value(&ev));
                                     actions.save_config.dispatch(());
-                                    signals.set_restart_required.set(true); // Requires sniffer restart
+                                    signals.service.set_restart_required.set(true); // Requires sniffer restart
                                 }>
                                 <option value="">"Auto-Detect (권장)"</option>
                                 <For

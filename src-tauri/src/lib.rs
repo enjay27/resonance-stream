@@ -46,6 +46,7 @@ pub fn run() {
                 nickname_cache: Mutex::new(std::collections::HashMap::new()),
                 dictionary: RwLock::new(Arc::new(dictionary)),
                 translator_tx: Mutex::new(None),
+                translation_ledger: Mutex::new(Default::default()),
                 data_factory_tx: Mutex::new(None),
                 sniffer_tx: Mutex::new(None),
                 blocked_users: Mutex::new(config.blocked_users.clone()),

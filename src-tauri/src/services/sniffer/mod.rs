@@ -301,6 +301,12 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                     continue;
                 }
 
+                // Every Japanese message is owed a translation, even with the
+                // translator off or still starting: its next start catches up.
+                if contains_japanese(&chat.message) {
+                    state.translation_ledger.lock().record(chat.pid);
+                }
+
                 // Translated messages are archived by the translator with their
                 // translation; anything else is archived as it is.
                 let translator = state.translator_tx.lock();

@@ -91,7 +91,9 @@ impl ChannelLimits {
 
 /// The newest messages saved in `dir` (one JSON `ChatMessage` per line, one
 /// `.jsonl` file per day), up to each channel's limit, oldest first. Reading
-/// stops once every channel with a limit of its own is full. Pids are
+/// stops once every channel with a limit of its own is full. A message saved
+/// twice (untranslated, then again once a catch-up translated it) comes back
+/// once, as its newest line. Pids are
 /// renumbered 1..=n in that order: saved pids come from earlier runs and may
 /// collide, while new messages must sort after the loaded ones.
 pub fn load_recent(dir: &Path, limits: &ChannelLimits) -> Vec<ChatMessage> {
@@ -108,6 +110,7 @@ pub fn load_recent(dir: &Path, limits: &ChannelLimits) -> Vec<ChatMessage> {
     // Newest day first, newest line first, until every channel is full.
     let mut newest_first = Vec::new();
     let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut seen = std::collections::HashSet::new();
     let all_full = |counts: &HashMap<String, usize>| {
         limits
             .channels()
@@ -127,6 +130,12 @@ pub fn load_recent(dir: &Path, limits: &ChannelLimits) -> Vec<ChatMessage> {
             let Ok(message) = serde_json::from_str::<ChatMessage>(line) else {
                 continue;
             };
+            // Same identity as the capture's duplicate check; messages
+            // without one (no timestamp, no sequence id) are all kept.
+            let identity = (message.uid, message.timestamp, message.sequence_id);
+            if (message.timestamp != 0 || message.sequence_id != 0) && !seen.insert(identity) {
+                continue;
+            }
             let count = counts.entry(message.channel.clone()).or_insert(0);
             if *count < limits.of(&message.channel) {
                 *count += 1;
@@ -185,6 +194,10 @@ impl ChatHistory {
 
     /// For in-place updates (translation, blocked flag); the channel must
     /// not be changed through it.
+    pub fn get(&self, pid: u64) -> Option<&ChatMessage> {
+        self.messages.get(&pid)
+    }
+
     pub fn get_mut(&mut self, pid: u64) -> Option<&mut ChatMessage> {
         self.messages.get_mut(&pid)
     }
@@ -396,6 +409,45 @@ mod tests {
             Some("번역")
         );
         assert!(h.get_mut(99).is_none());
+    }
+
+    #[test]
+    fn load_recent_keeps_the_newest_line_of_a_message_saved_twice() {
+        let dir = temp_dir("twice");
+        let saved = |translated: Option<&str>, seq: u64| {
+            serde_json::to_string(&ChatMessage {
+                uid: 9,
+                timestamp: 1000,
+                sequence_id: seq,
+                channel: "GUILD".into(),
+                message: "こんにちは".into(),
+                translated: translated.map(Into::into),
+                ..Default::default()
+            })
+            .unwrap()
+        };
+        std::fs::write(
+            dir.join(chat_log_file_name("2026-09-30")),
+            [
+                saved(None, 1),         // archived untranslated
+                saved(None, 2),         // another message
+                saved(Some("안녕"), 1), // the catch-up's translated copy
+                line_on("GUILD", 0, "no identity"),
+                line_on("GUILD", 0, "no identity"),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let got = load_recent(&dir, &limits(&[]));
+        let seqs: Vec<_> = got
+            .iter()
+            .map(|m| (m.sequence_id, m.translated.clone()))
+            .collect();
+        assert_eq!(
+            seqs,
+            [(2, None), (1, Some("안녕".into())), (0, None), (0, None)]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn day(s: &str) -> NaiveDate {

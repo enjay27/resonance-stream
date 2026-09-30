@@ -143,6 +143,30 @@ pub fn TranslationSection() -> impl IntoView {
                         <div class="text-[9px] opacity-50">"할당량이 높을수록 번역 속도가 빨라지지만 VRAM을 더 많이 소모합니다."</div>
                     </Show>
 
+                    // Catch-up: missed messages translated at each translator start
+                    <div class="flex items-center justify-between mt-3">
+                        <div class="flex flex-col">
+                            <span class="text-[11px] font-bold text-base-content/50 uppercase">"놓친 메시지 번역 (Catch-up)"</span>
+                            <span class="text-[9px] opacity-50">"번역기가 시작될 때 앱 실행 후 번역되지 않은 최근 메시지를 번역합니다. 0 = 끄기"</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <input type="number" min="0" max="1000" step="10"
+                                class="input input-xs input-bordered w-16 text-right"
+                                prop:value=move || signals.translation_catch_up_limit.get().to_string()
+                                on:change=move |ev| {
+                                    let limit = event_target_value(&ev)
+                                        .trim()
+                                        .parse::<usize>()
+                                        .unwrap_or_else(|_| signals.translation_catch_up_limit.get_untracked())
+                                        .min(1000);
+                                    signals.set_translation_catch_up_limit.set(limit);
+                                    actions.save_config.dispatch(());
+                                }
+                            />
+                            <span class="text-[10px] opacity-60">"개"</span>
+                        </div>
+                    </div>
+
                     <Show when=move || signals.restart_required.get()>
                         <div class="text-[10px] text-warning font-bold animate-pulse mt-2 p-2 bg-warning/10 rounded">
                             "⚠️ 변경 사항 적용을 위해 AI 번역기가 재시작 됩니다. 번역을 위해 잠시 시간이 소요됩니다."

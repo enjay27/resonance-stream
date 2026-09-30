@@ -36,8 +36,11 @@ is green, PR opened by Claude, `.github/workflows/auto-merge.yml` merges it when
 
 **Review 2026-09-30:** 13 findings, all fixed (N11-N13 on `claude/review-n11-n12-n13`) —
 [`.memory/active-issues/review-2026-09-30.md`](.memory/active-issues/review-2026-09-30.md).
-App parts cross-checked only. Queued (Kade 2026-09-30): chat-log retention (days, default 0 =
-keep), then translation ledger (catch-up from in-memory history at translator start, newest 100).
+App parts cross-checked only.
+
+**Translation ledger (2026-09-30, `claude/translation-ledger`):** owed Japanese messages of
+this run are caught up (newest 100, setting) at each translator start --
+[`sessions/2026-09-30-translation-ledger.md`](.memory/sessions/2026-09-30-translation-ledger.md).
 
 **Favorite messages (2026-09-30, `claude/favorite-messages`):** ⭐ list -- copy, edit, global
 shortcut pastes into the game (clipboard + `SendInput` Ctrl+V), merged (PR #32). Follow-up

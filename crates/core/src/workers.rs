@@ -1,6 +1,7 @@
 //! Decisions about the app's background workers, kept free of Tauri so they
 //! can be tested on any OS.
 
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 /// What to do with a worker after a settings change.
@@ -50,6 +51,60 @@ pub fn pick_local_port(preferred: u16) -> u16 {
 
 pub fn translation_is_stale(queued_at: Instant, now: Instant) -> bool {
     now.saturating_duration_since(queued_at) > MAX_TRANSLATION_WAIT
+}
+
+/// Most pids the ledger holds; the oldest go first. Only the newest few are
+/// ever caught up, so this only bounds memory while translation stays off.
+pub const LEDGER_CAPACITY: usize = 5000;
+
+/// The translation ledger: the Japanese chat messages of this run (it starts
+/// empty when the app opens) that are still owed a translation. A message
+/// leaves it only when its translation succeeds -- or when a catch-up passes
+/// it over as too old -- so one that failed, went stale in the queue or
+/// arrived while the translator was off is still owed at the next start.
+#[derive(Debug, Default)]
+pub struct TranslationLedger {
+    owed: BTreeSet<u64>,
+}
+
+impl TranslationLedger {
+    /// A new Japanese message, owed until translated.
+    pub fn record(&mut self, pid: u64) {
+        self.owed.insert(pid);
+        while self.owed.len() > LEDGER_CAPACITY {
+            self.owed.pop_first();
+        }
+    }
+
+    /// Translated (or gone): no longer owed. Returns whether it was owed.
+    pub fn settle(&mut self, pid: u64) -> bool {
+        self.owed.remove(&pid)
+    }
+
+    pub fn is_owed(&self, pid: u64) -> bool {
+        self.owed.contains(&pid)
+    }
+
+    pub fn len(&self) -> usize {
+        self.owed.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.owed.is_empty()
+    }
+
+    /// At a translator start: the newest `limit` owed pids, oldest first.
+    /// They stay owed until settled; the older ones are passed over and
+    /// dropped (0 catches up nothing and drops everything).
+    pub fn catch_up(&mut self, limit: usize) -> Vec<u64> {
+        let keep_from = self.owed.len().saturating_sub(limit);
+        let newest = match self.owed.iter().nth(keep_from).copied() {
+            Some(first_kept) => self.owed.split_off(&first_kept),
+            None => BTreeSet::new(),
+        };
+        self.owed = newest;
+        self.owed.iter().copied().collect()
+    }
 }
 
 #[cfg(test)]
@@ -117,5 +172,54 @@ mod tests {
             t0,
             t0 + MAX_TRANSLATION_WAIT + Duration::from_millis(1)
         ));
+    }
+
+    #[test]
+    fn ledger_owes_a_message_until_it_is_translated() {
+        let mut ledger = TranslationLedger::default();
+        assert!(ledger.is_empty());
+        ledger.record(5);
+        ledger.record(7);
+        assert!(ledger.is_owed(5));
+        assert!(ledger.settle(5));
+        assert!(!ledger.settle(5)); // a second translation of it is not owed
+        assert!(!ledger.is_owed(5));
+        assert_eq!(ledger.len(), 1);
+    }
+
+    #[test]
+    fn a_failed_message_is_still_owed_after_later_ones_succeed() {
+        let mut ledger = TranslationLedger::default();
+        for pid in [1, 2, 3] {
+            ledger.record(pid);
+        }
+        ledger.settle(3); // 2 failed, 3 succeeded
+        ledger.settle(1);
+        assert_eq!(ledger.catch_up(10), [2]);
+    }
+
+    #[test]
+    fn catch_up_takes_the_newest_and_drops_the_rest() {
+        let mut ledger = TranslationLedger::default();
+        for pid in [10, 11, 12, 13, 14] {
+            ledger.record(pid);
+        }
+        assert_eq!(ledger.catch_up(2), [13, 14]);
+        assert_eq!(ledger.len(), 2); // still owed until translated
+        assert!(!ledger.is_owed(12)); // passed over for good
+        assert_eq!(ledger.catch_up(5), [13, 14]);
+        assert!(ledger.catch_up(0).is_empty());
+        assert!(ledger.is_empty());
+    }
+
+    #[test]
+    fn ledger_keeps_only_the_newest_up_to_its_capacity() {
+        let mut ledger = TranslationLedger::default();
+        for pid in 0..(LEDGER_CAPACITY as u64 + 3) {
+            ledger.record(pid);
+        }
+        assert_eq!(ledger.len(), LEDGER_CAPACITY);
+        assert!(!ledger.is_owed(2));
+        assert!(ledger.is_owed(3));
     }
 }

@@ -3,7 +3,7 @@ pub mod server_manager;
 
 pub use server_manager::*;
 
-use crossbeam_channel::{unbounded, Sender};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use reqwest::blocking::Client;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -94,20 +94,91 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             "Translator",
             "AI Server running! Ready for translation.",
         );
+
+        // 4. Once per start: what the ledger says was missed
+        catch_up(&app, &rx, &client, &is_current);
+        if !is_current() {
+            return;
+        }
         emit_translator_state(&app, "Active", "AI Engine Ready");
 
-        // 4. Run the pure translation loop
+        // 5. Run the pure translation loop
         while let Ok(job) = rx.recv() {
-            if translation_is_stale(job.queued_at, Instant::now()) {
-                log::debug!("[Translator] Skipped pid {}: waited too long", job.chat.pid);
-                archive_chat(&app, &job.chat);
-                continue;
-            }
-            process_translation_job(job, &client, &app);
+            process_live_job(job, &client, &app);
         }
     });
 
     tx
+}
+
+/// A job from the sniffer: skipped when it waited too long (it stays owed
+/// in the ledger, so the next translator start catches it up).
+fn process_live_job(job: TranslationJob, client: &Client, app: &AppHandle) {
+    if translation_is_stale(job.queued_at, Instant::now()) {
+        log::debug!("[Translator] Skipped pid {}: waited too long", job.chat.pid);
+        archive_chat(app, &job.chat);
+        return;
+    }
+    process_translation_job(job, client, app);
+}
+
+/// Translates, once per translator start, the Japanese messages of this run
+/// that the ledger still owes: the newest `translation_catch_up_limit` of
+/// them, oldest first, read from the in-memory history. Jobs queued while
+/// the server loaded are dropped first -- their messages are in the ledger.
+/// Live messages arriving meanwhile go before the next catch-up item.
+fn catch_up(
+    app: &AppHandle,
+    rx: &Receiver<TranslationJob>,
+    client: &Client,
+    is_current: &dyn Fn() -> bool,
+) {
+    let state = app.state::<crate::AppState>();
+    while rx.try_recv().is_ok() {}
+
+    let limit = crate::config::current_config(app).translation_catch_up_limit;
+    let pids = state.translation_ledger.lock().catch_up(limit);
+    let owed: Vec<ChatMessage> = {
+        let history = state.chat_history.lock();
+        let mut ledger = state.translation_ledger.lock();
+        pids.into_iter()
+            .filter_map(|pid| match history.get(pid) {
+                Some(chat) if chat.translated.is_none() => Some(chat.clone()),
+                _ => {
+                    ledger.settle(pid); // gone from history, or translated already
+                    None
+                }
+            })
+            .collect()
+    };
+    if owed.is_empty() {
+        return;
+    }
+
+    let total = owed.len();
+    inject_system_message(
+        app,
+        SystemLogLevel::Info,
+        "Translator",
+        format!("Catching up {} missed message(s)...", total),
+    );
+    for (done, chat) in owed.into_iter().enumerate() {
+        if !is_current() {
+            return;
+        }
+        emit_translator_state(app, "Catching Up", &format!("{}/{}", done + 1, total));
+        while let Ok(job) = rx.try_recv() {
+            process_live_job(job, client, app);
+        }
+        process_translation_job(TranslationJob::new(chat), client, app);
+    }
+    let still_owed = state.translation_ledger.lock().len();
+    inject_system_message(
+        app,
+        SystemLogLevel::Info,
+        "Translator",
+        format!("Catch-up done ({} still untranslated).", still_owed),
+    );
 }
 
 /// Queues `chat` for the archive, as it is (untranslated), when archiving is
@@ -126,6 +197,12 @@ pub fn archive_chat(app: &AppHandle, chat: &ChatMessage) {
 fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle) {
     let chat = job.chat;
     let state = app.state::<crate::AppState>();
+
+    // Translated already (a catch-up item that was also queued live) or not
+    // a message of this run's ledger: nothing is owed.
+    if !state.translation_ledger.lock().is_owed(chat.pid) {
+        return;
+    }
 
     // 1. Preprocess. The nickname lock is held only for this step: the
     // sniffer needs it for every Japanese nickname, and must not wait for
@@ -162,6 +239,7 @@ fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle
     if let Some(existing_chat) = state.chat_history.lock().get_mut(chat.pid) {
         existing_chat.translated = Some(final_str.clone());
     }
+    state.translation_ledger.lock().settle(chat.pid);
 
     let _ = app.emit(
         "translation-event",

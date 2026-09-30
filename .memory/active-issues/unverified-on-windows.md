@@ -43,6 +43,12 @@ run as the real app.
   with archiving on reloads chat (no duplicates after re-login); right-click tab menu
   (limits, archive toggle, custom channels); message spacing; window position restored;
   no silent dictionary sync unless auto-sync is on.
+- **Translation ledger (2026-09-30, `claude/translation-ledger`).** Core tested on Linux
+  (`workers::TranslationLedger`, `load_recent` dedup); app cross-checked (incl. `--tests`).
+  Worth a real run: with translation off, collect some Japanese chat, turn it on -- the
+  badge shows CATCHING UP, then those rows get translations (newest 100); new chat during
+  the catch-up is translated without waiting; a tier change mid-catch-up stops the old
+  worker; with archiving on, a restart reloads each caught-up message once.
 - **Favorite messages (2026-09-30, `claude/favorite-messages`).** Core/types/ui tests on
   Linux; app cross-checked (incl. `--tests`) only. Worth a real run, as Administrator:
   ⭐ in the nav controls opens the list; 📋 copies; ✏️ edits text + records a shortcut

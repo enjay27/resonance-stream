@@ -1,5 +1,7 @@
 use crate::chat_view::ChatStore;
-use crate::ui_types::{default_favorite_messages, ChatMessage, FavoriteMessage, SystemMessage};
+use crate::ui_types::{
+    default_catch_up_limit, default_favorite_messages, ChatMessage, FavoriteMessage, SystemMessage,
+};
 use leptos::prelude::{signal, Action, ReadSignal, RwSignal, WriteSignal};
 use std::collections::HashMap;
 
@@ -72,6 +74,9 @@ pub struct AppSignals {
     pub set_opacity: WriteSignal<f32>,
     pub tier: ReadSignal<String>,
     pub set_tier: WriteSignal<String>,
+    /// Missed Japanese messages a translator start translates; 0 = none.
+    pub translation_catch_up_limit: ReadSignal<usize>,
+    pub set_translation_catch_up_limit: WriteSignal<usize>,
     pub restart_required: ReadSignal<bool>,
     pub set_restart_required: WriteSignal<bool>,
     pub dict_update_available: ReadSignal<bool>,
@@ -195,6 +200,8 @@ impl AppSignals {
         let (theme, set_theme) = signal("dark".to_string());
         let (opacity, set_opacity) = signal(0.85f32);
         let (tier, set_tier) = signal("middle".to_string());
+        let (translation_catch_up_limit, set_translation_catch_up_limit) =
+            signal(default_catch_up_limit());
         let (restart_required, set_restart_required) = signal(false);
         let (dict_update_available, set_dict_update_available) = signal(false);
         let (is_at_bottom, set_is_at_bottom) = signal(true);
@@ -310,6 +317,8 @@ impl AppSignals {
             set_opacity,
             tier,
             set_tier,
+            translation_catch_up_limit,
+            set_translation_catch_up_limit,
             restart_required,
             set_restart_required,
             dict_update_available,

@@ -10,7 +10,10 @@ use leptos::reactive::spawn_local;
 use leptos::{component, view, IntoView};
 
 #[component]
-pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
+pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
+    // Owned by this row: freed when it unmounts. The store's Arc copy is
+    // what events update.
+    let sig = RwSignal::from(sig);
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
     let actions = use_context::<AppActions>().expect("AppActions missing");
 

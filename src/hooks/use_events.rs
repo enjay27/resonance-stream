@@ -122,7 +122,7 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
         let pid = packet.pid;
         signals.custom_filters.with_untracked(|filters| {
             signals.set_chat.update(|store| {
-                store.add(pid, &channel, RwSignal::new(packet), filters, &limits);
+                store.add(pid, &channel, ArcRwSignal::new(packet), filters, &limits);
             });
         });
 
@@ -183,7 +183,7 @@ fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
             if log.len() >= 200 {
                 log.remove(0);
             }
-            log.push(RwSignal::new(packet));
+            log.push(ArcRwSignal::new(packet));
         });
 
         let active_tab = signals.active_tab.get_untracked();

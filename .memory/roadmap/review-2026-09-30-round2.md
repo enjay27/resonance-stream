@@ -10,7 +10,7 @@ the order below ("proceed by your order"). One step, one `claude/*` branch, one 
 | A9 | health check ignores a dead child (waits 30 s); 30 s fixed | **done** (step 2) — `wait_for_server` stops at once with the exit status; limit `SERVER_START_TIMEOUT` 90 s |
 | A3 | hydration replaces the chat store: events during `get_chat_history` are lost | **done** `claude/hydration-merge` — `ChatStore::merge_history` (pid order, live copy wins). Left: a translation event for a pre-listen row that lands during the fetch is still lost (small window) |
 | A5 | two readiness checks overwrite `model_ready` (model missing + server present = "starting") | **done** (step 3) — `hydration::translator_ready` |
-| A6 | `RwSignal::new` per chat row outside an owner: evicted rows likely never freed | open (step 4, verify first) |
+| A6 | `RwSignal::new` per chat row outside an owner: evicted rows never freed | **done** `claude/chat-signal-leak` — confirmed in reactive_graph 0.2.15 `ArenaItem::new_with_storage` (no owner = never disposed) and by test (0 of 2 freed); store holds `ArcRwSignal`, rows wrap it in an owned `RwSignal`. System log likewise |
 | A4 | prompt starts with literal `<bos>`; llama-server adds BOS too (double BOS) | open (step 5, confirm in server log on Windows) |
 | A8 | `max_tokens: 512` for every line; runaway output blocks the queue | open (step 5) |
 | B1 | translation cache (LRU on masked text) | open (step 6) |

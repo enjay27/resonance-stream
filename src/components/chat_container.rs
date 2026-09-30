@@ -201,7 +201,8 @@ pub fn ChatContainer() -> impl IntoView {
                     <For
                         each=move || filtered_system_logs.get()
                         key=|sig| sig.with_untracked(|m| m.pid)
-                        children={move |sig: RwSignal<SystemMessage>| {
+                        children={move |sig: ArcRwSignal<SystemMessage>| {
+                            let sig = RwSignal::from(sig);
                             let level = sig.get().level.clone();
                             let level_badge = level.clone();
                             let level_filter = level.clone();

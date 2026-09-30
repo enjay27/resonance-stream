@@ -2,7 +2,7 @@ use crate::chat_view::ChatStore;
 use crate::ui_types::{
     default_catch_up_limit, default_favorite_messages, ChatMessage, FavoriteMessage, SystemMessage,
 };
-use leptos::prelude::{signal, Action, ReadSignal, RwSignal, WriteSignal};
+use leptos::prelude::{signal, Action, ArcRwSignal, ReadSignal, WriteSignal};
 use std::collections::HashMap;
 
 #[derive(Copy, Clone, Debug)]
@@ -37,8 +37,11 @@ pub struct AppSignals {
     pub name_cache: ReadSignal<HashMap<String, String>>,
     pub set_name_cache: WriteSignal<HashMap<String, String>>,
     /// Chat messages by pid, plus each tab's list (per-tab limits).
-    pub chat: ReadSignal<ChatStore<RwSignal<ChatMessage>>>,
-    pub set_chat: WriteSignal<ChatStore<RwSignal<ChatMessage>>>,
+    /// `ArcRwSignal`: rows are created in event callbacks, where no reactive
+    /// owner exists, so an arena `RwSignal` would never be freed; an Arc one
+    /// is freed with the last clone (evicted here, and its row unmounted).
+    pub chat: ReadSignal<ChatStore<ArcRwSignal<ChatMessage>>>,
+    pub set_chat: WriteSignal<ChatStore<ArcRwSignal<ChatMessage>>>,
     /// Messages each tab keeps (right-click a tab); keys as in AppConfig.
     pub tab_limits: ReadSignal<HashMap<String, usize>>,
     pub set_tab_limits: WriteSignal<HashMap<String, usize>>,
@@ -48,8 +51,8 @@ pub struct AppSignals {
     /// Vertical padding of each chat row, px.
     pub message_spacing: ReadSignal<u32>,
     pub set_message_spacing: WriteSignal<u32>,
-    pub system_log: ReadSignal<Vec<RwSignal<SystemMessage>>>,
-    pub set_system_log: WriteSignal<Vec<RwSignal<SystemMessage>>>,
+    pub system_log: ReadSignal<Vec<ArcRwSignal<SystemMessage>>>,
+    pub set_system_log: WriteSignal<Vec<ArcRwSignal<SystemMessage>>>,
     pub is_system_at_bottom: ReadSignal<bool>,
     pub set_system_at_bottom: WriteSignal<bool>,
     pub debug_mode: ReadSignal<bool>,
@@ -175,12 +178,12 @@ impl AppSignals {
         let (search_term, set_search_term) = signal("".to_string());
         let (name_cache, set_name_cache) =
             signal(std::collections::HashMap::<String, String>::new());
-        let (chat, set_chat) = signal(ChatStore::<RwSignal<ChatMessage>>::default());
+        let (chat, set_chat) = signal(ChatStore::<ArcRwSignal<ChatMessage>>::default());
         let (tab_limits, set_tab_limits) = signal(HashMap::<String, usize>::new());
         let (archive_ignored_channels, set_archive_ignored_channels) =
             signal(vec!["WORLD".to_string()]);
         let (message_spacing, set_message_spacing) = signal(4u32);
-        let (system_log, set_system_log) = signal(Vec::<RwSignal<SystemMessage>>::new());
+        let (system_log, set_system_log) = signal(Vec::<ArcRwSignal<SystemMessage>>::new());
 
         let (is_system_at_bottom, set_system_at_bottom) = signal(true);
         let (debug_mode, set_debug_mode) = signal(false);

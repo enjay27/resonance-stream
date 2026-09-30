@@ -193,6 +193,27 @@ pub fn load_config(app: AppHandle) -> AppConfig {
 /// async: writes the file and may start or stop workers -- not on the main thread.
 #[tauri::command(async)]
 pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) {
+    // One save at a time: two overlapping saves would each compare against
+    // the same old config and start (or stop) the same worker twice.
+    let _saving = state.config_lock.lock();
+    apply_config(&app, &state, config);
+}
+
+/// Read-modify-write of the live config under the save lock, so a change
+/// made from the backend (block list) cannot be lost to a concurrent save.
+pub fn modify_config(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    change: impl FnOnce(&mut AppConfig),
+) {
+    let _saving = state.config_lock.lock();
+    let mut config = state.config.read().clone();
+    change(&mut config);
+    apply_config(app, state, config);
+}
+
+fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig) {
+    let app = app.clone();
     let old_config = state.config.read().clone();
 
     let path = get_config_path(&app);
@@ -244,6 +265,7 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
         WorkerChange::Stop => {
             // Drop the Sender (Kills the thread and frees VRAM)
             *state.translator_tx.lock() = None;
+            crate::services::translator::retire_translator_workers();
             inject_system_message(
                 &app,
                 SystemLogLevel::Info,

@@ -6,6 +6,7 @@ pub use server_manager::*;
 use crossbeam_channel::{unbounded, Sender};
 use reqwest::blocking::Client;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
@@ -31,8 +32,21 @@ impl TranslationJob {
     }
 }
 
+/// Identifies the translator worker that is current. A worker that was
+/// stopped or replaced while it was still starting up sees the number move
+/// and stays silent instead of reporting on a server that is not its own.
+static WORKER_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Marks every running or starting worker as superseded (call when the
+/// translator is stopped or its sender dropped).
+pub fn retire_translator_workers() {
+    WORKER_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
 pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<TranslationJob> {
     let (tx, rx) = unbounded::<TranslationJob>();
+    let generation = WORKER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let is_current = move || WORKER_GENERATION.load(Ordering::SeqCst) == generation;
     let config = crate::config::current_config(&app);
 
     thread::spawn(move || {
@@ -44,6 +58,9 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         );
         emit_translator_state(&app, "Starting", "Initializing AI Backend...");
 
+        if !is_current() {
+            return;
+        }
         server_manager::kill_orphaned_servers(&app);
 
         // 1. Launch the Server
@@ -54,7 +71,11 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
         // 2. Wait for Health
         emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
-        if !server_manager::server_health_check_for_30_seconds(&app) {
+        let healthy = server_manager::server_health_check_for_30_seconds(&app, &is_current);
+        if !is_current() {
+            return; // superseded while loading: the guard drops and kills our server
+        }
+        if !healthy {
             emit_translator_state(
                 &app,
                 "Error",

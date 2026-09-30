@@ -32,6 +32,10 @@ which waits for the cloud install. Upgrading graft past 0.20.0 rewrites `.mcp.js
 **CI runs once per change:** `push` only on `main`, `pull_request` for branches; both skip
 markdown/`docs/`/`.memory/`-only changes. If a required check is set, docs-only PRs stay pending.
 
+**Review 2026-09-30:** 13 new findings, being fixed in 4 steps —
+[`.memory/active-issues/review-2026-09-30.md`](.memory/active-issues/review-2026-09-30.md).
+Step 1 (translator lifecycle, N1/N6/N10) done; app parts cross-checked only.
+
 ## Where the detail is
 
 | read | when |

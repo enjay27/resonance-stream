@@ -1,7 +1,6 @@
 use super::core::{server_url, set_server_port, PREFERRED_SERVER_PORT};
 use crate::protocol::types::SystemLogLevel;
 use crate::{inject_system_message, AI_SERVER_FILENAME, AI_SERVER_FOLDER};
-use reqwest::blocking::Client;
 use resonance_core::workers::{log_tail, pick_local_port, SERVER_START_TIMEOUT};
 use std::fs;
 use std::os::windows::process::CommandExt;
@@ -187,7 +186,7 @@ pub fn wait_for_server(
     server: &mut ServerGuard,
     keep_waiting: &dyn Fn() -> bool,
 ) -> Result<(), String> {
-    let client = Client::new();
+    let client = resonance_llama::client();
     let start_wait = Instant::now();
 
     inject_system_message(

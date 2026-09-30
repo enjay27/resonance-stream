@@ -79,7 +79,8 @@ impl MockLlama {
         self.reply([Reply::Content(text.to_string())])
     }
 
-    /// `/health` answers these statuses first (503 = still loading).
+    /// `/health` answers these statuses first (503 = still loading, 0 =
+    /// never answers).
     pub fn health(&self, statuses: impl IntoIterator<Item = u16>) -> &Self {
         self.script.lock().unwrap().health.extend(statuses);
         self
@@ -127,6 +128,7 @@ fn serve(stream: TcpStream, script: &Mutex<Script>) {
             } else if request.path == "/health" {
                 match script.health.pop_front() {
                     Some(200) | None => Reply::Body(r#"{"status":"ok"}"#.into()),
+                    Some(0) => Reply::Hang,
                     Some(status) => Reply::Status(status),
                 }
             } else {

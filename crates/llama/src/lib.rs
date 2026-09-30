@@ -3,6 +3,29 @@
 
 use reqwest::blocking::Client;
 use resonance_core::text::completion_request;
+use std::time::Duration;
+
+/// llama-server is on 127.0.0.1: a connection that takes longer is not coming.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+/// One translation, or one health check. Well under
+/// `resonance_core::workers::MAX_TRANSLATION_WAIT`, so a hung server fails
+/// jobs (and is restarted) while the lines are still worth translating.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The client the translator uses: requests give up after
+/// [`REQUEST_TIMEOUT`] instead of waiting on a hung server forever.
+pub fn client() -> Client {
+    client_with(REQUEST_TIMEOUT)
+}
+
+/// A client for llama-server whose requests give up after `request`.
+pub fn client_with(request: Duration) -> Client {
+    Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT.min(request))
+        .timeout(request)
+        .build()
+        .expect("HTTP client builds (Client::new() panics on the same failure)")
+}
 
 /// `Err` carries a reason for the log; it is never shown as a translation.
 pub fn translate_text(client: &Client, server_url: &str, jp_text: &str) -> Result<String, String> {
@@ -18,10 +41,14 @@ pub fn translate_text(client: &Client, server_url: &str, jp_text: &str) -> Resul
     let json_body = response
         .json::<serde_json::Value>()
         .map_err(|e| format!("AI server reply unreadable: {e}"))?;
-    json_body["content"]
+    let content = json_body["content"]
         .as_str()
-        .map(|content| content.trim().to_string())
-        .ok_or_else(|| "AI server reply has no content".to_string())
+        .ok_or_else(|| "AI server reply has no content".to_string())?
+        .trim();
+    if content.is_empty() {
+        return Err("AI server reply is empty".to_string());
+    }
+    Ok(content.to_string())
 }
 
 /// `true` once `GET /health` answers with a success status (llama-server

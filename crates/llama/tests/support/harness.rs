@@ -119,7 +119,7 @@ impl Harness {
     pub fn new(llama: &MockLlama) -> Self {
         Self {
             capture: Capture::new(),
-            translator: Translator::new(llama, Client::new()),
+            translator: Translator::new(llama, resonance_llama::client()),
         }
     }
 

@@ -63,7 +63,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
         // The dictionary lives in AppState, so a sync or an edit applies to
         // the next job without a restart.
-        let client = Client::new();
+        let client = resonance_llama::client();
         let mut supervisor = ServerSupervisor::default();
         // Outlives server restarts: the same model answers the same way.
         let mut cache = TranslationCache::new(TRANSLATION_CACHE_SIZE);

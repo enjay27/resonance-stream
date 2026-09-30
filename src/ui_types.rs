@@ -58,6 +58,9 @@ pub struct AppConfig {
     pub message_spacing: u32,
     #[serde(default = "default_favorite_messages")]
     pub favorite_messages: Vec<FavoriteMessage>,
+    /// Days of daily chat logs to keep; 0 keeps them all.
+    #[serde(default)]
+    pub chat_log_retention_days: u32,
 }
 
 pub fn default_spacing() -> u32 {

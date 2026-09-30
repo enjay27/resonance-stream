@@ -147,6 +147,9 @@ pub struct AppSignals {
     pub set_show_troubleshooter: WriteSignal<bool>,
     pub favorite_messages: ReadSignal<Vec<FavoriteMessage>>,
     pub set_favorite_messages: WriteSignal<Vec<FavoriteMessage>>,
+    /// Days of daily chat logs to keep; 0 keeps them all.
+    pub chat_log_retention_days: ReadSignal<u32>,
+    pub set_chat_log_retention_days: WriteSignal<u32>,
     pub show_favorites: ReadSignal<bool>,
     pub set_show_favorites: WriteSignal<bool>,
 }
@@ -248,6 +251,7 @@ impl AppSignals {
 
         let (show_troubleshooter, set_show_troubleshooter) = signal(false);
         let (favorite_messages, set_favorite_messages) = signal(default_favorite_messages());
+        let (chat_log_retention_days, set_chat_log_retention_days) = signal(0u32);
         let (show_favorites, set_show_favorites) = signal(false);
 
         AppSignals {
@@ -385,6 +389,8 @@ impl AppSignals {
             set_show_troubleshooter,
             favorite_messages,
             set_favorite_messages,
+            chat_log_retention_days,
+            set_chat_log_retention_days,
             show_favorites,
             set_show_favorites,
         }

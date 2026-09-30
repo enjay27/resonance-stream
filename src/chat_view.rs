@@ -178,6 +178,34 @@ impl<T: Clone> ChatStore<T> {
         self.messages.get(&pid)
     }
 
+    /// Merges the backend's history (`(pid, channel, message)`) under the
+    /// messages that arrived live while it was being fetched, instead of
+    /// replacing them. Pids give the order (the backend hands them out in
+    /// arrival order); a pid held both ways keeps the live copy, which
+    /// events may already have updated.
+    pub fn merge_history(
+        &mut self,
+        history: Vec<(u64, String, T)>,
+        channel_of: impl Fn(&T) -> String,
+        custom_filters: &[String],
+        limits: &HashMap<String, usize>,
+    ) {
+        let live = std::mem::take(self);
+        let mut rows: Vec<(u64, String, T)> = history
+            .into_iter()
+            .filter(|(pid, _, _)| !live.messages.contains_key(pid))
+            .collect();
+        rows.extend(
+            live.messages
+                .into_iter()
+                .map(|(pid, m)| (pid, channel_of(&m), m)),
+        );
+        rows.sort_unstable_by_key(|(pid, _, _)| *pid);
+        for (pid, channel, message) in rows {
+            self.add(pid, &channel, message, custom_filters, limits);
+        }
+    }
+
     /// The tab's messages, oldest first.
     pub fn tab<'a>(&'a self, key: &str) -> impl DoubleEndedIterator<Item = T> + 'a {
         self.views
@@ -435,5 +463,55 @@ mod tests {
         assert!(!is_muted(&m, 6)); // the level rule is WORLD only
         m.is_blocked = true;
         assert!(is_muted(&m, 0));
+    }
+
+    type Row = (String, &'static str);
+    fn row(channel: &str, tag: &'static str) -> Row {
+        (channel.to_string(), tag)
+    }
+    fn channel_of(r: &Row) -> String {
+        r.0.clone()
+    }
+
+    #[test]
+    fn history_merges_under_messages_that_arrived_while_it_loaded() {
+        // Regression (A3): hydration replaced the store with the history,
+        // dropping messages that arrived (live) during the fetch.
+        let (filters, limits) = (vec![], HashMap::new());
+        let mut store = ChatStore::default();
+        store.add(7, "WORLD", row("WORLD", "live"), &filters, &limits);
+        let history = vec![
+            (3, "PARTY".to_string(), row("PARTY", "old-a")),
+            (5, "WORLD".to_string(), row("WORLD", "old-b")),
+        ];
+        store.merge_history(history, channel_of, &filters, &limits);
+        let tags: Vec<_> = store.tab(ALL_TAB).map(|r| r.1).collect();
+        assert_eq!(tags, ["old-a", "old-b", "live"]);
+        assert_eq!(store.tab("WORLD").count(), 2);
+    }
+
+    #[test]
+    fn a_message_both_live_and_in_history_keeps_the_live_copy() {
+        let (filters, limits) = (vec![], HashMap::new());
+        let mut store = ChatStore::default();
+        store.add(5, "WORLD", row("WORLD", "live"), &filters, &limits);
+        let history = vec![(5, "WORLD".to_string(), row("WORLD", "snapshot"))];
+        store.merge_history(history, channel_of, &filters, &limits);
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.get(5).unwrap().1, "live");
+    }
+
+    #[test]
+    fn merged_history_still_obeys_the_tab_limits() {
+        let filters = vec![];
+        let limits = limits(&[("WORLD", 2)]);
+        let mut store = ChatStore::default();
+        store.add(9, "WORLD", row("WORLD", "live"), &filters, &limits);
+        let history = (1..=4)
+            .map(|pid| (pid, "WORLD".to_string(), row("WORLD", "old")))
+            .collect();
+        store.merge_history(history, channel_of, &filters, &limits);
+        let pids: Vec<_> = store.views.pids("WORLD").collect();
+        assert_eq!(pids, [4, 9]);
     }
 }

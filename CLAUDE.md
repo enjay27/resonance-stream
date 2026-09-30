@@ -121,6 +121,12 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
   Tauri boundary — renaming a field is a protocol change, not a refactor.
 - **Zero hardcoded credentials.** No tokens or keys in committed files. The gist and
   release URLs are public and fine.
+- **TDD for every task flow.** Test first: write the failing unit test that pins the
+  wanted behaviour, run it and see it fail for the right reason, then write the code
+  that makes it pass, then refactor with the tests green. A bug fix starts with a
+  test that reproduces the bug. Pure logic is tested in `crates/core` (or the ui's pure
+  modules), so it runs on every OS. If a change cannot be unit-tested (Tauri/Windows
+  glue), say so in the commit body. `just coverage` shows what the tests do not reach.
 - **Auto-correction restraint.** Self-correct at most **2** times, then stop and ask.
 - **Never report a gate as passed when it could not run.** A Linux session cannot
   build `src-tauri/`; say so, and leave it to the Windows CI job.
@@ -129,6 +135,7 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
 
 ## Definition of Done
 
+0. **Test first.** New behaviour or a bug fix has its failing unit test before its code.
 1. **Run the gate for every part touched** (table above). `cargo fmt` is part of it.
 2. **Behaviour check where a gate cannot see it.** UI changes need a manual run
    (`cargo tauri dev`, Windows, as Administrator); if not done, say so in the commit body.

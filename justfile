@@ -40,3 +40,7 @@ app-check:
 app-cross-check:
     mkdir -p dist && ( [ -f dist/index.html ] || echo '<!doctype html>' > dist/index.html )
     cargo check -p resonance-stream --target x86_64-pc-windows-gnu
+
+# Line coverage of core + types (needs `cargo install cargo-llvm-cov`).
+coverage:
+    cargo llvm-cov -p resonance-core -p resonance-types --summary-only

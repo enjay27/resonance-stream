@@ -65,10 +65,9 @@ More shapes of `0x0003` (12-byte header = u64 counter + 4 zero bytes; the counte
   from 3.9 KB; the `0x0002` header (`00000000 09d4a768 00000000 00000001`) was identical in
   both captures.
 
-## Left open (low, no branch yet)
+## Left open -> done 2026-10-01 (`claude/core-review-leftovers`)
 
-- W4 dedup capacity (4096) is fixed; limits above ~4096 in total re-emit old reloaded lines.
-- W6 parser gaps: `class_id` never set (sender tag 24 is unknown), `SenderInfo.is_blocked`
-  never set, two channel-code tables disagree, chunk type must precede its payload.
-- W7 IPv6 ignored but the watchdog is fed first. W8 `pick_local_port` race. W9 sniffer
-  `Err(_) => continue` busy loop. Channel as an enum in `resonance-types`.
+- W4 done: `ChatPipeline::remember` grows the dedup cache to the reloaded history + 4096.
+- W6 done except `class_id`: chunk payload may precede its type; field-4 "Me" blocks use `Channel::known_code`; dead `SenderInfo.is_blocked` removed. **`class_id` stays 0**: sender tag 24 is kept as an unknown field (the old comment called it "Platform?"); it needs a capture where the value can be matched to a class. Golden pin re-recorded twice, each shown to change only what the commit says.
+- W7 done (IPv4 check before the watchdog). W9 done (`workers::read_error_backoff`, 10 ms doubling to 1 s, one warning per streak).
+- W8 mitigated, not closed: llama-server binds the port itself, so the pick-then-bind gap cannot be removed. A server that exits while loading now goes through `ServerSupervisor::on_server_exited` (fresh port, backoff, 3 restarts in 10 min) instead of straight to Error -- a broken model now retries 3 times before the error shows.

@@ -1,5 +1,5 @@
 use crate::protocol::decoder::{
-    field_end, find_int_by_tag, find_string_by_tag, read_tag, read_varint, skip_field,
+    field_end, find_int_by_tag, find_string_by_tag, read_varint, Fields, Value,
 };
 use resonance_types::ChatMessage;
 use std::collections::HashMap;
@@ -64,48 +64,30 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload<'_>> {
     }
 
     let (total_len, header_read) = read_varint(&data[1..]);
-    let mut i = 1 + header_read;
-    let safe_end = field_end(i, total_len, data.len());
+    let body_start = 1 + header_read;
+    let safe_end = field_end(body_start, total_len, data.len());
 
     let mut is_valid_chat_packet = false;
 
-    while i < safe_end {
-        let Some((tag, tag_len)) = read_tag(&data[i..safe_end]) else {
-            break;
-        };
-        let wire_type = (tag & 0x07) as u8;
-        let field_num = (tag >> 3) as u32;
-        i += tag_len;
-
-        if wire_type == 2 {
-            let (len, read) = read_varint(&data[i..safe_end]);
-            i += read;
-            let block_end = field_end(i, len, safe_end);
-
-            if let Some(sub_data) = data.get(i..block_end) {
-                match field_num {
-                    2 | 4 => {
-                        payload.chat_blocks.push((field_num, sub_data));
-                        is_valid_chat_packet = true;
-                    }
-                    _ => {}
+    for field in Fields::new(&data[body_start..safe_end]) {
+        match field.value {
+            Value::Bytes(block) => {
+                if matches!(field.number(), 2 | 4) {
+                    payload.chat_blocks.push((field.number() as u32, block));
+                    is_valid_chat_packet = true;
                 }
             }
-            i = block_end;
-        } else if wire_type == 0 {
-            let (val, read) = read_varint(&data[i..safe_end]);
-
-            if field_num == 1 || field_num == 2 {
-                payload.channel = match val {
-                    2 => "LOCAL".into(),
-                    3 => "PARTY".into(),
-                    4 => "GUILD".into(),
-                    _ => "WORLD".into(),
-                };
+            Value::Varint(val) => {
+                if matches!(field.number(), 1 | 2) {
+                    payload.channel = match val {
+                        2 => "LOCAL".into(),
+                        3 => "PARTY".into(),
+                        4 => "GUILD".into(),
+                        _ => "WORLD".into(),
+                    };
+                }
             }
-            i += read;
-        } else {
-            i = i.saturating_add(skip_field(wire_type, &data[i..safe_end]));
+            Value::Other => {}
         }
     }
 
@@ -179,57 +161,20 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
 // --- STRICT MAPPED PARSERS ---
 fn parse_chat_payload(data: &[u8]) -> ChatPayload {
     let mut payload = ChatPayload::default();
-    let mut i = 0;
-
-    while i < data.len() {
-        let Some((tag, tag_len)) = read_tag(&data[i..]) else {
-            break;
-        };
-        let wire_type = (tag & 0x07) as u8;
-        i += tag_len;
-
-        match tag {
-            8 => {
-                // Session ID / Sequence ID
-                let (val, read) = read_varint(&data[i..]);
-                payload.session_id = val;
-                i += read;
-            }
-            18 => {
-                // SenderInfo Block
-                let (len, read) = read_varint(&data[i..]);
-                i += read;
-                let block_end = field_end(i, len, data.len());
-                if let Some(sub_data) = data.get(i..block_end) {
-                    payload.sender = parse_sender_info(sub_data);
-                }
-                i = block_end;
-            }
-            24 => {
-                // Timestamp
-                let (val, read) = read_varint(&data[i..]);
-                payload.timestamp = val;
-                i += read;
-            }
-            34 => {
-                // Message Block -> Delegated to extracted function!
-                let (len, read) = read_varint(&data[i..]);
-                i += read;
-                let block_end = field_end(i, len, data.len());
-                if let Some(sub_data) = data.get(i..block_end) {
-                    parse_message_block(sub_data, &mut payload);
-                }
-                i = block_end;
-            }
+    for field in Fields::new(data) {
+        match (field.tag, field.value) {
+            // Session ID / Sequence ID
+            (8, Value::Varint(id)) => payload.session_id = id,
+            // SenderInfo Block
+            (18, Value::Bytes(sender)) => payload.sender = parse_sender_info(sender),
+            // Timestamp
+            (24, Value::Varint(timestamp)) => payload.timestamp = timestamp,
+            // Message Block
+            (34, Value::Bytes(message)) => parse_message_block(message, &mut payload),
             _ => {
-                // Skip Unknown
-                let safe_end = i
-                    .saturating_add(skip_field(wire_type, &data[i..]))
-                    .min(data.len());
                 payload
                     .unknown_fields
-                    .insert(format!("chat_{}", tag), data[i..safe_end].to_vec());
-                i = safe_end;
+                    .insert(format!("chat_{}", field.tag), field.raw.to_vec());
             }
         }
     }
@@ -239,31 +184,15 @@ fn parse_chat_payload(data: &[u8]) -> ChatPayload {
 // A clean, dedicated function just for handling rich text arrays!
 fn parse_rich_content(data: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>) -> String {
     let mut parsed_text = String::new();
-    let mut k = 0;
-
-    while k < data.len() {
-        let Some((r_tag, tag_len)) = read_tag(&data[k..]) else {
-            break;
-        };
-        let r_wire = (r_tag & 0x07) as u8;
-        k += tag_len;
-
-        if r_tag == 18 {
+    for field in Fields::new(data) {
+        match (field.tag, field.value) {
             // Chunk Block (Field 2)
-            let (clen, cr) = read_varint(&data[k..]);
-            k += cr;
-            let c_end = field_end(k, clen, data.len());
-
-            // Delegate to ANOTHER small function!
-            parsed_text.push_str(&parse_chunk_block(&data[k..c_end], unknown_fields));
-
-            k = c_end;
-        } else {
-            let safe_end = k
-                .saturating_add(skip_field(r_wire, &data[k..]))
-                .min(data.len());
-            unknown_fields.insert(format!("rich_{}", r_tag), data[k..safe_end].to_vec());
-            k = safe_end;
+            (18, Value::Bytes(chunk)) => {
+                parsed_text.push_str(&parse_chunk_block(chunk, unknown_fields));
+            }
+            _ => {
+                unknown_fields.insert(format!("rich_{}", field.tag), field.raw.to_vec());
+            }
         }
     }
     parsed_text
@@ -273,39 +202,22 @@ fn parse_rich_content(data: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>
 fn parse_chunk_block(chunk: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>) -> String {
     let mut chunk_type = 0;
     let mut chunk_text = String::new();
-    let mut l = 0;
-
-    while l < chunk.len() {
-        let Some((c_tag, tag_len)) = read_tag(&chunk[l..]) else {
-            break;
-        };
-        let c_wire = (c_tag & 0x07) as u8;
-        l += tag_len;
-
-        if c_tag == 8 {
+    for field in Fields::new(chunk) {
+        match (field.tag, field.value) {
             // Chunk Type
-            let (val, vr) = read_varint(&chunk[l..]);
-            chunk_type = val;
-            l += vr;
-        } else if c_tag == 18 {
-            // Chunk Payload
-            let (plen, pr) = read_varint(&chunk[l..]);
-            l += pr;
-            let p_end = field_end(l, plen, chunk.len());
-
-            // Type 7 = Text Chunk. We must dig one layer deeper to Tag 10 for the string!
-            if chunk_type == 7 {
-                if let Some(txt) = find_string_by_tag(&chunk[l..p_end], 10) {
-                    chunk_text = txt;
+            (8, Value::Varint(kind)) => chunk_type = kind,
+            // Chunk Payload. Type 7 = Text Chunk: the string is one layer
+            // deeper, at tag 10.
+            (18, Value::Bytes(payload)) => {
+                if chunk_type == 7 {
+                    if let Some(text) = find_string_by_tag(payload, 10) {
+                        chunk_text = text;
+                    }
                 }
             }
-            l = p_end;
-        } else {
-            let safe_end = l
-                .saturating_add(skip_field(c_wire, &chunk[l..]))
-                .min(chunk.len());
-            unknown_fields.insert(format!("chunk_{}", c_tag), chunk[l..safe_end].to_vec());
-            l = safe_end;
+            _ => {
+                unknown_fields.insert(format!("chunk_{}", field.tag), field.raw.to_vec());
+            }
         }
     }
 
@@ -321,53 +233,24 @@ fn parse_chunk_block(chunk: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>
 
 fn parse_sender_info(data: &[u8]) -> SenderInfo {
     let mut sender = SenderInfo::default();
-    let mut i = 0;
-    while i < data.len() {
-        let Some((tag, tag_len)) = read_tag(&data[i..]) else {
-            break;
-        };
-        let wire_type = (tag & 0x07) as u8;
-        i += tag_len;
-
-        match tag {
-            8 => {
-                // Tag 8 = Field 1 (UID)
-                let (val, read) = read_varint(&data[i..]);
-                sender.uid = val;
-                i += read;
+    for field in Fields::new(data) {
+        match (field.tag, field.value) {
+            // Tag 8 = Field 1 (UID)
+            (8, Value::Varint(uid)) => sender.uid = uid,
+            // Tag 18 = Field 2 (Nickname)
+            (18, Value::Bytes(name)) => {
+                sender.nickname = String::from_utf8_lossy(name).into_owned();
             }
-            18 => {
-                // Tag 18 = Field 2 (Nickname)
-                let (len, read) = read_varint(&data[i..]);
-                i += read;
-                let block_end = field_end(i, len, data.len());
-                if let Some(sub_data) = data.get(i..block_end) {
-                    sender.nickname = String::from_utf8_lossy(sub_data).into_owned();
-                }
-                i = block_end;
-            }
-            32 => {
-                // Tag 32 = Field 4 (Status Flag)
-                let (val, read) = read_varint(&data[i..]);
-                sender.status = val;
-                i += read;
-            }
-            40 => {
-                // Tag 40 = Field 5 (Level)
-                let (val, read) = read_varint(&data[i..]);
-                sender.level = val;
-                i += read;
-            }
-            // Tags 24 (Platform?), 56 (Rank?), and 64 (Badge?)
-            // will now safely fall into the skip_field wildcard!
+            // Tag 32 = Field 4 (Status Flag)
+            (32, Value::Varint(status)) => sender.status = status,
+            // Tag 40 = Field 5 (Level)
+            (40, Value::Varint(level)) => sender.level = level,
+            // Tags 24 (Platform?), 56 (Rank?), and 64 (Badge?) and the rest
+            // are kept as unknown fields.
             _ => {
-                let safe_end = i
-                    .saturating_add(skip_field(wire_type, &data[i..]))
-                    .min(data.len());
                 sender
                     .unknown_fields
-                    .insert(format!("sender_{}", tag), data[i..safe_end].to_vec());
-                i = safe_end;
+                    .insert(format!("sender_{}", field.tag), field.raw.to_vec());
             }
         }
     }
@@ -375,49 +258,23 @@ fn parse_sender_info(data: &[u8]) -> SenderInfo {
 }
 
 fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
-    let mut j = 0;
-
-    while j < data.len() {
-        let Some((sub_tag, tag_len)) = read_tag(&data[j..]) else {
-            break;
-        };
-        let sub_wire = (sub_tag & 0x07) as u8;
-        j += tag_len;
-
-        match sub_tag {
-            26 => {
-                // Normal Chat Text
-                let (slen, r) = read_varint(&data[j..]);
-                j += r;
-                let s_end = field_end(j, slen, data.len());
-                if j < s_end {
-                    let text_msg = String::from_utf8_lossy(&data[j..s_end]).into_owned();
-                    payload.message.push_str(&text_msg);
+    for field in Fields::new(data) {
+        match (field.tag, field.value) {
+            // Normal Chat Text
+            (26, Value::Bytes(text)) => {
+                if !text.is_empty() {
+                    payload.message.push_str(&String::from_utf8_lossy(text));
                 }
-                j = s_end;
             }
-            58 => {
-                // Rich Content Array (Item Links, Fishing, etc.)
-                let (rlen, rr) = read_varint(&data[j..]);
-                j += rr;
-                let r_end = field_end(j, rlen, data.len());
-                let rich_data = &data[j..r_end];
-
-                let rich_text = parse_rich_content(rich_data, &mut payload.unknown_fields);
+            // Rich Content Array (Item Links, Fishing, etc.)
+            (58, Value::Bytes(rich)) => {
+                let rich_text = parse_rich_content(rich, &mut payload.unknown_fields);
                 payload.message.push_str(&rich_text);
-
-                // [CRITICAL FIX]: Advance the pointer past the block so it doesn't parse garbage!
-                j = r_end;
             }
             _ => {
-                // Safely skip unknown inner tags
-                let safe_end = j
-                    .saturating_add(skip_field(sub_wire, &data[j..]))
-                    .min(data.len());
                 payload
                     .unknown_fields
-                    .insert(format!("msg_{}", sub_tag), data[j..safe_end].to_vec());
-                j = safe_end;
+                    .insert(format!("msg_{}", field.tag), field.raw.to_vec());
             }
         }
     }
@@ -426,6 +283,7 @@ fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::decoder::skip_field;
 
     #[test]
     fn test_standard_read_varint() {

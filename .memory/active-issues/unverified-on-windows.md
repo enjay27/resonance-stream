@@ -75,3 +75,7 @@ run as the real app.
   (no "already active"); with archiving on, a busy WORLD day no longer pushes GUILD/PARTY
   out of the reloaded history (each channel reloads up to its own tab limit); a blocked
   sender's message raises no unread badge.
+- **llama client timeouts (2026-09-30, `claude/integration-test-harness`).** The
+  translator worker and `wait_for_server` use `resonance_llama::client()` (2 s connect,
+  30 s request); an empty model reply is a failed job. Tested against a mock server on
+  Linux; app cross-checked only, not run against a real llama-server.

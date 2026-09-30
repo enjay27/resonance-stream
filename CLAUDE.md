@@ -4,12 +4,12 @@ Resonance Stream is a Windows desktop app: it sniffs Blue Protocol: Star Resonan
 chat packets (raw socket, no client hooking), translates Japanese chat to Korean
 through a local llama.cpp server, and shows it in a Tauri overlay.
 
-It is one Cargo workspace in four crates, three parts. **Which part you touch decides which
+It is one Cargo workspace in five crates, three parts. **Which part you touch decides which
 gate applies.** That is the most important thing on this page.
 
 | tree | part | builds on | gate |
 |---|---|---|---|
-| `crates/core/` `crates/types/` | **core** — packet → chat pipeline, protocol decoding, translation text processing; DTOs shared by app and ui | any OS | `just core-check` |
+| `crates/core/` `crates/llama/` `crates/types/` | **core** — packet → chat pipeline, protocol decoding, translation text processing; llama-server HTTP client; DTOs shared by app and ui | any OS | `just core-check` |
 | `src/` | **ui** — Leptos 0.8 CSR frontend (wasm); pure modules unit-tested on the host | any OS | `just ui-check` |
 | `src-tauri/` | **app** — Tauri 2 backend: sockets, translator server, downloader, windows, tray | **Windows only** | `just app-check` (Windows) · `just app-cross-check` (Linux, compile only) |
 
@@ -61,6 +61,7 @@ crates/core/           resonance-core — pure logic, tested on any OS
   src/history.rs        ChatHistory (backend chat log) + load_recent (daily chat_logs reload)
   src/workers.rs        worker decisions: translator on/off/restart, stale jobs, port
   src/download.rs       download checks: HTTPS, length + SHA-256, progress, versions
+crates/llama/          resonance-llama — llama-server HTTP client (/completion, /health), any OS
 crates/types/          resonance-types — DTOs shared across the Tauri boundary (serde only)
 src/                  ui crate (resonance-stream-ui)
   app/                  App shell; actions.rs (save_config, clear_history),

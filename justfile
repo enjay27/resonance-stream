@@ -16,9 +16,10 @@ fmt-check:
 fmt:
     cargo fmt --all
 
-# core part: platform-independent logic + shared types. Runs anywhere.
+# core part: platform-independent logic, the llama-server client + shared
+# types. Runs anywhere.
 core-check:
-    cargo test -p resonance-core -p resonance-types
+    cargo test -p resonance-core -p resonance-llama -p resonance-types
 
 # ui part: Leptos frontend, compiled for the browser target; its pure
 # modules (e.g. chat_view) are unit-tested on the host.
@@ -41,6 +42,6 @@ app-cross-check:
     mkdir -p dist && ( [ -f dist/index.html ] || echo '<!doctype html>' > dist/index.html )
     cargo check -p resonance-stream --target x86_64-pc-windows-gnu
 
-# Line coverage of core + types (needs `cargo install cargo-llvm-cov`).
+# Line coverage of core + llama + types (needs `cargo install cargo-llvm-cov`).
 coverage:
-    cargo llvm-cov -p resonance-core -p resonance-types --summary-only
+    cargo llvm-cov -p resonance-core -p resonance-llama -p resonance-types --summary-only

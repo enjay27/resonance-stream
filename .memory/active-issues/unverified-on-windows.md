@@ -52,6 +52,10 @@ run as the real app.
   the game or its anti-cheat may ignore `SendInput` -- if so, text is still on the
   clipboard. Also: changing the tab-switch shortcut must keep favorite shortcuts working
   (all shortcuts now re-registered together in `shortcut.rs::apply_global_shortcuts`).
+- **Chat log retention (2026-09-30, `claude/chat-log-retention`).** Core tested on Linux
+  (`history::expired_chat_logs`), ui + app cross-checked. Worth a real run: Settings →
+  데이터 → "채팅 로그 보관 기간" 2 deletes older `chat_logs/*.jsonl` on save, at start-up
+  and at midnight while archiving; 0 deletes nothing; `dataset_raw.jsonl` is untouched.
 - **Favorites follow-up (2026-09-30, `claude/favorites-notes-guard`).** Same gates as above.
   Worth a real run: ⭐ on a chat row (hover, both normal and compact view) adds the
   message with its translation as the note, a second ⭐ on the same text adds nothing;

@@ -57,6 +57,9 @@ pub fn run() {
             });
             let state = app.state::<AppState>();
 
+            // Old daily logs past the retention setting go before the reload.
+            crate::io::prune_chat_logs(&handle);
+
             // Chat saved by earlier runs (daily chat logs), newest last; new
             // pids continue after them so the list stays in order.
             let restored = resonance_core::history::load_recent(

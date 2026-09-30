@@ -387,11 +387,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
 
                             // Original message view (inline, with box-decoration-clone to wrap backgrounds beautifully)
                             let original_view = view! {
-                                <span class=move || format!(
-                                    "text-base-content font-bold opacity-90 box-decoration-clone bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border-y border-r border-base-content/5 border-l-[3px] inline align-baseline {} {}",
-                                    if hide_orig_pref && has_translation { "hidden group-hover:inline" } else { "inline" },
-                                    channel_colors().1
-                                )
+                                <span class=move || crate::chat_view::compact_original_class(hide_orig_pref, has_translation, channel_colors().1)
                                 style=move || format!("font-size: {}px;", signals.font_size.get().saturating_sub(2).max(10))>
                                     {
                                         if !hide_orig_pref && is_japanese(&msg.message) && signals.use_translation.get() {

@@ -4,7 +4,7 @@
 
 ## Now — 2026-09-30
 
-**Per-channel archive (2026-09-30, `claude/per-channel-archive-compact-copy`):** the global `archive_chat` toggle is gone; the archive worker always runs and each tab (right-click, `archive_ignored_channels`) decides. `dataset_raw.jsonl` -> `dataset_<CHANNEL>.jsonl` (`dataset_file_name`, core); daily `chat_logs/` unchanged; write failures reported once as a system message. Old `dataset_raw.jsonl` is left as is. Compact-mode star/COPY on one line. NOT VERIFIED: needs a Windows run (files appear per tab; compact hover).
+**Per-channel archive (2026-09-30, `claude/per-channel-archive-compact-copy`):** the global `archive_chat` toggle is gone; the archive worker always runs and each tab (right-click, `archive_ignored_channels`) decides. `dataset_raw.jsonl` -> `dataset_<CHANNEL>.jsonl` (`dataset_file_name`, core); daily `chat_logs/` unchanged; write failures reported once as a system message. Old `dataset_raw.jsonl` is left as is. Compact-mode star/COPY on one line. Compact "hide original" fixed: the original bubble carried `inline` and `hidden` together and `inline` won (`compact_original_class`, tested). NOT VERIFIED: needs a Windows run (files appear per tab; compact hover).
 
 **Integration tests (2026-09-30, `claude/integration-test-harness`):** mock game server +
 mock llama-server in `crates/llama/tests/`; HTTP timeouts fixed. **Found: framing loses

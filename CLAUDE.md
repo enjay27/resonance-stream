@@ -66,7 +66,8 @@ crates/types/          resonance-types — DTOs shared across the Tauri boundary
 src/                  ui crate (resonance-stream-ui)
   app/                  App shell; actions.rs (save_config, clear_history),
                           hydration.rs (start-up load), setup_flow.rs (first-run wizard)
-  store.rs              AppSignals (all app-wide signals, AppSignals::new) + AppActions
+  store.rs              AppSignals (app-wide signals, AppSignals::new) + AppActions
+  config_signals.rs     ConfigSignals: the signals that mirror AppConfig; to_config() / apply()
   chat_view.rs          chat list: per-tab views + limits (ChatStore), filter, paging -- pure, host-tested
   components/           views; settings/ is one file per settings section
   hooks/                backend event, config and tray wiring
@@ -111,6 +112,11 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
   parent outside the `<Show>` and passed down as props — see `components/settings/`.
 - Helpers that need many signals take `signals: AppSignals` and destructure only the
   fields they use (`let AppSignals { a, set_b, .. } = signals;`).
+- **A setting that lives in `config.json` is a field of `AppConfig` (ui) and a signal of
+  `signals.config` (`ConfigSignals`, named like the field).** Adding one means adding it
+  to `ConfigSignals` -- `to_config` / `apply` list every field, so forgetting is a compile
+  error -- and to the app's `AppConfig`. Its load-time quirks (a saved value that is
+  clamped or replaced) live in `apply`, not in `hydration.rs`.
 
 ## Guardrails
 

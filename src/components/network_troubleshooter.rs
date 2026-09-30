@@ -44,7 +44,7 @@ pub fn Troubleshooter() -> impl IntoView {
                         set_progress.set((i as f64 / list.len() as f64) * 100.0);
 
                         // 1. Temporarily save this adapter to config
-                        signals.set_network_interface.set(iface.ip.clone());
+                        signals.config.set_network_interface.set(iface.ip.clone());
                         actions.save_config.dispatch(());
 
                         // 2. Restart the backend sniffer!
@@ -73,7 +73,7 @@ pub fn Troubleshooter() -> impl IntoView {
             // If we loop through everything and nothing worked...
             set_status.set("fail".to_string());
             set_progress.set(100.0);
-            signals.set_network_interface.set("".to_string()); // Reset to auto
+            signals.config.set_network_interface.set("".to_string()); // Reset to auto
             actions.save_config.dispatch(());
             let _ = invoke("restart_sniffer_command", JsValue::NULL).await; // Restart in auto mode
         });

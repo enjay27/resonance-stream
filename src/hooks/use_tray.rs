@@ -1,5 +1,6 @@
 //! Tray <-> UI wiring: tray menu clicks flip UI state, UI state relabels the tray.
 
+use crate::config_signals::ConfigSignals;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::{invoke, listen};
 use leptos::prelude::*;
@@ -8,9 +9,12 @@ use wasm_bindgen::prelude::*;
 
 /// Listens for the tray's click-through and always-on-top menu items.
 pub fn setup_tray_listeners(signals: AppSignals, actions: AppActions) {
+    let ConfigSignals {
+        always_on_top: is_pinned,
+        set_always_on_top: set_is_pinned,
+        ..
+    } = signals.config;
     let AppSignals {
-        is_pinned,
-        set_is_pinned,
         click_through,
         set_click_through,
         ..
@@ -58,11 +62,11 @@ pub fn setup_tray_listeners(signals: AppSignals, actions: AppActions) {
 /// Keeps the tray menu labels in sync with click-through / always-on-top.
 /// Runs on start-up and whenever either signal changes.
 pub fn sync_tray_menu(signals: AppSignals) {
-    let AppSignals {
-        is_pinned,
-        click_through,
+    let ConfigSignals {
+        always_on_top: is_pinned,
         ..
-    } = signals;
+    } = signals.config;
+    let AppSignals { click_through, .. } = signals;
 
     Effect::new(move |_| {
         let ct = click_through.get();

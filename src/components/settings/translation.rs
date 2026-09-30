@@ -22,14 +22,14 @@ pub fn TranslationSection() -> impl IntoView {
                 <label class="label cursor-pointer bg-base-100 rounded-lg px-4 py-3 border border-base-content/5 hover:border-success/30 transition-all">
                     <span class="label-text font-bold text-base-content">"실시간 번역 기능 사용"</span>
                     <input type="checkbox" class="toggle toggle-success toggle-sm"
-                        prop:checked=move || signals.use_translation.get()
+                        prop:checked=move || signals.config.use_translation.get()
                         on:click=move |ev| {
                             // Prevent the browser from automatically flipping the switch
                             let is_turning_on = event_target_checked(&ev);
 
                             if is_turning_on {
                                 // 1. Optimistically set the UI to ON so the toggle moves immediately
-                                signals.set_use_translation.set(true);
+                                signals.config.set_use_translation.set(true);
 
                                 spawn_local(async move {
                                     let mut has_error = false;
@@ -43,7 +43,7 @@ pub fn TranslationSection() -> impl IntoView {
                                                     if w.confirm_with_message("AI 모델 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
                                                         signals.set_wizard_step.set(2);
                                                         signals.set_show_settings.set(false);
-                                                        signals.set_init_done.set(false);
+                                                        signals.config.set_init_done.set(false);
                                                     }
                                                 }
                                             }
@@ -60,7 +60,7 @@ pub fn TranslationSection() -> impl IntoView {
                                                         if w.confirm_with_message("AI 실행 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
                                                             signals.set_wizard_step.set(2);
                                                             signals.set_show_settings.set(false);
-                                                            signals.set_init_done.set(false);
+                                                            signals.config.set_init_done.set(false);
                                                         }
                                                     }
                                                 }
@@ -71,7 +71,7 @@ pub fn TranslationSection() -> impl IntoView {
                                     // 4. Finalize
                                     if has_error {
                                         // Revert the toggle visually back to OFF if files are missing
-                                        signals.set_use_translation.set(false);
+                                        signals.config.set_use_translation.set(false);
                                     } else {
                                         // Everything exists, safely save the config
                                         actions.save_config.dispatch(());
@@ -79,7 +79,7 @@ pub fn TranslationSection() -> impl IntoView {
                                 });
                             } else {
                                 // User is turning it OFF (Toggle visually moves immediately)
-                                signals.set_use_translation.set(false);
+                                signals.config.set_use_translation.set(false);
                                 actions.save_config.dispatch(());
                             }
                         }
@@ -87,7 +87,7 @@ pub fn TranslationSection() -> impl IntoView {
                 </label>
             </div>
 
-            <Show when=move || signals.use_translation.get()>
+            <Show when=move || signals.config.use_translation.get()>
                 // Compute Mode Radio Group
                 <div class="p-3 bg-base-200 rounded-lg space-y-3 border border-base-content/5">
                     <span class="text-[11px] font-bold text-base-content/50 uppercase">"연산 장치 (Compute Mode)"</span>
@@ -96,10 +96,10 @@ pub fn TranslationSection() -> impl IntoView {
                             view! {
                                 <button
                                     class="join-item btn btn-xs flex-1 font-black border-base-content/10"
-                                    class:btn-success=move || signals.compute_mode.get() == m
-                                    class:btn-outline=move || signals.compute_mode.get() != m
+                                    class:btn-success=move || signals.config.compute_mode.get() == m
+                                    class:btn-outline=move || signals.config.compute_mode.get() != m
                                     on:click=move |_| {
-                                        signals.set_compute_mode.set(m);
+                                        signals.config.set_compute_mode.set(m);
                                         actions.save_config.dispatch(());
                                         signals.set_restart_required.set(true);
                                     }
@@ -111,17 +111,17 @@ pub fn TranslationSection() -> impl IntoView {
                     </div>
 
                     // Hide VRAM settings if CPU is selected
-                    <Show when=move || signals.compute_mode.get() == ComputeMode::Gpu>
+                    <Show when=move || signals.config.compute_mode.get() == ComputeMode::Gpu>
                         <span class="text-[11px] font-bold text-base-content/50 uppercase block mt-3">"VRAM 사용량 (GPU Offload)"</span>
                         <div class="join w-full">
                             {Tier::ALL.iter().copied().map(|t| {
                                 view! {
                                     <button
                                         class="join-item btn btn-xs flex-1 font-black border-base-content/10"
-                                        class:btn-success=move || signals.tier.get() == t
-                                        class:btn-outline=move || signals.tier.get() != t
+                                        class:btn-success=move || signals.config.tier.get() == t
+                                        class:btn-outline=move || signals.config.tier.get() != t
                                         on:click=move |_| {
-                                            signals.set_tier.set(t);
+                                            signals.config.set_tier.set(t);
                                             actions.save_config.dispatch(());
                                             signals.set_restart_required.set(true);
                                         }
@@ -144,14 +144,14 @@ pub fn TranslationSection() -> impl IntoView {
                         <div class="flex items-center gap-1">
                             <input type="number" min="0" max="1000" step="10"
                                 class="input input-xs input-bordered w-16 text-right"
-                                prop:value=move || signals.translation_catch_up_limit.get().to_string()
+                                prop:value=move || signals.config.translation_catch_up_limit.get().to_string()
                                 on:change=move |ev| {
                                     let limit = event_target_value(&ev)
                                         .trim()
                                         .parse::<usize>()
-                                        .unwrap_or_else(|_| signals.translation_catch_up_limit.get_untracked())
+                                        .unwrap_or_else(|_| signals.config.translation_catch_up_limit.get_untracked())
                                         .min(1000);
-                                    signals.set_translation_catch_up_limit.set(limit);
+                                    signals.config.set_translation_catch_up_limit.set(limit);
                                     actions.save_config.dispatch(());
                                 }
                             />

@@ -12,50 +12,15 @@ use wasm_bindgen::prelude::*;
 
 pub async fn hydrate_from_backend(signals: AppSignals) {
     let AppSignals {
-        set_init_done,
-        set_use_translation,
-        set_compute_mode,
         set_is_sniffer_active,
         set_status_text,
         set_model_ready,
-        set_active_tab,
         set_chat,
-        tab_limits,
-        set_tab_limits,
-        set_archive_ignored_channels,
-        set_message_spacing,
-        custom_filters,
         set_system_log,
-        set_debug_mode,
-        set_log_level,
-        set_compact_mode,
-        set_is_pinned,
-        set_custom_filters,
-        set_theme,
-        set_opacity,
-        set_tier,
-        set_translation_catch_up_limit,
         set_dict_update_available,
-        set_hide_original_in_compact,
-        set_network_interface,
-        set_drag_to_scroll,
-        set_alert_keywords,
-        set_alert_volume,
-        set_emphasis_keywords,
-        set_use_relative_time,
-        set_font_size,
-        set_hide_blocked_messages,
-        set_blocked_users,
-        set_min_sender_level,
         set_show_app_update_modal,
         set_show_model_update_modal,
         set_pending_update_data,
-        set_auto_sync_latest_dict,
-        set_tab_switch_modifier,
-        set_tab_switch_key,
-        set_favorite_messages,
-        set_chat_log_retention_days,
-        set_raw_capture,
         ..
     } = signals;
 
@@ -65,50 +30,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
         Ok(res) => {
             if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(res) {
                 log!("Loaded Config: {:?}", config);
-                set_init_done.set(config.init_done);
-                set_use_translation.set(config.use_translation);
-                set_compute_mode.set(config.compute_mode);
-                set_compact_mode.set(config.compact_mode);
-                set_active_tab.set(config.active_tab);
-                set_is_pinned.set(config.always_on_top);
-                if !config.tab_limits.is_empty() {
-                    set_tab_limits.set(config.tab_limits);
-                }
-                set_archive_ignored_channels.set(config.archive_ignored_channels);
-                set_message_spacing.set(config.message_spacing);
-                set_custom_filters.set(config.custom_tab_filters);
-                set_theme.set(config.theme);
-                set_opacity.set(config.overlay_opacity);
-                set_debug_mode.set(config.debug_mode);
-                set_log_level.set(config.log_level);
-                set_tier.set(config.tier);
-                set_translation_catch_up_limit.set(config.translation_catch_up_limit);
-                set_hide_original_in_compact.set(config.hide_original_in_compact);
-                set_network_interface.set(config.network_interface);
-                set_drag_to_scroll.set(config.drag_to_scroll);
-                set_alert_keywords.set(config.alert_keywords);
-                set_alert_volume.set(config.alert_volume);
-                set_emphasis_keywords.set(config.emphasis_keywords);
-                set_use_relative_time.set(config.use_relative_time);
-                let loaded_size = if config.font_size > 8 {
-                    config.font_size
-                } else {
-                    14
-                };
-                set_font_size.set(loaded_size);
-                set_hide_blocked_messages.set(config.hide_blocked_messages);
-                set_blocked_users.set(config.blocked_users);
-                set_min_sender_level.set(config.min_sender_level);
-                set_auto_sync_latest_dict.set(config.auto_sync_latest_dict);
-                set_tab_switch_modifier.set(config.tab_switch_modifier);
-                set_favorite_messages.set(config.favorite_messages);
-                set_chat_log_retention_days.set(config.chat_log_retention_days);
-                set_raw_capture.set(config.raw_capture);
-                set_tab_switch_key.set(if config.tab_switch_key.is_empty() {
-                    "Tab".to_string()
-                } else {
-                    config.tab_switch_key
-                });
+                signals.config.apply(config.clone());
 
                 // 2. If the user hasn't finished the wizard, stop here
                 if config.init_done {
@@ -123,8 +45,8 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                             // Merged, not replaced: the listeners are already
                             // up, and messages that arrived during the fetch
                             // are in the store.
-                            let limits = tab_limits.get_untracked();
-                            let filters = custom_filters.get_untracked();
+                            let limits = signals.config.tab_limits.get_untracked();
+                            let filters = signals.config.custom_tab_filters.get_untracked();
                             let history = vec
                                 .into_iter()
                                 .map(|p| (p.pid, p.channel, ArcRwSignal::new(p)))
@@ -208,7 +130,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                                 // Only when auto-sync is on (off by default); the
                                 // settings button and the wizard always sync.
                                 if update_data.dict_update_available
-                                    && signals.auto_sync_latest_dict.get_untracked()
+                                    && signals.config.auto_sync_latest_dict.get_untracked()
                                 {
                                     add_system_log(
                                         SystemLogLevel::Info,

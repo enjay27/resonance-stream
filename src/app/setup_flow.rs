@@ -1,5 +1,6 @@
 //! First-run wizard flow: download model + server + dictionary, then start services.
 
+use crate::config_signals::ConfigSignals;
 use crate::hooks::use_events::setup_event_listeners;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
@@ -14,8 +15,8 @@ pub fn finalize_setup(
     signals: AppSignals,
     save_config: Action<(), ()>,
 ) -> impl Fn(()) + Copy + Send + Sync + 'static {
+    let ConfigSignals { set_init_done, .. } = signals.config;
     let AppSignals {
-        set_init_done,
         set_is_sniffer_active,
         ..
     } = signals;

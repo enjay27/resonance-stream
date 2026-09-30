@@ -85,10 +85,10 @@ pub fn DataDevSection(
                             <span class="text-[9px] opacity-60">"(사용자 사전 직접 수정 시 체크 해제해주세요)"</span>
                         </div>
                         <input type="checkbox" class="toggle toggle-warning toggle-sm"
-                            prop:checked=move || signals.auto_sync_latest_dict.get()
+                            prop:checked=move || signals.config.auto_sync_latest_dict.get()
                             on:change=move |ev| {
                                 let checked = event_target_checked(&ev);
-                                signals.set_auto_sync_latest_dict.set(checked);
+                                signals.config.set_auto_sync_latest_dict.set(checked);
                                 actions.save_config.dispatch(());
                             }
                         />
@@ -129,10 +129,10 @@ pub fn DataDevSection(
                     <div class="flex items-center gap-1">
                         <input type="number" min="0" max="3650" step="1"
                             class="input input-xs input-bordered w-16 text-right"
-                            prop:value=move || signals.chat_log_retention_days.get().to_string()
+                            prop:value=move || signals.config.chat_log_retention_days.get().to_string()
                             on:change=move |ev| {
                                 let days = event_target_value(&ev).trim().parse::<u32>().unwrap_or(0).min(3650);
-                                signals.set_chat_log_retention_days.set(days);
+                                signals.config.set_chat_log_retention_days.set(days);
                                 actions.save_config.dispatch(());
                             }
                         />
@@ -167,16 +167,16 @@ pub fn DataDevSection(
                         <span class="text-[9px] opacity-60">"시스템 탭 및 개발자 도구 활성화"</span>
                     </div>
                     <input type="checkbox" class="toggle toggle-warning toggle-sm"
-                        prop:checked=move || signals.debug_mode.get()
+                        prop:checked=move || signals.config.debug_mode.get()
                         on:change=move |ev| {
-                            signals.set_debug_mode.set(event_target_checked(&ev));
+                            signals.config.set_debug_mode.set(event_target_checked(&ev));
                             actions.save_config.dispatch(());
                         }
                     />
                 </div>
 
                 // --- REVEALED ONLY IN DEBUG MODE ---
-                <Show when=move || signals.debug_mode.get()>
+                <Show when=move || signals.config.debug_mode.get()>
                     <div class="p-3 bg-warning/5 border border-warning/20 rounded-lg space-y-3 mt-2 animate-in fade-in slide-in-from-top-2 duration-200">
 
                         // 1. Log Level Select
@@ -185,9 +185,9 @@ pub fn DataDevSection(
                                 <span class="text-[11px] font-bold text-base-content/80">"로그 레벨 (Log Level)"</span>
                             </div>
                             <select class="select select-bordered select-xs w-24 text-xs font-bold bg-base-100"
-                                prop:value=move || signals.log_level.get().as_str()
+                                prop:value=move || signals.config.log_level.get().as_str()
                                 on:change=move |ev| {
-                                    signals.set_log_level.set(LogLevel::from_name(&event_target_value(&ev)));
+                                    signals.config.set_log_level.set(LogLevel::from_name(&event_target_value(&ev)));
                                     actions.save_config.dispatch(());
                                 }>
                                 {LogLevel::ALL.iter().copied().map(|level| view! {
@@ -215,9 +215,9 @@ pub fn DataDevSection(
                                     "폴더"
                                 </button>
                                 <input type="checkbox" class="toggle toggle-warning toggle-sm"
-                                    prop:checked=move || signals.raw_capture.get()
+                                    prop:checked=move || signals.config.raw_capture.get()
                                     on:change=move |ev| {
-                                        signals.set_raw_capture.set(event_target_checked(&ev));
+                                        signals.config.set_raw_capture.set(event_target_checked(&ev));
                                         actions.save_config.dispatch(());
                                     }
                                 />
@@ -233,9 +233,9 @@ pub fn DataDevSection(
                                 <span class="text-[9px] text-warning/80 italic">"VPN 사용 시 패킷 캡처 실패 해결용"</span>
                             </div>
                             <select class="select select-bordered select-xs w-36 text-[10px] font-bold bg-base-100"
-                                prop:value=move || signals.network_interface.get()
+                                prop:value=move || signals.config.network_interface.get()
                                 on:change=move |ev| {
-                                    signals.set_network_interface.set(event_target_value(&ev));
+                                    signals.config.set_network_interface.set(event_target_value(&ev));
                                     actions.save_config.dispatch(());
                                     signals.set_restart_required.set(true); // Requires sniffer restart
                                 }>

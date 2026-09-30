@@ -21,9 +21,9 @@ pub fn BlockedUsersSection() -> impl IntoView {
                     <span class="text-[9px] text-base-content/50">"활성화 시 '(차단된 사용자의 메시지입니다)' 문구도 표시하지 않습니다."</span>
                 </div>
                 <input type="checkbox" class="toggle toggle-error toggle-sm"
-                    prop:checked=move || signals.hide_blocked_messages.get()
+                    prop:checked=move || signals.config.hide_blocked_messages.get()
                     on:change=move |ev| {
-                        signals.set_hide_blocked_messages.set(event_target_checked(&ev));
+                        signals.config.set_hide_blocked_messages.set(event_target_checked(&ev));
                         actions.save_config.dispatch(());
                     }
                 />
@@ -31,7 +31,7 @@ pub fn BlockedUsersSection() -> impl IntoView {
 
             <div class="bg-base-200/50 rounded-lg p-2 max-h-40 overflow-y-auto border border-base-content/5">
                 {move || {
-                    let blocked = signals.blocked_users.get();
+                    let blocked = signals.config.blocked_users.get();
                     if blocked.is_empty() {
                         view! { <div class="text-[10px] text-base-content/50 italic text-center py-2">"차단된 사용자가 없습니다."</div> }.into_any()
                     } else {
@@ -53,7 +53,7 @@ pub fn BlockedUsersSection() -> impl IntoView {
                                             });
 
                                             // 2. Instantly remove from frontend UI state
-                                            signals.set_blocked_users.update(|map| {
+                                            signals.config.set_blocked_users.update(|map| {
                                                 map.remove(&uid_clone);
                                             });
                                         }>

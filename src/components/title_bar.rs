@@ -73,7 +73,7 @@ pub fn TitleBar() -> impl IntoView {
                     }}
                 </div>
 
-                <Show when=move || store.use_translation.get()>
+                <Show when=move || store.config.use_translation.get()>
                     <div
                         class=move || {
                             let state = store.translator_state.get();

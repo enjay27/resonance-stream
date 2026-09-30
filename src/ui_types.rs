@@ -4,10 +4,10 @@ use serde_with::DisplayFromStr;
 
 // Types shared with the backend live in crates/types.
 pub use resonance_types::{
-    default_catch_up_limit, default_favorite_messages, ChatMessage, FavoriteMessage, FolderStatus,
-    GistMetadata, NetworkInterface, ProgressPayload, RemoteDictionary, ServiceStates,
-    SnifferStatePayload, SystemMessage, TranslationResult, TranslatorStatePayload,
-    UpdateCheckResult, VersionInfo,
+    contains_japanese, default_catch_up_limit, default_favorite_messages, ChatMessage,
+    FavoriteMessage, FolderStatus, GistMetadata, NetworkInterface, ProgressPayload,
+    RemoteDictionary, ServiceStates, SnifferStatePayload, SystemMessage, TranslationResult,
+    TranslatorStatePayload, UpdateCheckResult, VersionInfo,
 };
 
 #[serde_as]

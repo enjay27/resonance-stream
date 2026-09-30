@@ -7,9 +7,10 @@ pub fn format_time(ts: u64) -> String {
     format!("{:02}:{:02}", date.get_hours(), date.get_minutes())
 }
 
+/// The backend's rule (`resonance_types::contains_japanese`), so the UI
+/// marks exactly the lines the translator takes.
 pub fn is_japanese(text: &str) -> bool {
-    let re = js_sys::RegExp::new("[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FAF]", "");
-    re.test(text)
+    crate::ui_types::contains_japanese(text)
 }
 
 pub fn copy_to_clipboard(text: &str) {

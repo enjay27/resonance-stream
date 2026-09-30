@@ -14,8 +14,11 @@ the order below ("proceed by your order"). One step, one `claude/*` branch, one 
 | A4 | prompt starts with literal `<bos>`; llama-server adds BOS too (double BOS) | **blocked: needs Kade** — changing it changes what the fine-tuned model sees. Question: did `make_prompt()` training tokenize with the tokenizer adding BOS (then training had 2 as well: keep) or not (then drop `<bos>` from `translation_prompt`)? The llama-server log (B3) also shows the "2 BOS tokens" warning. Prompt now pinned in core |
 | A8 | `max_tokens: 512` for every line; runaway output blocks the queue | **done** `claude/prompt-in-core` — `text::output_token_limit` (3/char + 32, 64..512), sent as `n_predict` and `max_tokens`. C1 done in the same branch (prompt, sanitising, `contains_japanese` moved to core, pinned) |
 | B1 | translation cache (LRU on masked text) | **done** `claude/translation-cache` — `text::TranslationCache` (512 lines, raw model output by masked text; lives in the worker, survives server restarts) |
-| A7 | stale/failed job archived untranslated, then again translated after catch-up | open (step 7) |
+| A7 | stale/failed job archived untranslated, then again translated after catch-up | **dropped: by design** — `history::load_recent` documents it and reloads such a message once, as its newest (translated) line |
 | A10 | `app_data_dir().unwrap()` in `launch_ai_server` | **done** in step 2 (same function) |
-| B3 B4 B6 C2 C3 | server stderr log; `-t` from CPU count; `contains_japanese` ranges; enums for states/tabs; `AppSignals` grouping | open (step 7) |
+| B6 | `contains_japanese` missed half-width katakana, 々, Ext A, U+9FB0-9FFF; UI had a second copy (JS regex) | **done** `claude/small-fixes` — one rule in `resonance-types`, core re-exports, UI calls it |
+| B3 | `--log-disable`: an exiting llama-server said nothing | **done** `claude/small-fixes` — output to `bin/<ai folder>/llama-server.log` (new each start); exit messages quote `workers::log_tail` (last 3 lines) |
+| B4 | `-t 4` fixed | **left for Kade**: the game shares the CPU; more threads may cost FPS. Decide with a measurement |
+| C2 C3 | enums for states/tabs/channels; `AppSignals` grouping (~70 signal pairs) | open — large UI refactors, asked Kade before starting |
 
 C4 (translator supervisor) moved from step 1 into step 2: it is the crash-handling part.

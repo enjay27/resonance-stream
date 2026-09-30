@@ -441,17 +441,7 @@ impl TranslationCache {
     }
 }
 
-pub fn contains_japanese(text: &str) -> bool {
-    text.chars().any(|c| {
-        let u = c as u32;
-        // Hiragana: 0x3040 - 0x309F
-        // Katakana: 0x30A0 - 0x30FF
-        // CJK Unified Ideographs (Kanji): 0x4E00 - 0x9FAF
-        (0x3040..=0x309F).contains(&u)
-            || (0x30A0..=0x30FF).contains(&u)
-            || (0x4E00..=0x9FAF).contains(&u)
-    })
-}
+pub use resonance_types::contains_japanese;
 
 /// Display form of stickers and inline emotes: a standalone sticker
 /// (`emojiPic=...`) becomes [`STICKER_TOKEN`], each `<sprite=...>` tag

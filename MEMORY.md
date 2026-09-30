@@ -4,14 +4,11 @@
 
 ## Now — 2026-09-30
 
-**Core review follow-up (`claude/tdd-rule-and-core-hardening`):** CLAUDE.md now requires TDD
-(test first, `just coverage`). Core coverage 96.7% lines. W3 done (PR #38). P1 done: `load_recent` examines at most
-`MAX_SCAN_LINES` = 50k lines (start-up 1.6 s -> 54 ms on 60 days of logs; quiet channels reload
-fewer messages). W1 done: stream key is the full
-4-tuple (`StreamKey`, 12 bytes), idle connections dropped after 60 s. W5 done: `postprocess_text` restores `[P n]`/`[p n]`/full-width
-placeholders in one regex pass. **P2 was wrong** (`AppState.dictionary` is already `Arc`) and P3 is
-<0.1% of translation latency and an Aho-Corasick swap would change masking order -- both dropped.
-Next, in order: P2+P3 `Arc<Dictionary>` + matcher, W5 placeholder check, field iterator, W2.
+**Core review follow-up (2026-09-30):** record and status in
+[`.memory/roadmap/core-review-2026-09-30.md`](.memory/roadmap/core-review-2026-09-30.md).
+Done: W3, P1, W1, W5 (PRs #38-#41) and the field iterator `decoder::Fields` (parser output
+pinned by a golden test). **Next: W2 real framing -- blocked until Kade has a port-5003
+capture** (what to record is in that file). TDD is the rule (CLAUDE.md); `just coverage`.
 
 **Graft-guided refactor, phases 0–5: done** —
 [`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).

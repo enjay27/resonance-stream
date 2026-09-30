@@ -24,7 +24,7 @@ pub fn TitleBar() -> impl IntoView {
             // --- CENTER: App Status (READY / INITIALIZING) ---
             <div class="absolute left-1/2 -translate-x-1/2 pointer-events-none">
                 <span class="text-[10px] font-black tracking-[0.2em] text-bpsr-green uppercase animate-in fade-in duration-500">
-                    {move || store.status_text.get()}
+                    {move || store.setup.status_text.get()}
                 </span>
             </div>
 
@@ -34,7 +34,7 @@ pub fn TitleBar() -> impl IntoView {
                 // --- ADVANCED SNIFFER BADGE ---
                 <div
                     class=move || {
-                        let state = store.sniffer_state.get();
+                        let state = store.service.sniffer_state.get();
                         let base = "badge badge-xs gap-1.5 px-2 py-2 font-black text-[9px] mr-2 shadow-inner transition-all";
                         match state {
                             SnifferState::Active => format!("{} badge-success bg-success/10 text-success border-success/20", base),
@@ -45,7 +45,7 @@ pub fn TitleBar() -> impl IntoView {
                         }
                     }
                     on:click=move |_| {
-                        let current_state = store.sniffer_state.get();
+                        let current_state = store.service.sniffer_state.get();
                         // Open troubleshooter if it's explicitly broken, or if the user wants to test it manually
                         if matches!(current_state, SnifferState::Error | SnifferState::Off) {
                             store.set_show_troubleshooter.set(true);
@@ -54,7 +54,7 @@ pub fn TitleBar() -> impl IntoView {
                 >
                     // The Pulsing Indicator Dot
                     <div class=move || {
-                        let state = store.sniffer_state.get();
+                        let state = store.service.sniffer_state.get();
                         let base = "w-1 h-1 rounded-full";
                         match state {
                             SnifferState::Active => format!("{} bg-success animate-pulse shadow-[0_0_8px_#00ff88]", base),
@@ -65,7 +65,7 @@ pub fn TitleBar() -> impl IntoView {
                     }></div>
 
                     // The Status Text
-                    {move || match store.sniffer_state.get() {
+                    {move || match store.service.sniffer_state.get() {
                         SnifferState::Active => "SNIFFER ON".to_string(),
                         SnifferState::Error => "ERROR (CLICK)".to_string(),
                         SnifferState::Off => "SNIFFER OFF".to_string(),
@@ -76,7 +76,7 @@ pub fn TitleBar() -> impl IntoView {
                 <Show when=move || store.config.use_translation.get()>
                     <div
                         class=move || {
-                            let state = store.translator_state.get();
+                            let state = store.service.translator_state.get();
                             let base = "badge badge-xs gap-1.5 px-2 py-2 font-black text-[9px] mr-2 shadow-inner transition-all";
                             match state {
                                 TranslatorState::Active => format!("{} badge-success bg-success/10 text-success border-success/20", base),
@@ -88,16 +88,16 @@ pub fn TitleBar() -> impl IntoView {
                         }
                         on:click=move |_| {
                             // Show error alert on click if in Error state
-                            if store.translator_state.get() == TranslatorState::Error {
+                            if store.service.translator_state.get() == TranslatorState::Error {
                                 if let Some(w) = web_sys::window() {
-                                    let _ = w.alert_with_message(&store.translator_error.get());
+                                    let _ = w.alert_with_message(&store.service.translator_error.get());
                                 }
                             }
                         }
                     >
                         // The Pulsing Indicator Dot
                         <div class=move || {
-                            let state = store.translator_state.get();
+                            let state = store.service.translator_state.get();
                             let base = "w-1 h-1 rounded-full";
                             match state {
                                 TranslatorState::Active => format!("{} bg-success animate-pulse shadow-[0_0_8px_#00ff88]", base),
@@ -108,7 +108,7 @@ pub fn TitleBar() -> impl IntoView {
                         }></div>
 
                         // The Status Text
-                        {move || match store.translator_state.get() {
+                        {move || match store.service.translator_state.get() {
                             TranslatorState::Active => "번역 ON".to_string(),
                             TranslatorState::Error => "AI ERROR (CLICK)".to_string(),
                             TranslatorState::Off => "번역 OFF".to_string(),

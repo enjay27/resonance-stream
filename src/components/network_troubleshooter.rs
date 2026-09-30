@@ -59,7 +59,8 @@ pub fn Troubleshooter() -> impl IntoView {
 
                             // WOW! We just check if the state flipped to Active!
                             // As long as the game is running, background packets will trigger this instantly!
-                            if signals.sniffer_state.get_untracked() == SnifferState::Active {
+                            if signals.service.sniffer_state.get_untracked() == SnifferState::Active
+                            {
                                 set_status.set("success".to_string());
                                 set_progress.set(100.0);
                                 return; // We found the working adapter!

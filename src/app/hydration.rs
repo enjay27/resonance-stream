@@ -2,6 +2,7 @@
 //! history, start the sniffer and translator, and check for updates.
 
 use crate::hooks::use_events::setup_event_listeners;
+use crate::status_signals::{ServiceSignals, UpdateSignals};
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
 use crate::ui_types::{AppConfig, ChatMessage, FolderStatus, SystemLogLevel, SystemMessage};
@@ -11,18 +12,24 @@ use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 
 pub async fn hydrate_from_backend(signals: AppSignals) {
-    let AppSignals {
+    let ServiceSignals {
         set_is_sniffer_active,
-        set_status_text,
         set_model_ready,
-        set_chat,
-        set_system_log,
         set_dict_update_available,
+        ..
+    } = signals.service;
+    let UpdateSignals {
         set_show_app_update_modal,
         set_show_model_update_modal,
         set_pending_update_data,
         ..
+    } = signals.updates;
+    let AppSignals {
+        set_chat,
+        set_system_log,
+        ..
     } = signals;
+    let set_status_text = signals.setup.set_status_text;
 
     log!("App component hydration started...");
     // Load User Config

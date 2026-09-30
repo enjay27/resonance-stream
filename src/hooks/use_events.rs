@@ -69,9 +69,9 @@ fn apply_translator_state(signals: AppSignals, payload: TranslatorStatePayload) 
     if !TRANSLATOR_SEQ.accept(payload.seq) {
         return;
     }
-    signals.set_translator_state.set(payload.state);
+    signals.service.set_translator_state.set(payload.state);
     if payload.state == TranslatorState::Error {
-        signals.set_translator_error.set(payload.message);
+        signals.service.set_translator_error.set(payload.message);
     }
 }
 
@@ -79,10 +79,10 @@ fn apply_sniffer_state(signals: AppSignals, payload: SnifferStatePayload) {
     if !SNIFFER_SEQ.accept(payload.seq) {
         return;
     }
-    signals.set_sniffer_state.set(payload.state);
+    signals.service.set_sniffer_state.set(payload.state);
     // If it's an error, save the message so the user can click the badge to read it
     if payload.state == SnifferState::Error {
-        signals.set_sniffer_error.set(payload.message);
+        signals.service.set_sniffer_error.set(payload.message);
     }
 }
 
@@ -234,6 +234,6 @@ fn create_firewall_missing_handler(signals: AppSignals) -> Closure<dyn FnMut(JsV
         signals.config.set_init_done.set(false);
 
         // 2. Make sure it starts on Step 0 (the Firewall Agreement page)
-        signals.set_wizard_step.set(0);
+        signals.setup.set_wizard_step.set(0);
     }) as Box<dyn FnMut(JsValue)>)
 }

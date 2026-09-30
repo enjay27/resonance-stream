@@ -6,6 +6,7 @@ pub mod favorites;
 pub mod hooks;
 pub mod service_state;
 pub mod shortcut_keys;
+pub mod status_signals;
 pub mod store;
 pub mod tauri_bridge;
 pub mod ui_types;

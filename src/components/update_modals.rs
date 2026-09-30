@@ -1,5 +1,6 @@
 //! "Update available" modals for the app and the AI model.
 
+use crate::status_signals::UpdateSignals;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
 use crate::ui_types::ProgressPayload;
@@ -11,8 +12,7 @@ use wasm_bindgen::prelude::*;
 #[component]
 pub fn AppUpdateModal() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
-    let AppSignals {
-        set_status_text,
+    let UpdateSignals {
         show_app_update_modal,
         set_show_app_update_modal,
         pending_update_data,
@@ -21,7 +21,8 @@ pub fn AppUpdateModal() -> impl IntoView {
         app_update_progress,
         set_app_update_progress,
         ..
-    } = signals;
+    } = signals.updates;
+    let set_status_text = signals.setup.set_status_text;
 
     // --- APP UPDATE LOGIC ---
     let start_app_update = move |download_url: String| {
@@ -137,7 +138,7 @@ pub fn AppUpdateModal() -> impl IntoView {
 #[component]
 pub fn ModelUpdateModal() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
-    let AppSignals {
+    let UpdateSignals {
         show_model_update_modal,
         set_show_model_update_modal,
         pending_update_data,
@@ -146,7 +147,7 @@ pub fn ModelUpdateModal() -> impl IntoView {
         model_update_progress,
         set_model_update_progress,
         ..
-    } = signals;
+    } = signals.updates;
 
     // --- MODEL UPDATE LOGIC ---
     let start_model_update = move |download_url: String, version: String, expected_hash: String| {
@@ -250,7 +251,7 @@ pub fn ModelUpdateModal() -> impl IntoView {
                                         <button class="btn btn-info btn-block mt-4 gap-2"
                                             on:click=move |_| {
                                                 set_show_model_update_modal.set(false);
-                                                signals.set_restart_required.set(true);
+                                                signals.service.set_restart_required.set(true);
                                             }>
                                             "확인"
                                         </button>

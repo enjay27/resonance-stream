@@ -61,6 +61,7 @@ impl StreamTracker {
     }
 
     /// Connections currently tracked.
+    #[cfg(test)]
     pub fn stream_count(&self) -> usize {
         self.streams.len()
     }

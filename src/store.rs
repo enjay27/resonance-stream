@@ -1,7 +1,8 @@
 use crate::chat_view::ChatStore;
 use crate::ui_types::{
     default_catch_up_limit, default_favorite_messages, Channel, ChatMessage, ComputeMode,
-    FavoriteMessage, SnifferState, SystemMessage, Theme, Tier, TranslatorState, ALL_TAB,
+    FavoriteMessage, LogLevel, SnifferState, SystemLogLevel, SystemMessage, Theme, Tier,
+    TranslatorState, ALL_TAB,
 };
 use leptos::prelude::{signal, Action, ArcRwSignal, ReadSignal, WriteSignal};
 use std::collections::HashMap;
@@ -58,10 +59,10 @@ pub struct AppSignals {
     pub set_system_at_bottom: WriteSignal<bool>,
     pub debug_mode: ReadSignal<bool>,
     pub set_debug_mode: WriteSignal<bool>,
-    pub log_level: ReadSignal<String>,
-    pub set_log_level: WriteSignal<String>,
-    pub system_level_filter: ReadSignal<Option<String>>,
-    pub set_system_level_filter: WriteSignal<Option<String>>,
+    pub log_level: ReadSignal<LogLevel>,
+    pub set_log_level: WriteSignal<LogLevel>,
+    pub system_level_filter: ReadSignal<Option<SystemLogLevel>>,
+    pub set_system_level_filter: WriteSignal<Option<SystemLogLevel>>,
     pub system_source_filter: ReadSignal<Option<String>>,
     pub set_system_source_filter: WriteSignal<Option<String>>,
     pub compact_mode: ReadSignal<bool>,
@@ -188,8 +189,8 @@ impl AppSignals {
 
         let (is_system_at_bottom, set_system_at_bottom) = signal(true);
         let (debug_mode, set_debug_mode) = signal(false);
-        let (log_level, set_log_level) = signal("info".to_string());
-        let (system_level_filter, set_system_level_filter) = signal(None::<String>);
+        let (log_level, set_log_level) = signal(LogLevel::default());
+        let (system_level_filter, set_system_level_filter) = signal(None::<SystemLogLevel>);
         let (system_source_filter, set_system_source_filter) = signal(None::<String>);
 
         let (compact_mode, set_compact_mode) = signal(false);

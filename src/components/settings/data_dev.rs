@@ -1,6 +1,6 @@
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
-use crate::ui_types::NetworkInterface;
+use crate::ui_types::{LogLevel, NetworkInterface};
 use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
@@ -185,16 +185,14 @@ pub fn DataDevSection(
                                 <span class="text-[11px] font-bold text-base-content/80">"로그 레벨 (Log Level)"</span>
                             </div>
                             <select class="select select-bordered select-xs w-24 text-xs font-bold bg-base-100"
-                                prop:value=move || signals.log_level.get()
+                                prop:value=move || signals.log_level.get().as_str()
                                 on:change=move |ev| {
-                                    signals.set_log_level.set(event_target_value(&ev));
+                                    signals.set_log_level.set(LogLevel::from_name(&event_target_value(&ev)));
                                     actions.save_config.dispatch(());
                                 }>
-                                <option value="trace">"TRACE"</option>
-                                <option value="debug">"DEBUG"</option>
-                                <option value="info">"INFO"</option>
-                                <option value="warn">"WARN"</option>
-                                <option value="error">"ERROR"</option>
+                                {LogLevel::ALL.iter().copied().map(|level| view! {
+                                    <option value=level.as_str()>{level.label()}</option>
+                                }).collect_view()}
                             </select>
                         </div>
 

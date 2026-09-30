@@ -8,7 +8,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use super::emit_sniffer_state;
-use crate::protocol::types::{SnifferState, SystemLogLevel};
+use crate::protocol::types::{LogLevel, SnifferState, SystemLogLevel};
 use crate::{inject_system_message, NetworkInterface};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000; //
@@ -20,7 +20,7 @@ pub fn initialize_network_socket(
     app: &AppHandle,
     config: &crate::config::AppConfig,
 ) -> Option<Socket> {
-    if config.log_level.to_lowercase() == "debug" || config.log_level.to_lowercase() == "info" {
+    if matches!(config.log_level, LogLevel::Debug | LogLevel::Info) {
         if let Ok(network_interfaces) = list_afinet_netifas() {
             for (name, ip) in network_interfaces {
                 inject_system_message(

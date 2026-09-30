@@ -1,4 +1,5 @@
 use crate::tauri_bridge::invoke;
+use crate::ui_types::SystemLogLevel;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 
@@ -19,9 +20,9 @@ pub fn copy_to_clipboard(text: &str) {
     }
 }
 
-pub fn add_system_log(level: &str, source: &str, message: &str) {
+pub fn add_system_log(level: SystemLogLevel, source: &str, message: &str) {
     let msg_json = serde_json::json!({
-        "level": level,
+        "level": level.as_str(),
         "source": source,
         "message": message
     });

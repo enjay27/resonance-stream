@@ -4,7 +4,7 @@ use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use resonance_types::{
     default_catch_up_limit, default_favorite_messages, Channel, ComputeMode, FavoriteMessage,
-    Theme, Tier, ALL_TAB, CUSTOM_TAB,
+    LogLevel, Theme, Tier, ALL_TAB, CUSTOM_TAB,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -29,7 +29,7 @@ pub struct AppConfig {
     pub theme: Theme,
     pub overlay_opacity: f32,
     pub debug_mode: bool,
-    pub log_level: String,
+    pub log_level: LogLevel,
     pub tier: Tier,
     /// Japanese messages missed since the app opened that a translator start
     /// translates (the newest ones); 0 turns the catch-up off.
@@ -117,7 +117,7 @@ impl Default for AppConfig {
             theme: Theme::default(),
             overlay_opacity: 0.85,
             debug_mode: false,
-            log_level: "info".to_string(),
+            log_level: LogLevel::default(),
             tier: Tier::default(),
             translation_catch_up_limit: default_catch_up_limit(),
             hide_original_in_compact: false,

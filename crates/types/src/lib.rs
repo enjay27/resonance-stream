@@ -76,16 +76,22 @@ impl Channel {
             .unwrap_or_default()
     }
 
-    /// The channel for the number the game sends in a chat frame: 2 local,
-    /// 3 party, 4 guild, 9 beginner; anything else (1 world, ...) is world.
-    pub fn from_code(code: u64) -> Self {
+    /// The channel for the number the game sends: 1 world, 2 local, 3 party,
+    /// 4 guild, 9 beginner; `None` for a number the game has no channel for.
+    pub fn known_code(code: u64) -> Option<Self> {
         match code {
-            2 => Channel::Local,
-            3 => Channel::Party,
-            4 => Channel::Guild,
-            9 => Channel::Beginner,
-            _ => Channel::World,
+            1 => Some(Channel::World),
+            2 => Some(Channel::Local),
+            3 => Some(Channel::Party),
+            4 => Some(Channel::Guild),
+            9 => Some(Channel::Beginner),
+            _ => None,
         }
+    }
+
+    /// Like [`known_code`](Self::known_code); a number nobody knows is world.
+    pub fn from_code(code: u64) -> Self {
+        Self::known_code(code).unwrap_or_default()
     }
 }
 
@@ -583,6 +589,16 @@ mod tests {
                 Channel::World
             );
         }
+    }
+
+    #[test]
+    fn known_codes_are_the_ones_from_code_does_not_default() {
+        // One table: a code the game has no channel for is `None` here and
+        // world in `from_code`.
+        assert_eq!(Channel::known_code(1), Some(Channel::World));
+        assert_eq!(Channel::known_code(9), Some(Channel::Beginner));
+        assert_eq!(Channel::known_code(5), None);
+        assert_eq!(Channel::from_code(5), Channel::World);
     }
 
     #[test]

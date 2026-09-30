@@ -31,7 +31,6 @@ pub struct SenderInfo {
     pub class_id: u64,    // Tag 24 (Field 3): 2 (e.g., Twin Striker)
     pub status: u64,      // Tag 32 (Field 4): 1 (Online/Normal flag)
     pub level: u64,       // Tag 40 (Field 5): 60
-    pub is_blocked: bool,
     pub unknown_fields: HashMap<String, Vec<u8>>,
 }
 
@@ -152,7 +151,6 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
                 chat.nickname = parsed_payload.sender.nickname;
                 chat.class_id = parsed_payload.sender.class_id;
                 chat.level = parsed_payload.sender.level;
-                chat.is_blocked = parsed_payload.sender.is_blocked;
 
                 chat.unknown_fields = parsed_payload.unknown_fields;
                 chat.unknown_fields
@@ -162,11 +160,7 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
                 if let Some(msg) = find_string_by_tag(block, 0x1A) {
                     chat.message = msg;
                     if let Some(chan_id) = find_int_by_tag(block, 0x10) {
-                        chat.channel = match chan_id {
-                            3 => Channel::Party,
-                            4 => Channel::Guild,
-                            _ => chat.channel,
-                        };
+                        chat.channel = Channel::known_code(chan_id).unwrap_or(chat.channel);
                     }
                 }
             }
@@ -178,9 +172,7 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
                 chat.nickname = "Me".to_string();
             }
 
-            if !chat.is_blocked {
-                events.push(Port5003Event::Chat(chat));
-            }
+            events.push(Port5003Event::Chat(chat));
         }
     }
 
@@ -397,6 +389,28 @@ mod tests {
             let events = history_pipeline(&history_root(code, &[entry(1, 5, "Bob", 10, "x")]));
             let Port5003Event::Chat(chat) = &events[0];
             assert_eq!(chat.channel, name);
+        }
+    }
+
+    #[test]
+    fn a_me_message_block_names_its_channel_with_the_same_codes() {
+        // W6: this block had its own table (3 party, 4 guild only).
+        for (code, want) in [
+            (1u8, Channel::World),
+            (2, Channel::Local),
+            (3, Channel::Party),
+            (4, Channel::Guild),
+            (9, Channel::Beginner),
+            (5, Channel::Guild), // unknown: keeps the root's channel
+        ] {
+            let block = [0x1A, 0x02, b'h', b'i', 0x10, code];
+            let raw = SplitPayload {
+                channel: Channel::Guild,
+                chat_blocks: vec![(4, &block[..])],
+            };
+            let events = stage2_process(raw);
+            let Port5003Event::Chat(chat) = &events[0];
+            assert_eq!(chat.channel, want, "code {code}");
         }
     }
 
@@ -889,6 +903,6 @@ mod tests {
         assert_eq!((hash, chats), (PINNED_HASH, PINNED_CHATS));
     }
 
-    const PINNED_HASH: u64 = 705_384_538_130_478_511; // chunk payload before its type now keeps its text (W6)
+    const PINNED_HASH: u64 = 12_255_116_944_102_839_806; // W6: chunk payload before its type keeps its text; one channel-code table
     const PINNED_CHATS: usize = 28_337;
 }

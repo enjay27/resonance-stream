@@ -1,13 +1,13 @@
 # Handoff: "do all recommended and opened" (2026-10-01)
 
 Plan approved by Kade: three PRs, one at a time, each merged before the next starts
-(CLAUDE.md, *Several tasks in one session*). **Stopped by Kade after task 2; task 3 not started.**
+(CLAUDE.md, *Several tasks in one session*). Kade paused after task 2 and resumed task 3 the same day (CI is now ~4 min).
 
 | # | branch | state |
 |---|---|---|
 | 1 | `claude/plain-history-frames` | **merged** (#67): plain `0x0003` `{3: channel, 5: chat}` is history (`framing.rs::decode`, `has_history_lines`) |
 | 2 | `claude/beginner-channel` | **PR #68 open**, gates green locally; CI decides. `Channel::Beginner` (code 9), tab, colours, limit, switch cycle; golden parser pin re-recorded (proved: old hash returns when BEGINNER is printed as WORLD) |
-| 3 | `claude/core-review-leftovers` | **not started** |
+| 3 | `claude/core-review-leftovers` | **PR open** -- W4, W6 (not `class_id`), W7, W8, W9; see the core-review note |
 
 ## Task 3 (next, after #68 is merged and its branch is gone)
 

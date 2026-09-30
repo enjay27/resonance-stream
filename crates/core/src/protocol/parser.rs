@@ -31,7 +31,6 @@ pub struct SenderInfo {
     pub class_id: u64,    // Tag 24 (Field 3): 2 (e.g., Twin Striker)
     pub status: u64,      // Tag 32 (Field 4): 1 (Online/Normal flag)
     pub level: u64,       // Tag 40 (Field 5): 60
-    pub is_blocked: bool,
     pub unknown_fields: HashMap<String, Vec<u8>>,
 }
 
@@ -152,7 +151,6 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
                 chat.nickname = parsed_payload.sender.nickname;
                 chat.class_id = parsed_payload.sender.class_id;
                 chat.level = parsed_payload.sender.level;
-                chat.is_blocked = parsed_payload.sender.is_blocked;
 
                 chat.unknown_fields = parsed_payload.unknown_fields;
                 chat.unknown_fields
@@ -162,11 +160,7 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
                 if let Some(msg) = find_string_by_tag(block, 0x1A) {
                     chat.message = msg;
                     if let Some(chan_id) = find_int_by_tag(block, 0x10) {
-                        chat.channel = match chan_id {
-                            3 => Channel::Party,
-                            4 => Channel::Guild,
-                            _ => chat.channel,
-                        };
+                        chat.channel = Channel::known_code(chan_id).unwrap_or(chat.channel);
                     }
                 }
             }
@@ -178,9 +172,7 @@ pub(crate) fn stage2_process(raw: SplitPayload<'_>) -> Vec<Port5003Event> {
                 chat.nickname = "Me".to_string();
             }
 
-            if !chat.is_blocked {
-                events.push(Port5003Event::Chat(chat));
-            }
+            events.push(Port5003Event::Chat(chat));
         }
     }
 
@@ -230,25 +222,29 @@ fn parse_rich_content(data: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>
 // Handles the specific Chunk Type (Text vs Item Link vs Fish)
 fn parse_chunk_block(chunk: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>) -> String {
     let mut chunk_type = 0;
-    let mut chunk_text = String::new();
+    let mut payloads: Vec<&[u8]> = Vec::new();
     for field in Fields::new(chunk) {
         match (field.tag, field.value) {
             // Chunk Type
             (8, Value::Varint(kind)) => chunk_type = kind,
-            // Chunk Payload. Type 7 = Text Chunk: the string is one layer
-            // deeper, at tag 10.
-            (18, Value::Bytes(payload)) => {
-                if chunk_type == 7 {
-                    if let Some(text) = find_string_by_tag(payload, 10) {
-                        chunk_text = text;
-                    }
-                }
-            }
+            // Chunk Payload; read once the type is known, whatever the order.
+            (18, Value::Bytes(bytes)) => payloads.push(bytes),
             _ => {
                 unknown_fields.insert(format!("chunk_{}", field.tag), field.raw.to_vec());
             }
         }
     }
+    // Type 7 = Text Chunk: the string is one layer deeper, at tag 10. The
+    // last payload that holds one wins.
+    let chunk_text = if chunk_type == 7 {
+        payloads
+            .iter()
+            .rev()
+            .find_map(|payload| find_string_by_tag(payload, 10))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     match chunk_type {
         7 => chunk_text, // Text Chunk
@@ -397,6 +393,28 @@ mod tests {
     }
 
     #[test]
+    fn a_me_message_block_names_its_channel_with_the_same_codes() {
+        // W6: this block had its own table (3 party, 4 guild only).
+        for (code, want) in [
+            (1u8, Channel::World),
+            (2, Channel::Local),
+            (3, Channel::Party),
+            (4, Channel::Guild),
+            (9, Channel::Beginner),
+            (5, Channel::Guild), // unknown: keeps the root's channel
+        ] {
+            let block = [0x1A, 0x02, b'h', b'i', 0x10, code];
+            let raw = SplitPayload {
+                channel: Channel::Guild,
+                chat_blocks: vec![(4, &block[..])],
+            };
+            let events = stage2_process(raw);
+            let Port5003Event::Chat(chat) = &events[0];
+            assert_eq!(chat.channel, want, "code {code}");
+        }
+    }
+
+    #[test]
     fn a_history_root_without_lines_or_a_live_root_gives_nothing() {
         assert!(history_pipeline(&history_root(1, &[])).is_empty());
         assert!(history_pipeline(&[]).is_empty());
@@ -484,6 +502,20 @@ mod tests {
             0x12, 0x07, // Tag 18 (Payload), Length 7
             0x0A, 0x05, // Tag 10 (String), Length 5
             b'H', b'e', b'l', b'l', b'o',
+        ];
+        assert_eq!(parse_chunk_block(&text_chunk, &mut unknown_fields), "Hello");
+    }
+
+    #[test]
+    fn a_chunk_reads_the_same_with_its_payload_before_its_type() {
+        // W6: the type was read while walking the fields, so a payload that came
+        // first was skipped and the text lost.
+        let mut unknown_fields = HashMap::new();
+        let text_chunk = [
+            0x12, 0x07, // Tag 18 (Payload), Length 7
+            0x0A, 0x05, // Tag 10 (String), Length 5
+            b'H', b'e', b'l', b'l', b'o', //
+            0x08, 0x07, // Tag 8 (Type), Value 7
         ];
         assert_eq!(parse_chunk_block(&text_chunk, &mut unknown_fields), "Hello");
     }
@@ -871,6 +903,6 @@ mod tests {
         assert_eq!((hash, chats), (PINNED_HASH, PINNED_CHATS));
     }
 
-    const PINNED_HASH: u64 = 17_370_710_247_901_616_853; // code 9 now reads as BEGINNER, not WORLD
-    const PINNED_CHATS: usize = 28_246;
+    const PINNED_HASH: u64 = 12_255_116_944_102_839_806; // W6: chunk payload before its type keeps its text; one channel-code table
+    const PINNED_CHATS: usize = 28_337;
 }

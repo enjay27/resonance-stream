@@ -80,3 +80,5 @@ run as the real app.
   Linux; app cross-checked only, not run against a real llama-server.
 
 - **Beginner channel (2026-10-01, `claude/beginner-channel`).** Core/ui/app-cross gates green; not run on Windows: the new 초보자 tab (nav, 🌱 icon, unread badge, colours), its limit and archive entries in the right-click menu, the custom-tab list showing BEGINNER, and the tab-switch shortcut cycle (now six tabs). Beginner lines from old logs stay WORLD.
+
+- **Core-review leftovers (2026-10-01, `claude/core-review-leftovers`).** Core gate green (W4, W6, W7 tested). Not run on Windows: W9 (the sniffer loop backing off on a failing socket read -- nothing tests a failing socket) and W8 (translator retry when llama-server exits while loading: try a bad model file or a taken port and watch for "Retrying in Ns..." then the Error after 3 tries).

@@ -97,6 +97,23 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 return; // superseded while loading: the guard drops and kills our server
             }
             if let Err(reason) = started {
+                // A server that died while loading -- the port was taken
+                // between picking it and binding it, say -- is restarted like
+                // one that died later: a fresh port, a backoff, a limit.
+                if server.exit_status().is_some() {
+                    if let SupervisorAction::Restart(wait) =
+                        supervisor.on_server_exited(Instant::now())
+                    {
+                        let msg = format!("{reason} Retrying in {}s...", wait.as_secs());
+                        inject_system_message(&app, SystemLogLevel::Warning, "Translator", &msg);
+                        emit_translator_state(&app, TranslatorState::Restarting, &msg);
+                        drop(server);
+                        if !sleep_while(wait, &is_current) {
+                            return;
+                        }
+                        continue;
+                    }
+                }
                 inject_system_message(&app, SystemLogLevel::Error, "Translator", &reason);
                 emit_translator_state(&app, TranslatorState::Error, &reason);
                 drain_untranslated(&app, &rx);

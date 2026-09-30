@@ -267,10 +267,7 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
 // --- 4. SIDE EFFECT DISPATCHER ---
 fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
     let state = app.state::<AppState>();
-    let (use_translation, archive_chat) = {
-        let config = state.config.read();
-        (config.use_translation, config.archive_chat)
-    };
+    let use_translation = state.config.read().use_translation;
 
     for action in actions {
         match action {
@@ -314,8 +311,7 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                     Some(tx) if use_translation && contains_japanese(&chat.message) => {
                         let _ = tx.send(TranslationJob::new(chat));
                     }
-                    _ if archive_chat => crate::services::translator::archive_chat(app, &chat),
-                    _ => {}
+                    _ => crate::services::translator::archive_chat(app, &chat),
                 }
             }
         }

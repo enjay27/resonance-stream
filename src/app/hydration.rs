@@ -36,7 +36,6 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
         set_tier,
         set_translation_catch_up_limit,
         set_dict_update_available,
-        set_archive_chat,
         set_hide_original_in_compact,
         set_network_interface,
         set_drag_to_scroll,
@@ -83,7 +82,6 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                 set_log_level.set(config.log_level);
                 set_tier.set(config.tier);
                 set_translation_catch_up_limit.set(config.translation_catch_up_limit);
-                set_archive_chat.set(config.archive_chat);
                 set_hide_original_in_compact.set(config.hide_original_in_compact);
                 set_network_interface.set(config.network_interface);
                 set_drag_to_scroll.set(config.drag_to_scroll);

@@ -90,8 +90,6 @@ pub struct AppSignals {
     pub set_unread_count: WriteSignal<i32>,
     pub active_menu_id: ReadSignal<Option<u64>>,
     pub set_active_menu_id: WriteSignal<Option<u64>>,
-    pub archive_chat: ReadSignal<bool>,
-    pub set_archive_chat: WriteSignal<bool>,
     pub hide_original_in_compact: ReadSignal<bool>,
     pub set_hide_original_in_compact: WriteSignal<bool>,
     pub network_interface: ReadSignal<String>,
@@ -210,7 +208,6 @@ impl AppSignals {
         let (is_at_bottom, set_is_at_bottom) = signal(true);
         let (unread_count, set_unread_count) = signal(0);
         let (active_menu_id, set_active_menu_id) = signal(None::<u64>);
-        let (archive_chat, set_archive_chat) = signal(false);
         let (hide_original_in_compact, set_hide_original_in_compact) = signal(false);
         let (network_interface, set_network_interface) = signal("".to_string());
         let (click_through, set_click_through) = signal(false);
@@ -332,8 +329,6 @@ impl AppSignals {
             set_unread_count,
             active_menu_id,
             set_active_menu_id,
-            archive_chat,
-            set_archive_chat,
             hide_original_in_compact,
             set_hide_original_in_compact,
             network_interface,

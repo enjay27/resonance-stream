@@ -32,7 +32,6 @@ pub struct AppConfig {
     /// translates (the newest ones); 0 turns the catch-up off.
     #[serde(default = "default_catch_up_limit")]
     pub translation_catch_up_limit: usize,
-    pub archive_chat: bool,
     pub hide_original_in_compact: bool,
     pub network_interface: String,
     pub drag_to_scroll: bool,
@@ -120,7 +119,6 @@ impl Default for AppConfig {
             log_level: "info".to_string(),
             tier: "middle".to_string(),
             translation_catch_up_limit: default_catch_up_limit(),
-            archive_chat: false,
             hide_original_in_compact: false,
             network_interface: "".to_string(),
             drag_to_scroll: false,
@@ -307,28 +305,6 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
 
     if old_config.chat_log_retention_days != config.chat_log_retention_days {
         crate::io::prune_chat_logs(&app);
-    }
-
-    // --- MANAGE THE DATA FACTORY THREAD ---
-    if !old_config.archive_chat && config.archive_chat {
-        // Turned ON: Spawn the I/O thread
-        let tx = crate::io::start_data_factory_worker(app.clone());
-        *state.data_factory_tx.lock() = Some(tx);
-        inject_system_message(
-            &app,
-            SystemLogLevel::Info,
-            "DataFactory",
-            "Dataset logging enabled.",
-        );
-    } else if old_config.archive_chat && !config.archive_chat {
-        // Turned OFF: Drop the Sender (Kills the thread)
-        *state.data_factory_tx.lock() = None;
-        inject_system_message(
-            &app,
-            SystemLogLevel::Info,
-            "DataFactory",
-            "Dataset logging disabled.",
-        );
     }
 }
 

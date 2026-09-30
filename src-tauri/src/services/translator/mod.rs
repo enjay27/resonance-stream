@@ -303,11 +303,11 @@ fn catch_up(
     Some(SupervisorAction::Continue)
 }
 
-/// Queues `chat` for the archive, as it is (untranslated), when archiving is
-/// on and its channel is archived.
+/// Queues `chat` for the archive, as it is (untranslated), when its channel
+/// is archived.
 pub fn archive_chat(app: &AppHandle, chat: &ChatMessage) {
     let state = app.state::<crate::AppState>();
-    if !state.config.read().archive_chat || !crate::io::archives_channel(app, &chat.channel) {
+    if !crate::io::archives_channel(app, &chat.channel) {
         return;
     }
     let df_tx = state.data_factory_tx.lock().clone();

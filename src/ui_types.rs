@@ -28,7 +28,6 @@ pub struct AppConfig {
     /// Missed Japanese messages a translator start translates; 0 = none.
     #[serde(default = "default_catch_up_limit")]
     pub translation_catch_up_limit: usize,
-    pub archive_chat: bool,
     pub hide_original_in_compact: bool,
     #[serde(default)]
     pub network_interface: String,

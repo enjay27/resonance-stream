@@ -227,21 +227,6 @@ pub fn DataDevSection(
                                 />
                             </select>
                         </div>
-
-                        // 3. Data Factory (Save Chatting Log)
-                        <div class="flex items-center justify-between">
-                            <div class="flex flex-col">
-                                <span class="text-[11px] font-black text-warning uppercase">"Data Factory"</span>
-                                <span class="text-[9px] text-base-content/60 italic">"채팅 로그 원본 저장 (dataset_raw.jsonl)"</span>
-                            </div>
-                            <input type="checkbox" class="checkbox checkbox-warning checkbox-xs"
-                                prop:checked=move || signals.archive_chat.get()
-                                on:change=move |ev| {
-                                    signals.set_archive_chat.set(event_target_checked(&ev));
-                                    actions.save_config.dispatch(());
-                                }
-                            />
-                        </div>
                     </div>
                 </Show>
             </div>

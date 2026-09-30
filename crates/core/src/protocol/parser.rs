@@ -667,4 +667,229 @@ mod tests {
         assert_eq!(parsed.timestamp, 128);
         assert_eq!(parsed.message, "Hi");
     }
+
+    // --- Golden characterization (pins parser output across refactors) ---
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+        fn chance(&mut self, percent: u64) -> bool {
+            self.below(100) < percent
+        }
+    }
+
+    fn varint(mut v: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let byte = (v & 0x7F) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(byte);
+                return out;
+            }
+            out.push(byte | 0x80);
+        }
+    }
+    fn tag(field: u64, wire: u64) -> Vec<u8> {
+        varint(field << 3 | wire)
+    }
+    fn var_field(field: u64, v: u64) -> Vec<u8> {
+        [tag(field, 0), varint(v)].concat()
+    }
+    fn len_field(field: u64, body: &[u8]) -> Vec<u8> {
+        [tag(field, 2), varint(body.len() as u64), body.to_vec()].concat()
+    }
+    fn text(rng: &mut Rng) -> Vec<u8> {
+        const POOL: [&str; 6] = [
+            "",
+            "Hi",
+            "こんにちは",
+            "募集 3周 @Ab1",
+            "<sprite=3>x",
+            "【火力】",
+        ];
+        if rng.chance(15) {
+            (0..rng.below(6)).map(|_| rng.next() as u8).collect()
+        } else {
+            POOL[rng.below(6) as usize].as_bytes().to_vec()
+        }
+    }
+    fn random_field(rng: &mut Rng) -> Vec<u8> {
+        let field = 1 + rng.below(40);
+        match rng.below(5) {
+            0 => var_field(field, rng.next() >> rng.below(64)),
+            1 => len_field(field, &text(rng)),
+            2 => [tag(field, 1), (0..8).map(|_| rng.next() as u8).collect()].concat(),
+            3 => [tag(field, 5), (0..4).map(|_| rng.next() as u8).collect()].concat(),
+            _ => tag(field, 3 + 3 * rng.below(2)), // wire types 3 / 6, no body
+        }
+    }
+    fn chunk(rng: &mut Rng) -> Vec<u8> {
+        let kind = [7, 7, 7, 3, 2, 9, 12, 5][rng.below(8) as usize];
+        let mut parts = vec![var_field(1, kind)];
+        if kind == 7 {
+            parts.push(len_field(2, &len_field(1, &text(rng))));
+        } else if rng.chance(30) {
+            parts.push(len_field(2, &text(rng)));
+        }
+        if rng.chance(25) {
+            parts.push(random_field(rng));
+        }
+        if rng.chance(15) {
+            parts.reverse(); // type after payload
+        }
+        parts.concat()
+    }
+    fn message_block(rng: &mut Rng) -> Vec<u8> {
+        let mut parts = Vec::new();
+        for _ in 0..rng.below(4) {
+            parts.push(match rng.below(4) {
+                0 | 1 => len_field(3, &text(rng)),
+                2 => len_field(
+                    7,
+                    &(0..1 + rng.below(3))
+                        .map(|_| len_field(2, &chunk(rng)))
+                        .collect::<Vec<_>>()
+                        .concat(),
+                ),
+                _ => random_field(rng),
+            });
+        }
+        parts.concat()
+    }
+    fn sender(rng: &mut Rng) -> Vec<u8> {
+        let bits = 7 * (1 + rng.below(4));
+        let mut parts = vec![var_field(1, rng.below(1 << bits))];
+        if rng.chance(80) {
+            parts.push(len_field(2, &text(rng)));
+        }
+        for field in [3, 4, 5, 7, 8] {
+            if rng.chance(40) {
+                parts.push(var_field(field, rng.below(300)));
+            }
+        }
+        if rng.chance(20) {
+            parts.push(random_field(rng));
+        }
+        parts.concat()
+    }
+    fn chat_payload(rng: &mut Rng) -> Vec<u8> {
+        let mut parts = Vec::new();
+        if rng.chance(85) {
+            parts.push(var_field(1, rng.below(100_000)));
+        }
+        if rng.chance(85) {
+            parts.push(len_field(2, &sender(rng)));
+        }
+        if rng.chance(70) {
+            parts.push(var_field(3, rng.next() >> 20));
+        }
+        if rng.chance(90) {
+            parts.push(len_field(4, &message_block(rng)));
+        }
+        for _ in 0..rng.below(3) {
+            parts.push(random_field(rng));
+        }
+        if rng.chance(20) && parts.len() > 1 {
+            parts.swap(0, 1);
+        }
+        parts.concat()
+    }
+    fn gen_root(rng: &mut Rng) -> Vec<u8> {
+        let mut body = Vec::new();
+        for _ in 0..1 + rng.below(3) {
+            body.extend(match rng.below(6) {
+                0..=2 => len_field(2, &chat_payload(rng)),
+                3 => len_field(
+                    4,
+                    &[
+                        len_field(3, &text(rng)),
+                        if rng.chance(60) {
+                            var_field(2, 3 + rng.below(3))
+                        } else {
+                            vec![]
+                        },
+                    ]
+                    .concat(),
+                ),
+                4 => var_field(1 + rng.below(2), rng.below(6)),
+                _ => random_field(rng),
+            });
+        }
+        let mut out = [vec![0x0A], varint(body.len() as u64), body].concat();
+        match rng.below(10) {
+            0 => out.truncate(rng.below(out.len() as u64 + 1) as usize),
+            1 | 2 => {
+                let at = rng.below(out.len() as u64) as usize;
+                out[at] = rng.next() as u8;
+            }
+            3 => {
+                let at = rng.below(out.len() as u64) as usize;
+                out.splice(at..at, [0xFF; 10]);
+            }
+            _ => {}
+        }
+        out
+    }
+
+    /// Output in a canonical text form (unknown fields sorted: HashMap order is random).
+    fn canonical(events: &[Port5003Event]) -> String {
+        let mut out = String::new();
+        for Port5003Event::Chat(c) in events {
+            let mut unknown: Vec<_> = c.unknown_fields.iter().collect();
+            unknown.sort();
+            out += &format!(
+                "{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}\n",
+                c.channel,
+                c.nickname,
+                c.message,
+                c.timestamp,
+                c.uid,
+                c.class_id,
+                c.level,
+                c.sequence_id,
+                c.is_blocked,
+                unknown
+            );
+        }
+        out
+    }
+
+    fn fnv1a(hash: &mut u64, bytes: &[u8]) {
+        for b in bytes {
+            *hash = (*hash ^ u64::from(*b)).wrapping_mul(0x0100_0000_01B3);
+        }
+    }
+
+    #[test]
+    fn parser_output_is_pinned_across_refactors() {
+        // Characterization: recorded from the hand-written parser loops, so a
+        // refactor of them (the field iterator) must not change one byte of output.
+        let mut rng = Rng(0x1234_5678_9ABC_DEF1);
+        let (mut hash, mut chats, mut packets) = (0xCBF2_9CE4_8422_2325u64, 0usize, 0usize);
+        for _ in 0..40_000 {
+            let data = gen_root(&mut rng);
+            let events = parsing_pipeline(&data);
+            chats += events.len();
+            packets += usize::from(!events.is_empty());
+            fnv1a(&mut hash, canonical(&events).as_bytes());
+            fnv1a(&mut hash, b"\x00");
+        }
+        assert!(
+            chats > 20_000 && packets > 15_000,
+            "weak generator: {chats} chats in {packets} packets"
+        );
+        assert_eq!((hash, chats), (PINNED_HASH, PINNED_CHATS));
+    }
+
+    const PINNED_HASH: u64 = 8_225_781_135_236_233_223;
+    const PINNED_CHATS: usize = 28_246;
 }

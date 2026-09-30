@@ -5,7 +5,6 @@ use crate::{AppState, ChatMessage, SystemLogLevel, SystemMessage};
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
@@ -76,29 +75,28 @@ pub fn inject_system_message<S: Into<String>>(
     }
 }
 
-pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
-    let fingerprint = generate_message_fingerprint(&packet);
+/// Stores and emits a chat message. Returns `false` when it was dropped as a
+/// duplicate, so the caller does not translate or archive it either.
+pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) -> bool {
+    let fingerprint = resonance_core::capture::fingerprint(&packet);
     let now = Instant::now();
 
-    {
+    if let Some(fingerprint) = fingerprint {
         let mut cache = CHAT_DEDUPE_CACHE.lock();
 
-        // 1. Prune old messages from the sliding window (e.g., older than 2 seconds)
+        // Prune the sliding window (older than 2 seconds); the deque is ordered by time.
         while let Some(&(_, time)) = cache.front() {
             if now.duration_since(time) > Duration::from_secs(2) {
                 cache.pop_front();
             } else {
-                break; // VecDeque is ordered by time, so we can stop here
+                break;
             }
         }
 
-        // 2. Check if this exact message was already processed
+        // The same message from a second client: drop it.
         if cache.iter().any(|(hash, _)| *hash == fingerprint) {
-            // Silently drop the duplicate packet from the second client
-            return;
+            return false;
         }
-
-        // 3. Not a duplicate, add it to the cache
         cache.push_back((fingerprint, now));
     }
 
@@ -117,17 +115,5 @@ pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) {
         // Emit "packet-event" for Game Chat
         let _ = app.emit("packet-event", &packet);
     }
-}
-
-// Helper to generate a unique fingerprint for the chat message
-fn generate_message_fingerprint(packet: &ChatMessage) -> u64 {
-    let mut hasher = DefaultHasher::new();
-
-    // If your server provides a truly unique sequence_id for every message,
-    // you only need to hash that. Otherwise, hash the combination of sender, text, and time:
-    packet.uid.hash(&mut hasher);
-    packet.message.hash(&mut hasher);
-    packet.timestamp.hash(&mut hasher);
-
-    hasher.finish()
+    true
 }

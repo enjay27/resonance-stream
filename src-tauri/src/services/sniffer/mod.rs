@@ -263,17 +263,21 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                     );
                 }
 
-                // Dispatch Side Effects
-                store_and_emit(app, chat.clone());
+                // Dispatch Side Effects. A duplicate dropped here is neither
+                // translated nor archived.
+                if !store_and_emit(app, chat.clone()) {
+                    continue;
+                }
 
-                if use_translation && contains_japanese(&chat.message) {
-                    if let Some(tx) = state.translator_tx.lock().as_ref() {
-                        let _ = tx.send(TranslationJob::new(chat.clone()));
+                // Translated messages are archived by the translator with their
+                // translation; anything else is archived as it is.
+                let translator = state.translator_tx.lock();
+                match translator.as_ref() {
+                    Some(tx) if use_translation && contains_japanese(&chat.message) => {
+                        let _ = tx.send(TranslationJob::new(chat));
                     }
-                } else if archive_chat && crate::io::archives_channel(app, &chat.channel) {
-                    if let Some(df_tx) = state.data_factory_tx.lock().as_ref() {
-                        let _ = df_tx.send(crate::io::DataFactoryJob { chat: chat.clone() });
-                    }
+                    _ if archive_chat => crate::services::translator::archive_chat(app, &chat),
+                    _ => {}
                 }
             }
         }

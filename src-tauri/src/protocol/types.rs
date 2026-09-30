@@ -19,6 +19,8 @@ pub struct AppState {
     /// The live config. The file on disk is read once at start-up and
     /// written by `save_config`; everything else reads this copy.
     pub config: RwLock<AppConfig>,
+    /// Held while a config change is applied (see `save_config`).
+    pub config_lock: Mutex<()>,
     pub chat_history: Mutex<ChatHistory>,
     pub system_history: Mutex<VecDeque<SystemMessage>>,
     pub next_pid: AtomicU64,

@@ -14,6 +14,21 @@ pub enum ProcessAction {
     UpdateBlockedMessage,
 }
 
+/// Key for the short-window duplicate check in the app (a second game client
+/// sending the same message), or `None` for a message with no identity: "Me"
+/// messages have no uid or timestamp, and the same text twice is legitimate.
+pub fn fingerprint(chat: &ChatMessage) -> Option<u64> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    if chat.uid == 0 && chat.timestamp == 0 {
+        return None;
+    }
+    let mut hasher = DefaultHasher::new();
+    chat.uid.hash(&mut hasher);
+    chat.message.hash(&mut hasher);
+    chat.timestamp.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
 pub struct MessageProcessor {
     dedup_cache: HashMap<Signature, u64>,
     order: VecDeque<Signature>,
@@ -158,6 +173,24 @@ mod tests {
             message: text.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn fingerprint_ignores_identityless_messages_and_tells_others_apart() {
+        // Regression (N9): the same "Me" text twice in 2 s was dropped.
+        assert_eq!(fingerprint(&me("ok")), None);
+        let a = ChatMessage {
+            uid: 1,
+            timestamp: 5,
+            message: "hi".into(),
+            ..Default::default()
+        };
+        let b = ChatMessage {
+            message: "yo".into(),
+            ..a.clone()
+        };
+        assert_eq!(fingerprint(&a), fingerprint(&a.clone()));
+        assert_ne!(fingerprint(&a), fingerprint(&b));
     }
 
     #[test]

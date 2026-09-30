@@ -6,6 +6,7 @@ pub use server_manager::*;
 use crossbeam_channel::{unbounded, Sender};
 use reqwest::blocking::Client;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
@@ -31,8 +32,21 @@ impl TranslationJob {
     }
 }
 
+/// Identifies the translator worker that is current. A worker that was
+/// stopped or replaced while it was still starting up sees the number move
+/// and stays silent instead of reporting on a server that is not its own.
+static WORKER_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Marks every running or starting worker as superseded (call when the
+/// translator is stopped or its sender dropped).
+pub fn retire_translator_workers() {
+    WORKER_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
 pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<TranslationJob> {
     let (tx, rx) = unbounded::<TranslationJob>();
+    let generation = WORKER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let is_current = move || WORKER_GENERATION.load(Ordering::SeqCst) == generation;
     let config = crate::config::current_config(&app);
 
     thread::spawn(move || {
@@ -44,6 +58,9 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         );
         emit_translator_state(&app, "Starting", "Initializing AI Backend...");
 
+        if !is_current() {
+            return;
+        }
         server_manager::kill_orphaned_servers(&app);
 
         // 1. Launch the Server
@@ -54,7 +71,11 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
 
         // 2. Wait for Health
         emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
-        if !server_manager::server_health_check_for_30_seconds(&app) {
+        let healthy = server_manager::server_health_check_for_30_seconds(&app, &is_current);
+        if !is_current() {
+            return; // superseded while loading: the guard drops and kills our server
+        }
+        if !healthy {
             emit_translator_state(
                 &app,
                 "Error",
@@ -79,6 +100,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         while let Ok(job) = rx.recv() {
             if translation_is_stale(job.queued_at, Instant::now()) {
                 log::debug!("[Translator] Skipped pid {}: waited too long", job.chat.pid);
+                archive_chat(&app, &job.chat);
                 continue;
             }
             process_translation_job(job, &client, &app);
@@ -86,6 +108,19 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
     });
 
     tx
+}
+
+/// Queues `chat` for the archive, as it is (untranslated), when archiving is
+/// on and its channel is archived.
+pub fn archive_chat(app: &AppHandle, chat: &ChatMessage) {
+    let state = app.state::<crate::AppState>();
+    if !state.config.read().archive_chat || !crate::io::archives_channel(app, &chat.channel) {
+        return;
+    }
+    let df_tx = state.data_factory_tx.lock().clone();
+    if let Some(df_tx) = df_tx {
+        let _ = df_tx.send(crate::io::DataFactoryJob { chat: chat.clone() });
+    }
 }
 
 fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle) {
@@ -102,7 +137,16 @@ fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle
     };
 
     // 2. HTTP Request (Blocking)
-    let raw_translation = translate_text(client, &server_url(), &shield.masked_text);
+    let raw_translation = match translate_text(client, &server_url(), &shield.masked_text) {
+        Ok(text) => text,
+        Err(reason) => {
+            // No translation: the row stays as it is, and the original is
+            // still archived.
+            log::warn!("[Translator] pid {}: {}", chat.pid, reason);
+            archive_chat(app, &chat);
+            return;
+        }
+    };
 
     // 3. Postprocess
     let final_str = postprocess_text(&raw_translation, &shield);
@@ -210,7 +254,7 @@ mod tests {
 
         // 4. Test the actual Translation pipeline against the mock
         let test_jp = "116　偵察右　銀なぽ";
-        let result_ko = translate_text(&client, &mock_url, test_jp);
+        let result_ko = translate_text(&client, &mock_url, test_jp).unwrap();
 
         assert_eq!(result_ko, "116 정찰 우측 은나포");
     }

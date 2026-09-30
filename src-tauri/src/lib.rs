@@ -39,6 +39,7 @@ pub fn run() {
             let dictionary = resonance_core::text::Dictionary::load(&dictionary_path(&handle));
             app.manage(AppState {
                 config: RwLock::new(config.clone()),
+                config_lock: Mutex::new(()),
                 chat_history: Mutex::new(ChatHistory::new(config.history_limit())),
                 system_history: Mutex::new(VecDeque::with_capacity(200)),
                 next_pid: 1.into(),

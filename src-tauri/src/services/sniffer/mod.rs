@@ -263,17 +263,21 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                     );
                 }
 
-                // Dispatch Side Effects
-                store_and_emit(app, chat.clone());
+                // Dispatch Side Effects. A duplicate dropped here is neither
+                // translated nor archived.
+                if !store_and_emit(app, chat.clone()) {
+                    continue;
+                }
 
-                if use_translation && contains_japanese(&chat.message) {
-                    if let Some(tx) = state.translator_tx.lock().as_ref() {
-                        let _ = tx.send(TranslationJob::new(chat.clone()));
+                // Translated messages are archived by the translator with their
+                // translation; anything else is archived as it is.
+                let translator = state.translator_tx.lock();
+                match translator.as_ref() {
+                    Some(tx) if use_translation && contains_japanese(&chat.message) => {
+                        let _ = tx.send(TranslationJob::new(chat));
                     }
-                } else if archive_chat && crate::io::archives_channel(app, &chat.channel) {
-                    if let Some(df_tx) = state.data_factory_tx.lock().as_ref() {
-                        let _ = df_tx.send(crate::io::DataFactoryJob { chat: chat.clone() });
-                    }
+                    _ if archive_chat => crate::services::translator::archive_chat(app, &chat),
+                    _ => {}
                 }
             }
         }
@@ -291,11 +295,9 @@ pub fn block_user_command(
     state.blocked_users.lock().insert(uid, nickname.clone());
 
     // 2. Add to Disk Config
-    let mut config = crate::config::current_config(&app);
-    config.blocked_users.insert(uid, nickname);
-
-    // Pass app and state exactly as your config.rs requires
-    crate::config::save_config(app.clone(), state.clone(), config);
+    crate::config::modify_config(&app, &state, |config| {
+        config.blocked_users.insert(uid, nickname);
+    });
 
     // 3. Retroactively scrub existing messages in the UI
     let mut history = state.chat_history.lock();
@@ -313,10 +315,9 @@ pub fn unblock_user_command(uid: u64, app: tauri::AppHandle, state: tauri::State
     state.blocked_users.lock().remove(&uid);
 
     // 2. Remove from Disk Config
-    let mut config = crate::config::current_config(&app);
-    config.blocked_users.remove(&uid);
-
-    crate::config::save_config(app.clone(), state.clone(), config);
+    crate::config::modify_config(&app, &state, |config| {
+        config.blocked_users.remove(&uid);
+    });
 
     // 3. Retroactively un-scrub existing messages in the UI
     let mut history = state.chat_history.lock();

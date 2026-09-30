@@ -16,7 +16,8 @@ pub(crate) fn set_server_port(port: u16) {
     SERVER_PORT.store(port, Ordering::Relaxed);
 }
 
-pub fn translate_text(client: &Client, server_url: &str, jp_text: &str) -> String {
+/// `Err` carries a reason for the log; it is never shown as a translation.
+pub fn translate_text(client: &Client, server_url: &str, jp_text: &str) -> Result<String, String> {
     let safe_text = sanitize_input(jp_text);
 
     // Must match make_prompt() format used during fine-tuning training
@@ -46,18 +47,19 @@ pub fn translate_text(client: &Client, server_url: &str, jp_text: &str) -> Strin
     // Use /completion endpoint (llama.cpp native, not OpenAI-compatible)
     let endpoint = format!("{}/completion", server_url);
 
-    let response = match client.post(&endpoint).json(&payload).send() {
-        Ok(res) => res,
-        Err(_) => return "[AI Server Connection Error]".to_string(),
-    };
+    let response = client
+        .post(&endpoint)
+        .json(&payload)
+        .send()
+        .map_err(|e| format!("AI server connection error: {e}"))?;
 
-    if let Ok(json_body) = response.json::<serde_json::Value>() {
-        if let Some(content) = json_body["content"].as_str() {
-            return content.trim().to_string();
-        }
-    }
-
-    "[AI Server Parsing Error]".to_string()
+    let json_body = response
+        .json::<serde_json::Value>()
+        .map_err(|e| format!("AI server reply unreadable: {e}"))?;
+    json_body["content"]
+        .as_str()
+        .map(|content| content.trim().to_string())
+        .ok_or_else(|| "AI server reply has no content".to_string())
 }
 
 fn sanitize_input(text: &str) -> String {

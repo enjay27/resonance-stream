@@ -169,17 +169,10 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                                         "UI",
                                         "Starting AI translation engine...",
                                     );
-                                    let _ = invoke("start_translator_sidecar", JsValue::NULL).await;
+                                    // The backend already started the translator at
+                                    // launch and reports its state through events.
                                     set_model_ready.set(true);
                                     set_status_text.set("AI Engine Starting...".to_string());
-                                    if let Ok(st) =
-                                        invoke("ai_server_health_check", JsValue::NULL).await
-                                    {
-                                        let payload = st.as_bool().unwrap();
-                                        if payload {
-                                            signals.set_translator_state.set("Active".to_string());
-                                        }
-                                    }
                                 } else {
                                     add_system_log(
                                         "warn",
@@ -188,12 +181,6 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                                     );
                                     set_model_ready.set(false);
                                 }
-                            }
-                        }
-
-                        if let Ok(res) = invoke("check_dict_update", JsValue::NULL).await {
-                            if let Some(needed) = res.as_bool() {
-                                set_dict_update_available.set(needed);
                             }
                         }
                     }
@@ -232,6 +219,8 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                                         .unwrap();
                                     let _ = invoke("sync_dictionary", args).await;
                                 }
+
+                                set_dict_update_available.set(update_data.dict_update_available);
 
                                 // 2. Save metadata for the modals to use
                                 set_pending_update_data.set(Some(update_data.remote_data.clone()));

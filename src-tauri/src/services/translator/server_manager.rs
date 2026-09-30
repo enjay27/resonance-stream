@@ -136,7 +136,10 @@ pub fn launch_ai_server(
     }
 }
 
-pub fn server_health_check_for_30_seconds(app: &AppHandle) -> bool {
+pub fn server_health_check_for_30_seconds(
+    app: &AppHandle,
+    keep_waiting: &dyn Fn() -> bool,
+) -> bool {
     let client = Client::new();
     let start_wait = Instant::now();
 
@@ -148,6 +151,9 @@ pub fn server_health_check_for_30_seconds(app: &AppHandle) -> bool {
     );
 
     while start_wait.elapsed().as_secs() < 30 {
+        if !keep_waiting() {
+            return false;
+        }
         inject_system_message(
             app,
             SystemLogLevel::Trace,

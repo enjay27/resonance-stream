@@ -49,8 +49,12 @@ pub fn get_system_history(state: tauri::State<AppState>) -> Vec<SystemMessage> {
 
 #[tauri::command]
 pub fn launch_translator(app: AppHandle, state: State<'_, AppState>) {
-    // Turned ON: Start the server and store the Sender
+    // Idempotent: a translator that is already running is left alone.
+    let mut slot = state.translator_tx.lock();
+    if slot.is_some() {
+        return;
+    }
     let model_path = crate::get_model_path(&app);
     let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
-    *state.translator_tx.lock() = Some(tx);
+    *slot = Some(tx);
 }

@@ -147,7 +147,8 @@ pub fn start_download(
                 return;
             }
 
-            let _ = invoke("launch_translator", JsValue::NULL).await;
+            // The translator starts when finalize saves the config (translation
+            // goes off -> on there); starting it here too ran two servers.
 
             // 5. Both downloads succeeded
             set_downloading.set(false);

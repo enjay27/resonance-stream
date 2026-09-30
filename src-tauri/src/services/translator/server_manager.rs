@@ -2,7 +2,7 @@ use super::core::{server_url, set_server_port, PREFERRED_SERVER_PORT};
 use crate::protocol::types::SystemLogLevel;
 use crate::{inject_system_message, AI_SERVER_FILENAME, AI_SERVER_FOLDER};
 use reqwest::blocking::Client;
-use resonance_core::workers::{pick_local_port, SERVER_START_TIMEOUT};
+use resonance_core::workers::{log_tail, pick_local_port, SERVER_START_TIMEOUT};
 use std::fs;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
@@ -45,17 +45,31 @@ fn kill_server_pid(pid: u32) {
 pub struct ServerGuard {
     child: Child,
     pid_file: Option<PathBuf>,
+    log_file: Option<PathBuf>,
 }
 
 impl ServerGuard {
-    fn new(app: &AppHandle, child: Child) -> Self {
+    fn new(app: &AppHandle, child: Child, log_file: Option<PathBuf>) -> Self {
         let pid = child.id();
         SERVER_PID.store(pid, Ordering::SeqCst);
         let pid_file = pid_file(app);
         if let Some(path) = &pid_file {
             let _ = fs::write(path, pid.to_string());
         }
-        Self { child, pid_file }
+        Self {
+            child,
+            pid_file,
+            log_file,
+        }
+    }
+
+    /// The last lines llama-server wrote (its log file), or "" without one.
+    pub fn last_words(&self) -> String {
+        self.log_file
+            .as_ref()
+            .and_then(|path| fs::read_to_string(path).ok())
+            .map(|log| log_tail(&log, 3))
+            .unwrap_or_default()
     }
 
     /// How the server ended, or `None` while it still runs.
@@ -98,12 +112,29 @@ pub fn launch_ai_server(
         .join(AI_SERVER_FOLDER)
         .join(AI_SERVER_FILENAME);
 
-    let mut server_cmd = Command::new(server_path);
+    let mut server_cmd = Command::new(&server_path);
     server_cmd.arg("-m").arg(model_path);
     let port = pick_local_port(PREFERRED_SERVER_PORT);
     set_server_port(port);
     server_cmd.arg("--port").arg(port.to_string());
-    server_cmd.arg("--log-disable");
+
+    // The server's own output goes to a log file (new each start), so an
+    // exit can say why -- out of memory, a broken model. Without the file,
+    // it logs nothing, as before.
+    let log_path = server_path.with_file_name("llama-server.log");
+    let log_file = fs::File::create(&log_path)
+        .and_then(|out| Ok((out.try_clone()?, out)))
+        .ok();
+    let log_path = match log_file {
+        Some((stdout, stderr)) => {
+            server_cmd.stdout(stdout).stderr(stderr);
+            Some(log_path)
+        }
+        None => {
+            server_cmd.arg("--log-disable");
+            None
+        }
+    };
 
     let gpu_layers = if config.compute_mode.to_lowercase() == "gpu" {
         match config.tier.to_lowercase().as_str() {
@@ -134,7 +165,7 @@ pub fn launch_ai_server(
     server_cmd.creation_flags(CREATE_NO_WINDOW);
 
     match server_cmd.spawn() {
-        Ok(child) => Some(ServerGuard::new(app, child)),
+        Ok(child) => Some(ServerGuard::new(app, child, log_path)),
         Err(e) => {
             let err_msg = format!("Failed to start llama-server.exe. ({})", e);
             inject_system_message(app, SystemLogLevel::Error, "Translator", &err_msg);
@@ -171,9 +202,14 @@ pub fn wait_for_server(
             return Err("AI Engine start cancelled.".into());
         }
         if let Some(status) = server.exit_status() {
-            return Err(format!(
-                "AI Engine failed to start: llama-server exited ({status}). Out of memory or a broken model?"
-            ));
+            let last_words = server.last_words();
+            return Err(if last_words.is_empty() {
+                format!(
+                    "AI Engine failed to start: llama-server exited ({status}). Out of memory or a broken model?"
+                )
+            } else {
+                format!("AI Engine failed to start: llama-server exited ({status}): {last_words}")
+            });
         }
         inject_system_message(
             app,

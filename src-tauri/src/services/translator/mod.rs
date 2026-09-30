@@ -185,12 +185,13 @@ impl ServerRun<'_> {
     }
 
     fn server_exited(&mut self, status: &str) -> SupervisorAction {
-        inject_system_message(
-            self.app,
-            SystemLogLevel::Warning,
-            "Translator",
-            format!("llama-server exited ({}).", status),
-        );
+        let last_words = self.server.last_words();
+        let msg = if last_words.is_empty() {
+            format!("llama-server exited ({}).", status)
+        } else {
+            format!("llama-server exited ({}): {}", status, last_words)
+        };
+        inject_system_message(self.app, SystemLogLevel::Warning, "Translator", msg);
         self.supervisor.on_server_exited(Instant::now())
     }
 }

@@ -119,6 +119,31 @@ impl ServerSupervisor {
     }
 }
 
+/// Longest log line `log_tail` keeps (then `…`).
+pub const LOG_TAIL_LINE_CHARS: usize = 200;
+
+/// The last `n` non-empty lines of a server log, joined by " | ", for an
+/// error message: why llama-server exited is usually its last word.
+pub fn log_tail(log: &str, n: usize) -> String {
+    let mut lines: Vec<String> = log
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .rev()
+        .take(n)
+        .map(|line| {
+            if line.chars().count() > LOG_TAIL_LINE_CHARS {
+                let cut: String = line.chars().take(LOG_TAIL_LINE_CHARS).collect();
+                cut + "…"
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+    lines.reverse();
+    lines.join(" | ")
+}
+
 /// Most pids the ledger holds; the oldest go first. Only the newest few are
 /// ever caught up, so this only bounds memory while translation stays off.
 pub const LEDGER_CAPACITY: usize = 5000;
@@ -357,5 +382,22 @@ mod tests {
         );
         // ...and the count starts over for the new server.
         assert_eq!(sup.on_job_failed(now), SupervisorAction::Continue);
+    }
+
+    #[test]
+    fn the_last_lines_of_a_server_log_explain_its_exit() {
+        let log = "load model\n\nggml_vulkan: out of memory\r\nfailed to load model\n\n";
+        assert_eq!(
+            log_tail(log, 2),
+            "ggml_vulkan: out of memory | failed to load model"
+        );
+        assert_eq!(log_tail("", 3), "");
+        assert_eq!(log_tail("one", 3), "one");
+    }
+
+    #[test]
+    fn a_long_log_line_is_cut() {
+        let tail = log_tail(&"x".repeat(1000), 1);
+        assert!(tail.chars().count() <= LOG_TAIL_LINE_CHARS + 1);
     }
 }

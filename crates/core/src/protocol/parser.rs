@@ -230,25 +230,29 @@ fn parse_rich_content(data: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>
 // Handles the specific Chunk Type (Text vs Item Link vs Fish)
 fn parse_chunk_block(chunk: &[u8], unknown_fields: &mut HashMap<String, Vec<u8>>) -> String {
     let mut chunk_type = 0;
-    let mut chunk_text = String::new();
+    let mut payloads: Vec<&[u8]> = Vec::new();
     for field in Fields::new(chunk) {
         match (field.tag, field.value) {
             // Chunk Type
             (8, Value::Varint(kind)) => chunk_type = kind,
-            // Chunk Payload. Type 7 = Text Chunk: the string is one layer
-            // deeper, at tag 10.
-            (18, Value::Bytes(payload)) => {
-                if chunk_type == 7 {
-                    if let Some(text) = find_string_by_tag(payload, 10) {
-                        chunk_text = text;
-                    }
-                }
-            }
+            // Chunk Payload; read once the type is known, whatever the order.
+            (18, Value::Bytes(bytes)) => payloads.push(bytes),
             _ => {
                 unknown_fields.insert(format!("chunk_{}", field.tag), field.raw.to_vec());
             }
         }
     }
+    // Type 7 = Text Chunk: the string is one layer deeper, at tag 10. The
+    // last payload that holds one wins.
+    let chunk_text = if chunk_type == 7 {
+        payloads
+            .iter()
+            .rev()
+            .find_map(|payload| find_string_by_tag(payload, 10))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     match chunk_type {
         7 => chunk_text, // Text Chunk
@@ -484,6 +488,20 @@ mod tests {
             0x12, 0x07, // Tag 18 (Payload), Length 7
             0x0A, 0x05, // Tag 10 (String), Length 5
             b'H', b'e', b'l', b'l', b'o',
+        ];
+        assert_eq!(parse_chunk_block(&text_chunk, &mut unknown_fields), "Hello");
+    }
+
+    #[test]
+    fn a_chunk_reads_the_same_with_its_payload_before_its_type() {
+        // W6: the type was read while walking the fields, so a payload that came
+        // first was skipped and the text lost.
+        let mut unknown_fields = HashMap::new();
+        let text_chunk = [
+            0x12, 0x07, // Tag 18 (Payload), Length 7
+            0x0A, 0x05, // Tag 10 (String), Length 5
+            b'H', b'e', b'l', b'l', b'o', //
+            0x08, 0x07, // Tag 8 (Type), Value 7
         ];
         assert_eq!(parse_chunk_block(&text_chunk, &mut unknown_fields), "Hello");
     }
@@ -871,6 +889,6 @@ mod tests {
         assert_eq!((hash, chats), (PINNED_HASH, PINNED_CHATS));
     }
 
-    const PINNED_HASH: u64 = 17_370_710_247_901_616_853; // code 9 now reads as BEGINNER, not WORLD
-    const PINNED_CHATS: usize = 28_246;
+    const PINNED_HASH: u64 = 705_384_538_130_478_511; // chunk payload before its type now keeps its text (W6)
+    const PINNED_CHATS: usize = 28_337;
 }

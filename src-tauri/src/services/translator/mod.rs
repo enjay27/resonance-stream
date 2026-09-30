@@ -3,12 +3,12 @@ pub mod server_manager;
 
 pub use server_manager::*;
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
 use reqwest::blocking::Client;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::inject_system_message;
@@ -16,7 +16,7 @@ use crate::protocol::types::{ChatMessage, SystemLogLevel};
 
 use self::core::{server_url, translate_text};
 use resonance_core::text::{postprocess_text, preprocess_text};
-use resonance_core::workers::translation_is_stale;
+use resonance_core::workers::{translation_is_stale, ServerSupervisor, SupervisorAction};
 
 pub struct TranslationJob {
     pub chat: ChatMessage,
@@ -58,81 +58,188 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         );
         emit_translator_state(&app, "Starting", "Initializing AI Backend...");
 
-        if !is_current() {
-            return;
-        }
-        server_manager::kill_orphaned_servers(&app);
-
-        // 1. Launch the Server
-        let _server_guard = match server_manager::launch_ai_server(&app, &model_path, &config) {
-            Some(guard) => guard,
-            None => return,
-        };
-
-        // 2. Wait for Health
-        emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
-        let healthy = server_manager::server_health_check_for_30_seconds(&app, &is_current);
-        if !is_current() {
-            return; // superseded while loading: the guard drops and kills our server
-        }
-        if !healthy {
-            emit_translator_state(
-                &app,
-                "Error",
-                "AI Engine failed to start (OOM or missing model).",
-            );
-            return;
-        }
-
-        // 3. Setup Dependencies (the dictionary lives in AppState, so a
-        // sync or an edit applies to the next job without a restart)
+        // The dictionary lives in AppState, so a sync or an edit applies to
+        // the next job without a restart.
         let client = Client::new();
+        let mut supervisor = ServerSupervisor::default();
 
-        inject_system_message(
-            &app,
-            SystemLogLevel::Success,
-            "Translator",
-            "AI Server running! Ready for translation.",
-        );
+        // One pass per llama-server: a server that crashed or hung is
+        // replaced (with backoff) until the supervisor gives up.
+        loop {
+            if !is_current() {
+                return;
+            }
+            server_manager::kill_orphaned_servers(&app);
 
-        // 4. Once per start: what the ledger says was missed
-        catch_up(&app, &rx, &client, &is_current);
-        if !is_current() {
-            return;
-        }
-        emit_translator_state(&app, "Active", "AI Engine Ready");
+            // 1. Launch the Server
+            let Some(mut server) = server_manager::launch_ai_server(&app, &model_path, &config)
+            else {
+                return;
+            };
 
-        // 5. Run the pure translation loop
-        while let Ok(job) = rx.recv() {
-            process_live_job(job, &client, &app);
+            // 2. Wait for Health
+            emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
+            let started = server_manager::wait_for_server(&app, &mut server, &is_current);
+            if !is_current() {
+                return; // superseded while loading: the guard drops and kills our server
+            }
+            if let Err(reason) = started {
+                inject_system_message(&app, SystemLogLevel::Error, "Translator", &reason);
+                emit_translator_state(&app, "Error", &reason);
+                drain_untranslated(&app, &rx);
+                return;
+            }
+
+            inject_system_message(
+                &app,
+                SystemLogLevel::Success,
+                "Translator",
+                "AI Server running! Ready for translation.",
+            );
+
+            let mut run = ServerRun {
+                app: &app,
+                client: &client,
+                server: &mut server,
+                supervisor: &mut supervisor,
+            };
+
+            // 3. Once per server: what the ledger says was missed
+            let mut outcome = catch_up(&mut run, &rx, &is_current);
+            if outcome == Some(SupervisorAction::Continue) {
+                if !is_current() {
+                    return;
+                }
+                emit_translator_state(&app, "Active", "AI Engine Ready");
+                // 4. The translation loop
+                outcome = serve(&mut run, &rx);
+            }
+
+            match outcome {
+                None | Some(SupervisorAction::Continue) => return, // stopped
+                Some(SupervisorAction::Restart(wait)) => {
+                    let msg = format!("AI Engine stopped. Restarting in {}s...", wait.as_secs());
+                    inject_system_message(&app, SystemLogLevel::Warning, "Translator", &msg);
+                    emit_translator_state(&app, "Restarting", &msg);
+                    drop(server); // kills a hung server before the wait
+                    if !sleep_while(wait, &is_current) {
+                        return;
+                    }
+                }
+                Some(SupervisorAction::GiveUp) => {
+                    let msg = "AI Engine keeps stopping. Turn translation off and on to retry.";
+                    inject_system_message(&app, SystemLogLevel::Error, "Translator", msg);
+                    emit_translator_state(&app, "Error", msg);
+                    drop(server);
+                    drain_untranslated(&app, &rx);
+                    return;
+                }
+            }
         }
     });
 
     tx
 }
 
-/// A job from the sniffer: skipped when it waited too long (it stays owed
-/// in the ledger, so the next translator start catches it up).
-fn process_live_job(job: TranslationJob, client: &Client, app: &AppHandle) {
-    if translation_is_stale(job.queued_at, Instant::now()) {
-        log::debug!("[Translator] Skipped pid {}: waited too long", job.chat.pid);
-        archive_chat(app, &job.chat);
-        return;
-    }
-    process_translation_job(job, client, app);
+/// How often an idle worker checks that its server is still running.
+const IDLE_CHECK: Duration = Duration::from_secs(5);
+
+/// One running llama-server and what decides its fate.
+struct ServerRun<'a> {
+    app: &'a AppHandle,
+    client: &'a Client,
+    server: &'a mut server_manager::ServerGuard,
+    supervisor: &'a mut ServerSupervisor,
 }
 
-/// Translates, once per translator start, the Japanese messages of this run
+impl ServerRun<'_> {
+    /// Translates `job` and says what to do next: a failed job whose
+    /// server exited, or the last of several failures in a row, restarts it.
+    fn translate(&mut self, job: TranslationJob) -> SupervisorAction {
+        match process_translation_job(job, self.client, self.app) {
+            JobResult::Done => {
+                self.supervisor.on_job_ok();
+                SupervisorAction::Continue
+            }
+            JobResult::Skipped => SupervisorAction::Continue,
+            JobResult::Failed => match self.server.exit_status() {
+                Some(status) => self.server_exited(&status),
+                None => self.supervisor.on_job_failed(Instant::now()),
+            },
+        }
+    }
+
+    fn live(&mut self, job: TranslationJob) -> SupervisorAction {
+        if translation_is_stale(job.queued_at, Instant::now()) {
+            log::debug!("[Translator] Skipped pid {}: waited too long", job.chat.pid);
+            archive_chat(self.app, &job.chat);
+            return SupervisorAction::Continue;
+        }
+        self.translate(job)
+    }
+
+    fn server_exited(&mut self, status: &str) -> SupervisorAction {
+        inject_system_message(
+            self.app,
+            SystemLogLevel::Warning,
+            "Translator",
+            format!("llama-server exited ({}).", status),
+        );
+        self.supervisor.on_server_exited(Instant::now())
+    }
+}
+
+/// Translates live jobs until the channel closes (`None`: the translator
+/// was stopped) or the server must be restarted or given up on.
+fn serve(run: &mut ServerRun, rx: &Receiver<TranslationJob>) -> Option<SupervisorAction> {
+    loop {
+        let action = match rx.recv_timeout(IDLE_CHECK) {
+            Ok(job) => run.live(job),
+            Err(RecvTimeoutError::Timeout) => match run.server.exit_status() {
+                Some(status) => run.server_exited(&status),
+                None => SupervisorAction::Continue,
+            },
+            Err(RecvTimeoutError::Disconnected) => return None,
+        };
+        if action != SupervisorAction::Continue {
+            return Some(action);
+        }
+    }
+}
+
+/// Sleeps `total`, in short steps; `false` if the worker was superseded.
+fn sleep_while(total: Duration, is_current: &dyn Fn() -> bool) -> bool {
+    let deadline = Instant::now() + total;
+    while Instant::now() < deadline {
+        if !is_current() {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    is_current()
+}
+
+/// No server any more: archive what still arrives, untranslated (it stays
+/// owed in the ledger), until the translator is stopped or replaced.
+fn drain_untranslated(app: &AppHandle, rx: &Receiver<TranslationJob>) {
+    while let Ok(job) = rx.recv() {
+        archive_chat(app, &job.chat);
+    }
+}
+
+/// Translates, once per server start, the Japanese messages of this run
 /// that the ledger still owes: the newest `translation_catch_up_limit` of
 /// them, oldest first, read from the in-memory history. Jobs queued while
 /// the server loaded are dropped first -- their messages are in the ledger.
 /// Live messages arriving meanwhile go before the next catch-up item.
+/// `None`: superseded; otherwise `Continue`, or the restart decision that
+/// cut it short.
 fn catch_up(
-    app: &AppHandle,
+    run: &mut ServerRun,
     rx: &Receiver<TranslationJob>,
-    client: &Client,
     is_current: &dyn Fn() -> bool,
-) {
+) -> Option<SupervisorAction> {
+    let app = run.app;
     let state = app.state::<crate::AppState>();
     while rx.try_recv().is_ok() {}
 
@@ -152,7 +259,7 @@ fn catch_up(
             .collect()
     };
     if owed.is_empty() {
-        return;
+        return Some(SupervisorAction::Continue);
     }
 
     let total = owed.len();
@@ -164,13 +271,19 @@ fn catch_up(
     );
     for (done, chat) in owed.into_iter().enumerate() {
         if !is_current() {
-            return;
+            return None;
         }
         emit_translator_state(app, "Catching Up", &format!("{}/{}", done + 1, total));
         while let Ok(job) = rx.try_recv() {
-            process_live_job(job, client, app);
+            let action = run.live(job);
+            if action != SupervisorAction::Continue {
+                return Some(action);
+            }
         }
-        process_translation_job(TranslationJob::new(chat), client, app);
+        let action = run.translate(TranslationJob::new(chat));
+        if action != SupervisorAction::Continue {
+            return Some(action);
+        }
     }
     let still_owed = state.translation_ledger.lock().len();
     inject_system_message(
@@ -179,6 +292,7 @@ fn catch_up(
         "Translator",
         format!("Catch-up done ({} still untranslated).", still_owed),
     );
+    Some(SupervisorAction::Continue)
 }
 
 /// Queues `chat` for the archive, as it is (untranslated), when archiving is
@@ -194,14 +308,22 @@ pub fn archive_chat(app: &AppHandle, chat: &ChatMessage) {
     }
 }
 
-fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle) {
+enum JobResult {
+    Done,
+    /// Nothing was owed (translated already, or not of this run).
+    Skipped,
+    /// No translation; the message stays owed.
+    Failed,
+}
+
+fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle) -> JobResult {
     let chat = job.chat;
     let state = app.state::<crate::AppState>();
 
     // Translated already (a catch-up item that was also queued live) or not
     // a message of this run's ledger: nothing is owed.
     if !state.translation_ledger.lock().is_owed(chat.pid) {
-        return;
+        return JobResult::Skipped;
     }
 
     // 1. Preprocess. The nickname lock is held only for this step: the
@@ -221,7 +343,7 @@ fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle
             // still archived.
             log::warn!("[Translator] pid {}: {}", chat.pid, reason);
             archive_chat(app, &chat);
-            return;
+            return JobResult::Failed;
         }
     };
 
@@ -248,6 +370,7 @@ fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle
             translated: final_str,
         },
     );
+    JobResult::Done
 }
 
 /// Records the state (for `get_service_states`) and emits it. The lock is

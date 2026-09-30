@@ -66,6 +66,9 @@ pub struct AppConfig {
     /// Days of daily chat logs (chat_logs/) to keep; 0 keeps them all.
     #[serde(default)]
     pub chat_log_retention_days: u32,
+    /// Debug: append the game's raw port-5003 packets to `captures/`. Applies live.
+    #[serde(default)]
+    pub raw_capture: bool,
 }
 
 fn default_spacing() -> u32 {
@@ -138,6 +141,7 @@ impl Default for AppConfig {
             message_spacing: default_spacing(),
             favorite_messages: default_favorite_messages(),
             chat_log_retention_days: 0,
+            raw_capture: false,
         }
     }
 }
@@ -303,6 +307,10 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
         }
     }
 
+    if old_config.raw_capture != config.raw_capture {
+        crate::services::sniffer::set_raw_capture(config.raw_capture);
+    }
+
     if old_config.chat_log_retention_days != config.chat_log_retention_days {
         crate::io::prune_chat_logs(&app);
     }
@@ -323,6 +331,13 @@ mod tests {
         assert_eq!(config.theme, "light");
         assert_eq!(config.blocked_users.get(&7).map(String::as_str), Some("x"));
         assert_eq!(config.font_size, 14); // absent: default
+    }
+
+    #[test]
+    fn raw_capture_is_off_by_default() {
+        assert!(!AppConfig::default().raw_capture);
+        let config: AppConfig = serde_json::from_str(r#"{"init_done": true}"#).unwrap();
+        assert!(!config.raw_capture);
     }
 
     #[test]

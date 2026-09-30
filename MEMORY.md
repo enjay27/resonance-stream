@@ -4,6 +4,8 @@
 
 ## Now — 2026-09-30
 
+**Raw capture tool (2026-09-30, `claude/festive-hypatia-5r78o7`):** settings > debug mode > "Raw Capture" (`raw_capture`, live) appends each port-5003 packet as `<unix_ms>\t<hex IPv4 packet>` to `<app data>/captures/capture-*.log` (50 MB cap). Format + writer + `replay` are in core (`capture/recorder.rs`). Kade records, uploads to a Gist (not tracked); drop it in `crates/core/tests/fixtures/<name>.capture.log` and W2 can start -- how: [`core-review-2026-09-30.md`](.memory/roadmap/core-review-2026-09-30.md). NOT VERIFIED: Windows run.
+
 **Per-channel archive (2026-09-30, `claude/per-channel-archive-compact-copy`):** the global `archive_chat` toggle is gone; the archive worker always runs and each tab (right-click, `archive_ignored_channels`) decides. `dataset_raw.jsonl` -> `dataset_<CHANNEL>.jsonl` (`dataset_file_name`, core); daily `chat_logs/` unchanged; write failures reported once as a system message. Old `dataset_raw.jsonl` is left as is. Compact-mode star/COPY on one line. NOT VERIFIED: needs a Windows run (files appear per tab; compact hover).
 
 **Integration tests (2026-09-30, `claude/integration-test-harness`):** mock game server +

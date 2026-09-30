@@ -4,6 +4,11 @@
 
 ## Now — 2026-09-30
 
+**Integration tests (2026-09-30, `claude/integration-test-harness`):** mock game server +
+mock llama-server in `crates/llama/tests/`; HTTP timeouts fixed. **Found: framing loses
+lines around rich messages** (pinned, fix is W2) --
+[`sessions/2026-09-30-integration-tests.md`](.memory/sessions/2026-09-30-integration-tests.md).
+
 **Review round 2 (2026-09-30):** core + UI communication + LLM server —
 [`.memory/roadmap/review-2026-09-30-round2.md`](.memory/roadmap/review-2026-09-30-round2.md).
 Steps 1-7 in order, one PR each. Steps 1 (A1 `get_service_states`) 2 (A2/A9 translator supervisor), 3 (A3/A5 hydration), 4 (A6 row signal leak), 5 (C1 prompt in core, A8 output limit), 6 (B1 cache), 7a (B6 Japanese rule, B3 server log) done; C2/C3 wait on Kade. **A4 (double `<bos>`) waits on Kade** — question in the file.

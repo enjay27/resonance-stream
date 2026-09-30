@@ -14,11 +14,12 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::inject_system_message;
 use crate::protocol::types::{ChatMessage, SystemLogLevel};
 
-use self::core::{server_url, translate_text};
+use self::core::server_url;
 use resonance_core::text::{
-    postprocess_text, preprocess_text, TranslationCache, TRANSLATION_CACHE_SIZE,
+    preprocess_text, translate_masked, TranslationCache, TRANSLATION_CACHE_SIZE,
 };
 use resonance_core::workers::{translation_is_stale, ServerSupervisor, SupervisorAction};
+use resonance_llama::translate_text;
 
 pub struct TranslationJob {
     pub chat: ChatMessage,
@@ -347,16 +348,12 @@ fn process_translation_job(
         preprocess_text(&chat.message, &dict, Some(&nick_cache))
     };
 
-    // 2. HTTP Request (Blocking), unless this line was translated before
-    let cached = cache.get(&shield.masked_text);
-    let raw_translation = match cached.map_or_else(
-        || translate_text(client, &server_url(), &shield.masked_text),
-        Ok,
-    ) {
-        Ok(text) => {
-            cache.put(&shield.masked_text, &text);
-            text
-        }
+    // 2. HTTP Request (Blocking), unless this line was translated before;
+    // 3. Postprocess
+    let final_str = match translate_masked(&shield, cache, |masked| {
+        translate_text(client, &server_url(), masked)
+    }) {
+        Ok(text) => text,
         Err(reason) => {
             // No translation: the row stays as it is, and the original is
             // still archived.
@@ -365,9 +362,6 @@ fn process_translation_job(
             return JobResult::Failed;
         }
     };
-
-    // 3. Postprocess
-    let final_str = postprocess_text(&raw_translation, &shield);
 
     // 4. Dispatch Side Effects
     let archive = state.data_factory_tx.lock().clone();
@@ -401,82 +395,4 @@ pub fn emit_translator_state(app: &tauri::AppHandle, state: &str, message: &str)
     let mut states = app_state.service_states.lock();
     let payload = states.set_translator(state, message);
     let _ = app.emit("translator-state", payload);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reqwest::blocking::Client;
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn test_full_translator_flow_with_mock() {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-
-        // 1. Create a mock server on a random available port
-        let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
-        let port = listener.local_addr().unwrap().port();
-        let mock_url = format!("http://127.0.0.1:{}", port);
-
-        // 2. Spawn a thread to act as the "llama-server"
-        std::thread::spawn(move || {
-            // Loop to handle multiple incoming requests (health check + translation)
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    let mut buffer = [0; 4096];
-                    if let Ok(bytes_read) = stream.read(&mut buffer) {
-                        let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-
-                        // Route 1: Mock the Health Check endpoint
-                        if request.starts_with("GET /health") {
-                            let body = r#"{"status":"ok"}"#;
-                            // FIXED: Added Content-Length and Connection: close
-                            let response = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                                body.len(), body
-                            );
-                            let _ = stream.write_all(response.as_bytes());
-                        }
-                        // Route 2: Mock llama.cpp's native /completion endpoint,
-                        // which translate_text() calls (not the OpenAI-style one)
-                        else if request.starts_with("POST /completion") {
-                            let body = r#"{"content": " 116 정찰 우측 은나포 "}"#;
-                            // FIXED: Added Content-Length and Connection: close
-                            let response = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                                body.len(), body
-                            );
-                            let _ = stream.write_all(response.as_bytes());
-                        }
-                    }
-                }
-            }
-        });
-
-        let client = Client::new();
-
-        // 3. Test the Health Check polling logic against the mock
-        let mut is_ready = false;
-        let start_wait = Instant::now();
-
-        // We use a much shorter timeout (2 seconds) since the mock is instant
-        while start_wait.elapsed().as_secs() < 2 {
-            if let Ok(res) = client.get(format!("{}/health", mock_url)).send() {
-                if res.status().is_success() {
-                    is_ready = true;
-                    break;
-                }
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-
-        assert!(is_ready, "Mock server failed the health check loop!");
-
-        // 4. Test the actual Translation pipeline against the mock
-        let test_jp = "116　偵察右　銀なぽ";
-        let result_ko = translate_text(&client, &mock_url, test_jp).unwrap();
-
-        assert_eq!(result_ko, "116 정찰 우측 은나포");
-    }
 }

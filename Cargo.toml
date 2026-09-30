@@ -23,7 +23,7 @@ chrono = "0.4.44"
 serde_with = "3.17.0"
 
 [workspace]
-members = ["src-tauri", "crates/core", "crates/types"]
+members = ["src-tauri", "crates/core", "crates/llama", "crates/types"]
 
 # The one place the app version is set. src-tauri inherits it, and
 # tauri.conf.json has no "version", so Tauri falls back to src-tauri's.

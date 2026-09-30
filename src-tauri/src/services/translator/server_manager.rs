@@ -218,19 +218,17 @@ pub fn wait_for_server(
             format!("Polling {}/health...", server_url()),
         );
 
-        if let Ok(res) = client.get(format!("{}/health", server_url())).send() {
-            if res.status().is_success() {
-                inject_system_message(
-                    app,
-                    SystemLogLevel::Trace,
-                    "Translator",
-                    format!(
-                        "Health check passed after {}ms",
-                        start_wait.elapsed().as_millis()
-                    ),
-                );
-                return Ok(());
-            }
+        if resonance_llama::health_ok(&client, &server_url()) {
+            inject_system_message(
+                app,
+                SystemLogLevel::Trace,
+                "Translator",
+                format!(
+                    "Health check passed after {}ms",
+                    start_wait.elapsed().as_millis()
+                ),
+            );
+            return Ok(());
         }
         std::thread::sleep(Duration::from_millis(1000));
     }

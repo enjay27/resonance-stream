@@ -330,6 +330,22 @@ pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
         .to_string()
 }
 
+/// Translates one preprocessed line: the cache answers a line seen before,
+/// otherwise `backend` (the model) gets the masked text. A reply is cached
+/// and restored with this line's own terms; a failure is not cached.
+pub fn translate_masked(
+    shield: &ShieldData,
+    cache: &mut TranslationCache,
+    backend: impl FnOnce(&str) -> Result<String, String>,
+) -> Result<String, String> {
+    let raw = match cache.get(&shield.masked_text) {
+        Some(raw) => raw,
+        None => backend(&shield.masked_text)?,
+    };
+    cache.put(&shield.masked_text, &raw);
+    Ok(postprocess_text(&raw, shield))
+}
+
 // --- The model request ---
 
 /// The prompt for one chat line. Must match `make_prompt()` of the
@@ -980,5 +996,53 @@ mod tests {
         cache.put(&first.masked_text, "[P0]님");
         let raw = cache.get(&second.masked_text).unwrap();
         assert_eq!(postprocess_text(&raw, &second), "Hanako님");
+    }
+
+    fn shield_for(text: &str, names: &HashMap<String, String>) -> ShieldData {
+        preprocess_text(text, &Dictionary::default(), Some(names))
+    }
+
+    #[test]
+    fn translate_masked_sends_the_masked_line_and_restores_the_reply() {
+        let names = HashMap::from([("たろう".to_string(), "Taro".to_string())]);
+        let shield = shield_for("たろうさん", &names);
+        let mut cache = TranslationCache::new(8);
+        let mut sent = Vec::new();
+        let got = translate_masked(&shield, &mut cache, |masked| {
+            sent.push(masked.to_string());
+            Ok(" [P0]님 <end_of_turn>".to_string())
+        });
+        assert_eq!(got.as_deref(), Ok("Taro님"));
+        assert_eq!(sent, [shield.masked_text.clone()]);
+    }
+
+    #[test]
+    fn translate_masked_serves_a_repeat_from_the_cache() {
+        let names = HashMap::from([
+            ("たろう".to_string(), "Taro".to_string()),
+            ("はなこ".to_string(), "Hanako".to_string()),
+        ]);
+        let mut cache = TranslationCache::new(8);
+        let mut calls = 0;
+        let mut backend = |_: &str| {
+            calls += 1;
+            Ok("[P0]님".to_string())
+        };
+        let first = translate_masked(&shield_for("たろうさん", &names), &mut cache, &mut backend);
+        let second = translate_masked(&shield_for("はなこさん", &names), &mut cache, &mut backend);
+        assert_eq!(first.as_deref(), Ok("Taro님"));
+        assert_eq!(second.as_deref(), Ok("Hanako님"));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn translate_masked_does_not_cache_a_failure() {
+        let shield = shield_for("こんにちは", &HashMap::new());
+        let mut cache = TranslationCache::new(8);
+        let failed = translate_masked(&shield, &mut cache, |_| Err("down".to_string()));
+        assert_eq!(failed, Err("down".to_string()));
+        assert!(cache.is_empty());
+        let retried = translate_masked(&shield, &mut cache, |_| Ok("안녕하세요".to_string()));
+        assert_eq!(retried.as_deref(), Ok("안녕하세요"));
     }
 }

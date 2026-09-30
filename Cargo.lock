@@ -4419,6 +4419,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "resonance-llama"
+version = "0.4.0"
+dependencies = [
+ "reqwest 0.11.27",
+ "resonance-core",
+ "serde_json",
+]
+
+[[package]]
 name = "resonance-stream"
 version = "0.4.0"
 dependencies = [
@@ -4433,6 +4442,7 @@ dependencies = [
  "parking_lot",
  "reqwest 0.11.27",
  "resonance-core",
+ "resonance-llama",
  "resonance-types",
  "serde",
  "serde_json",

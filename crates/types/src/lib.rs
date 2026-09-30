@@ -227,6 +227,24 @@ pub struct UpdateCheckResult {
     pub remote_data: GistMetadata,
 }
 
+// --- Rules both sides apply ---
+
+/// Whether `text` has Japanese in it (kana or kanji): the backend translates
+/// such a line, and the UI marks its original. One definition, so the two
+/// cannot disagree.
+pub fn contains_japanese(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(c,
+            '\u{3005}'                 // 々 iteration mark
+            | '\u{3040}'..='\u{30FF}'  // hiragana, katakana
+            | '\u{31F0}'..='\u{31FF}'  // katakana phonetic extensions
+            | '\u{3400}'..='\u{4DBF}'  // CJK extension A
+            | '\u{4E00}'..='\u{9FFF}'  // CJK unified ideographs
+            | '\u{FF66}'..='\u{FF9F}'  // half-width katakana
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +334,29 @@ mod tests {
         let old: TranslatorStatePayload =
             serde_json::from_str(r#"{"state":"Active","message":"m"}"#).unwrap();
         assert_eq!(old.seq, 0);
+    }
+
+    #[test]
+    fn japanese_is_kana_or_kanji() {
+        assert!(contains_japanese("こんにちは"));
+        assert!(contains_japanese("カタカナ"));
+        assert!(contains_japanese("漢字"));
+        assert!(!contains_japanese("hello 123"));
+        assert!(!contains_japanese("안녕하세요"));
+    }
+
+    #[test]
+    fn japanese_the_old_ranges_missed() {
+        // B6: half-width katakana, the iteration mark, the phonetic
+        // extensions, CJK Extension A and the end of the unified block.
+        assert!(contains_japanese("ｱﾘｶﾞﾄｳ"));
+        assert!(contains_japanese("々"));
+        assert!(contains_japanese("ㇰ"));
+        assert!(contains_japanese("㐀"));
+        assert!(contains_japanese("\u{9FC0}"));
+        // Full-width Latin and half-width Korean are not Japanese.
+        assert!(!contains_japanese("ｗｗｗ ＡＢＣ"));
+        assert!(!contains_japanese("ﾡ"));
     }
 
     #[test]

@@ -91,13 +91,13 @@ pub fn Troubleshooter() -> impl IntoView {
                 let _ = invoke("restart_sniffer_command", JsValue::NULL).await;
 
                 // 3. Close the troubleshooter so they can see the main UI reconnecting
-                signals.set_show_troubleshooter.set(false);
+                signals.ui.set_show_troubleshooter.set(false);
             }
         });
     };
 
     view! {
-        <Show when=move || signals.show_troubleshooter.get()>
+        <Show when=move || signals.ui.show_troubleshooter.get()>
             <div class="modal modal-open backdrop-blur-sm z-[30000]">
                 <div class="modal-box bg-base-300 border border-base-content/10 shadow-2xl w-full max-w-md p-6">
 
@@ -148,7 +148,7 @@ pub fn Troubleshooter() -> impl IntoView {
                                 <h3 class="text-lg font-bold text-success">"어댑터 복구 완료!"</h3>
                                 <p class="text-xs">"성공적으로 게임 채팅을 감지했습니다. 설정이 자동으로 저장되었습니다."</p>
                                 <div class="text-[10px] bg-base-200 p-2 rounded text-success font-mono">{move || current_test.get()}</div>
-                                <button class="btn btn-success btn-block mt-4" on:click=move |_| signals.set_show_troubleshooter.set(false)>"닫기"</button>
+                                <button class="btn btn-success btn-block mt-4" on:click=move |_| signals.ui.set_show_troubleshooter.set(false)>"닫기"</button>
                             </div>
                         }.into_any(),
 
@@ -159,7 +159,7 @@ pub fn Troubleshooter() -> impl IntoView {
                                 <p class="text-xs leading-relaxed">"모든 네트워크 어댑터를 확인했지만 게임 트래픽을 찾지 못했습니다. 게임이 켜져있고 로그인 된 상태인지 확인해주세요."</p>
 
                                 <div class="flex gap-2 mt-4">
-                                    <button class="btn btn-ghost flex-1" on:click=move |_| signals.set_show_troubleshooter.set(false)>"닫기"</button>
+                                    <button class="btn btn-ghost flex-1" on:click=move |_| signals.ui.set_show_troubleshooter.set(false)>"닫기"</button>
                                     <button class="btn btn-warning flex-1" on:click=start_scan>"다시 시도"</button>
                                 </div>
                             </div>
@@ -169,7 +169,7 @@ pub fn Troubleshooter() -> impl IntoView {
                     }}
                 </div>
                 <div class="modal-backdrop bg-black/50" on:click=move |_| {
-                    if status.get() != "scanning" { signals.set_show_troubleshooter.set(false); }
+                    if status.get() != "scanning" { signals.ui.set_show_troubleshooter.set(false); }
                 }></div>
             </div>
         </Show>

@@ -31,7 +31,7 @@ pub fn DictionaryModal() -> impl IntoView {
 
     // Fetch the dictionary data when the modal opens
     Effect::new(move |_| {
-        if signals.show_dictionary.get() {
+        if signals.ui.show_dictionary.get() {
             spawn_local(async move {
                 if let Ok(v) = invoke("get_dict_version", JsValue::NULL).await {
                     if let Some(v_str) = v.as_string() {
@@ -80,7 +80,7 @@ pub fn DictionaryModal() -> impl IntoView {
             // uses it, no restart needed.
             let _ = invoke("save_local_dictionary", args).await;
 
-            signals.set_show_dictionary.set(false);
+            signals.ui.set_show_dictionary.set(false);
         });
     };
 
@@ -189,7 +189,7 @@ pub fn DictionaryModal() -> impl IntoView {
     };
 
     view! {
-        <Show when=move || signals.show_dictionary.get()>
+        <Show when=move || signals.ui.show_dictionary.get()>
             <div class="modal modal-open backdrop-blur-sm transition-all duration-300 z-[30000]">
                 <div class="modal-box bg-base-300 border border-base-content/10 w-11/12 max-w-4xl p-0 overflow-hidden shadow-2xl flex flex-col h-[80vh] animate-in zoom-in duration-200">
 
@@ -200,7 +200,7 @@ pub fn DictionaryModal() -> impl IntoView {
                             <span class="badge badge-info badge-sm font-mono opacity-80">{move || format!("v{}", version.get())}</span>
                         </div>
                         <button class="btn btn-ghost btn-xs text-xl"
-                                on:click=move |_| signals.set_show_dictionary.set(false)>"✕"</button>
+                                on:click=move |_| signals.ui.set_show_dictionary.set(false)>"✕"</button>
                     </div>
 
                     // --- MAIN CONTENT AREA ---
@@ -473,13 +473,13 @@ pub fn DictionaryModal() -> impl IntoView {
                     <div class="bg-base-200 p-3 border-t border-base-content/5 flex justify-between items-center">
                         <span class="text-[10px] text-warning">"⚠️ 서버에서 사전을 동기화하면 수정한 내용이 초기화될 수 있습니다."</span>
                         <div class="flex gap-2">
-                            <button class="btn btn-ghost btn-sm" on:click=move |_| signals.set_show_dictionary.set(false)>"취소"</button>
+                            <button class="btn btn-ghost btn-sm" on:click=move |_| signals.ui.set_show_dictionary.set(false)>"취소"</button>
                             <button class="btn btn-success btn-sm font-bold shadow-lg" on:click=save_dict>"수정 사항 저장"</button>
                         </div>
                     </div>
 
                 </div>
-                <div class="modal-backdrop bg-black/40" on:click=move |_| signals.set_show_dictionary.set(false)></div>
+                <div class="modal-backdrop bg-black/40" on:click=move |_| signals.ui.set_show_dictionary.set(false)></div>
             </div>
         </Show>
     }

@@ -122,7 +122,7 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
 
         let pid = packet.pid;
         signals.config.custom_tab_filters.with_untracked(|filters| {
-            signals.set_chat.update(|store| {
+            signals.chat.set_chat.update(|store| {
                 store.add(pid, channel, ArcRwSignal::new(packet), filters, &limits);
             });
         });
@@ -136,11 +136,11 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
         // Only increment if the message belongs to the tab we are currently looking at
         if muted {
             // not unread: no badge for blocked or low-level senders
-        } else if is_visible && !signals.is_at_bottom.get_untracked() {
-            signals.set_unread_count.update(|c| *c += 1);
+        } else if is_visible && !signals.chat.is_at_bottom.get_untracked() {
+            signals.chat.set_unread_count.update(|c| *c += 1);
         } else if !is_visible {
             // Inactive tab -> Increment Tab Badge
-            signals.set_unread_counts.update(|counts| {
+            signals.chat.set_unread_counts.update(|counts| {
                 *counts.entry(channel.to_string()).or_insert(0) += 1;
             });
         }
@@ -165,7 +165,7 @@ fn create_translation_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)
         if let Some(payload) = payload::<TranslationResult>(event_obj) {
             // Find the existing message by PID and update its signal.
             // Only this row re-renders; the list itself is untouched.
-            signals.chat.with_untracked(|store| {
+            signals.chat.chat.with_untracked(|store| {
                 if let Some(chat_rw) = store.get(payload.pid) {
                     chat_rw.update(|c| {
                         c.translated = Some(payload.translated);
@@ -181,7 +181,7 @@ fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
         let Some(packet) = payload::<SystemMessage>(event_obj) else {
             return;
         };
-        signals.set_system_log.update(|log| {
+        signals.chat.set_system_log.update(|log| {
             if log.len() >= 200 {
                 log.remove(0);
             }
@@ -190,7 +190,7 @@ fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
 
         let active_tab = signals.config.active_tab.get_untracked();
         if active_tab != Tab::All.label() && active_tab != Tab::System.label() {
-            signals.set_unread_counts.update(|counts| {
+            signals.chat.set_unread_counts.update(|counts| {
                 *counts.entry(Tab::System.key().to_string()).or_insert(0) += 1;
             });
         }
@@ -220,7 +220,7 @@ fn create_update_message_handler(signals: AppSignals) -> Closure<dyn FnMut(JsVal
             return;
         };
         // Find the existing signal by PID and completely overwrite its value
-        signals.chat.with_untracked(|store| {
+        signals.chat.chat.with_untracked(|store| {
             if let Some(chat_rw) = store.get(updated_msg.pid) {
                 chat_rw.set(updated_msg);
             }

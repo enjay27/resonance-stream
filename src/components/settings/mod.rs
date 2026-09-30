@@ -33,7 +33,7 @@ pub fn Settings() -> impl IntoView {
     let (new_emphasis, set_new_emphasis) = signal(String::new());
 
     Effect::new(move |_| {
-        if signals.show_settings.get() {
+        if signals.ui.show_settings.get() {
             spawn_local(async move {
                 if let Ok(res) = invoke("get_network_interfaces", JsValue::NULL).await {
                     if let Ok(list) = serde_wasm_bindgen::from_value::<Vec<NetworkInterface>>(res) {
@@ -69,6 +69,7 @@ pub fn Settings() -> impl IntoView {
         // 1. Extract the raw chat messages from the signal map
         let logs_to_export: Vec<_> = signals
             .chat
+            .chat
             .with_untracked(|store| store.all())
             .into_iter()
             .map(|sig| sig.get_untracked()) // Unpack the RwSignal<ChatMessage>
@@ -87,7 +88,7 @@ pub fn Settings() -> impl IntoView {
     });
 
     view! {
-        <Show when=move || signals.show_settings.get()>
+        <Show when=move || signals.ui.show_settings.get()>
             <div class="modal modal-open backdrop-blur-sm transition-all duration-300 z-[20000]">
                 <div class="modal-box bg-base-300 border border-base-content/10 w-full max-w-sm p-0 overflow-hidden shadow-2xl animate-in zoom-in duration-200">
 
@@ -95,7 +96,7 @@ pub fn Settings() -> impl IntoView {
                     <div class="flex items-center justify-between p-4 border-b border-base-content/5 bg-base-200">
                         <h2 class="text-sm font-black tracking-widest text-base-content">"SETTINGS"</h2>
                         <button class="btn btn-ghost btn-xs text-xl"
-                                on:click=move |_| signals.set_show_settings.set(false)>"✕"</button>
+                                on:click=move |_| signals.ui.set_show_settings.set(false)>"✕"</button>
                     </div>
 
                     // --- CONTENT (Scrollable) ---
@@ -133,7 +134,7 @@ pub fn Settings() -> impl IntoView {
                 </div>
 
                 // Modal Backdrop to close
-                <div class="modal-backdrop bg-black/40" on:click=move |_| signals.set_show_settings.set(false)></div>
+                <div class="modal-backdrop bg-black/40" on:click=move |_| signals.ui.set_show_settings.set(false)></div>
             </div>
         </Show>
     }

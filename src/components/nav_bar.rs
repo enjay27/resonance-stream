@@ -51,14 +51,15 @@ pub fn NavBar() -> impl IntoView {
                     .config
                     .set_active_tab
                     .set(next_tab.label().to_string());
-                signals.set_unread_count.set(0);
+                signals.chat.set_unread_count.set(0);
 
                 let filters = signals.config.custom_tab_filters.get_untracked();
                 signals
+                    .chat
                     .set_unread_counts
                     .update(|counts| next_tab.clear_unread(counts, &filters));
 
-                signals.set_is_at_bottom.set(true);
+                signals.chat.set_is_at_bottom.set(true);
                 actions.save_config.dispatch(());
             }) as Box<dyn FnMut(JsValue)>);
 
@@ -124,7 +125,7 @@ pub fn NavBar() -> impl IntoView {
 
                         let unread = Memo::new(move |_| match tab {
                             Tab::Channel(_) | Tab::System => {
-                                *signals.unread_counts.get().get(db_key).unwrap_or(&0)
+                                *signals.chat.unread_counts.get().get(db_key).unwrap_or(&0)
                             }
                             Tab::All | Tab::Custom => 0,
                         });
@@ -148,11 +149,11 @@ pub fn NavBar() -> impl IntoView {
                                     )
                                     on:click=move |_| {
                                         signals.config.set_active_tab.set(full.to_string());
-                                        signals.set_unread_count.set(0);
+                                        signals.chat.set_unread_count.set(0);
                                         let filters = signals.config.custom_tab_filters.get_untracked();
-                                        signals.set_unread_counts.update(|counts| tab.clear_unread(counts, &filters));
-                                        signals.set_is_at_bottom.set(true);
-                                        signals.set_system_at_bottom.set(true);
+                                        signals.chat.set_unread_counts.update(|counts| tab.clear_unread(counts, &filters));
+                                        signals.chat.set_is_at_bottom.set(true);
+                                        signals.chat.set_is_system_at_bottom.set(true);
                                         actions.save_config.dispatch(());
                                     }
                                     on:contextmenu=move |ev| {
@@ -281,8 +282,8 @@ pub fn NavBar() -> impl IntoView {
                     <input type="text" placeholder="대화 검색 (Ctrl+F)..."
                         node_ref=search_input_ref
                         class="input input-xs input-bordered w-64 bg-base-200 text-xs focus:outline-none focus:border-success"
-                        prop:value=move || signals.search_term.get()
-                        on:input=move |ev| signals.set_search_term.set(event_target_value(&ev))
+                        prop:value=move || signals.chat.search_term.get()
+                        on:input=move |ev| signals.chat.set_search_term.set(event_target_value(&ev))
                         on:keydown=move |ev| {
                             if ev.key() == "Escape" {
                                 set_is_search_open.set(false);
@@ -291,7 +292,7 @@ pub fn NavBar() -> impl IntoView {
                     />
                     <button class="btn btn-ghost btn-xs btn-circle text-base-content/50 hover:text-error"
                         on:click=move |_| {
-                            signals.set_search_term.set("".to_string());
+                            signals.chat.set_search_term.set("".to_string());
                             set_is_search_open.set(false);
                         }>
                         "✕"
@@ -328,7 +329,7 @@ pub fn NavBar() -> impl IntoView {
                         <button
                             node_ref=search_btn_ref
                             class="btn btn-ghost btn-xs text-lg"
-                            class:text-success=move || !signals.search_term.get().is_empty()
+                            class:text-success=move || !signals.chat.search_term.get().is_empty()
                             on:click=move |_| {
                                 let new_state = !is_search_open.get_untracked();
                                 set_is_search_open.set(new_state);
@@ -348,7 +349,7 @@ pub fn NavBar() -> impl IntoView {
 
                     <div class="tooltip tooltip-bottom" data-tip="자주 쓰는 메시지">
                         <button class="btn btn-ghost btn-xs text-lg"
-                            on:click=move |_| signals.set_show_favorites.set(true)>
+                            on:click=move |_| signals.ui.set_show_favorites.set(true)>
                             "⭐"
                         </button>
                     </div>
@@ -421,7 +422,7 @@ pub fn NavBar() -> impl IntoView {
                     </div>
 
                     <div class="tooltip tooltip-bottom" data-tip="Settings">
-                        <button class="btn btn-ghost btn-xs relative" on:click=move |_| signals.set_show_settings.set(true)>
+                        <button class="btn btn-ghost btn-xs relative" on:click=move |_| signals.ui.set_show_settings.set(true)>
                             "⚙️"
                         </button>
                     </div>

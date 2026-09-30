@@ -12,6 +12,7 @@ use crate::config_signals::ConfigSignals;
 use crate::hooks::use_tray::{setup_tray_listeners, sync_tray_menu};
 use crate::store::AppSignals;
 use crate::ui_types::Theme;
+use crate::view_signals::UiSignals;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -25,12 +26,12 @@ pub fn App() -> impl IntoView {
         overlay_opacity: opacity,
         ..
     } = signals.config;
-    let AppSignals {
+    let UiSignals {
         active_menu_id,
         set_active_menu_id,
-        set_current_time,
         ..
-    } = signals;
+    } = signals.ui;
+    let set_current_time = signals.chat.set_current_time;
 
     provide_context(signals);
 

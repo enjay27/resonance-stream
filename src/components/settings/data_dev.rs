@@ -68,7 +68,7 @@ pub fn DataDevSection(
                     </div>
                     <button class="btn btn-xs btn-outline"
                         on:click=move |_| {
-                            signals.set_show_dictionary.set(true);
+                            signals.ui.set_show_dictionary.set(true);
                         }
                     >
                         "사전 열기"

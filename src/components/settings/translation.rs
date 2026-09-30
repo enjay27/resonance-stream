@@ -42,7 +42,7 @@ pub fn TranslationSection() -> impl IntoView {
                                                 if let Some(w) = web_sys::window() {
                                                     if w.confirm_with_message("AI 모델 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
                                                         signals.setup.set_wizard_step.set(2);
-                                                        signals.set_show_settings.set(false);
+                                                        signals.ui.set_show_settings.set(false);
                                                         signals.config.set_init_done.set(false);
                                                     }
                                                 }
@@ -59,7 +59,7 @@ pub fn TranslationSection() -> impl IntoView {
                                                     if let Some(w) = web_sys::window() {
                                                         if w.confirm_with_message("AI 실행 파일이 없습니다. 다운로드 화면으로 이동하시겠습니까?").unwrap_or(false) {
                                                             signals.setup.set_wizard_step.set(2);
-                                                            signals.set_show_settings.set(false);
+                                                            signals.ui.set_show_settings.set(false);
                                                             signals.config.set_init_done.set(false);
                                                         }
                                                     }

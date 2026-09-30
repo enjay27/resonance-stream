@@ -45,6 +45,9 @@ shortcut pastes into the game (clipboard + `SendInput` Ctrl+V), merged (PR #32).
 restored after 500 ms. Both need a Windows run --
 [`unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).
 
+**Chat log retention (2026-09-30, `claude/chat-log-retention`):** `chat_log_retention_days`
+(both AppConfigs, default 0 = keep all), pruned at start-up / on save / at day change.
+
 ## Where the detail is
 
 | read | when |

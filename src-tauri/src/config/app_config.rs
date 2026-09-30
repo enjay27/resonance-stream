@@ -60,6 +60,9 @@ pub struct AppConfig {
     /// Chat lines to copy or paste by shortcut; see `shortcut.rs`.
     #[serde(default = "default_favorite_messages")]
     pub favorite_messages: Vec<FavoriteMessage>,
+    /// Days of daily chat logs (chat_logs/) to keep; 0 keeps them all.
+    #[serde(default)]
+    pub chat_log_retention_days: u32,
 }
 
 fn default_spacing() -> u32 {
@@ -131,6 +134,7 @@ impl Default for AppConfig {
             archive_ignored_channels: default_archive_ignored_channels(),
             message_spacing: default_spacing(),
             favorite_messages: default_favorite_messages(),
+            chat_log_retention_days: 0,
         }
     }
 }
@@ -294,6 +298,10 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
                 "AI Translation Disabled.",
             );
         }
+    }
+
+    if old_config.chat_log_retention_days != config.chat_log_retention_days {
+        crate::io::prune_chat_logs(&app);
     }
 
     // --- MANAGE THE DATA FACTORY THREAD ---

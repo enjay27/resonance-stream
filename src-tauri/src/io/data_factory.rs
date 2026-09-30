@@ -47,6 +47,24 @@ pub fn chat_logs_dir(app: &AppHandle) -> PathBuf {
         .join("chat_logs")
 }
 
+/// Deletes the daily chat logs the retention setting no longer keeps (0 keeps
+/// all). Runs at start-up, when the setting is saved and when the day changes.
+pub fn prune_chat_logs(app: &AppHandle) {
+    let keep_days = crate::config::current_config(app).chat_log_retention_days;
+    let removed = resonance_core::history::remove_expired_chat_logs(
+        &chat_logs_dir(app),
+        Local::now().date_naive(),
+        keep_days,
+    );
+    if removed > 0 {
+        log::info!(
+            "[DataFactory] Removed {} chat log file(s) older than {} day(s)",
+            removed,
+            keep_days
+        );
+    }
+}
+
 /// Appends to today's chat log, switching files when the date changes.
 struct DailyLog {
     dir: PathBuf,
@@ -125,8 +143,12 @@ pub fn start_data_factory_worker(app: AppHandle) -> Sender<DataFactoryJob> {
                 "timestamp": now_ms()
             });
             let _ = writeln!(dataset, "{}", entry);
+            let day_before = daily.day.clone();
             if let Err(e) = daily.write(&chat) {
                 log::warn!("[DataFactory] Chat log write failed: {}", e);
+            }
+            if !day_before.is_empty() && daily.day != day_before {
+                prune_chat_logs(&app); // a new day: yesterday's cut-off moved
             }
             if rx.is_empty() {
                 let _ = dataset.flush();

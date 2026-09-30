@@ -1,12 +1,49 @@
 //! Backend chat history: the newest messages of each channel, keyed by pid.
 
+use chrono::{Days, NaiveDate};
 use resonance_types::ChatMessage;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Daily chat log file for `date` (YYYY-MM-DD) inside the chat_logs folder.
 pub fn chat_log_file_name(date: &str) -> String {
     format!("{}.jsonl", date)
+}
+
+/// Daily chat logs in `dir` that `keep_days` no longer covers: today's file
+/// and those of the `keep_days - 1` days before it stay. 0 keeps every file.
+/// A file whose name is not a `YYYY-MM-DD.jsonl` date is never touched.
+pub fn expired_chat_logs(dir: &Path, today: NaiveDate, keep_days: u32) -> Vec<PathBuf> {
+    let Some(oldest_kept) = (keep_days > 0)
+        .then(|| today.checked_sub_days(Days::new(u64::from(keep_days) - 1)))
+        .flatten()
+    else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut expired: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .filter(|path| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| NaiveDate::parse_from_str(stem, "%Y-%m-%d").ok())
+                .is_some_and(|day| day < oldest_kept)
+        })
+        .collect();
+    expired.sort();
+    expired
+}
+
+/// Deletes `expired_chat_logs`; returns how many files were removed.
+pub fn remove_expired_chat_logs(dir: &Path, today: NaiveDate, keep_days: u32) -> usize {
+    expired_chat_logs(dir, today, keep_days)
+        .iter()
+        .filter(|path| std::fs::remove_file(path).is_ok())
+        .count()
 }
 
 /// Channels the parser produces (crates/core/src/protocol/parser.rs).
@@ -359,5 +396,66 @@ mod tests {
             Some("번역")
         );
         assert!(h.get_mut(99).is_none());
+    }
+
+    fn day(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    fn log_dir_with(name: &str, files: &[&str]) -> std::path::PathBuf {
+        let dir = temp_dir(name);
+        for file in files {
+            std::fs::write(dir.join(file), "").unwrap();
+        }
+        dir
+    }
+
+    fn names(paths: &[std::path::PathBuf]) -> Vec<String> {
+        paths
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn retention_keeps_today_and_the_days_before_it() {
+        let dir = log_dir_with(
+            "retention",
+            &[
+                "2026-09-27.jsonl",
+                "2026-09-28.jsonl",
+                "2026-09-29.jsonl",
+                "2026-09-30.jsonl",
+                "notes.jsonl",    // not a date: never touched
+                "2026-01-01.txt", // not a log
+            ],
+        );
+        let today = day("2026-09-30");
+        assert_eq!(
+            names(&expired_chat_logs(&dir, today, 2)),
+            ["2026-09-27.jsonl", "2026-09-28.jsonl"]
+        );
+        assert_eq!(names(&expired_chat_logs(&dir, today, 1)).len(), 3); // today only
+        assert!(expired_chat_logs(&dir, today, 4).is_empty());
+        assert!(expired_chat_logs(&dir, today, 0).is_empty()); // 0 = keep all
+        assert!(expired_chat_logs(&dir.join("missing"), today, 1).is_empty());
+
+        assert_eq!(remove_expired_chat_logs(&dir, today, 2), 2);
+        assert!(!dir.join("2026-09-28.jsonl").exists());
+        assert!(dir.join("2026-09-29.jsonl").exists());
+        assert!(dir.join("notes.jsonl").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn retention_crosses_month_and_year_boundaries() {
+        let dir = log_dir_with("retention-year", &["2025-12-31.jsonl", "2026-01-01.jsonl"]);
+        assert_eq!(
+            names(&expired_chat_logs(&dir, day("2026-01-02"), 2)),
+            ["2025-12-31.jsonl"]
+        );
+        // A huge setting cannot underflow the calendar.
+        assert!(expired_chat_logs(&dir, day("2026-01-02"), u32::MAX).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

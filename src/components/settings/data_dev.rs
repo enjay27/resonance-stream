@@ -119,6 +119,29 @@ pub fn DataDevSection(
 
                 <div class="divider m-0 opacity-10"></div>
 
+                // Chat log retention: daily files in chat_logs/, pruned at
+                // start-up, on save and when the day changes.
+                <div class="flex items-center justify-between">
+                    <div class="flex flex-col">
+                        <span class="text-xs font-bold text-base-content/80">"채팅 로그 보관 기간"</span>
+                        <span class="text-[9px] opacity-60">"지난 채팅 로그(chat_logs)를 설정한 일수만 남기고 삭제합니다. 0 = 삭제 안 함"</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                        <input type="number" min="0" max="3650" step="1"
+                            class="input input-xs input-bordered w-16 text-right"
+                            prop:value=move || signals.chat_log_retention_days.get().to_string()
+                            on:change=move |ev| {
+                                let days = event_target_value(&ev).trim().parse::<u32>().unwrap_or(0).min(3650);
+                                signals.set_chat_log_retention_days.set(days);
+                                actions.save_config.dispatch(());
+                            }
+                        />
+                        <span class="text-[10px] opacity-60">"일"</span>
+                    </div>
+                </div>
+
+                <div class="divider m-0 opacity-10"></div>
+
                 // --- NEW: Open AppData Directory ---
                 <div class="flex items-center justify-between">
                     <div class="flex flex-col">

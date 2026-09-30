@@ -388,7 +388,7 @@ mod tests {
             (3, Channel::Party),
             (4, Channel::Guild),
             (1, Channel::World),
-            (9, Channel::World), // the beginner channel has no variant yet
+            (9, Channel::Beginner),
         ] {
             let events = history_pipeline(&history_root(code, &[entry(1, 5, "Bob", 10, "x")]));
             let Port5003Event::Chat(chat) = &events[0];
@@ -871,6 +871,6 @@ mod tests {
         assert_eq!((hash, chats), (PINNED_HASH, PINNED_CHATS));
     }
 
-    const PINNED_HASH: u64 = 8_225_781_135_236_233_223;
+    const PINNED_HASH: u64 = 17_370_710_247_901_616_853; // code 9 now reads as BEGINNER, not WORLD
     const PINNED_CHATS: usize = 28_246;
 }

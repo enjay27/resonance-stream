@@ -47,8 +47,8 @@ Kade typed one line into each channel ("Here's world channel", "Guild channel", 
 | guild | 4 | "Guild channel" |
 | **beginner** | **9** | "beginner channel number "985"" |
 
-So the code table is 1 WORLD, 2 LOCAL, 3 PARTY, 4 GUILD, 9 BEGINNER; the parser maps 9 to WORLD
-(no variant yet -- a feature for after C2's `Channel` enum). Ids in a chat are per channel
+So the code table is 1 WORLD, 2 LOCAL, 3 PARTY, 4 GUILD, 9 BEGINNER; the parser maps 9 to `Channel::Beginner`
+(added 2026-10-01, `claude/beginner-channel`; was WORLD before). Ids in a chat are per channel
 (6, then 7 for world; 612098 guild; 2 party; 47 local; 3 beginner).
 
 More shapes of `0x0003` (12-byte header = u64 counter + 4 zero bytes; the counter runs

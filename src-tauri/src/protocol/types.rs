@@ -30,7 +30,7 @@ pub struct AppState {
     pub dictionary: RwLock<Arc<Dictionary>>,
     pub translator_tx: Mutex<Option<Sender<crate::services::translator::TranslationJob>>>,
     pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
-    pub sniffer_tx: Mutex<Option<Sender<()>>>,
+    pub sniffer_tx: Mutex<Option<crate::services::sniffer::SnifferHandle>>,
     pub blocked_users: Mutex<HashMap<u64, String>>,
     /// What the global shortcuts are bound to (see `shortcut.rs`).
     pub shortcuts: Mutex<crate::shortcut::GlobalShortcuts>,

@@ -63,3 +63,9 @@ run as the real app.
   clipboard holds what it held before (500 ms `CLIPBOARD_RESTORE_DELAY` in
   `shortcut.rs` -- if the game pastes the *old* text, raise it). Configs saved by #32
   keep their entries without notes (defaults only apply to a fresh config).
+- **N11/N12/N13 (2026-09-30, `claude/review-n11-n12-n13`).** Core + ui tested on Linux,
+  app cross-checked (incl. `--tests`). Worth a real run: pull the network cable / pick a
+  wrong adapter so the socket fails, then the title-bar sniffer badge must restart it
+  (no "already active"); with archiving on, a busy WORLD day no longer pushes GUILD/PARTY
+  out of the reloaded history (each channel reloads up to its own tab limit); a blocked
+  sender's message raises no unread badge.

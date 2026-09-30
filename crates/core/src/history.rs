@@ -1,8 +1,8 @@
-//! Backend chat history: the last `limit` messages, keyed by pid.
+//! Backend chat history: the newest messages of each channel, keyed by pid.
 
 use chrono::{Days, NaiveDate};
 use resonance_types::ChatMessage;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 /// Daily chat log file for `date` (YYYY-MM-DD) inside the chat_logs folder.
@@ -46,11 +46,55 @@ pub fn remove_expired_chat_logs(dir: &Path, today: NaiveDate, keep_days: u32) ->
         .count()
 }
 
-/// The newest `limit` messages saved in `dir` (one JSON `ChatMessage` per
-/// line, one `.jsonl` file per day), oldest first. Pids are renumbered
-/// 1..=n in that order: saved pids come from earlier runs and may collide,
-/// while new messages must sort after the loaded ones.
-pub fn load_recent(dir: &Path, limit: usize) -> Vec<ChatMessage> {
+/// Channels the parser produces (crates/core/src/protocol/parser.rs).
+const GAME_CHANNELS: [&str; 4] = ["WORLD", "LOCAL", "PARTY", "GUILD"];
+
+/// How many messages of each channel the backend keeps and reloads: the
+/// numbers of the UI's channel tabs (src/chat_view.rs `tab_limit`; unset:
+/// WORLD 200, others 1000). Per channel, so a busy WORLD chat cannot push
+/// GUILD or PARTY messages out.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ChannelLimits(HashMap<String, usize>);
+
+impl ChannelLimits {
+    /// `tab_limits` from the config; the all-tab and custom-tab entries are
+    /// not channels and are ignored.
+    pub fn new(tab_limits: &HashMap<String, usize>) -> Self {
+        Self(
+            tab_limits
+                .iter()
+                .filter(|(k, _)| !matches!(k.as_str(), "전체" | "커스텀" | "SYSTEM"))
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+        )
+    }
+
+    /// Messages `channel` keeps; at least 1, like the UI.
+    pub fn of(&self, channel: &str) -> usize {
+        self.0
+            .get(channel)
+            .copied()
+            .unwrap_or(if channel == "WORLD" { 200 } else { 1000 })
+            .max(1)
+    }
+
+    /// The game's channels and any other channel with a limit of its own.
+    fn channels(&self) -> impl Iterator<Item = &str> {
+        let extra = self
+            .0
+            .keys()
+            .map(String::as_str)
+            .filter(|c| !GAME_CHANNELS.contains(c));
+        GAME_CHANNELS.iter().copied().chain(extra)
+    }
+}
+
+/// The newest messages saved in `dir` (one JSON `ChatMessage` per line, one
+/// `.jsonl` file per day), up to each channel's limit, oldest first. Reading
+/// stops once every channel with a limit of its own is full. Pids are
+/// renumbered 1..=n in that order: saved pids come from earlier runs and may
+/// collide, while new messages must sort after the loaded ones.
+pub fn load_recent(dir: &Path, limits: &ChannelLimits) -> Vec<ChatMessage> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -61,20 +105,31 @@ pub fn load_recent(dir: &Path, limit: usize) -> Vec<ChatMessage> {
         .collect();
     files.sort(); // YYYY-MM-DD names: sorted by day
 
-    // Newest day first, newest line first, until `limit` messages.
+    // Newest day first, newest line first, until every channel is full.
     let mut newest_first = Vec::new();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    let all_full = |counts: &HashMap<String, usize>| {
+        limits
+            .channels()
+            .all(|c| counts.get(c).copied().unwrap_or(0) >= limits.of(c))
+    };
     for file in files.iter().rev() {
-        if newest_first.len() >= limit {
+        if all_full(&counts) {
             break;
         }
         let Ok(content) = std::fs::read_to_string(file) else {
             continue;
         };
         for line in content.lines().rev() {
-            if newest_first.len() >= limit {
+            if all_full(&counts) {
                 break;
             }
-            if let Ok(message) = serde_json::from_str::<ChatMessage>(line) {
+            let Ok(message) = serde_json::from_str::<ChatMessage>(line) else {
+                continue;
+            };
+            let count = counts.entry(message.channel.clone()).or_insert(0);
+            if *count < limits.of(&message.channel) {
+                *count += 1;
                 newest_first.push(message);
             }
         }
@@ -87,35 +142,49 @@ pub fn load_recent(dir: &Path, limit: usize) -> Vec<ChatMessage> {
     newest_first
 }
 
-/// Pids come from one increasing counter, so ordering by pid is arrival
-/// order, and dropping the oldest message is `pop_first` (O(log n)) instead
-/// of shifting every entry of an insertion-ordered map.
+/// Backend chat history, capped per channel (`ChannelLimits`). Pids come
+/// from one increasing counter, so ordering by pid is arrival order.
 #[derive(Debug, Default)]
 pub struct ChatHistory {
     messages: BTreeMap<u64, ChatMessage>,
-    limit: usize,
+    /// Pids of each channel, oldest first.
+    by_channel: HashMap<String, VecDeque<u64>>,
+    limits: ChannelLimits,
 }
 
 impl ChatHistory {
-    pub fn new(limit: usize) -> Self {
+    pub fn new(limits: ChannelLimits) -> Self {
         Self {
             messages: BTreeMap::new(),
-            limit,
+            by_channel: HashMap::new(),
+            limits,
         }
     }
 
-    /// Changes the limit, dropping the oldest messages if it shrank.
-    pub fn set_limit(&mut self, limit: usize) {
-        self.limit = limit;
-        self.evict();
+    /// Changes the limits, dropping the oldest messages of channels that shrank.
+    pub fn set_limits(&mut self, limits: ChannelLimits) {
+        self.limits = limits;
+        let channels: Vec<String> = self.by_channel.keys().cloned().collect();
+        for channel in channels {
+            self.evict(&channel);
+        }
     }
 
-    /// Stores a message, dropping the oldest ones beyond the limit.
+    /// Stores a message, dropping the oldest ones of its channel beyond the
+    /// channel's limit.
     pub fn push(&mut self, message: ChatMessage) {
-        self.messages.insert(message.pid, message);
-        self.evict();
+        let (pid, channel) = (message.pid, message.channel.clone());
+        if self.messages.insert(pid, message).is_none() {
+            self.by_channel
+                .entry(channel.clone())
+                .or_default()
+                .push_back(pid);
+        }
+        self.evict(&channel);
     }
 
+    /// For in-place updates (translation, blocked flag); the channel must
+    /// not be changed through it.
     pub fn get_mut(&mut self, pid: u64) -> Option<&mut ChatMessage> {
         self.messages.get_mut(&pid)
     }
@@ -139,12 +208,19 @@ impl ChatHistory {
 
     pub fn clear(&mut self) {
         self.messages.clear();
+        self.by_channel.clear();
     }
 
-    /// The newest message always stays, even with a limit of 0.
-    fn evict(&mut self) {
-        while self.messages.len() > self.limit.max(1) {
-            self.messages.pop_first();
+    /// The newest message of a channel always stays.
+    fn evict(&mut self, channel: &str) {
+        let limit = self.limits.of(channel);
+        let Some(pids) = self.by_channel.get_mut(channel) else {
+            return;
+        };
+        while pids.len() > limit {
+            if let Some(oldest) = pids.pop_front() {
+                self.messages.remove(&oldest);
+            }
         }
     }
 }
@@ -154,11 +230,20 @@ mod tests {
     use super::*;
 
     fn msg(pid: u64) -> ChatMessage {
+        on("", pid)
+    }
+
+    fn on(channel: &str, pid: u64) -> ChatMessage {
         ChatMessage {
             pid,
+            channel: channel.into(),
             message: format!("m{pid}"),
             ..Default::default()
         }
+    }
+
+    fn limits(pairs: &[(&str, usize)]) -> ChannelLimits {
+        ChannelLimits::new(&pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect())
     }
 
     fn pids(h: &ChatHistory) -> Vec<u64> {
@@ -173,8 +258,13 @@ mod tests {
     }
 
     fn line(pid: u64, text: &str) -> String {
+        line_on("", pid, text)
+    }
+
+    fn line_on(channel: &str, pid: u64, text: &str) -> String {
         serde_json::to_string(&ChatMessage {
             pid,
+            channel: channel.into(),
             message: text.into(),
             ..Default::default()
         })
@@ -196,7 +286,7 @@ mod tests {
         .unwrap();
         std::fs::write(dir.join("notes.txt"), line(5, "ignored")).unwrap();
 
-        let got = load_recent(&dir, 4);
+        let got = load_recent(&dir, &limits(&[("", 4)]));
         let texts: Vec<_> = got.iter().map(|m| m.message.as_str()).collect();
         assert_eq!(texts, ["b", "c", "d", "e"]); // oldest first, bad line skipped
         let pids: Vec<_> = got.iter().map(|m| m.pid).collect();
@@ -205,16 +295,54 @@ mod tests {
     }
 
     #[test]
-    fn load_recent_without_logs_is_empty() {
-        let dir = temp_dir("none");
-        assert!(load_recent(&dir.join("missing"), 10).is_empty());
-        assert!(load_recent(&dir, 0).is_empty());
+    fn load_recent_fills_each_channel_on_its_own() {
+        // A busy WORLD day after a GUILD day: GUILD still comes back.
+        let dir = temp_dir("per-channel");
+        std::fs::write(
+            dir.join(chat_log_file_name("2026-09-28")),
+            [line_on("GUILD", 1, "g1"), line_on("GUILD", 2, "g2")].join("\n"),
+        )
+        .unwrap();
+        let world: Vec<_> = (0..10)
+            .map(|i| line_on("WORLD", i, &format!("w{i}")))
+            .collect();
+        std::fs::write(dir.join(chat_log_file_name("2026-09-29")), world.join("\n")).unwrap();
+
+        let got = load_recent(&dir, &limits(&[("WORLD", 3), ("GUILD", 5)]));
+        let texts: Vec<_> = got.iter().map(|m| m.message.as_str()).collect();
+        assert_eq!(texts, ["g1", "g2", "w7", "w8", "w9"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
+    fn load_recent_without_logs_is_empty() {
+        let dir = temp_dir("none");
+        assert!(load_recent(&dir.join("missing"), &limits(&[])).is_empty());
+        assert!(load_recent(&dir, &limits(&[])).is_empty());
+        // No limits configured: the defaults still apply, nothing is lost.
+        std::fs::write(
+            dir.join(chat_log_file_name("2026-09-29")),
+            line_on("WORLD", 1, "w"),
+        )
+        .unwrap();
+        assert_eq!(load_recent(&dir, &limits(&[])).len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn channel_limits_ignore_tab_entries_and_default_like_the_ui() {
+        let l = limits(&[("전체", 5), ("커스텀", 5), ("GUILD", 0), ("PARTY", 30)]);
+        assert_eq!(l.of("PARTY"), 30);
+        assert_eq!(l.of("GUILD"), 1); // at least 1
+        assert_eq!(l.of("WORLD"), 200);
+        assert_eq!(l.of("LOCAL"), 1000);
+        assert_eq!(l.channels().count(), 4); // the game's channels, always
+        assert_eq!(limits(&[("TRADE", 1)]).channels().count(), 5);
+    }
+
+    #[test]
     fn keeps_the_newest_up_to_the_limit() {
-        let mut h = ChatHistory::new(3);
+        let mut h = ChatHistory::new(limits(&[("", 3)]));
         for pid in 1..=5 {
             h.push(msg(pid));
         }
@@ -222,27 +350,45 @@ mod tests {
     }
 
     #[test]
+    fn a_busy_channel_does_not_evict_another() {
+        let mut h = ChatHistory::new(limits(&[("WORLD", 2), ("GUILD", 2)]));
+        h.push(on("GUILD", 1));
+        for pid in 2..=10 {
+            h.push(on("WORLD", pid));
+        }
+        assert_eq!(pids(&h), [1, 9, 10]);
+    }
+
+    #[test]
     fn shrinking_the_limit_drops_the_oldest() {
-        let mut h = ChatHistory::new(10);
+        let mut h = ChatHistory::new(limits(&[("", 10)]));
         for pid in 1..=5 {
             h.push(msg(pid));
         }
-        h.set_limit(2);
+        h.set_limits(limits(&[("", 2)]));
         assert_eq!(pids(&h), [4, 5]);
     }
 
     #[test]
     fn a_zero_limit_still_keeps_the_latest_message() {
-        // Matches the old behaviour: evict first, then insert.
-        let mut h = ChatHistory::new(0);
+        let mut h = ChatHistory::new(limits(&[("", 0)]));
         h.push(msg(1));
         h.push(msg(2));
         assert_eq!(pids(&h), [2]);
     }
 
     #[test]
+    fn pushing_a_pid_again_replaces_it_once() {
+        let mut h = ChatHistory::new(limits(&[("", 2)]));
+        h.push(msg(1));
+        h.push(msg(1));
+        h.push(msg(2));
+        assert_eq!(pids(&h), [1, 2]);
+    }
+
+    #[test]
     fn get_mut_updates_in_place() {
-        let mut h = ChatHistory::new(3);
+        let mut h = ChatHistory::new(limits(&[("", 3)]));
         h.push(msg(1));
         h.get_mut(1).unwrap().translated = Some("번역".into());
         assert_eq!(

@@ -7,7 +7,8 @@
 **Core review follow-up (`claude/tdd-rule-and-core-hardening`):** CLAUDE.md now requires TDD
 (test first, `just coverage`). Core coverage 96.7% lines. W3 done (PR #38). P1 done: `load_recent` examines at most
 `MAX_SCAN_LINES` = 50k lines (start-up 1.6 s -> 54 ms on 60 days of logs; quiet channels reload
-fewer messages). Next, in order: W1 stream key, P2+P3 `Arc<Dictionary>` + matcher, W5 placeholder check, field iterator, W2.
+fewer messages). W1 done: stream key is the full
+4-tuple (`StreamKey`, 12 bytes), idle connections dropped after 60 s. Next, in order: P2+P3 `Arc<Dictionary>` + matcher, W5 placeholder check, field iterator, W2.
 
 **Graft-guided refactor, phases 0–5: done** —
 [`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).

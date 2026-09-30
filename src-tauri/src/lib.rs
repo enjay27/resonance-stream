@@ -49,6 +49,11 @@ pub fn run() {
                 data_factory_tx: Mutex::new(None),
                 sniffer_tx: Mutex::new(None),
                 blocked_users: Mutex::new(config.blocked_users.clone()),
+                shortcuts: Mutex::new(shortcut::GlobalShortcuts {
+                    tab_modifier: config.tab_switch_modifier.clone(),
+                    tab_key: config.tab_switch_key.clone(),
+                    favorites: config.favorite_messages.clone(),
+                }),
             });
             let state = app.state::<AppState>();
 
@@ -93,11 +98,7 @@ pub fn run() {
                 );
             }
 
-            update_global_tab_shortcut(
-                handle.clone(),
-                config.tab_switch_modifier.clone(),
-                config.tab_switch_key.clone(),
-            );
+            apply_global_shortcuts(&handle);
 
             // --- START AI IF NEEDED ---
             if config.use_translation {
@@ -124,6 +125,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             check_model_status,
             download_model,

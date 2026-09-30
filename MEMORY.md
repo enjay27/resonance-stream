@@ -36,9 +36,9 @@ Windows run needed — [`unverified-on-windows.md`](.memory/active-issues/unveri
 [`.memory/sessions/2026-09-29-ui-improve-port.md`](.memory/sessions/2026-09-29-ui-improve-port.md).
 Kade's calls: sequential pids, both archives, gist has sha256, auto-sync off by default.
 
-**Graft 0.21.1 (2026-09-30, `claude/graft-0.21.1`):** pinned in `graft-bootstrap.cjs`; `.mcp.json` re-pointed
-at `.claude/helpers/graft-mcp.cjs` (ef17d3d had reverted PR #24 — MCP failed to start). An upgrade
-or `graft init` rewrites `.mcp.json` — re-point it; check the stamp shape in graft's `dist/upkeep.js`.
+**Graft 0.21.1 (2026-09-30):** pinned in `graft-bootstrap.cjs`. `.mcp.json` runs `graft mcp` as
+graft's wiring refresh writes it (committed, `claude/graft-mcp-wiring`); a session only runs
+`graft build`. A later `graft init`/`upgrade` rewrite goes in its own commit.
 
 **Git workflow (2026-09-30):** each task on a `claude/<name>` branch, push when the local gate
 is green, PR opened by Claude, `.github/workflows/auto-merge.yml` merges it when CI passes

@@ -12,7 +12,16 @@ pub async fn clear_backend_history() {
     let _ = invoke("clear_chat_history", JsValue::NULL).await;
 }
 
+/// Listeners are registered once per page load: a second registration (the
+/// setup wizard re-opening after a firewall error, then finishing) would
+/// handle every event twice.
+static LISTENERS_REGISTERED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 pub async fn setup_event_listeners(signals: AppSignals) {
+    if LISTENERS_REGISTERED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     // 1. Create the closures using our new helper functions
     let packet_closure = create_packet_handler(signals);
     let system_closure = create_system_handler(signals);
@@ -64,9 +73,14 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
         };
 
         let limits = signals.tab_limits.get_untracked();
-        let alert = signals
-            .alert_keywords
-            .with_untracked(|kws| kws.iter().any(|kw| packet.message.contains(kw.as_str())));
+        // Blocked senders (and WORLD chat below the minimum level) never ping.
+        let muted = packet.is_blocked
+            || (packet.channel == "WORLD"
+                && packet.level < signals.min_sender_level.get_untracked());
+        let alert = !muted
+            && signals
+                .alert_keywords
+                .with_untracked(|kws| kws.iter().any(|kw| packet.message.contains(kw.as_str())));
         let channel = packet.channel.clone();
         let message_for_log = alert.then(|| packet.message.clone());
 

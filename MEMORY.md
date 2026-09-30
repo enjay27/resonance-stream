@@ -34,7 +34,7 @@ markdown/`docs/`/`.memory/`-only changes. If a required check is set, docs-only 
 
 **Review 2026-09-30:** 13 new findings, being fixed in 4 steps —
 [`.memory/active-issues/review-2026-09-30.md`](.memory/active-issues/review-2026-09-30.md).
-Step 1 (translator lifecycle, N1/N6/N10) done; app parts cross-checked only.
+Steps 1 (translator lifecycle) and 2 (UI: N2/N4/N5/N11) done; app parts cross-checked only.
 
 ## Where the detail is
 

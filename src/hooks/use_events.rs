@@ -3,8 +3,8 @@ use crate::service_state::SeqGate;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
 use crate::ui_types::{
-    ChatMessage, ServiceStates, SnifferStatePayload, SystemMessage, TranslationResult,
-    TranslatorStatePayload,
+    ChatMessage, ServiceStates, SnifferState, SnifferStatePayload, SystemMessage,
+    TranslationResult, TranslatorState, TranslatorStatePayload,
 };
 use leptos::logging::log;
 use leptos::prelude::*;
@@ -69,8 +69,8 @@ fn apply_translator_state(signals: AppSignals, payload: TranslatorStatePayload) 
     if !TRANSLATOR_SEQ.accept(payload.seq) {
         return;
     }
-    signals.set_translator_state.set(payload.state.clone());
-    if payload.state == "Error" {
+    signals.set_translator_state.set(payload.state);
+    if payload.state == TranslatorState::Error {
         signals.set_translator_error.set(payload.message);
     }
 }
@@ -79,9 +79,9 @@ fn apply_sniffer_state(signals: AppSignals, payload: SnifferStatePayload) {
     if !SNIFFER_SEQ.accept(payload.seq) {
         return;
     }
-    signals.set_sniffer_state.set(payload.state.clone());
+    signals.set_sniffer_state.set(payload.state);
     // If it's an error, save the message so the user can click the badge to read it
-    if payload.state == "Error" {
+    if payload.state == SnifferState::Error {
         signals.set_sniffer_error.set(payload.message);
     }
 }

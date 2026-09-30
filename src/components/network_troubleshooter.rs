@@ -1,6 +1,6 @@
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
-use crate::ui_types::NetworkInterface;
+use crate::ui_types::{NetworkInterface, SnifferState};
 use leptos::context::use_context;
 use leptos::control_flow::Show;
 use leptos::prelude::{signal, ClassAttribute, Get, IntoAny, OnAttribute, Set};
@@ -59,7 +59,7 @@ pub fn Troubleshooter() -> impl IntoView {
 
                             // WOW! We just check if the state flipped to Active!
                             // As long as the game is running, background packets will trigger this instantly!
-                            if signals.sniffer_state.get_untracked() == "Active" {
+                            if signals.sniffer_state.get_untracked() == SnifferState::Active {
                                 set_status.set("success".to_string());
                                 set_progress.set(100.0);
                                 return; // We found the working adapter!

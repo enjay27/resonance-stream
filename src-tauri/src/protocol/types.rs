@@ -6,8 +6,8 @@ use resonance_core::text::Dictionary;
 use serde::{Deserialize, Serialize};
 
 pub use resonance_types::{
-    ChatMessage, NetworkInterface, ServiceStates, SnifferStatePayload, SystemMessage,
-    TranslationResult, TranslatorStatePayload,
+    ChatMessage, NetworkInterface, ServiceStates, SnifferState, SnifferStatePayload, SystemMessage,
+    TranslationResult, TranslatorState, TranslatorStatePayload,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicU64;

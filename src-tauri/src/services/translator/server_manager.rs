@@ -1,5 +1,5 @@
 use super::core::{server_url, set_server_port, PREFERRED_SERVER_PORT};
-use crate::protocol::types::SystemLogLevel;
+use crate::protocol::types::{SystemLogLevel, TranslatorState};
 use crate::{inject_system_message, AI_SERVER_FILENAME, AI_SERVER_FOLDER};
 use resonance_core::workers::{log_tail, pick_local_port, SERVER_START_TIMEOUT};
 use std::fs;
@@ -103,7 +103,7 @@ pub fn launch_ai_server(
     let Ok(data_dir) = app.path().app_data_dir() else {
         let msg = "Failed to start llama-server.exe. (no app data folder)";
         inject_system_message(app, SystemLogLevel::Error, "Translator", msg);
-        super::emit_translator_state(app, "Error", msg);
+        super::emit_translator_state(app, TranslatorState::Error, msg);
         return None;
     };
     let server_path = data_dir
@@ -170,7 +170,7 @@ pub fn launch_ai_server(
             inject_system_message(app, SystemLogLevel::Error, "Translator", &err_msg);
             super::emit_translator_state(
                 app,
-                "Error",
+                TranslatorState::Error,
                 &format!("Failed to start llama-server.exe. ({})", e),
             );
             None

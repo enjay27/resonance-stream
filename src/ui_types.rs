@@ -6,8 +6,8 @@ use serde_with::DisplayFromStr;
 pub use resonance_types::{
     contains_japanese, default_catch_up_limit, default_favorite_messages, Channel, ChatMessage,
     FavoriteMessage, FolderStatus, GistMetadata, NetworkInterface, ProgressPayload,
-    RemoteDictionary, ServiceStates, SnifferStatePayload, SystemMessage, TranslationResult,
-    TranslatorStatePayload, UpdateCheckResult, VersionInfo,
+    RemoteDictionary, ServiceStates, SnifferState, SnifferStatePayload, SystemMessage,
+    TranslationResult, TranslatorState, TranslatorStatePayload, UpdateCheckResult, VersionInfo,
 };
 
 #[serde_as]

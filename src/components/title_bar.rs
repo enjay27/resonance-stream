@@ -1,5 +1,6 @@
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
+use crate::ui_types::{SnifferState, TranslatorState};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos::IntoView;
@@ -35,18 +36,18 @@ pub fn TitleBar() -> impl IntoView {
                     class=move || {
                         let state = store.sniffer_state.get();
                         let base = "badge badge-xs gap-1.5 px-2 py-2 font-black text-[9px] mr-2 shadow-inner transition-all";
-                        match state.as_str() {
-                            "Active" => format!("{} badge-success bg-success/10 text-success border-success/20", base),
-                            "Error" => format!("{} badge-error bg-error/10 text-error border-error/20 cursor-pointer hover:bg-error/20", base),
-                            "Off" => format!("{} badge-ghost bg-white/5 text-gray-600 border-white/10", base),
-                            // Yellow for transitions: Starting, Firewall, Binding
-                            _ => format!("{} badge-warning bg-warning/10 text-warning border-warning/20", base),
+                        match state {
+                            SnifferState::Active => format!("{} badge-success bg-success/10 text-success border-success/20", base),
+                            SnifferState::Error => format!("{} badge-error bg-error/10 text-error border-error/20 cursor-pointer hover:bg-error/20", base),
+                            SnifferState::Off => format!("{} badge-ghost bg-white/5 text-gray-600 border-white/10", base),
+                            // Yellow for transitions
+                            SnifferState::Starting | SnifferState::Binding | SnifferState::Pending => format!("{} badge-warning bg-warning/10 text-warning border-warning/20", base),
                         }
                     }
                     on:click=move |_| {
                         let current_state = store.sniffer_state.get();
                         // Open troubleshooter if it's explicitly broken, or if the user wants to test it manually
-                        if current_state == "Error" || current_state.to_lowercase().contains("warning") || current_state == "Off" {
+                        if matches!(current_state, SnifferState::Error | SnifferState::Off) {
                             store.set_show_troubleshooter.set(true);
                         }
                     }
@@ -55,20 +56,20 @@ pub fn TitleBar() -> impl IntoView {
                     <div class=move || {
                         let state = store.sniffer_state.get();
                         let base = "w-1 h-1 rounded-full";
-                        match state.as_str() {
-                            "Active" => format!("{} bg-success animate-pulse shadow-[0_0_8px_#00ff88]", base),
-                            "Error" => format!("{} bg-error", base),
-                            "Off" => format!("{} bg-gray-600", base),
-                            _ => format!("{} bg-warning animate-pulse shadow-[0_0_8px_#fbbd23]", base),
+                        match state {
+                            SnifferState::Active => format!("{} bg-success animate-pulse shadow-[0_0_8px_#00ff88]", base),
+                            SnifferState::Error => format!("{} bg-error", base),
+                            SnifferState::Off => format!("{} bg-gray-600", base),
+                            SnifferState::Starting | SnifferState::Binding | SnifferState::Pending => format!("{} bg-warning animate-pulse shadow-[0_0_8px_#fbbd23]", base),
                         }
                     }></div>
 
                     // The Status Text
-                    {move || match store.sniffer_state.get().as_str() {
-                        "Active" => "SNIFFER ON".to_string(),
-                        "Error" => "ERROR (CLICK)".to_string(),
-                        "Off" => "SNIFFER OFF".to_string(),
-                        state => state.to_uppercase(), // e.g., "FIREWALL", "BINDING"
+                    {move || match store.sniffer_state.get() {
+                        SnifferState::Active => "SNIFFER ON".to_string(),
+                        SnifferState::Error => "ERROR (CLICK)".to_string(),
+                        SnifferState::Off => "SNIFFER OFF".to_string(),
+                        state => state.label(), // e.g., "BINDING"
                     }}
                 </div>
 
@@ -77,17 +78,17 @@ pub fn TitleBar() -> impl IntoView {
                         class=move || {
                             let state = store.translator_state.get();
                             let base = "badge badge-xs gap-1.5 px-2 py-2 font-black text-[9px] mr-2 shadow-inner transition-all";
-                            match state.as_str() {
-                                "Active" => format!("{} badge-success bg-success/10 text-success border-success/20", base),
-                                "Error" => format!("{} badge-error bg-error/10 text-error border-error/20 cursor-pointer hover:bg-error/20", base),
-                                "Off" => format!("{} badge-ghost bg-white/5 text-gray-600 border-white/10", base),
-                                // Yellow for transitions: Starting, Loading Model
-                                _ => format!("{} badge-warning bg-warning/10 text-warning border-warning/20", base),
+                            match state {
+                                TranslatorState::Active => format!("{} badge-success bg-success/10 text-success border-success/20", base),
+                                TranslatorState::Error => format!("{} badge-error bg-error/10 text-error border-error/20 cursor-pointer hover:bg-error/20", base),
+                                TranslatorState::Off => format!("{} badge-ghost bg-white/5 text-gray-600 border-white/10", base),
+                                // Yellow for transitions
+                                TranslatorState::Starting | TranslatorState::LoadingModel | TranslatorState::CatchingUp | TranslatorState::Restarting => format!("{} badge-warning bg-warning/10 text-warning border-warning/20", base),
                             }
                         }
                         on:click=move |_| {
                             // Show error alert on click if in Error state
-                            if store.translator_state.get() == "Error" {
+                            if store.translator_state.get() == TranslatorState::Error {
                                 if let Some(w) = web_sys::window() {
                                     let _ = w.alert_with_message(&store.translator_error.get());
                                 }
@@ -98,20 +99,20 @@ pub fn TitleBar() -> impl IntoView {
                         <div class=move || {
                             let state = store.translator_state.get();
                             let base = "w-1 h-1 rounded-full";
-                            match state.as_str() {
-                                "Active" => format!("{} bg-success animate-pulse shadow-[0_0_8px_#00ff88]", base),
-                                "Error" => format!("{} bg-error", base),
-                                "Off" => format!("{} bg-gray-600", base),
-                                _ => format!("{} bg-warning animate-pulse shadow-[0_0_8px_#fbbd23]", base),
+                            match state {
+                                TranslatorState::Active => format!("{} bg-success animate-pulse shadow-[0_0_8px_#00ff88]", base),
+                                TranslatorState::Error => format!("{} bg-error", base),
+                                TranslatorState::Off => format!("{} bg-gray-600", base),
+                                TranslatorState::Starting | TranslatorState::LoadingModel | TranslatorState::CatchingUp | TranslatorState::Restarting => format!("{} bg-warning animate-pulse shadow-[0_0_8px_#fbbd23]", base),
                             }
                         }></div>
 
                         // The Status Text
-                        {move || match store.translator_state.get().as_str() {
-                            "Active" => "번역 ON".to_string(),
-                            "Error" => "AI ERROR (CLICK)".to_string(),
-                            "Off" => "번역 OFF".to_string(),
-                            state => state.to_uppercase(), // e.g., "STARTING", "LOADING MODEL"
+                        {move || match store.translator_state.get() {
+                            TranslatorState::Active => "번역 ON".to_string(),
+                            TranslatorState::Error => "AI ERROR (CLICK)".to_string(),
+                            TranslatorState::Off => "번역 OFF".to_string(),
+                            state => state.label(), // e.g., "STARTING", "LOADING MODEL"
                         }}
                     </div>
                 </Show>

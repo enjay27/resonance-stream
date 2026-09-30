@@ -36,7 +36,7 @@ mock (`support/game_server.rs`, `capture.rs`) that builds/reads channel strings.
 Test first: serde round trip of every variant + "unknown string -> World" + an old-format
 `ChatMessage` JSON still parses.
 
-**C2b — `ServiceState` for sniffer and translator.** One enum per service (they differ:
+**C2b — `ServiceState` for sniffer and translator.** *(done: `claude/c2b-service-states`; `SnifferState` Off/Starting/Binding/Pending/Active/Error and `TranslatorState` Off/Starting/Loading Model/Catching Up/Restarting/Active/Error -- the plan's list missed `Binding`, and `Ready` was never a state; unknown reads as Off; the title-bar's `contains("warning")` click test was dead and is gone.)* One enum per service (they differ:
 sniffer has `Restarting`; translator has `Loading Model`, `Catching Up`, `Ready`), with the
 exact wire strings via `#[serde(rename)]`. `SnifferStatePayload/TranslatorStatePayload.state`,
 `AppSignals.sniffer_state/translator_state`, `ServiceStates`. Touches: types 11 hits,

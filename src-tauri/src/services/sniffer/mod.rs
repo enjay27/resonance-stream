@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::protocol::types::{AppState, SystemLogLevel};
+use crate::protocol::types::{AppState, SnifferState, SystemLogLevel};
 use crossbeam_channel::Sender;
 use resonance_core::capture::{ChatPipeline, PipelineAction};
 use resonance_core::text::{contains_japanese, convert_to_romaji};
@@ -54,7 +54,7 @@ fn feed_watchdog() {
 
 /// Records the state (for `get_service_states`) and emits it. The lock is
 /// held across the emit so events leave in `seq` order.
-pub fn emit_sniffer_state(app: &tauri::AppHandle, state: &str, message: &str) {
+pub fn emit_sniffer_state(app: &tauri::AppHandle, state: SnifferState, message: &str) {
     let Some(app_state) = app.try_state::<AppState>() else {
         return;
     };
@@ -72,7 +72,11 @@ pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
             "Sniffer",
             "Firewall rule missing. Triggering Setup Wizard.",
         );
-        emit_sniffer_state(&app, "Error", "방화벽 설정 필요 (Setup Required)");
+        emit_sniffer_state(
+            &app,
+            SnifferState::Error,
+            "방화벽 설정 필요 (Setup Required)",
+        );
         let _ = app.emit("firewall-missing", ());
         return;
     }
@@ -85,7 +89,7 @@ pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
             "Sniffer",
             "Sniffer restart blocked: already active.",
         );
-        emit_sniffer_state(&app, "Pending", "Listening for game traffic...");
+        emit_sniffer_state(&app, SnifferState::Pending, "Listening for game traffic...");
         IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
         return;
     }
@@ -109,7 +113,11 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
             "Sniffer",
             "Firewall rule missing. Triggering Setup Wizard.",
         );
-        emit_sniffer_state(&app, "Error", "방화벽 설정 필요 (Setup Required)");
+        emit_sniffer_state(
+            &app,
+            SnifferState::Error,
+            "방화벽 설정 필요 (Setup Required)",
+        );
 
         // Tell the frontend to show the Setup Wizard!
         let _ = app.emit("firewall-missing", ());
@@ -136,7 +144,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
             "Sniffer",
             "Engine Active",
         );
-        emit_sniffer_state(&app_handle, "Starting", "Engine Active");
+        emit_sniffer_state(&app_handle, SnifferState::Starting, "Engine Active");
         IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
 
         // Abstracted Network Setup
@@ -151,7 +159,11 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
             "Sniffer",
             "Raw Socket active. Listening for game traffic...",
         );
-        emit_sniffer_state(&app_handle, "Pending", "Listening for game traffic...");
+        emit_sniffer_state(
+            &app_handle,
+            SnifferState::Pending,
+            "Listening for game traffic...",
+        );
 
         let mut buf = [0u8; 65535];
         let state = app_handle.state::<AppState>();
@@ -214,7 +226,11 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
 
                     if !IS_SNIFFER_ACTIVE.load(Ordering::Relaxed) {
                         IS_SNIFFER_ACTIVE.store(true, Ordering::Relaxed);
-                        emit_sniffer_state(&app_handle, "Active", "Listening for game traffic...");
+                        emit_sniffer_state(
+                            &app_handle,
+                            SnifferState::Active,
+                            "Listening for game traffic...",
+                        );
                     }
                 },
             );
@@ -260,7 +276,7 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
                 // Emitting "Error" changes the TitleBar badge to Red so the user can click it!
                 emit_sniffer_state(
                     &app,
-                    "Error",
+                    SnifferState::Error,
                     "게임 트래픽 감지 안됨 (클릭하여 어댑터 복구)",
                 );
                 IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);

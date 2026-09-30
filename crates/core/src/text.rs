@@ -17,6 +17,10 @@ lazy_static! {
         Regex::new(r"</?end_of_turn>|</?start_of_turn>|<bos>|<eos>").unwrap();
     static ref SPACE_BEFORE_PUNCT: Regex = Regex::new(r"\s+([.!?,~])").unwrap();
     static ref EXTRA_SPACES: Regex = Regex::new(r"\s+").unwrap();
+    /// A placeholder as the model may hand it back: `[P3]`, but also `[P 3]`,
+    /// `[p3]` or full-width `［P3］`.
+    static ref PLACEHOLDER_PATTERN: Regex =
+        Regex::new(r"[\[［]\s*[Pp]\s*(\d+)\s*[\]］]").unwrap();
 }
 
 /// Japanese brackets are shielded so the model keeps them as they are.
@@ -301,17 +305,18 @@ pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
     // 2. Strip leaked model turn tokens (</end_of_turn> etc.)
     final_text = TURN_TAG_PATTERN.replace_all(&final_text, "").to_string();
 
-    // [P1]이 [P10]의 일부를 먼저 치환해버리는 버그를 막기 위해,
-    // 문자열 길이가 긴 것(예: [P10])부터 내림차순 정렬하여 안전하게 치환합니다.
-    let mut placeholders: Vec<&String> = shield.replacements.keys().collect();
-    placeholders.sort_by(|a, b| b.len().cmp(&a.len()));
-
-    // Restore shielded words safely
-    for placeholder in placeholders {
-        if let Some(replacement) = shield.replacements.get(placeholder) {
-            final_text = final_text.replace(placeholder, replacement);
-        }
-    }
+    // Restore shielded words in one pass. Matching the whole `[P<n>]` token
+    // means [P1] can never eat part of [P10]; a number we never issued is
+    // left as the model wrote it.
+    final_text = PLACEHOLDER_PATTERN
+        .replace_all(&final_text, |caps: &Captures| {
+            shield
+                .replacements
+                .get(&format!("[P{}]", &caps[1]))
+                .cloned()
+                .unwrap_or_else(|| caps[0].to_string())
+        })
+        .into_owned();
 
     // Clean up weird LLM spacing around punctuation
     final_text = SPACE_BEFORE_PUNCT
@@ -735,6 +740,25 @@ mod tests {
         assert_eq!(normalize_emotes("plain"), "plain");
         // Idempotent: normalized text stays as it is.
         assert_eq!(normalize_emotes("[스티커]"), "[스티커]");
+    }
+
+    #[test]
+    fn placeholders_the_model_respaced_or_recased_are_still_restored() {
+        // W5: a small model writes "[P 0]", "[p0]" or full-width "［P0］"; the
+        // literal match missed it, the term vanished and junk showed instead.
+        let dict = Dictionary::from(HashMap::from([("火力".to_string(), "딜러".to_string())]));
+        let shield = preprocess_text("火力", &dict, None);
+        assert_eq!(shield.masked_text, "[P0]");
+        for mangled in ["[P0]", "[P 0]", "[ p0 ]", "[p0]", "［P0］", "［ P 0 ］"] {
+            let out = postprocess_text(&format!("{mangled} 구합니다"), &shield);
+            assert_eq!(out, "딜러 구합니다", "model wrote {mangled:?}");
+        }
+    }
+
+    #[test]
+    fn a_placeholder_number_we_never_issued_is_left_alone() {
+        let shield = empty_shield();
+        assert_eq!(postprocess_text("안녕 [P9]", &shield), "안녕 [P9]");
     }
 
     #[test]

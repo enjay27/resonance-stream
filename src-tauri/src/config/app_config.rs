@@ -1,4 +1,5 @@
 use crate::{inject_system_message, AppState, SystemLogLevel};
+use resonance_core::download::write_atomic;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -7,8 +8,11 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 
+/// `#[serde(default)]`: a field missing from the file (an older version, a
+/// hand edit) takes its default instead of failing the whole file.
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(default)]
 pub struct AppConfig {
     pub init_done: bool,
     pub use_translation: bool,
@@ -158,13 +162,19 @@ pub fn read_config_file(app: &AppHandle) -> AppConfig {
         // Create default if missing
         let default_config = AppConfig::default();
         if let Ok(json) = serde_json::to_string_pretty(&default_config) {
-            let _ = fs::write(&path, json);
+            let _ = write_atomic(&path, json.as_bytes());
         }
         return default_config;
     }
 
     match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|e| {
+            // Keep the unreadable file: the next save would overwrite it.
+            let backup = path.with_extension("json.bad");
+            let _ = fs::copy(&path, &backup);
+            log::error!("config.json unreadable ({e}); defaults used, file kept as {backup:?}");
+            AppConfig::default()
+        }),
         Err(_) => AppConfig::default(),
     }
 }
@@ -218,7 +228,9 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
 
     let path = get_config_path(&app);
     if let Ok(json) = serde_json::to_string_pretty(&config) {
-        let _ = fs::write(path, json);
+        if let Err(e) = write_atomic(&path, json.as_bytes()) {
+            log::error!("config.json not saved: {e}");
+        }
     }
     *state.config.write() = config.clone();
     state.chat_history.lock().set_limit(config.history_limit());
@@ -306,6 +318,19 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_config_missing_fields_keeps_the_rest() {
+        // Regression (N3): one missing field used to reset every setting.
+        let config: AppConfig = serde_json::from_str(
+            r#"{"init_done": true, "theme": "light", "blocked_users": {"7": "x"}}"#,
+        )
+        .unwrap();
+        assert!(config.init_done);
+        assert_eq!(config.theme, "light");
+        assert_eq!(config.blocked_users.get(&7).map(String::as_str), Some("x"));
+        assert_eq!(config.font_size, 14); // absent: default
+    }
 
     #[test]
     fn dictionary_auto_sync_is_off_by_default() {

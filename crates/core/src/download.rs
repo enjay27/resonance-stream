@@ -134,6 +134,18 @@ pub fn replace_file(from: &Path, to: &Path, attempts: u32, pause: Duration) -> i
     Err(last_err.expect("at least one attempt"))
 }
 
+/// Writes `contents` to `path` so a crash mid-write leaves the old file, not
+/// a torn one: the data goes to `<path>.tmp` first and is renamed over `path`.
+pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp);
+    std::fs::write(&tmp, contents)?;
+    replace_file(&tmp, path, 5, Duration::from_millis(50)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
 /// Is `remote` a newer version than `current`? Versions that both parse as
 /// semver ("0.4.0", "v0.5.1") are compared; anything else falls back to
 /// "different means newer", as before.
@@ -230,6 +242,18 @@ mod tests {
         std::fs::write(&path, b"hello").unwrap();
         assert_eq!(sha256_file(&path).unwrap(), HELLO_SHA256);
         assert!(sha256_file(&dir.join("missing")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_atomic_replaces_and_leaves_no_temp_file() {
+        let dir = temp_dir("atomic");
+        let path = dir.join("config.json");
+        write_atomic(&path, b"one").unwrap();
+        write_atomic(&path, b"two").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"two");
+        assert!(!dir.join("config.json.tmp").exists());
+        assert!(write_atomic(&dir.join("no/such/dir/x"), b"x").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

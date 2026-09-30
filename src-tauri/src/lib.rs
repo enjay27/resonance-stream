@@ -52,7 +52,7 @@ pub fn run() {
                 service_states: Mutex::new(Default::default()),
                 blocked_users: Mutex::new(config.blocked_users.clone()),
                 shortcuts: Mutex::new(shortcut::GlobalShortcuts {
-                    tab_modifier: config.tab_switch_modifier.clone(),
+                    tab_modifier: config.tab_switch_modifier,
                     tab_key: config.tab_switch_key.clone(),
                     favorites: config.favorite_messages.clone(),
                 }),

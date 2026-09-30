@@ -7,8 +7,9 @@ pub use resonance_types::{
     contains_japanese, default_catch_up_limit, default_favorite_messages, Channel, ChatMessage,
     ComputeMode, FavoriteMessage, FolderStatus, GistMetadata, LogLevel, NetworkInterface,
     ProgressPayload, RemoteDictionary, ServiceStates, SnifferState, SnifferStatePayload,
-    SystemLogLevel, SystemMessage, Theme, Tier, TranslationResult, TranslatorState,
-    TranslatorStatePayload, UpdateCheckResult, VersionInfo, ALL_TAB, CUSTOM_TAB, SYSTEM_TAB,
+    SystemLogLevel, SystemMessage, TabSwitchModifier, Theme, Tier, TranslationResult,
+    TranslatorState, TranslatorStatePayload, UpdateCheckResult, VersionInfo, ALL_TAB, CUSTOM_TAB,
+    SYSTEM_TAB,
 };
 
 #[serde_as]
@@ -48,7 +49,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub auto_sync_latest_dict: bool,
     #[serde(default)]
-    pub tab_switch_modifier: String, // e.g., "Ctrl", "Alt", "Shift"
+    pub tab_switch_modifier: TabSwitchModifier,
     #[serde(default)]
     pub tab_switch_key: String, // e.g., "Tab", "ArrowRight", etc.
     #[serde(default)]

@@ -386,6 +386,12 @@ string_enum! {
     } default Info
 }
 
+string_enum! {
+    /// The modifier of the tab-switch shortcut; `NoModifier` (stored as
+    /// `"None"`) is the key on its own.
+    TabSwitchModifier { Ctrl => "Ctrl", Alt => "Alt", Shift => "Shift", NoModifier => "None" } default Ctrl
+}
+
 impl SystemLogLevel {
     /// [`from_name`](Self::from_name), also taking `"warning"` (what the
     /// UI's `ui_system_message` command has always accepted).
@@ -841,6 +847,28 @@ mod tests {
             serde_json::from_str::<SystemMessage>(odd).unwrap().level,
             SystemLogLevel::Info
         );
+    }
+
+    #[test]
+    fn the_tab_switch_modifier_keeps_its_names_and_defaults_to_ctrl() {
+        use serde_json::{from_value, json, to_value};
+        for (value, name) in [
+            (TabSwitchModifier::Ctrl, "Ctrl"),
+            (TabSwitchModifier::Alt, "Alt"),
+            (TabSwitchModifier::Shift, "Shift"),
+            (TabSwitchModifier::NoModifier, "None"),
+        ] {
+            assert_eq!(to_value(value).unwrap(), name);
+            assert_eq!(from_value::<TabSwitchModifier>(json!(name)).unwrap(), value);
+        }
+        // What a fresh config has -- and what an empty or unknown value reads as.
+        assert_eq!(TabSwitchModifier::default(), TabSwitchModifier::Ctrl);
+        assert_eq!(TabSwitchModifier::from_name(""), TabSwitchModifier::Ctrl);
+        assert_eq!(
+            TabSwitchModifier::from_name("Meta"),
+            TabSwitchModifier::Ctrl
+        );
+        assert_eq!(TabSwitchModifier::from_name("alt"), TabSwitchModifier::Alt);
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use crate::chat_view::ChatStore;
 use crate::ui_types::{
     default_catch_up_limit, default_favorite_messages, Channel, ChatMessage, ComputeMode,
-    FavoriteMessage, LogLevel, SnifferState, SystemLogLevel, SystemMessage, Theme, Tier,
-    TranslatorState, ALL_TAB,
+    FavoriteMessage, LogLevel, SnifferState, SystemLogLevel, SystemMessage, TabSwitchModifier,
+    Theme, Tier, TranslatorState, ALL_TAB,
 };
 use leptos::prelude::{signal, Action, ArcRwSignal, ReadSignal, WriteSignal};
 use std::collections::HashMap;
@@ -142,8 +142,8 @@ pub struct AppSignals {
     pub set_auto_sync_latest_dict: WriteSignal<bool>,
     pub unread_counts: ReadSignal<HashMap<String, usize>>,
     pub set_unread_counts: WriteSignal<HashMap<String, usize>>,
-    pub tab_switch_modifier: ReadSignal<String>,
-    pub set_tab_switch_modifier: WriteSignal<String>,
+    pub tab_switch_modifier: ReadSignal<TabSwitchModifier>,
+    pub set_tab_switch_modifier: WriteSignal<TabSwitchModifier>,
     pub tab_switch_key: ReadSignal<String>,
     pub set_tab_switch_key: WriteSignal<String>,
     pub show_troubleshooter: ReadSignal<bool>,
@@ -246,7 +246,7 @@ impl AppSignals {
         let (unread_counts, set_unread_counts) =
             signal::<std::collections::HashMap<String, usize>>(HashMap::new());
 
-        let (tab_switch_modifier, set_tab_switch_modifier) = signal("Ctrl".to_string());
+        let (tab_switch_modifier, set_tab_switch_modifier) = signal(TabSwitchModifier::default());
         let (tab_switch_key, set_tab_switch_key) = signal("Tab".to_string());
 
         let (show_troubleshooter, set_show_troubleshooter) = signal(false);

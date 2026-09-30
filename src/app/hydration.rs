@@ -100,11 +100,7 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                 set_blocked_users.set(config.blocked_users);
                 set_min_sender_level.set(config.min_sender_level);
                 set_auto_sync_latest_dict.set(config.auto_sync_latest_dict);
-                set_tab_switch_modifier.set(if config.tab_switch_modifier.is_empty() {
-                    "Ctrl".to_string()
-                } else {
-                    config.tab_switch_modifier
-                });
+                set_tab_switch_modifier.set(config.tab_switch_modifier);
                 set_favorite_messages.set(config.favorite_messages);
                 set_chat_log_retention_days.set(config.chat_log_retention_days);
                 set_raw_capture.set(config.raw_capture);

@@ -3,8 +3,8 @@ use resonance_core::download::write_atomic;
 use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use resonance_types::{
-    default_catch_up_limit, default_favorite_messages, Channel, FavoriteMessage, ALL_TAB,
-    CUSTOM_TAB,
+    default_catch_up_limit, default_favorite_messages, Channel, ComputeMode, FavoriteMessage,
+    Theme, Tier, ALL_TAB, CUSTOM_TAB,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -21,16 +21,16 @@ use tauri::{AppHandle, Manager, State};
 pub struct AppConfig {
     pub init_done: bool,
     pub use_translation: bool,
-    pub compute_mode: String,
+    pub compute_mode: ComputeMode,
     pub compact_mode: bool,
     pub always_on_top: bool,
     pub active_tab: String,
     pub custom_tab_filters: Vec<String>,
-    pub theme: String,
+    pub theme: Theme,
     pub overlay_opacity: f32,
     pub debug_mode: bool,
     pub log_level: String,
-    pub tier: String,
+    pub tier: Tier,
     /// Japanese messages missed since the app opened that a translator start
     /// translates (the newest ones); 0 turns the catch-up off.
     #[serde(default = "default_catch_up_limit")]
@@ -109,16 +109,16 @@ impl Default for AppConfig {
         Self {
             init_done: false,
             use_translation: false,
-            compute_mode: "cpu".into(),
+            compute_mode: ComputeMode::default(),
             compact_mode: false,
             always_on_top: false,
             active_tab: ALL_TAB.to_string(),
             custom_tab_filters: Channel::ALL.map(|c| c.as_str().to_string()).to_vec(),
-            theme: "dark".to_string(),
+            theme: Theme::default(),
             overlay_opacity: 0.85,
             debug_mode: false,
             log_level: "info".to_string(),
-            tier: "middle".to_string(),
+            tier: Tier::default(),
             translation_catch_up_limit: default_catch_up_limit(),
             hide_original_in_compact: false,
             network_interface: "".to_string(),
@@ -184,11 +184,11 @@ pub fn read_config_file(app: &AppHandle) -> AppConfig {
     }
 }
 
-fn translator_settings(c: &AppConfig) -> TranslatorSettings<'_> {
+fn translator_settings(c: &AppConfig) -> TranslatorSettings {
     TranslatorSettings {
         enabled: c.use_translation,
-        compute_mode: &c.compute_mode,
-        tier: &c.tier,
+        compute_mode: c.compute_mode,
+        tier: c.tier,
     }
 }
 
@@ -326,7 +326,7 @@ mod tests {
         )
         .unwrap();
         assert!(config.init_done);
-        assert_eq!(config.theme, "light");
+        assert_eq!(config.theme, Theme::Light);
         assert_eq!(config.blocked_users.get(&7).map(String::as_str), Some("x"));
         assert_eq!(config.font_size, 14); // absent: default
     }
@@ -336,6 +336,20 @@ mod tests {
         assert!(!AppConfig::default().raw_capture);
         let config: AppConfig = serde_json::from_str(r#"{"init_done": true}"#).unwrap();
         assert!(!config.raw_capture);
+    }
+
+    #[test]
+    fn odd_setting_values_still_load() {
+        // Hand-edited or from another version: case is ignored, a value
+        // nobody knows is the default -- the rest of the file survives.
+        let config: AppConfig = serde_json::from_str(
+            r#"{"init_done": true, "compute_mode": "GPU", "tier": "extreme", "theme": "neon"}"#,
+        )
+        .unwrap();
+        assert!(config.init_done);
+        assert_eq!(config.compute_mode, ComputeMode::Gpu);
+        assert_eq!(config.tier, Tier::Middle);
+        assert_eq!(config.theme, Theme::Dark);
     }
 
     #[test]

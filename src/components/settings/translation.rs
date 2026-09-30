@@ -1,6 +1,6 @@
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
-use crate::ui_types::FolderStatus;
+use crate::ui_types::{ComputeMode, FolderStatus, Tier};
 use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use wasm_bindgen::JsValue;
@@ -92,49 +92,41 @@ pub fn TranslationSection() -> impl IntoView {
                 <div class="p-3 bg-base-200 rounded-lg space-y-3 border border-base-content/5">
                     <span class="text-[11px] font-bold text-base-content/50 uppercase">"연산 장치 (Compute Mode)"</span>
                     <div class="join w-full">
-                        {vec!["cpu", "gpu"].into_iter().map(|m| {
-                            let m_val = m.to_string();
-                            let m_line = m.to_string();
-                            let m_click = m.to_string();
+                        {ComputeMode::ALL.iter().copied().map(|m| {
                             view! {
                                 <button
                                     class="join-item btn btn-xs flex-1 font-black border-base-content/10"
-                                    class:btn-success=move || signals.compute_mode.get() == m_val
-                                    class:btn-outline=move || signals.compute_mode.get() != m_line
+                                    class:btn-success=move || signals.compute_mode.get() == m
+                                    class:btn-outline=move || signals.compute_mode.get() != m
                                     on:click=move |_| {
-                                        signals.set_compute_mode.set(m_click.clone());
+                                        signals.set_compute_mode.set(m);
                                         actions.save_config.dispatch(());
                                         signals.set_restart_required.set(true);
                                     }
                                 >
-                                    {m.to_uppercase()}
+                                    {m.label()}
                                 </button>
                             }
                         }).collect_view()}
                     </div>
 
                     // Hide VRAM settings if CPU is selected
-                    <Show when=move || signals.compute_mode.get() == "gpu">
+                    <Show when=move || signals.compute_mode.get() == ComputeMode::Gpu>
                         <span class="text-[11px] font-bold text-base-content/50 uppercase block mt-3">"VRAM 사용량 (GPU Offload)"</span>
                         <div class="join w-full">
-                            {vec!["low", "middle", "high", "very high"].into_iter().map(|t| {
-                                let t_val = t.to_string();
-                                let t_click = t.to_string();
-                                let t_line = t.to_string();
-                                let t_tier = t.to_string();
+                            {Tier::ALL.iter().copied().map(|t| {
                                 view! {
                                     <button
                                         class="join-item btn btn-xs flex-1 font-black border-base-content/10"
-                                        class:btn-success=move || signals.tier.get() == t_val
-                                        class:btn-outline=move || signals.tier.get() != t_line
-                                        class:text-secondary=move || t_tier == "extreme"
+                                        class:btn-success=move || signals.tier.get() == t
+                                        class:btn-outline=move || signals.tier.get() != t
                                         on:click=move |_| {
-                                            signals.set_tier.set(t_click.clone());
+                                            signals.set_tier.set(t);
                                             actions.save_config.dispatch(());
                                             signals.set_restart_required.set(true);
                                         }
                                     >
-                                        {t.to_uppercase()}
+                                        {t.label()}
                                     </button>
                                 }
                             }).collect_view()}

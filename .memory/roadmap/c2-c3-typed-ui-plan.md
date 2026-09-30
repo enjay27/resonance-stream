@@ -63,7 +63,7 @@ signals;` destructure keep working by taking the sub-struct they need. CLAUDE.md
 convention is updated with the step. Gate: ui; test first for `to_config`/`apply` round trip
 (every field set to a non-default value survives).
 
-**C2d — the other stringly-typed settings** (ideas added on Kade's request, same
+**C2d — the other stringly-typed settings** *(split: `claude/c2d1-settings-enums` = `ComputeMode`, `Tier`, `Theme` via a `string_enum!` macro in resonance-types (case-insensitive, unknown -> default); core `workers::gpu_layers` replaces `server_manager`'s string match; the dead `"extreme"` tier class is gone. Next PR: `LogLevel` + `TabSwitchModifier`.)* (ideas added on Kade's request, same
 recipe: enum, same strings on disk, unknown value -> the default). `ComputeMode` (`"cpu"`,
 `"gpu"`, ...: `workers.rs` `TranslatorSettings`, `setup_wizard.rs`, `translation.rs`,
 `server_manager.rs`, `store.rs`), `Tier` (`"low" "middle" "high"`: same files),

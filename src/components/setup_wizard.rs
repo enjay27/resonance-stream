@@ -1,5 +1,6 @@
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
+use crate::ui_types::ComputeMode;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
@@ -113,11 +114,11 @@ pub fn SetupWizard(
                                         <span class="text-xs font-bold opacity-50 uppercase">"연산 장치 (Compute Mode)"</span>
                                         <div class="join w-full">
                                             <button class="join-item btn btn-sm flex-1"
-                                                class:btn-success=move || signals.compute_mode.get() == "cpu"
-                                                on:click=move |_| signals.set_compute_mode.set("cpu".into())>"CPU"</button>
+                                                class:btn-success=move || signals.compute_mode.get() == ComputeMode::Cpu
+                                                on:click=move |_| signals.set_compute_mode.set(ComputeMode::Cpu)>"CPU"</button>
                                             <button class="join-item btn btn-sm flex-1"
-                                                class:btn-success=move || signals.compute_mode.get() == "gpu"
-                                                on:click=move |_| signals.set_compute_mode.set("gpu".into())>"GPU"</button>
+                                                class:btn-success=move || signals.compute_mode.get() == ComputeMode::Gpu
+                                                on:click=move |_| signals.set_compute_mode.set(ComputeMode::Gpu)>"GPU"</button>
                                         </div>
                                     </div>
                                 </Show>

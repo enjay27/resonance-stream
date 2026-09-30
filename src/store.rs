@@ -1,7 +1,7 @@
 use crate::chat_view::ChatStore;
 use crate::ui_types::{
-    default_catch_up_limit, default_favorite_messages, Channel, ChatMessage, FavoriteMessage,
-    SnifferState, SystemMessage, TranslatorState, ALL_TAB,
+    default_catch_up_limit, default_favorite_messages, Channel, ChatMessage, ComputeMode,
+    FavoriteMessage, SnifferState, SystemMessage, Theme, Tier, TranslatorState, ALL_TAB,
 };
 use leptos::prelude::{signal, Action, ArcRwSignal, ReadSignal, WriteSignal};
 use std::collections::HashMap;
@@ -13,8 +13,8 @@ pub struct AppSignals {
     pub set_init_done: WriteSignal<bool>,
     pub use_translation: ReadSignal<bool>,
     pub set_use_translation: WriteSignal<bool>,
-    pub compute_mode: ReadSignal<String>,
-    pub set_compute_mode: WriteSignal<String>,
+    pub compute_mode: ReadSignal<ComputeMode>,
+    pub set_compute_mode: WriteSignal<ComputeMode>,
     pub wizard_step: ReadSignal<i32>,
     pub set_wizard_step: WriteSignal<i32>,
     pub translator_state: ReadSignal<TranslatorState>,
@@ -72,12 +72,12 @@ pub struct AppSignals {
     pub set_show_settings: WriteSignal<bool>,
     pub custom_filters: ReadSignal<Vec<String>>,
     pub set_custom_filters: WriteSignal<Vec<String>>,
-    pub theme: ReadSignal<String>,
-    pub set_theme: WriteSignal<String>,
+    pub theme: ReadSignal<Theme>,
+    pub set_theme: WriteSignal<Theme>,
     pub opacity: ReadSignal<f32>,
     pub set_opacity: WriteSignal<f32>,
-    pub tier: ReadSignal<String>,
-    pub set_tier: WriteSignal<String>,
+    pub tier: ReadSignal<Tier>,
+    pub set_tier: WriteSignal<Tier>,
     /// Missed Japanese messages a translator start translates; 0 = none.
     pub translation_catch_up_limit: ReadSignal<usize>,
     pub set_translation_catch_up_limit: WriteSignal<usize>,
@@ -164,7 +164,7 @@ impl AppSignals {
     pub fn new() -> Self {
         let (init_done, set_init_done) = signal(false); // Hydrated from config
         let (use_translation, set_use_translation) = signal(false);
-        let (compute_mode, set_compute_mode) = signal("cpu".to_string());
+        let (compute_mode, set_compute_mode) = signal(ComputeMode::default());
         let (wizard_step, set_wizard_step) = signal(0); // 0: Welcome, 1: Options, 2: Download
 
         let (translator_state, set_translator_state) = signal(TranslatorState::Off);
@@ -197,9 +197,9 @@ impl AppSignals {
         let (show_settings, set_show_settings) = signal(false);
         let (custom_filters, set_custom_filters) =
             signal(Channel::ALL.map(|c| c.as_str().to_string()).to_vec());
-        let (theme, set_theme) = signal("dark".to_string());
+        let (theme, set_theme) = signal(Theme::default());
         let (opacity, set_opacity) = signal(0.85f32);
-        let (tier, set_tier) = signal("middle".to_string());
+        let (tier, set_tier) = signal(Tier::default());
         let (translation_catch_up_limit, set_translation_catch_up_limit) =
             signal(default_catch_up_limit());
         let (restart_required, set_restart_required) = signal(false);

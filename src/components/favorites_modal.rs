@@ -28,6 +28,7 @@ pub fn FavoritesModal() -> impl IntoView {
     // Index being edited; `len()` means a new entry not in the list yet.
     let (editing, set_editing) = signal(None::<usize>);
     let (edit_text, set_edit_text) = signal(String::new());
+    let (edit_note, set_edit_note) = signal(String::new());
     let (edit_shortcut, set_edit_shortcut) = signal(String::new());
     let (recording, set_recording) = signal(false);
     let (edit_error, set_edit_error) = signal(None::<String>);
@@ -41,6 +42,7 @@ pub fn FavoritesModal() -> impl IntoView {
             .cloned()
             .unwrap_or_default();
         set_edit_text.set(fav.text);
+        set_edit_note.set(fav.note);
         set_edit_shortcut.set(fav.shortcut);
         set_edit_error.set(None);
         set_recording.set(false);
@@ -65,6 +67,7 @@ pub fn FavoritesModal() -> impl IntoView {
         }
         let entry = FavoriteMessage {
             text,
+            note: edit_note.get_untracked().trim().to_string(),
             shortcut: edit_shortcut.get_untracked(),
         };
         set_favorite_messages.update(|list| match list.get_mut(index) {
@@ -157,6 +160,13 @@ pub fn FavoritesModal() -> impl IntoView {
                     prop:value=move || edit_text.get()
                     on:input=move |ev| set_edit_text.set(event_target_value(&ev))
                 ></textarea>
+                <input
+                    type="text"
+                    class="input input-bordered input-xs w-full"
+                    placeholder="메모 (예: 뜻) -- 선택"
+                    prop:value=move || edit_note.get()
+                    on:input=move |ev| set_edit_note.set(event_target_value(&ev))
+                />
                 <div class="flex items-center gap-1">
                     <span class="text-[10px] font-bold text-base-content/70 shrink-0">"단축키"</span>
                     <button
@@ -216,10 +226,11 @@ pub fn FavoritesModal() -> impl IntoView {
                     <div class="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-2">
                         <For
                             each={move || favorite_messages.get().into_iter().enumerate().collect::<Vec<_>>()}
-                            key=|(i, f)| (*i, f.text.clone(), f.shortcut.clone())
+                            key=|(i, f)| (*i, f.text.clone(), f.note.clone(), f.shortcut.clone())
                             children=move |(index, fav)| {
                                 let text = fav.text.clone();
                                 let shortcut = fav.shortcut.clone();
+                                let note = fav.note.clone();
                                 view! {
                                     <Show
                                         when=move || editing.get() == Some(index)
@@ -227,10 +238,14 @@ pub fn FavoritesModal() -> impl IntoView {
                                             let text = text.clone();
                                             let copy_text = text.clone();
                                             let shortcut = shortcut.clone();
+                                            let note = note.clone();
                                             view! {
                                                 <div class="flex items-start gap-2 p-2 rounded-lg bg-base-200 border border-base-content/5">
                                                     <div class="flex-1 min-w-0">
                                                         <div class="text-sm whitespace-pre-wrap break-words select-text">{text}</div>
+                                                        {(!note.is_empty()).then(|| view! {
+                                                            <div class="text-[11px] text-base-content/50 break-words">{note}</div>
+                                                        })}
                                                         {(!shortcut.is_empty()).then(|| view! {
                                                             <span class="badge badge-ghost badge-xs font-mono mt-1">{display(&shortcut)}</span>
                                                         })}

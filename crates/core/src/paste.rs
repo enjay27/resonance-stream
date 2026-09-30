@@ -5,6 +5,9 @@
 //! Ctrl+Shift+V. So every modifier still down is released first, then
 //! Ctrl+V is sent. The app turns these into `SendInput` calls (Windows).
 
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
 /// Windows virtual-key codes used here.
 pub const VK_CONTROL: u16 = 0x11;
 pub const VK_V: u16 = 0x56;
@@ -25,6 +28,30 @@ pub const MODIFIER_KEYS: [u16; 6] = [
     VK_LMENU,
     VK_RMENU,
 ];
+
+/// A favorite's shortcut pressed again within this long is ignored, so a
+/// held or double-tapped key does not spam the chat.
+pub const REPEAT_WINDOW: Duration = Duration::from_millis(1500);
+
+/// Remembers when each shortcut last pasted.
+#[derive(Debug, Default)]
+pub struct RepeatGuard {
+    last: HashMap<String, Instant>,
+}
+
+impl RepeatGuard {
+    /// True when `shortcut` may paste at `now` (and records it); false when it
+    /// already pasted within [`REPEAT_WINDOW`]. Other shortcuts do not count.
+    pub fn allow(&mut self, shortcut: &str, now: Instant) -> bool {
+        if let Some(&last) = self.last.get(shortcut) {
+            if now.saturating_duration_since(last) < REPEAT_WINDOW {
+                return false;
+            }
+        }
+        self.last.insert(shortcut.to_string(), now);
+        true
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyStroke {
@@ -58,6 +85,24 @@ pub fn paste_keystrokes(held_modifiers: &[u16]) -> Vec<KeyStroke> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_same_shortcut_is_refused_within_the_window() {
+        let mut guard = RepeatGuard::default();
+        let t0 = Instant::now();
+        assert!(guard.allow("Ctrl+Digit1", t0));
+        assert!(!guard.allow("Ctrl+Digit1", t0 + Duration::from_millis(300)));
+        // A refused press does not extend the window.
+        assert!(guard.allow("Ctrl+Digit1", t0 + REPEAT_WINDOW));
+    }
+
+    #[test]
+    fn other_shortcuts_are_not_held_back() {
+        let mut guard = RepeatGuard::default();
+        let t0 = Instant::now();
+        assert!(guard.allow("Ctrl+Digit1", t0));
+        assert!(guard.allow("Ctrl+Digit2", t0 + Duration::from_millis(100)));
+    }
 
     #[test]
     fn nothing_held_is_plain_ctrl_v() {

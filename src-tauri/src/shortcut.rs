@@ -6,10 +6,24 @@
 //! Changing one kind re-registers all of them.
 
 use crate::{inject_system_message, AppState, SystemLogLevel};
+use parking_lot::Mutex;
+use resonance_core::paste::RepeatGuard;
 use resonance_types::FavoriteMessage;
+use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+/// Time the game gets to read the clipboard after Ctrl+V, before the
+/// clipboard text from before the paste is put back.
+const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(500);
+
+/// Survives re-registration, so saving the list does not reset the window.
+static REPEAT_GUARD: LazyLock<Mutex<RepeatGuard>> = LazyLock::new(Default::default);
+/// Held for a whole paste: a second paste waits, so it does not save the
+/// first one's message as "the clipboard before" and restore that.
+static PASTE_LOCK: Mutex<()> = Mutex::new(());
 
 /// What the global shortcuts are bound to.
 #[derive(Debug, Clone, Default)]
@@ -94,10 +108,16 @@ pub fn apply_global_shortcuts(app: &AppHandle) {
             continue;
         }
         let text = favorite.text;
+        let accel_key = accel.clone();
         // On release: the main key is up, so the paste does not mix with it.
         let registered = global.on_shortcut(shortcut, move |app_handle, _shortcut, event| {
-            if event.state == ShortcutState::Released {
+            if event.state != ShortcutState::Released {
+                return;
+            }
+            if REPEAT_GUARD.lock().allow(&accel_key, Instant::now()) {
                 paste_favorite(app_handle.clone(), text.clone());
+            } else {
+                log::debug!("Favorite shortcut {accel_key} repeated too soon; ignored");
             }
         });
         match registered {
@@ -107,10 +127,14 @@ pub fn apply_global_shortcuts(app: &AppHandle) {
     }
 }
 
-/// Put `text` on the clipboard and send Ctrl+V to the focused window. Off the
-/// shortcut handler's thread: it waits a moment for the clipboard to settle.
+/// Put `text` on the clipboard, send Ctrl+V to the focused window, then put
+/// back the text that was on the clipboard before (only text can be put
+/// back; anything else is left replaced). Off the shortcut handler's thread:
+/// it waits for the clipboard and the game.
 fn paste_favorite(app: AppHandle, text: String) {
     std::thread::spawn(move || {
+        let _one_at_a_time = PASTE_LOCK.lock();
+        let previous = app.clipboard().read_text().ok();
         if let Err(e) = app.clipboard().write_text(text) {
             inject_system_message(
                 &app,
@@ -120,8 +144,15 @@ fn paste_favorite(app: AppHandle, text: String) {
             );
             return;
         }
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        std::thread::sleep(Duration::from_millis(30));
         send_paste_keys();
+
+        if let Some(previous) = previous {
+            std::thread::sleep(CLIPBOARD_RESTORE_DELAY);
+            if let Err(e) = app.clipboard().write_text(previous) {
+                log::warn!("Clipboard not restored after paste: {e}");
+            }
+        }
     });
 }
 

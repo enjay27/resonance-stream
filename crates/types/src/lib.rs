@@ -75,29 +75,34 @@ pub struct NetworkInterface {
 
 /// A saved chat line: copied from the favorites panel, or pasted into the
 /// game by its global shortcut. `shortcut` is a Tauri accelerator built from
-/// `KeyboardEvent.code` ("Ctrl+Shift+Digit1"); empty means none.
+/// `KeyboardEvent.code` ("Ctrl+Shift+Digit1"); empty means none. `note` is
+/// a reminder shown under the text (its meaning in Korean); never sent.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FavoriteMessage {
     pub text: String,
     #[serde(default)]
+    pub note: String,
+    #[serde(default)]
     pub shortcut: String,
 }
 
-/// What a fresh config starts with: common Japanese chat lines, no shortcuts.
+/// What a fresh config starts with: common Japanese chat lines with their
+/// Korean meaning, no shortcuts.
 pub fn default_favorite_messages() -> Vec<FavoriteMessage> {
     [
-        "こんにちは！",
-        "おはようございます！",
-        "よろしくお願いします！",
-        "ありがとうございます！",
-        "お疲れ様でした！",
-        "すみません！",
-        "またね！",
+        ("こんにちは！", "안녕하세요"),
+        ("おはようございます！", "좋은 아침입니다"),
+        ("よろしくお願いします！", "잘 부탁드립니다"),
+        ("ありがとうございます！", "감사합니다"),
+        ("お疲れ様でした！", "수고하셨습니다"),
+        ("すみません！", "죄송합니다"),
+        ("またね！", "또 봐요"),
     ]
     .into_iter()
-    .map(|text| FavoriteMessage {
+    .map(|(text, note)| FavoriteMessage {
         text: text.to_string(),
+        note: note.to_string(),
         shortcut: String::new(),
     })
     .collect()
@@ -191,9 +196,12 @@ mod tests {
         let defaults = default_favorite_messages();
         assert!(!defaults.is_empty());
         assert!(defaults.iter().all(|f| f.shortcut.is_empty()));
+        assert!(defaults.iter().all(|f| !f.note.is_empty()));
 
+        // A list saved before notes existed still loads.
         let fav: FavoriteMessage = serde_json::from_str(r#"{"text":"hi"}"#).unwrap();
         assert_eq!(fav.text, "hi");
+        assert!(fav.note.is_empty());
         assert!(fav.shortcut.is_empty());
     }
 

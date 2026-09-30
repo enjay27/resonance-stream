@@ -34,9 +34,10 @@ or `graft init` rewrites `.mcp.json` — re-point it; check the stamp shape in g
 is green, PR opened by Claude, `.github/workflows/auto-merge.yml` merges it when CI passes
 (needs to be on `main` first). CI runs on every PR (docs-only too); `push` only on `main`.
 
-**Review 2026-09-30:** 13 new findings, 9 fixed in 4 steps (N12, N13 open) —
+**Review 2026-09-30:** 13 findings, all fixed (N11-N13 on `claude/review-n11-n12-n13`) —
 [`.memory/active-issues/review-2026-09-30.md`](.memory/active-issues/review-2026-09-30.md).
-Steps 1 (translator lifecycle) 2 (UI: N2/N4/N5/N11) 3 (config safety: N3) and 4 (translate/archive/dedup: N7-N9) done; app parts cross-checked only.
+App parts cross-checked only. Queued (Kade 2026-09-30): chat-log retention (days, default 0 =
+keep), then translation ledger (catch-up from in-memory history at translator start, newest 100).
 
 **Favorite messages (2026-09-30, `claude/favorite-messages`):** ⭐ list -- copy, edit, global
 shortcut pastes into the game (clipboard + `SendInput` Ctrl+V), merged (PR #32). Follow-up

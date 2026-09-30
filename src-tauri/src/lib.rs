@@ -40,7 +40,7 @@ pub fn run() {
             app.manage(AppState {
                 config: RwLock::new(config.clone()),
                 config_lock: Mutex::new(()),
-                chat_history: Mutex::new(ChatHistory::new(config.history_limit())),
+                chat_history: Mutex::new(ChatHistory::new(config.channel_limits())),
                 system_history: Mutex::new(VecDeque::with_capacity(200)),
                 next_pid: 1.into(),
                 nickname_cache: Mutex::new(std::collections::HashMap::new()),
@@ -61,7 +61,7 @@ pub fn run() {
             // pids continue after them so the list stays in order.
             let restored = resonance_core::history::load_recent(
                 &crate::io::chat_logs_dir(&handle),
-                config.history_limit(),
+                &config.channel_limits(),
             );
             state.next_pid.fetch_max(
                 restored.len() as u64 + 1,

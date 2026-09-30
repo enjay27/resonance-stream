@@ -1,4 +1,4 @@
-use crate::chat_view::Tab;
+use crate::chat_view::{is_muted, Tab};
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
 use crate::ui_types::{
@@ -73,10 +73,9 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
         };
 
         let limits = signals.tab_limits.get_untracked();
-        // Blocked senders (and WORLD chat below the minimum level) never ping.
-        let muted = packet.is_blocked
-            || (packet.channel == "WORLD"
-                && packet.level < signals.min_sender_level.get_untracked());
+        // Blocked senders (and WORLD chat below the minimum level) never
+        // ping and are not counted as unread.
+        let muted = is_muted(&packet, signals.min_sender_level.get_untracked());
         let alert = !muted
             && signals
                 .alert_keywords
@@ -97,7 +96,9 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
             .with_untracked(|filters| tab.shows_channel(&channel, filters));
 
         // Only increment if the message belongs to the tab we are currently looking at
-        if is_visible && !signals.is_at_bottom.get_untracked() {
+        if muted {
+            // not unread: no badge for blocked or low-level senders
+        } else if is_visible && !signals.is_at_bottom.get_untracked() {
             signals.set_unread_count.update(|c| *c += 1);
         } else if !is_visible {
             // Inactive tab -> Increment Tab Badge

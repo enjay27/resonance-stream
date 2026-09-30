@@ -4,6 +4,7 @@ pub use self::network::*;
 
 use crate::{inject_system_message, store_and_emit, SnifferStatePayload, TranslationJob};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -17,6 +18,30 @@ use resonance_core::text::convert_to_romaji;
 // --- GLOBAL STATE ---
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
 static IS_SNIFFER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// A started sniffer: dropping it stops the worker threads; `is_alive` says
+/// whether the capture thread still runs. A sniffer that never started (no
+/// firewall rule) or died (socket error) is not alive, so starting again is
+/// not refused as "already active".
+pub struct SnifferHandle {
+    _stop: Sender<()>,
+    alive: Arc<AtomicBool>,
+}
+
+impl SnifferHandle {
+    pub fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::SeqCst)
+    }
+}
+
+/// Clears the alive flag however the capture thread ends.
+struct AliveGuard(Arc<AtomicBool>);
+
+impl Drop for AliveGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
 
 // Helper to "Kick" or "Feed" the Watchdog
 fn feed_watchdog() {
@@ -50,7 +75,7 @@ pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
     }
 
     let mut tx_lock = state.sniffer_tx.lock();
-    if tx_lock.is_some() {
+    if tx_lock.as_ref().is_some_and(SnifferHandle::is_alive) {
         inject_system_message(
             &app,
             SystemLogLevel::Warning,
@@ -65,9 +90,14 @@ pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
     *tx_lock = Some(tx);
 }
 
-pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
+pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
     // We use a blank channel just for its lifecycle dropping properties
     let (tx, rx) = crossbeam_channel::unbounded::<()>();
+    let alive = Arc::new(AtomicBool::new(false));
+    let handle = SnifferHandle {
+        _stop: tx,
+        alive: alive.clone(),
+    };
 
     if !check_firewall_rule() {
         inject_system_message(
@@ -82,7 +112,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
         let _ = app.emit("firewall-missing", ());
 
         // Return immediately without spawning the network thread
-        return tx;
+        return handle;
     }
 
     let config = crate::config::current_config(&app);
@@ -94,7 +124,9 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
     let app_handle = app.clone();
     let rx_main = rx.clone();
 
+    alive.store(true, Ordering::SeqCst);
     thread::spawn(move || {
+        let _alive = AliveGuard(alive);
         inject_system_message(
             &app_handle,
             SystemLogLevel::Success,
@@ -186,7 +218,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> Sender<()> {
         }
     });
 
-    tx // Return the Sender to AppState!
+    handle // Kept in AppState; dropping it stops the sniffer
 }
 
 // --- 2. WATCHDOG THREAD ---

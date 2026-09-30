@@ -1,5 +1,6 @@
 use crate::{inject_system_message, AppState, SystemLogLevel};
 use resonance_core::download::write_atomic;
+use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use resonance_types::{default_favorite_messages, FavoriteMessage};
 use serde::{Deserialize, Serialize};
@@ -84,20 +85,10 @@ fn default_archive_ignored_channels() -> Vec<String> {
 }
 
 impl AppConfig {
-    /// Messages the backend keeps (and reloads): as many as the UI's all-tab
-    /// holds -- all channel limits together (see src/chat_view.rs tab_limit).
-    pub fn history_limit(&self) -> usize {
-        let sum: usize = self
-            .tab_limits
-            .iter()
-            .filter(|(k, _)| !matches!(k.as_str(), "전체" | "커스텀" | "SYSTEM"))
-            .map(|(_, v)| *v)
-            .sum();
-        if sum == 0 {
-            2000
-        } else {
-            sum
-        }
+    /// Messages the backend keeps (and reloads) per channel: the UI's
+    /// channel-tab limits (see src/chat_view.rs tab_limit).
+    pub fn channel_limits(&self) -> ChannelLimits {
+        ChannelLimits::new(&self.tab_limits)
     }
 }
 
@@ -238,7 +229,10 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
         }
     }
     *state.config.write() = config.clone();
-    state.chat_history.lock().set_limit(config.history_limit());
+    state
+        .chat_history
+        .lock()
+        .set_limits(config.channel_limits());
 
     if old_config.favorite_messages != config.favorite_messages {
         state.shortcuts.lock().favorites = config.favorite_messages.clone();

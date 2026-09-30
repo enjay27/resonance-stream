@@ -29,9 +29,10 @@ ui-check:
 
 # Needs a `dist/` folder: tauri::generate_context! checks frontendDist exists.
 
-# app part: Tauri backend, check + tests. Windows only.
+# app part: Tauri backend tests. Windows only. `cargo test` type-checks the lib,
+# the bin and the tests; a separate `cargo check` would build every dependency a
+# second time (check and test artifacts are not shared).
 app-check:
-    cargo check -p resonance-stream
     cargo test -p resonance-stream
 
 # app part from Linux: compile-only check against the Windows GNU target.

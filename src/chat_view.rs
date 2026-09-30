@@ -537,5 +537,4 @@ mod tests {
         }
         assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
-
 }

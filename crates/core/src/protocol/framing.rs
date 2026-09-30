@@ -6,7 +6,7 @@
 //! | type     | body                                               | used |
 //! |----------|----------------------------------------------------|------|
 //! | `0x0002` | 16-byte header, then a protobuf root: live chat    | yes  |
-//! | `0x0003` | 12-byte header, then a root: the player's own line, echoed (always also sent as `0x0002`) | no |
+//! | `0x0003` | 12-byte header, then a root: the player's own line, echoed (always also sent as `0x0002`) -- or, when the root has field 5, a one-line channel history | history only |
 //! | `0x0004` | none: keepalive, 6 bytes                            | no   |
 //! | `0x8002` | 16-byte header, zstd: world state, not chat         | no   |
 //! | `0x8003` | 12-byte header, zstd, then a root: channel history  | yes  |
@@ -20,6 +20,7 @@
 //! has not checked.
 
 use crate::protocol::compression::decompress;
+use crate::protocol::decoder::{field_end, read_varint, Fields, Value};
 
 /// A frame longer than this is not a frame (the biggest seen is ~4 KB).
 pub const MAX_FRAME_LEN: usize = 1 << 20;
@@ -38,7 +39,8 @@ const ZSTD_FIRST_BYTE: u8 = 0x28;
 pub enum FrameKind {
     /// `0x0002`: one chat line, with its channel.
     Live,
-    /// `0x8003`: the channel's recent lines, newest first.
+    /// `0x8003`, or a plain `0x0003` whose root has field 5: the channel's
+    /// recent lines, newest first.
     History,
 }
 
@@ -174,18 +176,32 @@ fn find_sync(data: &[u8]) -> Option<usize> {
 }
 
 fn decode(ty: u16, body: &[u8]) -> Option<Frame> {
-    let kind = match ty {
-        TYPE_CHAT => FrameKind::Live,
-        t if t == COMPRESSED | TYPE_OWN_LINE => FrameKind::History,
-        _ => return None,
-    };
     let payload = body.get(inner_header(ty)..)?;
     let root = if ty & COMPRESSED != 0 {
         decompress(payload)?
     } else {
         payload.to_vec()
     };
-    (root.first() == Some(&ROOT_TAG)).then_some(Frame { kind, root })
+    if root.first() != Some(&ROOT_TAG) {
+        return None;
+    }
+    let kind = match ty {
+        TYPE_CHAT => FrameKind::Live,
+        t if t == COMPRESSED | TYPE_OWN_LINE => FrameKind::History,
+        // Plain `0x0003`: a one-line history has `{3: channel, 5: chat}`, the
+        // echo of the player's own line does not (and comes again as `0x0002`).
+        TYPE_OWN_LINE if has_history_lines(&root) => FrameKind::History,
+        _ => return None,
+    };
+    Some(Frame { kind, root })
+}
+
+/// Whether a root carries chat lines in field 5 (the history layout).
+fn has_history_lines(root: &[u8]) -> bool {
+    let (len, read) = read_varint(&root[1..]);
+    let start = 1 + read;
+    let end = field_end(start, len, root.len());
+    Fields::new(&root[start..end]).any(|f| f.number() == 5 && matches!(f.value, Value::Bytes(_)))
 }
 
 #[cfg(test)]
@@ -266,6 +282,34 @@ mod tests {
         .concat();
         let got = FrameAssembler::new().push(&stream);
         assert_eq!(roots(&got), [&root(b"one")[..]]);
+    }
+
+    /// Root `{ 3: channel, 5: chat }` as the server sends a one-line history.
+    fn one_line_history_root() -> Vec<u8> {
+        let chat = [&[0x08, 0x01][..], b"\x12\x02hi"].concat();
+        let mut body = vec![0x18, 0x09, 0x2A, chat.len() as u8];
+        body.extend(chat);
+        root(&body)
+    }
+
+    #[test]
+    fn a_plain_0x0003_frame_with_history_lines_is_history() {
+        let got = FrameAssembler::new().push(&frame_of(TYPE_OWN_LINE, &one_line_history_root()));
+        assert_eq!(
+            got,
+            vec![Frame {
+                kind: FrameKind::History,
+                root: one_line_history_root()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_plain_0x0003_echo_stays_skipped() {
+        // `{ 3: chat, 4: server time }`: no field 5, so not history.
+        let echo = root(&[0x1A, 0x02, 0x08, 0x01, 0x20, 0x05]);
+        let got = FrameAssembler::new().push(&frame_of(TYPE_OWN_LINE, &echo));
+        assert!(got.is_empty());
     }
 
     #[test]

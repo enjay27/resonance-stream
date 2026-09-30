@@ -200,7 +200,35 @@ pub fn DataDevSection(
 
                         <div class="divider m-0 opacity-10"></div>
 
-                        // 2. Network Interface Manual Selection
+                        // 2. Raw packet capture (for protocol debugging)
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex flex-col">
+                                <span class="text-[11px] font-bold text-base-content/80">"패킷 원본 캡처 (Raw Capture)"</span>
+                                <span class="text-[9px] text-warning/80 italic">"게임 패킷(포트 5003)을 captures 폴더에 한 줄씩 저장합니다. 최대 50MB"</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button class="btn btn-xs btn-outline"
+                                    on:click=move |_| {
+                                        spawn_local(async {
+                                            let _ = invoke("open_captures_folder", JsValue::NULL).await;
+                                        });
+                                    }
+                                >
+                                    "폴더"
+                                </button>
+                                <input type="checkbox" class="toggle toggle-warning toggle-sm"
+                                    prop:checked=move || signals.raw_capture.get()
+                                    on:change=move |ev| {
+                                        signals.set_raw_capture.set(event_target_checked(&ev));
+                                        actions.save_config.dispatch(());
+                                    }
+                                />
+                            </div>
+                        </div>
+
+                        <div class="divider m-0 opacity-10"></div>
+
+                        // 3. Network Interface Manual Selection
                         <div class="flex items-center justify-between">
                             <div class="flex flex-col">
                                 <span class="text-[11px] font-bold text-base-content/80">"네트워크 어댑터 (Network Interface)"</span>

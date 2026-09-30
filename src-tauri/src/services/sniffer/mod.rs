@@ -1,6 +1,9 @@
 mod network;
+mod raw_capture;
 
 pub use self::network::*;
+use self::raw_capture::RawCapture;
+pub use self::raw_capture::{open_captures_folder, set_raw_capture};
 
 use crate::{inject_system_message, store_and_emit, TranslationJob};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -165,6 +168,8 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
         );
         // Raw unparsed fields are only useful when reverse-engineering the protocol.
         pipeline.set_keep_unknown_fields(config.debug_mode);
+        set_raw_capture(config.raw_capture);
+        let mut raw_capture = RawCapture::default();
 
         loop {
             if let Err(crossbeam_channel::TryRecvError::Disconnected) = rx_main.try_recv() {
@@ -193,6 +198,9 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
                 }
                 Err(_) => continue,
             };
+
+            // Debug capture of the untouched packet, before anything parses it.
+            raw_capture.feed(&app_handle, &buf[..n]);
 
             // 1. Feed the Pure Pipeline. The raw socket sees every IP packet on
             // the interface, so nothing here may cost more than the parse: the

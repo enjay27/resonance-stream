@@ -135,6 +135,7 @@ pub fn run() {
             check_ai_server_status,
             download_ai_server,
             start_sniffer_command,
+            open_captures_folder,
             get_chat_history,
             get_system_history,
             get_service_states,

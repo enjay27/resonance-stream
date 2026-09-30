@@ -3,13 +3,16 @@
 //! segments and wraps each in an IPv4/TCP packet, as the raw socket sees it.
 
 use etherparse::PacketBuilder;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 pub const SERVER: [u8; 4] = [43, 155, 1, 1];
 pub const CLIENT: [u8; 4] = [192, 168, 0, 10];
 pub const GAME_PORT: u16 = 5003;
-/// Application header in front of each root. Its layout is not known; the
-/// framing only needs it to be a fixed size (4 in every capture so far).
-pub const HEADER: [u8; 4] = [0x00, 0x00, 0x01, 0x2C];
+/// Frame types (read off a real capture). Bit 15 = the body is zstd.
+pub const TYPE_CHAT: u16 = 0x0002;
+pub const TYPE_OWN_LINE: u16 = 0x0003;
+pub const TYPE_KEEPALIVE: u16 = 0x0004;
+pub const COMPRESSED: u16 = 0x8000;
 
 // --- protobuf-style encoding ---
 
@@ -123,7 +126,7 @@ impl Chat {
         self
     }
 
-    fn payload(&self) -> Vec<u8> {
+    pub fn payload(&self) -> Vec<u8> {
         let sender = [
             var_field(1, self.uid),
             bytes_field(2, self.nickname.as_bytes()),
@@ -190,8 +193,41 @@ pub fn root(fields: Vec<u8>) -> Vec<u8> {
     [vec![0x0A], varint(fields.len() as u64), fields].concat()
 }
 
+/// A live chat frame: `[len][0x0002][16-byte header][root]`.
 pub fn frame(root: &[u8]) -> Vec<u8> {
-    [HEADER.to_vec(), root.to_vec()].concat()
+    frame_of(TYPE_CHAT, 16, root)
+}
+
+/// `[u32 length, header included][u16 type][header][payload]`. The inner
+/// header's contents are not known; the game's varies, ours is zeros.
+pub fn frame_of(ty: u16, header_len: usize, payload: &[u8]) -> Vec<u8> {
+    let len = (6 + header_len + payload.len()) as u32;
+    [
+        &len.to_be_bytes()[..],
+        &ty.to_be_bytes(),
+        &vec![0u8; header_len],
+        payload,
+    ]
+    .concat()
+}
+
+/// A 6-byte keepalive frame; the game sends these all the time.
+pub fn keepalive() -> Vec<u8> {
+    frame_of(TYPE_KEEPALIVE, 0, &[])
+}
+
+/// The channel history the server re-sends (type 0x8003, zstd): `{ 3: channel,
+/// 5: chat, ... }`, newest first, so `lines` (oldest first) are reversed.
+pub fn history_frame(channel: Channel, lines: &[Chat]) -> Vec<u8> {
+    let mut fields = var_field(3, channel.code());
+    for line in lines.iter().rev() {
+        fields.extend(bytes_field(5, &line.payload()));
+    }
+    let packed = ruzstd::encoding::compress_to_vec(
+        &root(fields)[..],
+        ruzstd::encoding::CompressionLevel::Fastest,
+    );
+    frame_of(COMPRESSED | TYPE_OWN_LINE, 12, &packed)
 }
 
 // --- cutting a byte stream into TCP segments ---
@@ -227,18 +263,27 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// Each connection starts at its own sequence range, as separate TCP
+    /// connections do; two of them never look like a retransmit of each other.
     pub fn new(client: [u8; 4], client_port: u16) -> Self {
+        static NEXT_START: AtomicU32 = AtomicU32::new(1_000);
+        let start = NEXT_START.fetch_add(1 << 20, Ordering::Relaxed);
         Self {
             server: SERVER,
             server_port: GAME_PORT,
             client,
             client_port,
-            next_seq: 1_000,
+            next_seq: start,
         }
     }
 
     pub fn to_default_client() -> Self {
         Self::new(CLIENT, 50_000)
+    }
+
+    /// The sequence number the next segment carries.
+    pub fn seq(&self) -> u32 {
+        self.next_seq
     }
 
     /// The next segment of the stream as an IPv4/TCP packet.

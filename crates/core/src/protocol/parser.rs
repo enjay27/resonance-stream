@@ -51,6 +51,50 @@ pub fn parsing_pipeline(data: &[u8]) -> Vec<Port5003Event> {
     events
 }
 
+/// A `0x8003` history root: `{ 3: channel, 5: chat, 5: chat, ... }`, each
+/// `5` laid out like a live root's field `2`, newest first. Returned oldest
+/// first, so the lines are shown in the order they were said.
+pub fn history_pipeline(data: &[u8]) -> Vec<Port5003Event> {
+    let Some(raw) = split_history(data) else {
+        return Vec::new();
+    };
+    let mut events = stage2_process(raw);
+    events.reverse();
+    events
+}
+
+fn split_history(data: &[u8]) -> Option<SplitPayload<'_>> {
+    if data.len() < 3 || data[0] != 0x0A {
+        return None;
+    }
+    let (total_len, header_read) = read_varint(&data[1..]);
+    let body_start = 1 + header_read;
+    let safe_end = field_end(body_start, total_len, data.len());
+
+    let mut payload = SplitPayload {
+        channel: "WORLD".to_string(),
+        chat_blocks: Vec::new(),
+    };
+    for field in Fields::new(&data[body_start..safe_end]) {
+        match (field.number(), field.value) {
+            (3, Value::Varint(code)) => payload.channel = channel_name(code),
+            (5, Value::Bytes(block)) => payload.chat_blocks.push((2, block)),
+            _ => {}
+        }
+    }
+    (!payload.chat_blocks.is_empty()).then_some(payload)
+}
+
+fn channel_name(code: u64) -> String {
+    match code {
+        2 => "LOCAL",
+        3 => "PARTY",
+        4 => "GUILD",
+        _ => "WORLD",
+    }
+    .into()
+}
+
 // --- STAGE 1: SPLIT ---
 // Separates the raw Protobuf packet into categorized byte blocks.
 pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload<'_>> {
@@ -79,12 +123,7 @@ pub(crate) fn stage1_split(data: &[u8]) -> Option<SplitPayload<'_>> {
             }
             Value::Varint(val) => {
                 if matches!(field.number(), 1 | 2) {
-                    payload.channel = match val {
-                        2 => "LOCAL".into(),
-                        3 => "PARTY".into(),
-                        4 => "GUILD".into(),
-                        _ => "WORLD".into(),
-                    };
+                    payload.channel = channel_name(val);
                 }
             }
             Value::Other => {}
@@ -284,6 +323,92 @@ fn parse_message_block(data: &[u8], payload: &mut ChatPayload) {
 mod tests {
     use super::*;
     use crate::protocol::decoder::skip_field;
+
+    fn varint_bytes(mut v: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let byte = (v & 0x7F) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(byte);
+                return out;
+            }
+            out.push(byte | 0x80);
+        }
+    }
+
+    fn field_bytes(tag: u8, body: &[u8]) -> Vec<u8> {
+        [vec![tag], varint_bytes(body.len() as u64), body.to_vec()].concat()
+    }
+
+    /// `{ 1: id, 2: { 1: uid, 2: name }, 3: time, 4: { 3: text } }`
+    fn entry(id: u8, uid: u8, name: &str, time: u8, text: &str) -> Vec<u8> {
+        [
+            vec![0x08, id],
+            field_bytes(
+                0x12,
+                &[&[0x08, uid][..], &field_bytes(0x12, name.as_bytes())].concat(),
+            ),
+            vec![0x18, time],
+            field_bytes(0x22, &field_bytes(0x1A, text.as_bytes())),
+        ]
+        .concat()
+    }
+
+    fn history_root(channel: u8, entries: &[Vec<u8>]) -> Vec<u8> {
+        let mut fields = vec![0x18, channel];
+        for e in entries {
+            fields.extend(field_bytes(0x2A, e));
+        }
+        field_bytes(0x0A, &fields)
+    }
+
+    fn texts(events: &[Port5003Event]) -> Vec<&str> {
+        events
+            .iter()
+            .map(|Port5003Event::Chat(c)| c.message.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn history_lines_come_out_oldest_first() {
+        // The server sends the newest line first.
+        let root = history_root(
+            1,
+            &[
+                entry(3, 7, "Cid", 30, "newest"),
+                entry(2, 6, "Ann", 20, "middle"),
+                entry(1, 5, "Bob", 10, "oldest"),
+            ],
+        );
+        let events = history_pipeline(&root);
+        assert_eq!(texts(&events), ["oldest", "middle", "newest"]);
+        let Port5003Event::Chat(first) = &events[0];
+        assert_eq!(first.nickname, "Bob");
+        assert_eq!(first.uid, 5);
+        assert_eq!(first.sequence_id, 1);
+        assert_eq!(first.timestamp, 10);
+        assert_eq!(first.channel, "WORLD");
+    }
+
+    #[test]
+    fn history_channel_follows_the_roots_channel_field() {
+        for (code, name) in [(2, "LOCAL"), (3, "PARTY"), (4, "GUILD"), (1, "WORLD")] {
+            let events = history_pipeline(&history_root(code, &[entry(1, 5, "Bob", 10, "x")]));
+            let Port5003Event::Chat(chat) = &events[0];
+            assert_eq!(chat.channel, name);
+        }
+    }
+
+    #[test]
+    fn a_history_root_without_lines_or_a_live_root_gives_nothing() {
+        assert!(history_pipeline(&history_root(1, &[])).is_empty());
+        assert!(history_pipeline(&[]).is_empty());
+        // A live chat root is not a history root.
+        let live = field_bytes(0x0A, &field_bytes(0x12, &entry(1, 5, "Bob", 10, "x")));
+        assert!(history_pipeline(&live).is_empty());
+        assert_eq!(texts(&parsing_pipeline(&live)), ["x"]);
+    }
 
     #[test]
     fn test_standard_read_varint() {
@@ -507,9 +632,11 @@ mod tests {
                     .copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]);
             }
             parsing_pipeline(&data);
-            for root in crate::protocol::framing::FrameAssembler::new().push(&data) {
-                parsing_pipeline(&root);
+            for frame in crate::protocol::framing::FrameAssembler::new().push(&data) {
+                parsing_pipeline(&frame.root);
+                history_pipeline(&frame.root);
             }
+            history_pipeline(&data);
         }
     }
 

@@ -46,6 +46,7 @@ pub fn create_actions(signals: AppSignals) -> AppActions {
         tab_switch_key,
         favorite_messages,
         chat_log_retention_days,
+        raw_capture,
         ..
     } = signals;
 
@@ -84,6 +85,7 @@ pub fn create_actions(signals: AppSignals) -> AppActions {
             tab_switch_key: tab_switch_key.get_untracked(),
             favorite_messages: favorite_messages.get_untracked(),
             chat_log_retention_days: chat_log_retention_days.get_untracked(),
+            raw_capture: raw_capture.get_untracked(),
         };
 
         async move {

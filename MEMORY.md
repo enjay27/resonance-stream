@@ -4,11 +4,13 @@
 
 ## Now — 2026-09-30
 
+**Raw capture tool + W2 framing (2026-09-30, `claude/festive-hypatia-5r78o7`):** settings > debug mode > "Raw Capture" (`raw_capture`, live) appends each port-5003 packet as `<unix_ms>\t<hex IPv4 packet>` to `<app data>/captures/capture-*.log` (50 MB cap; `capture/recorder.rs`). Kade's first capture gave the real frame layout (`[u32 len][u16 type][body]`, bit 15 = zstd; table in `protocol/framing.rs` and [`core-review-2026-09-30.md`](.memory/roadmap/core-review-2026-09-30.md)). **W2 done:** length-based `FrameAssembler`, TCP-seq retransmit/gap handling in `StreamTracker`, `0x8003` channel history decompressed (`ruzstd`) and shown oldest-first (`parser::history_pipeline`); the mock's rich-line loss is gone. Real capture pinned (256 packets -> 160 chats) in `crates/core/tests/capture_replay.rs`; the file itself is gitignored (`tests/fixtures/*.capture.log`), CI skips it. NOT VERIFIED: Windows run. Open questions: file above.
+
 **Per-channel archive (2026-09-30, `claude/per-channel-archive-compact-copy`):** the global `archive_chat` toggle is gone; the archive worker always runs and each tab (right-click, `archive_ignored_channels`) decides. `dataset_raw.jsonl` -> `dataset_<CHANNEL>.jsonl` (`dataset_file_name`, core); daily `chat_logs/` unchanged; write failures reported once as a system message. Old `dataset_raw.jsonl` is left as is. Compact-mode star/COPY on one line. Compact "hide original" fixed: the original bubble carried `inline` and `hidden` together and `inline` won (`compact_original_class`, tested). NOT VERIFIED: needs a Windows run (files appear per tab; compact hover).
 
 **Integration tests (2026-09-30, `claude/integration-test-harness`):** mock game server +
-mock llama-server in `crates/llama/tests/`; HTTP timeouts fixed. **Found: framing loses
-lines around rich messages** (pinned, fix is W2) --
+mock llama-server in `crates/llama/tests/`; HTTP timeouts fixed. Found framing loses
+lines around rich messages -- fixed by W2 (above) --
 [`sessions/2026-09-30-integration-tests.md`](.memory/sessions/2026-09-30-integration-tests.md).
 
 **Review round 2 (2026-09-30):** core + UI communication + LLM server —
@@ -18,8 +20,7 @@ Steps 1-7 in order, one PR each. Steps 1 (A1 `get_service_states`) 2 (A2/A9 tran
 **Core review follow-up (2026-09-30):** record and status in
 [`.memory/roadmap/core-review-2026-09-30.md`](.memory/roadmap/core-review-2026-09-30.md).
 Done: W3, P1, W1, W5 (PRs #38-#41) and the field iterator `decoder::Fields` (parser output
-pinned by a golden test). **Next: W2 real framing -- blocked until Kade has a port-5003
-capture** (what to record is in that file). TDD is the rule (CLAUDE.md); `just coverage`.
+pinned by a golden test). W2 done (see above). TDD is the rule (CLAUDE.md); `just coverage`.
 
 **Graft-guided refactor, phases 0–5: done** —
 [`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).

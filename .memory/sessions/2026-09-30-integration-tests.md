@@ -22,6 +22,8 @@ is an error; integration tests first, real capture (W2) after.
   boundary, a segment ending inside a rich line resolves as that false root and the
   assembler throws away everything it was holding (8 lines in the pinned case).
   Both pinned in `capture.rs` as today's behaviour; a framing fix flips them.
+  **Fixed by W2 (length-based framing); both tests now assert the lines are shown.**
+  It was the mock's guessed header, not observed in a real capture.
   Random coalescing on frame boundaries and random splits of plain lines are fine
   (500 seeded rounds each).
 - **No HTTP timeout** on the translator's client: a hung llama-server stalled the

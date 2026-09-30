@@ -272,30 +272,35 @@ fn garbage_in_front_of_a_clean_segment_does_not_hide_the_next_line() {
 
 #[test]
 fn a_lost_segment_costs_its_frame_only() {
-    // The middle of `lost` never arrives; the frames after it still decode.
+    // The middle of `lost` never arrives (its sequence numbers are skipped);
+    // the frames after it still decode.
     let lost = chat(1, 100, "Bob", "lost in transit").frame();
     let next = chat(2, 101, "Ann", "still here").frame();
     let mut conn = Connection::to_default_client();
     let (head, _missing) = lost.split_at(lost.len() / 2);
-    let packets = [conn.packet(head), conn.packet(&next)];
+    let start = conn.seq();
+    let packets = [
+        conn.packet(head),
+        conn.packet_at(start + lost.len() as u32, &next),
+    ];
     let got = Capture::new().texts(&packets);
     assert_eq!(got, ["still here"]);
 }
 
 #[test]
 fn reordered_segments_lose_that_frame_only() {
-    // Known gap (W2 in .memory/roadmap/core-review-2026-09-30.md): the
-    // framing does not read TCP sequence numbers, so a frame whose halves
-    // arrive swapped is dropped. Pinned so a fix shows up here; what must
-    // hold today is that nothing panics and the next frame decodes.
+    // Known gap: segments are not put back in order, so a frame whose halves
+    // arrive swapped is dropped. What must hold is that nothing panics, the
+    // late half is not taken for new data, and the next frame decodes.
     let swapped = chat(1, 100, "Bob", "swapped halves").frame();
     let next = chat(2, 101, "Ann", "next").frame();
     let conn = Connection::to_default_client();
+    let base = conn.seq();
     let (a, b) = swapped.split_at(swapped.len() / 2);
     let packets = [
-        conn.packet_at(1_000 + a.len() as u32, b),
-        conn.packet_at(1_000, a),
-        conn.packet_at(1_000 + swapped.len() as u32, &next),
+        conn.packet_at(base + a.len() as u32, b),
+        conn.packet_at(base, a),
+        conn.packet_at(base + swapped.len() as u32, &next),
     ];
     assert_eq!(Capture::new().texts(&packets), ["next"]);
 }
@@ -364,12 +369,9 @@ fn a_burst_coalesced_any_way_gives_the_same_lines() {
 }
 
 #[test]
-fn each_plain_line_split_anywhere_gives_the_same_lines() {
-    // Every frame on its own, each cut into up to 5 pieces at random. Rich
-    // lines are left out: see `a_rich_line_cut_right_after_its_text_is_lost`.
-    let (mut frames, mut want) = burst();
-    frames.pop();
-    want.pop();
+fn each_line_split_anywhere_gives_the_same_lines() {
+    // Every frame on its own, each cut into up to 5 pieces at random.
+    let (frames, want) = burst();
     let mut rng = Rng(0x5EED_CAFE_F00D_0002);
     for round in 0..500 {
         let mut segments = Vec::new();
@@ -396,12 +398,10 @@ fn sizes(segments: &[Vec<u8>]) -> Vec<usize> {
 }
 
 #[test]
-fn a_rich_line_cut_right_after_its_text_is_lost() {
-    // Known bug (W2, framing without the real header): the text chunk is
-    // `0x0A len text`, the same shape as a root. A segment that ends right
-    // after the text resolves as that false root on its own, so the real
-    // frame's start is not held, and the rest arrives alone. Pinned so a
-    // framing fix shows up here: the fix must show the line.
+fn a_rich_line_cut_right_after_its_text_is_shown() {
+    // Was a bug while framing went by shape: the text chunk is `0x0A len
+    // text`, the same shape as a root, so a segment ending right after the
+    // text read as a frame of its own. Frames are read by length now.
     let line = chat(1, 100, "Bob", "")
         .rich(vec![Chunk::Text("売ります ".into()), Chunk::ItemLink])
         .frame();
@@ -409,29 +409,109 @@ fn a_rich_line_cut_right_after_its_text_is_lost() {
     let text_end = line.windows(text.len()).position(|w| w == text).unwrap() + text.len();
     let segments = cut_at(&line, &[text_end]);
 
-    let mut warm = Capture::new();
     let mut conn = Connection::to_default_client();
-    let first = chat(1, 1, "Ann", "header learned").frame();
-    assert_eq!(warm.texts(&[conn.packet(&first)]), ["header learned"]);
-    assert_eq!(warm.texts(&conn.packets(&segments)), Vec::<String>::new());
+    let first = chat(1, 1, "Ann", "before").frame();
+    let mut capture = Capture::new();
+    assert_eq!(capture.texts(&[conn.packet(&first)]), ["before"]);
+    assert_eq!(
+        capture.texts(&conn.packets(&segments)),
+        ["売ります [아이템 링크]"]
+    );
 }
 
 #[test]
-fn a_segment_that_ends_inside_a_rich_line_can_drop_the_whole_held_burst() {
-    // Known bug, found by random cuts (W2, framing without the real header):
-    // no segment below ends on a frame boundary, so the first 420 bytes
-    // (seven complete lines and the start of the rich one) are held. The
-    // fourth segment, read on its own, looks like a 15-byte root: the text
-    // chunk's 0x0A tag, whose length ends exactly where the segment does.
-    // That wins over the held bytes, which are thrown away -- all 8 lines
-    // are lost. Pinned so a framing fix shows up here: the fix must make
-    // this show every line of `burst()`.
-    let (frames, _) = burst();
+fn a_burst_cut_inside_a_rich_line_shows_every_line() {
+    // Was a bug (found by random cuts): the 4th segment read on its own as a
+    // 15-byte root and the 420 bytes held before it were thrown away.
+    let (frames, want) = burst();
     let stream = frames.concat();
     let segments = cut_at(&stream, &[246, 310, 420, 464]);
-    assert_eq!(sizes(&segments), [246, 64, 110, 44, 6]);
+    assert_eq!(Capture::new().texts(&one_per_segment(&segments)), want);
+}
+
+#[test]
+fn keepalives_between_lines_change_nothing() {
+    let stream = [
+        keepalive(),
+        chat(1, 100, "Bob", "one").frame(),
+        keepalive(),
+        keepalive(),
+        chat(2, 101, "Ann", "two").frame(),
+        keepalive(),
+    ]
+    .concat();
+    for size in [1, 5, 64, stream.len()] {
+        let got = Capture::new().texts(&one_per_segment(&cut_every(&stream, size)));
+        assert_eq!(got, ["one", "two"], "segments of {size}");
+    }
+}
+
+#[test]
+fn the_channel_history_is_shown_oldest_first() {
+    let lines = [
+        chat(1, 100, "Bob", "first"),
+        chat(2, 101, "Ann", "second"),
+        chat(3, 102, "Cid", "third"),
+    ];
+    let got = Capture::new().feed(&one_per_segment(&[history_frame(Channel::Guild, &lines)]));
+    let shown: Vec<_> = got
+        .iter()
+        .map(|c| (c.message.as_str(), c.channel.as_str()))
+        .collect();
     assert_eq!(
-        Capture::new().texts(&one_per_segment(&segments)),
-        Vec::<String>::new()
+        shown,
+        [("first", "GUILD"), ("second", "GUILD"), ("third", "GUILD")]
     );
+    assert_eq!(got[1].nickname, "Ann");
+    assert_eq!(got[1].uid, 101);
+}
+
+#[test]
+fn history_the_client_already_showed_live_is_not_shown_again() {
+    let lines = [chat(1, 100, "Bob", "old"), chat(2, 101, "Ann", "live")];
+    let mut conn = Connection::to_default_client();
+    let mut capture = Capture::new();
+    assert_eq!(capture.texts(&[conn.packet(&lines[1].frame())]), ["live"]);
+    let got = capture.texts(&[conn.packet(&history_frame(Channel::World, &lines))]);
+    assert_eq!(got, ["old"]);
+    // The server re-sends the same history a while later: nothing new.
+    let again = capture.texts(&[conn.packet(&history_frame(Channel::World, &lines))]);
+    assert!(again.is_empty());
+}
+
+#[test]
+fn a_history_frame_cut_into_segments_is_joined() {
+    let lines = [chat(1, 100, "Bob", "a"), chat(2, 101, "Ann", "b")];
+    let frame = history_frame(Channel::World, &lines);
+    for cut in 1..frame.len() {
+        let got = Capture::new().texts(&one_per_segment(&cut_at(&frame, &[cut])));
+        assert_eq!(got, ["a", "b"], "cut at {cut} of {}", frame.len());
+    }
+}
+
+#[test]
+fn joining_a_connection_mid_frame_finds_the_next_lines() {
+    // The app started while a frame was in flight: its tail comes first.
+    let cut_frame = chat(1, 100, "Bob", "half a frame").frame();
+    let tail = &cut_frame[cut_frame.len() / 2..];
+    let next = chat(2, 101, "Ann", "whole").frame();
+    let got = Capture::new().texts(&one_per_segment(&[tail.to_vec(), next]));
+    assert_eq!(got, ["whole"]);
+}
+
+#[test]
+fn a_frame_that_will_not_inflate_costs_its_frame_only() {
+    let bad = frame_of(COMPRESSED | TYPE_OWN_LINE, 12, &[0x28, 1, 2, 3, 4, 5]);
+    let next = chat(1, 100, "Bob", "after").frame();
+    let got = Capture::new().texts(&one_per_segment(&[bad, next]));
+    assert_eq!(got, ["after"]);
+}
+
+#[test]
+fn the_echo_of_the_players_own_line_is_not_shown_twice() {
+    // The game sends the player's own line as type 0x0002 and again as 0x0003.
+    let line = chat(1, 100, "Me", "hello");
+    let echo = frame_of(TYPE_OWN_LINE, 12, &root(bytes_field(3, &line.payload())));
+    let got = Capture::new().texts(&one_per_segment(&[line.frame(), echo]));
+    assert_eq!(got, ["hello"]);
 }

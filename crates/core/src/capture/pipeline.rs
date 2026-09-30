@@ -1,6 +1,7 @@
 use crate::capture::message_processor::{MessageProcessor, ProcessAction};
 use crate::capture::stream_tracker::{StreamKey, StreamTracker};
-use crate::protocol::parser::{parsing_pipeline, Port5003Event};
+use crate::protocol::framing::FrameKind;
+use crate::protocol::parser::{history_pipeline, parsing_pipeline, Port5003Event};
 use crate::text::normalize_emotes;
 use etherparse::{NetHeaders, PacketHeaders, TransportHeader};
 use resonance_types::ChatMessage;
@@ -80,12 +81,18 @@ impl ChatPipeline {
         stream_key[6..10].copy_from_slice(&ipv4.destination);
         stream_key[10..12].copy_from_slice(&tcp.destination_port.to_be_bytes());
 
-        // 3. Assemble fragmented bytes into complete Protobuf packets
-        let assembled_packets = self.tracker.process_bytes(stream_key, payload);
+        // 3. Assemble fragmented bytes into complete frames (retransmits dropped)
+        let frames = self
+            .tracker
+            .process_bytes(stream_key, tcp.sequence_number, payload);
 
-        // 4. Process the fully assembled packets
-        for packet_data in assembled_packets {
-            for event in parsing_pipeline(&packet_data) {
+        // 4. Process the fully assembled frames
+        for frame in frames {
+            let events = match frame.kind {
+                FrameKind::Live => parsing_pipeline(&frame.root),
+                FrameKind::History => history_pipeline(&frame.root),
+            };
+            for event in events {
                 // Guard clause for the event loop using let-else
                 let Port5003Event::Chat(mut chat) = event;
                 if !self.keep_unknown_fields {
@@ -118,7 +125,33 @@ impl ChatPipeline {
 mod tests {
     use super::*;
     use etherparse::PacketBuilder;
+    use ruzstd::encoding::{compress_to_vec, CompressionLevel};
     use std::collections::HashMap;
+
+    /// `[len][type][16-byte header][root]`: a live chat frame as the game sends it.
+    fn frame(root: &[u8]) -> Vec<u8> {
+        frame_of(0x0002, 16, root)
+    }
+
+    fn frame_of(ty: u16, header: usize, payload: &[u8]) -> Vec<u8> {
+        let len = (6 + header + payload.len()) as u32;
+        [
+            &len.to_be_bytes()[..],
+            &ty.to_be_bytes(),
+            &vec![0u8; header],
+            payload,
+        ]
+        .concat()
+    }
+
+    /// `[len][0x8003][12-byte header][zstd(root)]`: the channel history.
+    fn history_frame(root: &[u8]) -> Vec<u8> {
+        frame_of(
+            0x8003,
+            12,
+            &compress_to_vec(root, CompressionLevel::Fastest),
+        )
+    }
 
     #[test]
     fn test_full_chat_pipeline() {
@@ -134,8 +167,7 @@ mod tests {
 
         // 1. Construct the raw Protobuf payload for a complete BPSR Chat Message
         // Includes Session ID (Sequence ID), Sender Info (Nickname & UID), and Message Text
-        let tcp_payload = vec![
-            0x00, 0x00, 0x00, 0x00, // Fake 4-byte application header
+        let tcp_root = vec![
             0x0A, // Protobuf Root Tag
             0x14, // Root Length: 20 bytes
             // --- ChatPayload Wrapper (Tag 18 -> 0x12) ---
@@ -150,6 +182,7 @@ mod tests {
             0x22, 0x04, // Tag 34, Length 4
             0x1A, 0x02, 0x48, 0x69, // Text (Tag 26) = "Hi"
         ];
+        let tcp_payload = frame(&tcp_root);
 
         // 2. Wrap it in valid IPv4 and TCP headers
         let builder =
@@ -183,17 +216,17 @@ mod tests {
             panic!("Pipeline failed to emit a new message.");
         }
     }
-    fn tcp_from_5003(payload: &[u8]) -> Vec<u8> {
+    fn tcp_from_5003(seq: u32, payload: &[u8]) -> Vec<u8> {
         let builder =
-            PacketBuilder::ipv4([192, 168, 1, 1], [192, 168, 1, 2], 64).tcp(5003, 12345, 1, 0);
+            PacketBuilder::ipv4([192, 168, 1, 1], [192, 168, 1, 2], 64).tcp(5003, 12345, seq, 0);
         let mut out = Vec::new();
         builder.write(&mut out, payload).unwrap();
         out
     }
 
     /// Like `tcp_from_5003`, but to a chosen client (address and port).
-    fn tcp_from_5003_to(client: [u8; 4], port: u16, payload: &[u8]) -> Vec<u8> {
-        let builder = PacketBuilder::ipv4([192, 168, 1, 1], client, 64).tcp(5003, port, 1, 0);
+    fn tcp_from_5003_to(client: [u8; 4], port: u16, seq: u32, payload: &[u8]) -> Vec<u8> {
+        let builder = PacketBuilder::ipv4([192, 168, 1, 1], client, 64).tcp(5003, port, seq, 0);
         let mut out = Vec::new();
         builder.write(&mut out, payload).unwrap();
         out
@@ -209,15 +242,15 @@ mod tests {
         let (a1, a2) = hello.split_at(10);
         let (b1, b2) = world.split_at(10);
         let order = [
-            ([10, 0, 0, 1], 40000, a1),
-            ([10, 0, 0, 2], 40001, b1),
-            ([10, 0, 0, 1], 40000, a2),
-            ([10, 0, 0, 2], 40001, b2),
+            ([10, 0, 0, 1], 40000, 1_000, a1),
+            ([10, 0, 0, 2], 40001, 9_000, b1),
+            ([10, 0, 0, 1], 40000, 1_000 + a1.len() as u32, a2),
+            ([10, 0, 0, 2], 40001, 9_000 + b1.len() as u32, b2),
         ];
         let mut got = Vec::new();
-        for (client, port, part) in order {
+        for (client, port, seq, part) in order {
             for action in pipeline.feed_network_packet(
-                &tcp_from_5003_to(client, port, part),
+                &tcp_from_5003_to(client, port, seq, part),
                 |_| false,
                 || 1,
                 || {},
@@ -230,24 +263,27 @@ mod tests {
         assert_eq!(got, ["Hello", "World"]);
     }
 
-    /// App header + root { field 4: { tag 0x1A text } } -- a "Me" message.
+    /// Frame + root { field 4: { tag 0x1A text } } -- a "Me" message.
     fn me_segment(text: &str) -> Vec<u8> {
         let mut block = vec![0x1A, text.len() as u8];
         block.extend_from_slice(text.as_bytes());
         let mut root = vec![0x22, block.len() as u8];
         root.extend(block);
-        let mut seg = vec![0, 0, 0, 0, 0x0A, root.len() as u8];
+        let mut seg = vec![0x0A, root.len() as u8];
         seg.extend(root);
-        seg
+        frame(&seg)
     }
 
     fn emitted(pipeline: &mut ChatPipeline, segments: &[Vec<u8>]) -> Vec<ChatMessage> {
         let blocked: HashMap<u64, String> = HashMap::new();
         let mut pid = 0;
+        let mut seq = 1_000u32;
         let mut out = Vec::new();
         for seg in segments {
+            let at = seq;
+            seq = seq.wrapping_add(seg.len() as u32);
             let actions = pipeline.feed_network_packet(
-                &tcp_from_5003(seg),
+                &tcp_from_5003(at, seg),
                 |uid| blocked.contains_key(&uid),
                 || {
                     pid += 1;
@@ -272,8 +308,9 @@ mod tests {
         assert_eq!(texts, ["one", "two"]);
     }
 
-    /// App header + root { field 2: chat { seq, sender "Bob", message } }.
-    fn chat_segment(seq: u8, text: &str) -> Vec<u8> {
+    /// A chat as both the live and the history frames carry it:
+    /// { 1: seq, 2: sender "Bob" (uid 100), 4: message }.
+    fn chat_payload(seq: u8, text: &str) -> Vec<u8> {
         let mut msg = vec![0x1A, text.len() as u8];
         msg.extend_from_slice(text.as_bytes());
         let sender = [0x08, 0x64, 0x12, 0x03, b'B', b'o', b'b'];
@@ -281,11 +318,31 @@ mod tests {
         payload.extend_from_slice(&sender);
         payload.extend([0x22, msg.len() as u8]);
         payload.extend(msg);
+        payload
+    }
+
+    /// Frame + root { field 2: chat }.
+    fn chat_segment(seq: u8, text: &str) -> Vec<u8> {
+        let payload = chat_payload(seq, text);
         let mut root = vec![0x12, payload.len() as u8];
         root.extend(payload);
-        let mut seg = vec![0, 0, 0, 0, 0x0A, root.len() as u8];
+        let mut seg = vec![0x0A, root.len() as u8];
         seg.extend(root);
-        seg
+        frame(&seg)
+    }
+
+    /// Compressed history frame, root { 3: WORLD, 5: chat, 5: chat, ... }; the
+    /// lines are given oldest first and sent newest first, as the server does.
+    fn history_segment(lines: &[(u8, &str)]) -> Vec<u8> {
+        let mut fields = vec![0x18, 0x01];
+        for (seq, text) in lines.iter().rev() {
+            let payload = chat_payload(*seq, text);
+            fields.extend([0x2A, payload.len() as u8]);
+            fields.extend(payload);
+        }
+        let mut root = vec![0x0A, fields.len() as u8];
+        root.extend(fields);
+        history_frame(&root)
     }
 
     fn texts(chats: &[ChatMessage]) -> Vec<&str> {
@@ -354,12 +411,17 @@ mod tests {
         let mut https = Vec::new();
         other.write(&mut https, b"hello").unwrap();
         pipeline.feed_network_packet(&https, &is_blocked, || 1, || {});
-        pipeline.feed_network_packet(&tcp_from_5003(&[1, 2, 3, 4, 5]), &is_blocked, || 1, || {});
+        pipeline.feed_network_packet(
+            &tcp_from_5003(1, &[1, 2, 3, 4, 5]),
+            &is_blocked,
+            || 1,
+            || {},
+        );
         assert_eq!(lookups.get(), 0);
 
         // One chat message from uid 100: one lookup, and it is marked blocked.
         let actions = pipeline.feed_network_packet(
-            &tcp_from_5003(&chat_segment(1, "hi")),
+            &tcp_from_5003(6, &chat_segment(1, "hi")), // after the 5 bytes above
             &is_blocked,
             || 1,
             || {},
@@ -385,7 +447,7 @@ mod tests {
         assert_eq!(texts(&again), ["New"]);
     }
 
-    /// App header + a chat whose payload carries an unknown field (tag 0x28 = field 5).
+    /// Frame + a chat whose payload carries an unknown field (tag 0x28 = field 5).
     fn chat_with_unknown_field() -> Vec<u8> {
         let payload = [
             0x08, 0x01, // session id 1
@@ -395,9 +457,9 @@ mod tests {
         ];
         let mut root = vec![0x12, payload.len() as u8];
         root.extend_from_slice(&payload);
-        let mut seg = vec![0, 0, 0, 0, 0x0A, root.len() as u8];
+        let mut seg = vec![0x0A, root.len() as u8];
         seg.extend(root);
-        seg
+        frame(&seg)
     }
 
     #[test]
@@ -411,5 +473,41 @@ mod tests {
         pipeline.set_keep_unknown_fields(true);
         let got = emitted(&mut pipeline, &[chat_with_unknown_field()]);
         assert!(!got[0].unknown_fields.is_empty());
+    }
+
+    #[test]
+    fn history_lines_are_emitted_oldest_first() {
+        let mut pipeline = ChatPipeline::new();
+        let got = emitted(&mut pipeline, &[history_segment(&[(1, "old"), (2, "new")])]);
+        let texts: Vec<_> = got.iter().map(|c| c.message.as_str()).collect();
+        assert_eq!(texts, ["old", "new"]);
+        assert_eq!(got[0].channel, "WORLD");
+        assert_eq!(got[0].nickname, "Bob");
+    }
+
+    #[test]
+    fn history_lines_already_seen_live_are_not_shown_again() {
+        let mut pipeline = ChatPipeline::new();
+        let got = emitted(
+            &mut pipeline,
+            &[
+                chat_segment(2, "seen live"),
+                history_segment(&[(1, "missed"), (2, "seen live"), (3, "also missed")]),
+                history_segment(&[(1, "missed"), (2, "seen live"), (3, "also missed")]),
+            ],
+        );
+        let texts: Vec<_> = got.iter().map(|c| c.message.as_str()).collect();
+        assert_eq!(texts, ["seen live", "missed", "also missed"]);
+    }
+
+    #[test]
+    fn a_retransmitted_frame_is_emitted_once() {
+        let mut pipeline = ChatPipeline::new();
+        let seg = chat_segment(1, "once");
+        let mut out = Vec::new();
+        for packet in [tcp_from_5003(1_000, &seg), tcp_from_5003(1_000, &seg)] {
+            out.extend(pipeline.feed_network_packet(&packet, |_| false, || 1, || {}));
+        }
+        assert_eq!(out.len(), 1);
     }
 }

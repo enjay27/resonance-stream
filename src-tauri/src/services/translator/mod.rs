@@ -15,7 +15,9 @@ use crate::inject_system_message;
 use crate::protocol::types::{ChatMessage, SystemLogLevel};
 
 use self::core::{server_url, translate_text};
-use resonance_core::text::{postprocess_text, preprocess_text};
+use resonance_core::text::{
+    postprocess_text, preprocess_text, TranslationCache, TRANSLATION_CACHE_SIZE,
+};
 use resonance_core::workers::{translation_is_stale, ServerSupervisor, SupervisorAction};
 
 pub struct TranslationJob {
@@ -62,6 +64,8 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         // the next job without a restart.
         let client = Client::new();
         let mut supervisor = ServerSupervisor::default();
+        // Outlives server restarts: the same model answers the same way.
+        let mut cache = TranslationCache::new(TRANSLATION_CACHE_SIZE);
 
         // One pass per llama-server: a server that crashed or hung is
         // replaced (with backoff) until the supervisor gives up.
@@ -102,6 +106,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 client: &client,
                 server: &mut server,
                 supervisor: &mut supervisor,
+                cache: &mut cache,
             };
 
             // 3. Once per server: what the ledger says was missed
@@ -150,13 +155,14 @@ struct ServerRun<'a> {
     client: &'a Client,
     server: &'a mut server_manager::ServerGuard,
     supervisor: &'a mut ServerSupervisor,
+    cache: &'a mut TranslationCache,
 }
 
 impl ServerRun<'_> {
     /// Translates `job` and says what to do next: a failed job whose
     /// server exited, or the last of several failures in a row, restarts it.
     fn translate(&mut self, job: TranslationJob) -> SupervisorAction {
-        match process_translation_job(job, self.client, self.app) {
+        match process_translation_job(job, self.client, self.app, self.cache) {
             JobResult::Done => {
                 self.supervisor.on_job_ok();
                 SupervisorAction::Continue
@@ -316,7 +322,12 @@ enum JobResult {
     Failed,
 }
 
-fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle) -> JobResult {
+fn process_translation_job(
+    job: TranslationJob,
+    client: &Client,
+    app: &AppHandle,
+    cache: &mut TranslationCache,
+) -> JobResult {
     let chat = job.chat;
     let state = app.state::<crate::AppState>();
 
@@ -335,9 +346,16 @@ fn process_translation_job(job: TranslationJob, client: &Client, app: &AppHandle
         preprocess_text(&chat.message, &dict, Some(&nick_cache))
     };
 
-    // 2. HTTP Request (Blocking)
-    let raw_translation = match translate_text(client, &server_url(), &shield.masked_text) {
-        Ok(text) => text,
+    // 2. HTTP Request (Blocking), unless this line was translated before
+    let cached = cache.get(&shield.masked_text);
+    let raw_translation = match cached.map_or_else(
+        || translate_text(client, &server_url(), &shield.masked_text),
+        Ok,
+    ) {
+        Ok(text) => {
+            cache.put(&shield.masked_text, &text);
+            text
+        }
         Err(reason) => {
             // No translation: the row stays as it is, and the original is
             // still archived.

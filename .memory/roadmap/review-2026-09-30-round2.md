@@ -13,7 +13,7 @@ the order below ("proceed by your order"). One step, one `claude/*` branch, one 
 | A6 | `RwSignal::new` per chat row outside an owner: evicted rows never freed | **done** `claude/chat-signal-leak` — confirmed in reactive_graph 0.2.15 `ArenaItem::new_with_storage` (no owner = never disposed) and by test (0 of 2 freed); store holds `ArcRwSignal`, rows wrap it in an owned `RwSignal`. System log likewise |
 | A4 | prompt starts with literal `<bos>`; llama-server adds BOS too (double BOS) | **blocked: needs Kade** — changing it changes what the fine-tuned model sees. Question: did `make_prompt()` training tokenize with the tokenizer adding BOS (then training had 2 as well: keep) or not (then drop `<bos>` from `translation_prompt`)? The llama-server log (B3) also shows the "2 BOS tokens" warning. Prompt now pinned in core |
 | A8 | `max_tokens: 512` for every line; runaway output blocks the queue | **done** `claude/prompt-in-core` — `text::output_token_limit` (3/char + 32, 64..512), sent as `n_predict` and `max_tokens`. C1 done in the same branch (prompt, sanitising, `contains_japanese` moved to core, pinned) |
-| B1 | translation cache (LRU on masked text) | open (step 6) |
+| B1 | translation cache (LRU on masked text) | **done** `claude/translation-cache` — `text::TranslationCache` (512 lines, raw model output by masked text; lives in the worker, survives server restarts) |
 | A7 | stale/failed job archived untranslated, then again translated after catch-up | open (step 7) |
 | A10 | `app_data_dir().unwrap()` in `launch_ai_server` | **done** in step 2 (same function) |
 | B3 B4 B6 C2 C3 | server stderr log; `-t` from CPU count; `contains_japanese` ranges; enums for states/tabs; `AppSignals` grouping | open (step 7) |

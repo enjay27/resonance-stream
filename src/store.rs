@@ -1,6 +1,7 @@
 use crate::chat_view::ChatStore;
 use crate::ui_types::{
-    default_catch_up_limit, default_favorite_messages, ChatMessage, FavoriteMessage, SystemMessage,
+    default_catch_up_limit, default_favorite_messages, ChatMessage, FavoriteMessage, SnifferState,
+    SystemMessage, TranslatorState,
 };
 use leptos::prelude::{signal, Action, ArcRwSignal, ReadSignal, WriteSignal};
 use std::collections::HashMap;
@@ -16,8 +17,8 @@ pub struct AppSignals {
     pub set_compute_mode: WriteSignal<String>,
     pub wizard_step: ReadSignal<i32>,
     pub set_wizard_step: WriteSignal<i32>,
-    pub translator_state: ReadSignal<String>,
-    pub set_translator_state: WriteSignal<String>,
+    pub translator_state: ReadSignal<TranslatorState>,
+    pub set_translator_state: WriteSignal<TranslatorState>,
     pub translator_error: ReadSignal<String>,
     pub set_translator_error: WriteSignal<String>,
     pub is_sniffer_active: ReadSignal<bool>,
@@ -94,8 +95,8 @@ pub struct AppSignals {
     pub set_hide_original_in_compact: WriteSignal<bool>,
     pub network_interface: ReadSignal<String>,
     pub set_network_interface: WriteSignal<String>,
-    pub sniffer_state: ReadSignal<String>,
-    pub set_sniffer_state: WriteSignal<String>,
+    pub sniffer_state: ReadSignal<SnifferState>,
+    pub set_sniffer_state: WriteSignal<SnifferState>,
     pub sniffer_error: ReadSignal<String>,
     pub set_sniffer_error: WriteSignal<String>,
     pub click_through: ReadSignal<bool>,
@@ -166,7 +167,7 @@ impl AppSignals {
         let (compute_mode, set_compute_mode) = signal("cpu".to_string());
         let (wizard_step, set_wizard_step) = signal(0); // 0: Welcome, 1: Options, 2: Download
 
-        let (translator_state, set_translator_state) = signal("Off".to_string());
+        let (translator_state, set_translator_state) = signal(TranslatorState::Off);
         let (translator_error, set_translator_error) = signal("".to_string());
         let (is_sniffer_active, set_is_sniffer_active) = signal(false);
         let (status_text, set_status_text) = signal("".to_string());
@@ -215,7 +216,7 @@ impl AppSignals {
         let (click_through, set_click_through) = signal(false);
         let (drag_to_scroll, set_drag_to_scroll) = signal(false);
 
-        let (sniffer_state, set_sniffer_state) = signal("Off".to_string());
+        let (sniffer_state, set_sniffer_state) = signal(SnifferState::Off);
         let (sniffer_error, set_sniffer_error) = signal("".to_string());
 
         let (alert_keywords, set_alert_keywords) = signal(Vec::<String>::new());

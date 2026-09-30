@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::inject_system_message;
-use crate::protocol::types::{ChatMessage, SystemLogLevel};
+use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorState};
 
 use self::core::server_url;
 use resonance_core::text::{
@@ -59,7 +59,11 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             "Translator",
             "Initializing HTTP AI Backend...",
         );
-        emit_translator_state(&app, "Starting", "Initializing AI Backend...");
+        emit_translator_state(
+            &app,
+            TranslatorState::Starting,
+            "Initializing AI Backend...",
+        );
 
         // The dictionary lives in AppState, so a sync or an edit applies to
         // the next job without a restart.
@@ -83,14 +87,18 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
             };
 
             // 2. Wait for Health
-            emit_translator_state(&app, "Loading Model", "Loading AI weights into VRAM...");
+            emit_translator_state(
+                &app,
+                TranslatorState::LoadingModel,
+                "Loading AI weights into VRAM...",
+            );
             let started = server_manager::wait_for_server(&app, &mut server, &is_current);
             if !is_current() {
                 return; // superseded while loading: the guard drops and kills our server
             }
             if let Err(reason) = started {
                 inject_system_message(&app, SystemLogLevel::Error, "Translator", &reason);
-                emit_translator_state(&app, "Error", &reason);
+                emit_translator_state(&app, TranslatorState::Error, &reason);
                 drain_untranslated(&app, &rx);
                 return;
             }
@@ -116,7 +124,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 if !is_current() {
                     return;
                 }
-                emit_translator_state(&app, "Active", "AI Engine Ready");
+                emit_translator_state(&app, TranslatorState::Active, "AI Engine Ready");
                 // 4. The translation loop
                 outcome = serve(&mut run, &rx);
             }
@@ -126,7 +134,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 Some(SupervisorAction::Restart(wait)) => {
                     let msg = format!("AI Engine stopped. Restarting in {}s...", wait.as_secs());
                     inject_system_message(&app, SystemLogLevel::Warning, "Translator", &msg);
-                    emit_translator_state(&app, "Restarting", &msg);
+                    emit_translator_state(&app, TranslatorState::Restarting, &msg);
                     drop(server); // kills a hung server before the wait
                     if !sleep_while(wait, &is_current) {
                         return;
@@ -135,7 +143,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
                 Some(SupervisorAction::GiveUp) => {
                     let msg = "AI Engine keeps stopping. Turn translation off and on to retry.";
                     inject_system_message(&app, SystemLogLevel::Error, "Translator", msg);
-                    emit_translator_state(&app, "Error", msg);
+                    emit_translator_state(&app, TranslatorState::Error, msg);
                     drop(server);
                     drain_untranslated(&app, &rx);
                     return;
@@ -281,7 +289,11 @@ fn catch_up(
         if !is_current() {
             return None;
         }
-        emit_translator_state(app, "Catching Up", &format!("{}/{}", done + 1, total));
+        emit_translator_state(
+            app,
+            TranslatorState::CatchingUp,
+            &format!("{}/{}", done + 1, total),
+        );
         while let Ok(job) = rx.try_recv() {
             let action = run.live(job);
             if action != SupervisorAction::Continue {
@@ -388,7 +400,7 @@ fn process_translation_job(
 
 /// Records the state (for `get_service_states`) and emits it. The lock is
 /// held across the emit so events leave in `seq` order.
-pub fn emit_translator_state(app: &tauri::AppHandle, state: &str, message: &str) {
+pub fn emit_translator_state(app: &tauri::AppHandle, state: TranslatorState, message: &str) {
     let Some(app_state) = app.try_state::<crate::AppState>() else {
         return;
     };

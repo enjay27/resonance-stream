@@ -1,4 +1,4 @@
-use crate::{inject_system_message, AppState, SystemLogLevel};
+use crate::{inject_system_message, AppState, SystemLogLevel, TranslatorState};
 use resonance_core::download::write_atomic;
 use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
@@ -301,7 +301,7 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
             );
             crate::services::translator::emit_translator_state(
                 &app,
-                "Off",
+                TranslatorState::Off,
                 "AI Translation Disabled.",
             );
         }

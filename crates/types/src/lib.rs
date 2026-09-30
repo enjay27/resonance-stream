@@ -122,12 +122,76 @@ pub struct TranslationResult {
 
 // --- Service state events ---
 
+/// What the packet sniffer is doing. On the wire it is the variant's name
+/// (`"Active"`); a name this enum does not know reads as `Off`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SnifferState {
+    Starting,
+    Binding,
+    Pending,
+    Active,
+    Error,
+    /// Also what any unknown state reads as.
+    #[default]
+    #[serde(other)]
+    Off,
+}
+
+impl SnifferState {
+    /// What the title-bar badge shows for a transitional state.
+    pub fn label(self) -> String {
+        match self {
+            SnifferState::Starting => "STARTING",
+            SnifferState::Binding => "BINDING",
+            SnifferState::Pending => "PENDING",
+            SnifferState::Active => "ACTIVE",
+            SnifferState::Error => "ERROR",
+            SnifferState::Off => "OFF",
+        }
+        .to_string()
+    }
+}
+
+/// What the translator (llama-server and its worker) is doing; the wire form
+/// is the name with spaces (`"Loading Model"`), unknown reads as `Off`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TranslatorState {
+    Starting,
+    #[serde(rename = "Loading Model")]
+    LoadingModel,
+    #[serde(rename = "Catching Up")]
+    CatchingUp,
+    Restarting,
+    Active,
+    Error,
+    /// Also what any unknown state reads as.
+    #[default]
+    #[serde(other)]
+    Off,
+}
+
+impl TranslatorState {
+    /// What the title-bar badge shows for a transitional state.
+    pub fn label(self) -> String {
+        match self {
+            TranslatorState::Starting => "STARTING",
+            TranslatorState::LoadingModel => "LOADING MODEL",
+            TranslatorState::CatchingUp => "CATCHING UP",
+            TranslatorState::Restarting => "RESTARTING",
+            TranslatorState::Active => "ACTIVE",
+            TranslatorState::Error => "ERROR",
+            TranslatorState::Off => "OFF",
+        }
+        .to_string()
+    }
+}
+
 /// Orders state changes: every change of either service gets a larger `seq`,
 /// so the UI can drop a snapshot (`get_service_states`) that an event
 /// overtook. 0: no order known (a payload from before `seq` existed).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct SnifferStatePayload {
-    pub state: String,   // "Starting", "Pending", "Active", "Error", "Off"
+    pub state: SnifferState,
     pub message: String, // Context or Error message
     #[serde(default)]
     pub seq: u64,
@@ -135,7 +199,7 @@ pub struct SnifferStatePayload {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct TranslatorStatePayload {
-    pub state: String, // "Starting", "Loading Model", "Catching Up", "Active", "Error", "Off"
+    pub state: TranslatorState,
     pub message: String,
     #[serde(default)]
     pub seq: u64,
@@ -144,7 +208,7 @@ pub struct TranslatorStatePayload {
 impl Default for SnifferStatePayload {
     fn default() -> Self {
         Self {
-            state: "Off".into(),
+            state: SnifferState::Off,
             message: String::new(),
             seq: 0,
         }
@@ -154,7 +218,7 @@ impl Default for SnifferStatePayload {
 impl Default for TranslatorStatePayload {
     fn default() -> Self {
         Self {
-            state: "Off".into(),
+            state: TranslatorState::Off,
             message: String::new(),
             seq: 0,
         }
@@ -179,9 +243,9 @@ impl ServiceStates {
     }
 
     /// Records a sniffer state; returns the payload to emit.
-    pub fn set_sniffer(&mut self, state: &str, message: &str) -> SnifferStatePayload {
+    pub fn set_sniffer(&mut self, state: SnifferState, message: &str) -> SnifferStatePayload {
         self.sniffer = SnifferStatePayload {
-            state: state.to_string(),
+            state,
             message: message.to_string(),
             seq: self.next_seq(),
         };
@@ -189,9 +253,13 @@ impl ServiceStates {
     }
 
     /// Records a translator state; returns the payload to emit.
-    pub fn set_translator(&mut self, state: &str, message: &str) -> TranslatorStatePayload {
+    pub fn set_translator(
+        &mut self,
+        state: TranslatorState,
+        message: &str,
+    ) -> TranslatorStatePayload {
         self.translator = TranslatorStatePayload {
-            state: state.to_string(),
+            state,
             message: message.to_string(),
             seq: self.next_seq(),
         };
@@ -456,9 +524,50 @@ mod tests {
     #[test]
     fn service_states_start_off() {
         let states = ServiceStates::default();
-        assert_eq!(states.sniffer.state, "Off");
-        assert_eq!(states.translator.state, "Off");
+        assert_eq!(states.sniffer.state, SnifferState::Off);
+        assert_eq!(states.translator.state, TranslatorState::Off);
         assert_eq!((states.sniffer.seq, states.translator.seq), (0, 0));
+    }
+
+    #[test]
+    fn service_states_are_their_display_names_on_the_wire() {
+        use serde_json::{from_value, json, to_value};
+        for (state, name) in [
+            (SnifferState::Off, "Off"),
+            (SnifferState::Starting, "Starting"),
+            (SnifferState::Binding, "Binding"),
+            (SnifferState::Pending, "Pending"),
+            (SnifferState::Active, "Active"),
+            (SnifferState::Error, "Error"),
+        ] {
+            assert_eq!(to_value(state).unwrap(), name);
+            assert_eq!(from_value::<SnifferState>(json!(name)).unwrap(), state);
+            assert_eq!(state.label(), name.to_uppercase());
+        }
+        for (state, name) in [
+            (TranslatorState::Off, "Off"),
+            (TranslatorState::Starting, "Starting"),
+            (TranslatorState::LoadingModel, "Loading Model"),
+            (TranslatorState::CatchingUp, "Catching Up"),
+            (TranslatorState::Restarting, "Restarting"),
+            (TranslatorState::Active, "Active"),
+            (TranslatorState::Error, "Error"),
+        ] {
+            assert_eq!(to_value(state).unwrap(), name);
+            assert_eq!(from_value::<TranslatorState>(json!(name)).unwrap(), state);
+            assert_eq!(state.label(), name.to_uppercase());
+        }
+    }
+
+    #[test]
+    fn a_state_nobody_knows_reads_as_off() {
+        // An older or newer backend, a hand-made payload.
+        let sniffer: SnifferStatePayload =
+            serde_json::from_str(r#"{"state":"Firewall","message":"m"}"#).unwrap();
+        assert_eq!(sniffer.state, SnifferState::Off);
+        let translator: TranslatorStatePayload =
+            serde_json::from_str(r#"{"state":"","message":"m"}"#).unwrap();
+        assert_eq!(translator.state, TranslatorState::Off);
     }
 
     #[test]
@@ -466,9 +575,9 @@ mod tests {
         // Regression (A1): the UI had no way to ask for the current state, and
         // could not tell a snapshot from an event that raced it.
         let mut states = ServiceStates::default();
-        let a = states.set_translator("Starting", "init");
-        let b = states.set_sniffer("Active", "listening");
-        let c = states.set_translator("Active", "ready");
+        let a = states.set_translator(TranslatorState::Starting, "init");
+        let b = states.set_sniffer(SnifferState::Active, "listening");
+        let c = states.set_translator(TranslatorState::Active, "ready");
         assert!(0 < a.seq && a.seq < b.seq && b.seq < c.seq);
         assert_eq!(states.translator, c);
         assert_eq!(states.sniffer, b);
@@ -477,7 +586,8 @@ mod tests {
     #[test]
     fn state_payload_carries_seq_and_an_older_one_still_parses() {
         let json =
-            serde_json::to_value(ServiceStates::default().set_sniffer("Error", "x")).unwrap();
+            serde_json::to_value(ServiceStates::default().set_sniffer(SnifferState::Error, "x"))
+                .unwrap();
         assert_eq!(json["seq"], 1);
         let old: TranslatorStatePayload =
             serde_json::from_str(r#"{"state":"Active","message":"m"}"#).unwrap();

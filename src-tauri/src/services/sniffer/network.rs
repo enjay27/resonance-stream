@@ -8,7 +8,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use super::emit_sniffer_state;
-use crate::protocol::types::SystemLogLevel;
+use crate::protocol::types::{SnifferState, SystemLogLevel};
 use crate::{inject_system_message, NetworkInterface};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000; //
@@ -65,7 +65,7 @@ pub fn initialize_network_socket(
                 );
                 emit_sniffer_state(
                     app,
-                    "Binding",
+                    SnifferState::Binding,
                     &format!("Auto-Targeting Network Interface: {}", ip),
                 );
                 ip
@@ -130,7 +130,7 @@ pub fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, S
             local_ip, e
         );
         inject_system_message(app, SystemLogLevel::Error, "Sniffer", &msg);
-        emit_sniffer_state(app, "Error", &msg);
+        emit_sniffer_state(app, SnifferState::Error, &msg);
         return Err(msg);
     }
 

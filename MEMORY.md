@@ -2,7 +2,7 @@
 
 **Index, not the record.** Only what would be *false* the moment it goes stale lives here.
 
-## Now — 2026-09-29 (refactor done, pushed, CI green)
+## Now — 2026-09-30
 
 **Graft-guided refactor, phases 0–5: done** —
 [`.memory/roadmap/refactor-2026-09.md`](.memory/roadmap/refactor-2026-09.md).
@@ -26,8 +26,9 @@ Windows run needed — [`unverified-on-windows.md`](.memory/active-issues/unveri
 [`.memory/sessions/2026-09-29-ui-improve-port.md`](.memory/sessions/2026-09-29-ui-improve-port.md).
 Kade's calls: sequential pids, both archives, gist has sha256, auto-sync off by default.
 
-**Graft MCP start-up fix merged (PR #24, cee5842).** `.mcp.json` runs `.claude/helpers/graft-mcp.cjs`,
-which waits for the cloud install. Upgrading graft past 0.20.0 rewrites `.mcp.json` — re-point it.
+**Graft 0.21.1 (2026-09-30, `claude/graft-0.21.1`):** pinned in `graft-bootstrap.cjs`; `.mcp.json` re-pointed
+at `.claude/helpers/graft-mcp.cjs` (ef17d3d had reverted PR #24 — MCP failed to start). An upgrade
+or `graft init` rewrites `.mcp.json` — re-point it; check the stamp shape in graft's `dist/upkeep.js`.
 
 **Git workflow (2026-09-30):** each task on a `claude/<name>` branch, push when the local gate
 is green, PR opened by Claude, `.github/workflows/auto-merge.yml` merges it when CI passes

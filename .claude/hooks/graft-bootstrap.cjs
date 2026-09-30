@@ -17,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync, spawnSync } = require('child_process');
 
-const GRAFT_VERSION = '0.20.0';
+const GRAFT_VERSION = '0.21.1';
 const dir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const quiet = (cmd) => execSync(cmd, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 

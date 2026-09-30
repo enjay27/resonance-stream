@@ -280,8 +280,50 @@ pub fn newest_matching<T>(
     page
 }
 
+/// Class string of the compact-mode original-message bubble. Exactly one bare
+/// `display` utility may be present: two (`inline` + `hidden`) are resolved by
+/// stylesheet order, and `inline` wins -- the original stayed visible.
+pub fn compact_original_class(
+    hide_original: bool,
+    has_translation: bool,
+    channel_class: &str,
+) -> String {
+    let display = if hide_original && has_translation {
+        "hidden group-hover:inline"
+    } else {
+        "inline"
+    };
+    format!(
+        "text-base-content font-bold opacity-90 box-decoration-clone bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border-y border-r border-base-content/5 border-l-[3px] align-baseline {display} {channel_class}"
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    fn bare_display(class: &str) -> Vec<&str> {
+        class
+            .split_whitespace()
+            .filter(|c| matches!(*c, "inline" | "hidden" | "block" | "flex"))
+            .collect()
+    }
+
+    #[test]
+    fn hidden_original_has_no_competing_display_class() {
+        let c = compact_original_class(true, true, "border-l-success");
+        assert_eq!(bare_display(&c), ["hidden"]);
+        assert!(c.contains("group-hover:inline"));
+    }
+
+    #[test]
+    fn original_stays_inline_without_hide_or_without_translation() {
+        for (hide, tr) in [(false, true), (false, false), (true, false)] {
+            assert_eq!(
+                bare_display(&compact_original_class(hide, tr, "x")),
+                ["inline"]
+            );
+        }
+    }
+
     use super::*;
 
     fn msg(channel: &str, level: u64, nickname: &str, message: &str) -> ChatMessage {

@@ -10,10 +10,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::protocol::types::{AppState, SystemLogLevel};
-use crate::services::translator::core::contains_japanese;
 use crossbeam_channel::Sender;
 use resonance_core::capture::{ChatPipeline, PipelineAction};
-use resonance_core::text::convert_to_romaji;
+use resonance_core::text::{contains_japanese, convert_to_romaji};
 
 // --- GLOBAL STATE ---
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);

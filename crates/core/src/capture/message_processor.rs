@@ -48,6 +48,11 @@ impl MessageProcessor {
         }
     }
 
+    /// Makes room for at least `capacity` signatures (never shrinks).
+    pub fn grow_to(&mut self, capacity: usize) {
+        self.capacity = self.capacity.max(capacity);
+    }
+
     /// Number of remembered signatures.
     #[cfg(test)]
     pub fn len(&self) -> usize {

@@ -1,4 +1,4 @@
-use crate::capture::message_processor::{MessageProcessor, ProcessAction};
+use crate::capture::message_processor::{MessageProcessor, ProcessAction, DEFAULT_DEDUP_CAPACITY};
 use crate::capture::stream_tracker::{StreamKey, StreamTracker};
 use crate::protocol::framing::FrameKind;
 use crate::protocol::parser::{history_pipeline, parsing_pipeline, Port5003Event};
@@ -35,8 +35,11 @@ impl ChatPipeline {
     }
 
     /// Teaches the duplicate check messages shown before (e.g. history
-    /// reloaded from disk), so the server re-sending them is ignored.
+    /// reloaded from disk), so the server re-sending them is ignored. The
+    /// cache grows to hold all of them, plus the default room for new lines.
     pub fn remember(&mut self, messages: &[ChatMessage]) {
+        self.processor
+            .grow_to(messages.len() + DEFAULT_DEDUP_CAPACITY);
         for message in messages {
             self.processor.commit_new_message(message);
         }
@@ -395,6 +398,28 @@ mod tests {
             ],
         );
         assert_eq!(texts(&got), ["hi[이모지]", "[스티커]"]);
+    }
+
+    #[test]
+    fn reloaded_history_beyond_the_default_capacity_is_still_remembered() {
+        // W4: the duplicate cache held 4096 signatures, so with bigger chat
+        // limits the oldest reloaded lines were forgotten and shown again.
+        let count = DEFAULT_DEDUP_CAPACITY as u64 + 1000;
+        let history: Vec<ChatMessage> = (1..=count)
+            .map(|i| ChatMessage {
+                uid: 7,
+                timestamp: i,
+                sequence_id: i,
+                pid: i,
+                ..Default::default()
+            })
+            .collect();
+        let mut pipeline = ChatPipeline::new();
+        pipeline.remember(&history);
+
+        let mut oldest = history[0].clone();
+        let action = pipeline.processor.process(&mut oldest, &|_| false);
+        assert!(matches!(action, ProcessAction::IgnoreDuplicate));
     }
 
     #[test]

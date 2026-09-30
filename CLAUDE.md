@@ -134,28 +134,45 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
    (`cargo tauri dev`, Windows, as Administrator); if not done, say so in the commit body.
 3. **Record the outcome in the memory tree.** `MEMORY.md` is an index under ~40 lines —
    update its *Now* section. Detail goes in `.memory/` (see its README).
-4. **Commit the task as one change, automatically** — see *Version Control*.
+4. **Push the branch and open the PR** — see *Version Control*; CI merges it when green.
 
 ---
 
 ## Version Control
 
-**One task, one commit**, made by Claude without being asked, as soon as the gate is
-green. Not per file edit, not batched across unrelated tasks.
+**One task, one branch, one PR.** Claude runs the whole flow without being asked.
+
+1. **Start.** Every new task gets its own branch from an up-to-date `main`:
+   `git checkout main && git pull && git checkout -b claude/<short-task-name>`.
+   Never commit to `main`. A follow-up to a merged task is a new task: new branch.
+2. **During the task, commit freely** -- as many local commits as help. Unpushed history may
+   be tidied (`git commit --amend`, or `git reset --soft <base>` + one commit to squash).
+   Never rewrite history that is already pushed.
+3. **Finish = test, then push.** When the task is done, run the gate for every part
+   touched (table at the top; `cargo fmt` included) and fix failures. Only a green
+   local gate is pushed: `git push -u origin claude/<name>`. A gate that could not run
+   here is named in the last commit body (`NOT VERIFIED: app gate -- no Windows
+   toolchain in this session`) and left to CI.
+4. **Open the PR** against `main` (check for a PR template first). Do not merge it by
+   hand: `.github/workflows/auto-merge.yml` merges it and deletes its `claude/*` branch (never any other branch) once the CI
+   workflow passes on the PR's latest commit. If CI fails, fix on the same branch and
+   push again -- the run for the new commit decides. Never skip, disable or edit a
+   test/gate to get green.
 
 ```bash
 git status            # check BEFORE -A, never after
 git add -A && git commit
 ```
 
-- **Subject states the point of the change**, not the files touched
+- **Commit subject states the point of the change**, not the files touched
   (`Protocol decoding builds on any OS now -- moved out of the Windows crate`,
   not `move files`). The body says what changed, why, and **what is verified vs open**.
-- **If a gate could not run**, commit anyway and say so in the body:
-  `NOT VERIFIED: app gate — no Windows toolchain in this session`.
-- `MEMORY.md` and `.memory/` updates go in the **same commit** as the code they describe.
+- `MEMORY.md` and `.memory/` updates go in the branch, before the push.
 - **Claude never commits work it did not do.** Pre-existing changes stay untouched.
-- **`git push` is Kade's.** Auto-commit is local history; publishing is a separate decision.
+- Only `claude/*` branches auto-merge. `workflow_run` workflows are read from `main`, so a
+  change to `auto-merge.yml` itself takes effect after it has been merged once.
+- Merges made by the workflow use `GITHUB_TOKEN`, which does not start a `push` run on
+  `main`; the PR's own run is the gate.
 
 ### Never commit
 - Secrets, `.env`.

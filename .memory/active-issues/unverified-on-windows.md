@@ -52,3 +52,10 @@ run as the real app.
   the game or its anti-cheat may ignore `SendInput` -- if so, text is still on the
   clipboard. Also: changing the tab-switch shortcut must keep favorite shortcuts working
   (all shortcuts now re-registered together in `shortcut.rs::apply_global_shortcuts`).
+- **Favorites follow-up (2026-09-30, `claude/favorites-notes-guard`).** Same gates as above.
+  Worth a real run: ⭐ on a chat row (hover, both normal and compact view) adds the
+  message with its translation as the note, a second ⭐ on the same text adds nothing;
+  a quick double press of a favorite shortcut pastes once; after a paste in the game the
+  clipboard holds what it held before (500 ms `CLIPBOARD_RESTORE_DELAY` in
+  `shortcut.rs` -- if the game pastes the *old* text, raise it). Configs saved by #32
+  keep their entries without notes (defaults only apply to a fresh config).

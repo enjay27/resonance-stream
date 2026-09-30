@@ -1,4 +1,5 @@
-use crate::store::AppSignals;
+use crate::favorites::add_from_chat;
+use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
 use crate::ui_types::ChatMessage;
 use crate::use_context;
@@ -11,6 +12,36 @@ use leptos::{component, view, IntoView};
 #[component]
 pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
+    let actions = use_context::<AppActions>().expect("AppActions missing");
+
+    // Star: save this message (translation as the note) to the favorites.
+    let (starred, set_starred) = signal(false);
+    let save_favorite = move || {
+        let (text, translated) = sig.with_untracked(|m| (m.message.clone(), m.translated.clone()));
+        let mut added = false;
+        signals
+            .set_favorite_messages
+            .update(|list| added = add_from_chat(list, &text, translated.as_deref()));
+        if added {
+            actions.save_config.dispatch(());
+        }
+        set_starred.set(true);
+        spawn_local(async move {
+            gloo_timers::future::TimeoutFuture::new(1200).await;
+            set_starred.set(false);
+        });
+    };
+    let star_button = move |class: &'static str| {
+        view! {
+            <Show when=move || !sig.with(|m| m.is_blocked)>
+                <button class=class title="자주 쓰는 메시지에 추가"
+                    on:click=move |_| save_favorite()>
+                    {move || if starred.get() { "✓" } else { "⭐" }}
+                </button>
+            </Show>
+        }
+        .into_any()
+    };
 
     Effect::new(move |_| {
         if sig.with(|m| m.translated.is_some()) {
@@ -234,7 +265,8 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                                 }}
                             </div>
 
-                            <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                            <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 flex gap-1">
+                                {star_button("btn btn-ghost btn-xs text-[10px] h-6 min-h-0 px-2 hover:bg-base-content/10 bg-base-200 rounded-md shadow-sm")}
                                 <button class="btn btn-ghost btn-xs text-[10px] text-base-content/50 h-6 min-h-0 px-2 hover:bg-base-content/10 hover:text-base-content bg-base-200 rounded-md shadow-sm"
                                     on:click=move |_| sig.with_untracked(|m| copy_to_clipboard(&m.message))>
                                     "COPY"
@@ -399,6 +431,7 @@ pub fn ChatRow(sig: RwSignal<ChatMessage>) -> impl IntoView {
                         </time>
 
                         // --- NEW: HIDE COPY BUTTON ON BLOCKED MESSAGES ---
+                        {star_button("hidden group-hover:flex btn btn-ghost btn-xs text-[10px] h-5 min-h-0 px-1.5 py-0 hover:bg-base-content/10 leading-none")}
                         <Show when=move || !sig.with(|m| m.is_blocked)>
                             <button class="hidden group-hover:flex btn btn-ghost btn-xs text-[10px] font-bold text-base-content/50 h-5 min-h-0 px-1.5 py-0 hover:bg-base-content/10 hover:text-base-content leading-none"
                                 on:click=move |_| sig.with_untracked(|m| copy_to_clipboard(&m.message))>

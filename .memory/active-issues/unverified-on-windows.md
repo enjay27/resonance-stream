@@ -88,3 +88,7 @@ run as the real app.
   `ui-preview` only. Worth a real run: transparency at low opacity (text boxes), title
   bar / nav drag regions, compact bar hover-reveal (and leaving compact from it), pin,
   tab right-click menu, sender menu (copy / filter / block), star + copy on hover.
+- **rc UI fixes (`claude/rc-build-ui-fixes-ny8j3w`, 2026-10-01).** ui-preview only. Worth a
+  real run: the folded tools (hover / click, panel below the bar), the compact button by
+  close in the title bar, star + copy beside each compact message, and that rows keep
+  their size when the opacity slider crosses 50 %.

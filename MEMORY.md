@@ -4,6 +4,8 @@
 
 ## Now — 2026-10-01
 
+**rc UI fixes (2026-10-01, `claude/rc-build-ui-fixes-ny8j3w`, off `rc`):** from Kade's run of the redesign -- tools always folded below the bar (favorites + fold button stay out), compact toggle next to minimize/close in the title bar (normal mode only), compact star/copy right after each message, 커스텀 dot gray (`bg-slate-400`), row size fixed across the 50 % opacity threshold (`readability::ROW_LAYOUT`, tested). The 전체 tab stays (Kade). Screenshotted in `ui-preview`; NOT run on Windows -- see [`unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).
+
 **Release candidates (2026-10-01, `claude/rc-release-workflow`):** a merge into `rc` builds a plain exe and publishes prerelease `v0.6.0-rc.<branch>[.n]` (newest 5 kept) -- flow in CLAUDE.md *Release candidates*; logic in `.github/scripts/rc-lib.sh` (tested). Workspace version bumped 0.4.0 -> 0.6.0 (v0.5.0 was already released). **Open:** the workflow has never run -- first run is the first merge into `rc`; `rc` itself is created after this merges.
 
 **Main UI redesign (2026-10-01, `candidate/main-ui-a-cb`, PR into `rc` -- the first release candidate; Kade tries it on Windows before `main`):** normal = candidate A (translation first, line icons, Korean status pills), compact = CB (subtitle captions, hover-only bar); chat text sits on a tested dark text box (WCAG worst case over white) in compact, and in normal mode below 50 % opacity -- [`sessions/2026-10-01-main-ui-redesign.md`](.memory/sessions/2026-10-01-main-ui-redesign.md).

@@ -67,9 +67,18 @@ pub fn box_name(channel: Channel) -> (&'static str, Rgb) {
     }
 }
 
+/// A normal-mode row's size and position. Fixed: a row must not change size
+/// when the opacity slider crosses [`BACKING_BELOW_OPACITY`].
+pub const ROW_LAYOUT: &str = "ml-1.5 px-2.5 py-1 w-fit max-w-[calc(100%-0.5rem)]";
+
 /// Classes of a normal-mode row: the theme's own, or the text box's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RowPalette {
+    /// The row's size and position -- the same whatever the opacity.
+    pub layout: &'static str,
+    /// Whether the row sits on the dark text box.
+    pub backed: bool,
+    /// Colours only (background, shadow, rounding), never size.
     pub container: &'static str,
     pub text: &'static str,
     pub original: &'static str,
@@ -79,6 +88,8 @@ pub struct RowPalette {
 pub fn row_palette(backed: bool) -> RowPalette {
     if backed {
         RowPalette {
+            layout: ROW_LAYOUT,
+            backed: true,
             container: TEXT_BOX,
             text: "text-white",
             original: ORIGINAL_TEXT,
@@ -86,7 +97,9 @@ pub fn row_palette(backed: bool) -> RowPalette {
         }
     } else {
         RowPalette {
-            container: "",
+            layout: ROW_LAYOUT,
+            backed: false,
+            container: "rounded-lg hover:bg-base-content/5",
             text: "text-base-content",
             original: "text-base-content/45",
             meta: "text-base-content/40",
@@ -191,6 +204,33 @@ mod tests {
         let plain = row_palette(false);
         assert_eq!(plain.text, "text-base-content");
         assert!(!plain.container.contains("bg-black/"));
+    }
+
+    /// A class that changes the size of the box it is on.
+    fn sizes_the_box(class: &str) -> bool {
+        if class.starts_with('[') {
+            return false; // arbitrary property, e.g. the text shadow
+        }
+        let name = class.rsplit(':').next().unwrap_or(class);
+        [
+            "p", "px", "py", "pl", "pr", "pt", "pb", "m", "mx", "my", "ml", "mr", "mt", "mb", "w",
+            "h", "min-w", "max-w", "min-h", "max-h", "border", "gap", "size",
+        ]
+        .iter()
+        .any(|prefix| name == *prefix || name.starts_with(&format!("{prefix}-")))
+    }
+
+    #[test]
+    fn a_rows_size_does_not_change_with_the_window_opacity() {
+        let (backed, plain) = (row_palette(true), row_palette(false));
+        assert!(!backed.layout.is_empty());
+        assert_eq!(backed.layout, plain.layout);
+        // Only colours switch with the opacity: nothing that sizes the box.
+        for p in [backed, plain] {
+            for class in p.container.split_whitespace() {
+                assert!(!sizes_the_box(class), "{class}");
+            }
+        }
     }
 
     #[test]

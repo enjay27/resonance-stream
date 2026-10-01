@@ -1,7 +1,8 @@
+use crate::chat_view::Tab;
 use crate::components::icons::{self, icon};
 use crate::readability::title_bar_bg;
 use crate::status_view::{sniffer_status, translator_status};
-use crate::store::AppSignals;
+use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
 use crate::ui_types::{SnifferState, TranslatorState};
 use leptos::prelude::*;
@@ -15,6 +16,7 @@ const PILL: &str =
 #[component]
 pub fn TitleBar() -> impl IntoView {
     let store = use_context::<AppSignals>().expect("Store missing");
+    let actions = use_context::<AppActions>().expect("AppActions missing");
     let sniffer = move || sniffer_status(store.service.sniffer_state.get());
     let translator = move || translator_status(store.service.translator_state.get());
 
@@ -62,6 +64,19 @@ pub fn TitleBar() -> impl IntoView {
 
             // --- Window controls ---
             <div class="flex h-8 ml-2 no-drag">
+                // Compact mode sits next to minimize and close: easy to hit.
+                <Show when=move || store.config.init_done.get()>
+                    <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors" title="컴팩트 모드"
+                        on:click=move |_| {
+                            store.config.set_compact_mode.set(true);
+                            if store.config.active_tab.get_untracked() != Tab::System.label() {
+                                store.config.set_active_tab.set(Tab::Custom.label().to_string());
+                            }
+                            actions.save_config.dispatch(());
+                        }>
+                        {icon(icons::SHRINK, "size-3.5")}
+                    </button>
+                </Show>
                 <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors" title="최소화"
                     on:click=move |_| { spawn_local(async { let _ = invoke("minimize_window", JsValue::NULL).await; }); }>
                     {icon(icons::MINUS, "size-3.5")}

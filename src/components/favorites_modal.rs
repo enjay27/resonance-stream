@@ -2,11 +2,15 @@
 //! that pastes it into the game's chat box (the backend does the pasting).
 
 use crate::config_signals::ConfigSignals;
+use crate::favorites::{
+    add_tab, delete_tab, fill_with_defaults, locate, tab_summary, DEFAULT_TAB, DEFAULT_TAB_LABEL,
+    MAX_TAB_NAME_CHARS,
+};
 use crate::shortcut_keys::{
     accelerator_from_event, display, find_conflict, tab_switch_accelerator, Conflict, Rejected,
 };
 use crate::store::{AppActions, AppSignals};
-use crate::ui_types::FavoriteMessage;
+use crate::ui_types::{default_favorite_messages, FavoriteMessage};
 use crate::utils::copy_to_clipboard;
 use crate::view_signals::UiSignals;
 use leptos::ev::KeyboardEvent;
@@ -20,6 +24,8 @@ pub fn FavoritesModal() -> impl IntoView {
     let ConfigSignals {
         favorite_messages,
         set_favorite_messages,
+        favorite_tabs,
+        set_favorite_tabs,
         tab_switch_modifier,
         tab_switch_key,
         ..
@@ -29,6 +35,14 @@ pub fn FavoritesModal() -> impl IntoView {
         set_show_favorites,
         ..
     } = signals.ui;
+
+    // The tab on show (its stored name; empty is the default tab) and the two
+    // questions the strip can ask: add a tab, or confirm deleting one.
+    let (active_tab, set_active_tab) = signal(DEFAULT_TAB.to_string());
+    let (adding_tab, set_adding_tab) = signal(false);
+    let (new_tab_name, set_new_tab_name) = signal(String::new());
+    let (new_tab_error, set_new_tab_error) = signal(None::<&'static str>);
+    let (deleting_tab, set_deleting_tab) = signal(None::<String>);
 
     // Index being edited; `len()` means a new entry not in the list yet.
     let (editing, set_editing) = signal(None::<usize>);
@@ -70,13 +84,17 @@ pub fn FavoritesModal() -> impl IntoView {
             set_edit_error.set(Some("메시지를 입력하세요.".to_string()));
             return;
         }
-        let entry = FavoriteMessage {
+        let mut entry = FavoriteMessage {
             text,
             note: edit_note.get_untracked().trim().to_string(),
             shortcut: edit_shortcut.get_untracked(),
+            tab: active_tab.get_untracked(),
         };
         set_favorite_messages.update(|list| match list.get_mut(index) {
-            Some(slot) => *slot = entry,
+            Some(slot) => {
+                entry.tab = slot.tab.clone();
+                *slot = entry;
+            }
             None => list.push(entry),
         });
         cancel_edit();
@@ -92,6 +110,48 @@ pub fn FavoritesModal() -> impl IntoView {
         });
         set_pending_delete.set(None);
         cancel_edit();
+        actions.save_config.dispatch(());
+    };
+
+    let switch_tab = move |name: String| {
+        cancel_edit();
+        set_pending_delete.set(None);
+        set_active_tab.set(name);
+    };
+
+    let open_add_tab = move || {
+        set_new_tab_name.set(String::new());
+        set_new_tab_error.set(None);
+        set_adding_tab.set(true);
+    };
+
+    // `fill`: also file the default messages under the new tab.
+    let confirm_add_tab = move |fill: bool| {
+        let mut tabs = favorite_tabs.get_untracked();
+        match add_tab(&mut tabs, &new_tab_name.get_untracked()) {
+            Ok(name) => {
+                set_favorite_tabs.set(tabs);
+                if fill {
+                    set_favorite_messages.update(|list| {
+                        fill_with_defaults(list, &name);
+                    });
+                }
+                switch_tab(name);
+                set_adding_tab.set(false);
+                actions.save_config.dispatch(());
+            }
+            Err(e) => set_new_tab_error.set(Some(e.message())),
+        }
+    };
+
+    let confirm_delete_tab = move |name: String| {
+        let mut tabs = favorite_tabs.get_untracked();
+        let mut list = favorite_messages.get_untracked();
+        delete_tab(&mut tabs, &mut list, &name);
+        set_favorite_tabs.set(tabs);
+        set_favorite_messages.set(list);
+        set_deleting_tab.set(None);
+        switch_tab(DEFAULT_TAB.to_string());
         actions.save_config.dispatch(());
     };
 
@@ -134,11 +194,17 @@ pub fn FavoritesModal() -> impl IntoView {
                         "{}: 탭 전환 단축키와 겹칩니다.",
                         display(&accelerator)
                     ))),
-                    Some(Conflict::Favorite(i)) => set_edit_error.set(Some(format!(
-                        "{}: {}번 메시지가 이미 사용 중입니다.",
-                        display(&accelerator),
-                        i + 1
-                    ))),
+                    Some(Conflict::Favorite(i)) => {
+                        let (tab, place) = favorite_messages
+                            .with_untracked(|list| locate(list, i))
+                            .unwrap_or_default();
+                        set_edit_error.set(Some(format!(
+                            "{}: [{}] {}번 메시지가 이미 사용 중입니다.",
+                            display(&accelerator),
+                            tab,
+                            place
+                        )))
+                    }
                     None => {
                         set_edit_shortcut.set(accelerator);
                         set_edit_error.set(None);
@@ -216,12 +282,59 @@ pub fn FavoritesModal() -> impl IntoView {
     view! {
         <Show when=move || show_favorites.get()>
             <div class="modal modal-open backdrop-blur-sm z-[30000]">
-                <div class="modal-box bg-base-300 border border-base-content/10 w-11/12 max-w-lg p-0 overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
+                <div class="modal-box bg-base-300 border border-base-content/10 relative w-11/12 max-w-lg p-0 overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
 
                     <div class="flex items-center justify-between p-3 border-b border-base-content/5 bg-base-200">
                         <h2 class="text-sm font-black tracking-widest text-base-content">"자주 쓰는 메시지"</h2>
                         <button class="btn btn-ghost btn-xs text-xl"
                             on:click=move |_| set_show_favorites.set(false)>"✕"</button>
+                    </div>
+
+                    // --- TABS: the default tab, the user's, and "+" ---
+                    <div class="flex items-center gap-1 px-3 pt-2 overflow-x-auto custom-scrollbar" role="tablist">
+                        {move || {
+                            let mut names = vec![DEFAULT_TAB.to_string()];
+                            names.extend(favorite_tabs.get());
+                            names.into_iter().map(|name| {
+                                let is_active = {
+                                    let name = name.clone();
+                                    move || active_tab.get() == name
+                                };
+                                let label = if name == DEFAULT_TAB { DEFAULT_TAB_LABEL.to_string() } else { name.clone() };
+                                let removable = name != DEFAULT_TAB;
+                                let pick = name.clone();
+                                let ask_delete = name.clone();
+                                let is_active_btn = is_active.clone();
+                                view! {
+                                    <div class=move || format!(
+                                        "flex items-center shrink-0 rounded-md text-xs whitespace-nowrap transition-colors {}",
+                                        if is_active() { "bg-base-100 shadow-sm font-bold text-base-content" } else { "text-base-content/60 hover:text-base-content hover:bg-base-content/5" }
+                                    )>
+                                        <button class="h-7 px-2.5" role="tab"
+                                            aria-selected=move || is_active_btn().to_string()
+                                            on:click=move |_| switch_tab(pick.clone())>
+                                            {label}
+                                        </button>
+                                        <Show when={
+                                            let is_active = is_active.clone();
+                                            move || removable && is_active()
+                                        }>
+                                            <button class="h-7 pr-2 text-base-content/50 hover:text-error" title="탭 삭제"
+                                                on:click={
+                                                    let ask_delete = ask_delete.clone();
+                                                    move |_| set_deleting_tab.set(Some(ask_delete.clone()))
+                                                }>
+                                                "✕"
+                                            </button>
+                                        </Show>
+                                    </div>
+                                }
+                            }).collect_view()
+                        }}
+                        <button class="btn btn-ghost btn-xs btn-square shrink-0" title="탭 추가"
+                            on:click=move |_| open_add_tab()>
+                            "＋"
+                        </button>
                     </div>
 
                     <div class="text-[10px] text-base-content/60 px-3 pt-2">
@@ -230,8 +343,13 @@ pub fn FavoritesModal() -> impl IntoView {
 
                     <div class="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-2">
                         <For
-                            each={move || favorite_messages.get().into_iter().enumerate().collect::<Vec<_>>()}
-                            key=|(i, f)| (*i, f.text.clone(), f.note.clone(), f.shortcut.clone())
+                            each={move || {
+                                let tab = active_tab.get();
+                                favorite_messages.get().into_iter().enumerate()
+                                    .filter(|(_, f)| f.tab == tab)
+                                    .collect::<Vec<_>>()
+                            }}
+                            key=|(i, f)| (*i, f.text.clone(), f.note.clone(), f.shortcut.clone(), f.tab.clone())
                             children=move |(index, fav)| {
                                 let text = fav.text.clone();
                                 let shortcut = fav.shortcut.clone();
@@ -303,6 +421,60 @@ pub fn FavoritesModal() -> impl IntoView {
                             {editor()}
                         </Show>
                     </div>
+
+                    // --- ASK: new tab name, and whether to fill it with the defaults ---
+                    <Show when=move || adding_tab.get()>
+                        <div class="absolute inset-0 z-20 grid place-items-center bg-base-300/80 p-4">
+                            <div class="w-full max-w-xs flex flex-col gap-2 p-3 rounded-lg bg-base-200 border border-base-content/10 shadow-xl">
+                                <h3 class="text-sm font-black">"새 탭"</h3>
+                                <input type="text" class="input input-bordered input-sm w-full" placeholder="탭 이름"
+                                    maxlength=MAX_TAB_NAME_CHARS.to_string()
+                                    prop:value=move || new_tab_name.get()
+                                    on:input=move |ev| { set_new_tab_name.set(event_target_value(&ev)); set_new_tab_error.set(None); }
+                                    on:keydown=move |ev| match ev.key().as_str() {
+                                        "Enter" => confirm_add_tab(false),
+                                        "Escape" => set_adding_tab.set(false),
+                                        _ => {}
+                                    }
+                                />
+                                {move || new_tab_error.get().map(|e| view! {
+                                    <div class="text-[10px] text-error bg-error/10 p-1.5 rounded">{e}</div>
+                                })}
+                                <p class="text-[11px] text-base-content/70">
+                                    {format!("기본 문구 {}개(인사말 등)를 이 탭에 채워 넣을까요?", default_favorite_messages().len())}
+                                </p>
+                                <div class="flex flex-wrap justify-end gap-1">
+                                    <button class="btn btn-ghost btn-xs" on:click=move |_| set_adding_tab.set(false)>"취소"</button>
+                                    <button class="btn btn-outline btn-xs" on:click=move |_| confirm_add_tab(false)>"빈 탭으로 추가"</button>
+                                    <button class="btn btn-success btn-xs" on:click=move |_| confirm_add_tab(true)>"기본 문구로 채우기"</button>
+                                </div>
+                            </div>
+                        </div>
+                    </Show>
+
+                    // --- WARN: deleting a tab deletes its messages ---
+                    <Show when=move || deleting_tab.get().is_some()>
+                        {move || {
+                            let name = deleting_tab.get().unwrap_or_default();
+                            let (count, keyed) = favorite_messages.with(|l| tab_summary(l, &name));
+                            let target = name.clone();
+                            view! {
+                                <div class="absolute inset-0 z-20 grid place-items-center bg-base-300/80 p-4">
+                                    <div class="w-full max-w-xs flex flex-col gap-2 p-3 rounded-lg bg-base-200 border border-error/40 shadow-xl">
+                                        <h3 class="text-sm font-black text-error">{format!("'{name}' 탭을 삭제할까요?")}</h3>
+                                        <p class="text-[11px] text-base-content/80">
+                                            {format!("이 탭의 메시지 {count}개가 모두 삭제되며 되돌릴 수 없습니다.")}
+                                            {(keyed > 0).then(|| format!(" 지정된 단축키 {keyed}개도 해제됩니다."))}
+                                        </p>
+                                        <div class="flex justify-end gap-1">
+                                            <button class="btn btn-ghost btn-xs" on:click=move |_| set_deleting_tab.set(None)>"취소"</button>
+                                            <button class="btn btn-error btn-xs" on:click=move |_| confirm_delete_tab(target.clone())>"삭제"</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        }}
+                    </Show>
                 </div>
                 <div class="modal-backdrop" on:click=move |_| set_show_favorites.set(false)></div>
             </div>

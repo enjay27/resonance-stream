@@ -66,6 +66,10 @@ pub struct AppConfig {
     /// Chat lines to copy or paste by shortcut; see `shortcut.rs`.
     #[serde(default = "default_favorite_messages")]
     pub favorite_messages: Vec<FavoriteMessage>,
+    /// Names of the favorites tabs the user made (the default tab is not
+    /// listed); each message carries its own tab name.
+    #[serde(default)]
+    pub favorite_tabs: Vec<String>,
     /// Days of daily chat logs (chat_logs/) to keep; 0 keeps them all.
     #[serde(default)]
     pub chat_log_retention_days: u32,
@@ -139,6 +143,7 @@ impl Default for AppConfig {
             archive_ignored_channels: default_archive_ignored_channels(),
             message_spacing: default_spacing(),
             favorite_messages: default_favorite_messages(),
+            favorite_tabs: Vec::new(),
             chat_log_retention_days: 0,
             raw_capture: false,
         }
@@ -337,6 +342,21 @@ mod tests {
         assert!(!AppConfig::default().raw_capture);
         let config: AppConfig = serde_json::from_str(r#"{"init_done": true}"#).unwrap();
         assert!(!config.raw_capture);
+    }
+
+    #[test]
+    fn favorite_tabs_are_empty_when_missing_and_round_trip() {
+        assert!(AppConfig::default().favorite_tabs.is_empty());
+        let old: AppConfig = serde_json::from_str(r#"{"init_done": true}"#).unwrap();
+        assert!(old.favorite_tabs.is_empty());
+        let config: AppConfig = serde_json::from_str(
+            r#"{"favorite_tabs": ["레이드"], "favorite_messages": [{"text": "hi", "tab": "레이드"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(config.favorite_tabs, ["레이드"]);
+        assert_eq!(config.favorite_messages[0].tab, "레이드");
+        let saved = serde_json::to_value(&config).unwrap();
+        assert_eq!(saved["favorite_tabs"][0], "레이드");
     }
 
     #[test]

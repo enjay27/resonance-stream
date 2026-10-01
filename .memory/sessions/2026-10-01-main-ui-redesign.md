@@ -19,6 +19,11 @@ white behind the box, with the WCAG 2 formula: main text >= 7:1, original
 v3) >= 4.5:1. The class strings are tied to the tested alphas by a test.
 Screenshots: compact at 0 % opacity over white, normal at 30 % over a bright gradient.
 
+Bars (Kade: "add it as your recommendation"): below the same 0.5 opacity the title
+bar and tab bar turn near solid in the theme's own colour (`bg-base-300/95`,
+`title_bar_bg` / `nav_bar_bg`), so the theme's text keeps its designed contrast;
+at the default opacity they look as before. The compact hover bar was 95 % already.
+
 ## Other pure pieces (tested)
 - `status_view`: sniffer/translator state -> tone + Korean label.
 - `Tab::dot_class` replaced `Tab::icon`/`Tab::colors` (removed with their test lines:
@@ -30,7 +35,5 @@ Screenshots: compact at 0 % opacity over white, normal at 30 % over a bright gra
 ## Open
 - Not run on Windows (`cargo tauri dev`): transparency, drag regions (compact bar is
   `absolute` and invisible until hover), the always-on-top pin, real timestamps.
-- A low opacity also makes the title bar and tab labels faint (they keep their own
-  translucent backgrounds) -- left as is, asked Kade.
 - `format_time` multiplies by 1000: the mock's millisecond timestamps show odd times;
   real ones are seconds (not a change of this branch).

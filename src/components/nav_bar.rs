@@ -1,5 +1,6 @@
 use crate::chat_view::Tab;
 use crate::components::icons::{self, icon};
+use crate::readability::nav_bar_bg;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
 use crate::ui_types::Channel;
@@ -109,7 +110,7 @@ pub fn NavBar() -> impl IntoView {
 
     view! {
         <nav
-            class=move || format!("relative z-50 flex flex-nowrap items-center justify-between gap-x-2 px-2 py-1.5 border-b border-base-content/5 min-h-[44px] select-none transition-all duration-300 overflow-visible {}", if signals.config.compact_mode.get() { "!absolute top-0 inset-x-0 !h-8 !min-h-0 !py-0 opacity-0 hover:opacity-100 focus-within:opacity-100 bg-base-300/95 backdrop-blur-md shadow-lg transition-opacity duration-200" } else { "" })
+            class=move || format!("relative z-50 flex flex-nowrap items-center justify-between gap-x-2 px-2 py-1.5 border-b border-base-content/5 min-h-[44px] select-none transition-all duration-300 overflow-visible {}", if signals.config.compact_mode.get() { "!absolute top-0 inset-x-0 !h-8 !min-h-0 !py-0 opacity-0 hover:opacity-100 focus-within:opacity-100 bg-base-300/95 backdrop-blur-md shadow-lg transition-opacity duration-200" } else { nav_bar_bg(signals.config.overlay_opacity.get()) })
             data-tauri-drag-region
         >
             // --- LEFT: DaisyUI Tabs ---

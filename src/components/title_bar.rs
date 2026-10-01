@@ -1,4 +1,5 @@
 use crate::components::icons::{self, icon};
+use crate::readability::title_bar_bg;
 use crate::status_view::{sniffer_status, translator_status};
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
@@ -18,7 +19,7 @@ pub fn TitleBar() -> impl IntoView {
     let translator = move || translator_status(store.service.translator_state.get());
 
     view! {
-        <div class="flex items-center h-8 pl-3 bg-base-300/60 backdrop-blur-md border-b border-base-content/5 select-none" data-tauri-drag-region>
+        <div class=move || format!("flex items-center h-8 pl-3 backdrop-blur-md border-b border-base-content/5 select-none transition-colors {}", title_bar_bg(store.config.overlay_opacity.get())) data-tauri-drag-region>
             // --- LEFT: app name, version, start-up status ---
             <div class="flex items-baseline gap-2 min-w-0 flex-1 pointer-events-none">
                 <span class="text-[11px] font-bold text-base-content/80 truncate">"Resonance Stream"</span>

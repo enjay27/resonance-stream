@@ -31,6 +31,30 @@ pub fn needs_backing(overlay_opacity: f32) -> bool {
     overlay_opacity < BACKING_BELOW_OPACITY
 }
 
+/// Opacity of the title bar and tab bar behind their text once the window is
+/// see-through: near solid, in the theme's own colour, so the theme's text
+/// colours keep the contrast they were made for.
+pub const CHROME_BACKED_ALPHA: f64 = 0.95;
+pub const CHROME_BACKED: &str = "bg-base-300/95";
+
+/// Title bar background at this window opacity.
+pub fn title_bar_bg(overlay_opacity: f32) -> &'static str {
+    if needs_backing(overlay_opacity) {
+        CHROME_BACKED
+    } else {
+        "bg-base-300/60"
+    }
+}
+
+/// Tab bar background at this window opacity (normal mode; none by default).
+pub fn nav_bar_bg(overlay_opacity: f32) -> &'static str {
+    if needs_backing(overlay_opacity) {
+        CHROME_BACKED
+    } else {
+        ""
+    }
+}
+
 /// Sender-name class on the box and its colour (Tailwind's -300 shades),
 /// lighter than the theme's channel colours so they hold up on black.
 pub fn box_name(channel: Channel) -> (&'static str, Rgb) {
@@ -174,5 +198,25 @@ mod tests {
         assert!((contrast(WHITE, [0, 0, 0]) - 21.0).abs() < 0.01);
         assert!((contrast(WHITE, WHITE) - 1.0).abs() < 0.001);
         assert!((contrast([0x76, 0x76, 0x76], WHITE) - 4.54).abs() < 0.02);
+    }
+
+    #[test]
+    fn the_bars_turn_near_solid_when_the_window_is_see_through() {
+        let low = BACKING_BELOW_OPACITY - 0.01;
+        assert_eq!(title_bar_bg(low), CHROME_BACKED);
+        assert_eq!(nav_bar_bg(low), CHROME_BACKED);
+        assert_eq!(title_bar_bg(0.85), "bg-base-300/60", "plain look kept");
+        assert_eq!(nav_bar_bg(0.85), "");
+    }
+
+    #[test]
+    fn backed_bars_let_at_most_a_tenth_of_the_scene_through() {
+        // The theme's text colours are made for base-300; at >= 90 % the
+        // scene behind shifts the bar by at most a tenth.
+        assert!(CHROME_BACKED_ALPHA >= 0.9);
+        assert_eq!(
+            CHROME_BACKED,
+            format!("bg-base-300/{}", pct(CHROME_BACKED_ALPHA))
+        );
     }
 }

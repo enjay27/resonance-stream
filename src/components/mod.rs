@@ -1,6 +1,7 @@
 mod chat_container;
 pub mod chat_row;
 mod cheatsheet_modal;
+mod dictionary_add_modal;
 mod dictionary_modal;
 mod favorites_modal;
 pub mod icons;
@@ -14,6 +15,7 @@ mod update_modals;
 pub use chat_container::ChatContainer;
 pub use chat_row::ChatRow;
 pub use cheatsheet_modal::CheatSheetModal;
+pub use dictionary_add_modal::AddToDictionaryModal;
 pub use dictionary_modal::DictionaryModal;
 pub use favorites_modal::FavoritesModal;
 pub use nav_bar::NavBar;

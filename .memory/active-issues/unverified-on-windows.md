@@ -100,3 +100,8 @@ run as the real app.
 - **Cheat sheet (`claude/rc-build-ui-fixes-ny8j3w`, 2026-10-01).** ui-preview only. Worth a real run:
   the book button in the title bar (not a drag region), the modal over the transparent
   window, click-to-copy of a JP name.
+- **Chat row menus + add to dictionary (`claude/rc-build-ui-fixes-ny8j3w`, 2026-10-01).** ui-preview
+  only. Worth a real run: the pointer and underline on the message text, selecting a word and
+  clicking (the menu keeps the selection), double click, a click after a drag-to-scroll opening
+  nothing, "사전에 추가" saving and the next translation using the term (and `auto_sync_latest_dict`
+  overwriting it), copy / favorite feedback.

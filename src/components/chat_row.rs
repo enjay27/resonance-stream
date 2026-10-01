@@ -1,5 +1,5 @@
 use crate::chat_view::{compact_original_class, translation_pending};
-use crate::components::icons::{self, icon};
+use crate::dictionary_edit::draft;
 use crate::favorites::add_from_chat;
 use crate::readability::{box_name, needs_backing, row_palette, ORIGINAL_TEXT, TEXT_BOX};
 use crate::store::{AppActions, AppSignals};
@@ -7,6 +7,7 @@ use crate::tauri_bridge::invoke;
 use crate::ui_types::{Channel, ChatMessage};
 use crate::use_context;
 use crate::utils::{copy_to_clipboard, format_time};
+use crate::view_signals::{DictDraft, MenuKind, RowMenu};
 use leptos::portal::Portal;
 use leptos::prelude::*;
 use leptos::reactive::spawn_local;
@@ -21,7 +22,6 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
     let actions = use_context::<AppActions>().expect("AppActions missing");
 
     // Star: save this message (translation as the note) to the favorites.
-    let (starred, set_starred) = signal(false);
     let save_favorite = move || {
         let (text, translated) = sig.with_untracked(|m| (m.message.clone(), m.translated.clone()));
         let mut added = false;
@@ -32,22 +32,6 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
         if added {
             actions.save_config.dispatch(());
         }
-        set_starred.set(true);
-        spawn_local(async move {
-            gloo_timers::future::TimeoutFuture::new(1200).await;
-            set_starred.set(false);
-        });
-    };
-    let star_button = move |class: &'static str| {
-        view! {
-            <Show when=move || !sig.with(|m| m.is_blocked)>
-                <button class=class title="자주 쓰는 메시지에 추가"
-                    on:click=move |_| save_favorite()>
-                    {move || if starred.get() { "✓" } else { "⭐" }}
-                </button>
-            </Show>
-        }
-        .into_any()
     };
 
     Effect::new(move |_| {
@@ -66,9 +50,19 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
         }
     });
 
-    let is_active =
-        Memo::new(move |_| signals.ui.active_menu_id.get() == Some(sig.with_untracked(|m| m.pid)));
+    let pid = sig.with_untracked(|m| m.pid);
+    let menu_open = move |kind: MenuKind| {
+        Memo::new(move |_| signals.ui.active_menu.get() == Some(RowMenu { pid, kind }))
+    };
+    let name_open = menu_open(MenuKind::Sender);
+    let text_open = menu_open(MenuKind::Message);
     let (menu_pos, set_menu_pos) = signal((0, 0));
+    // The text selected in the message when its menu opened (the buttons of
+    // the menu would clear it), and where the pointer went down (drag-to-scroll).
+    let (selection, set_selection) = signal(String::new());
+    let (pointer_down, set_pointer_down) = signal((0, 0));
+    // "✓ ..." shown on a menu item for a moment before the menu closes.
+    let (done, set_done) = signal(None::<&'static str>);
 
     let channel_colors = move || {
         sig.with(|m| match m.channel {
@@ -123,19 +117,45 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
         }
     };
 
-    // Sender-name click: open / close this row's menu at the pointer.
-    let toggle_menu = move |ev: web_sys::MouseEvent| {
-        ev.stop_propagation();
-        if is_active.get() {
-            signals.ui.set_active_menu_id.set(None);
-        } else {
+    // Click on the sender's name or on the message text: open / close that
+    // menu at the pointer. A double click selects a word, so it (re)opens the
+    // menu with that word instead of closing it.
+    let click_menu = move |kind: MenuKind| {
+        move |ev: web_sys::MouseEvent| {
+            ev.stop_propagation();
+            if kind == MenuKind::Message && sig.with_untracked(|m| m.is_blocked) {
+                return;
+            }
+            // Drag-to-scroll ends in a click: not a request for a menu.
+            if signals.config.drag_to_scroll.get_untracked() {
+                let (x, y) = pointer_down.get_untracked();
+                if (ev.client_x() - x).abs() > 4 || (ev.client_y() - y).abs() > 4 {
+                    return;
+                }
+            }
+            if kind == MenuKind::Message {
+                let picked = web_sys::window()
+                    .and_then(|w| w.get_selection().ok().flatten())
+                    .map(|s| String::from(s.to_string()))
+                    .unwrap_or_default();
+                set_selection.set(picked);
+            }
+            let target = RowMenu { pid, kind };
             set_menu_pos.set((ev.client_x(), ev.client_y()));
-            signals
-                .ui
-                .set_active_menu_id
-                .set(Some(sig.with_untracked(|m| m.pid)));
+            set_done.set(None);
+            signals.ui.set_active_menu.update(|open| {
+                *open = if ev.detail() >= 2 {
+                    Some(target)
+                } else {
+                    RowMenu::toggled(*open, target)
+                }
+            });
         }
     };
+    let toggle_name = click_menu(MenuKind::Sender);
+    let toggle_text = click_menu(MenuKind::Message);
+    let note_pointer_down =
+        move |ev: web_sys::MouseEvent| set_pointer_down.set((ev.client_x(), ev.client_y()));
     // Underlined when the chat is filtered to this sender.
     let filtered_to_sender = move || {
         signals
@@ -146,7 +166,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
 
     let name_menu = move || {
         view! {
-            <Show when=move || is_active.get()>
+            <Show when=move || name_open.get()>
                 <Portal>
                     <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
                          style=move || {
@@ -158,7 +178,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                         <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
                             on:click=move |_| {
                                 sig.with_untracked(|m| copy_to_clipboard(&m.nickname));
-                                signals.ui.set_active_menu_id.set(None);
+                                signals.ui.set_active_menu.set(None);
                             }>
                             "📋 Copy Name"
                         </button>
@@ -171,7 +191,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                 } else {
                                     signals.chat.set_search_term.set(n);
                                 }
-                                signals.ui.set_active_menu_id.set(None);
+                                signals.ui.set_active_menu.set(None);
                             }>
                             "🔍 Filter Chat"
                         </button>
@@ -191,7 +211,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                 });
 
                                 signals.config.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
-                                signals.ui.set_active_menu_id.set(None);
+                                signals.ui.set_active_menu.set(None);
                             }>
                             "🚫 Block User"
                         </button>
@@ -202,20 +222,78 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
         .into_any()
     };
 
-    // Star + copy, shown on hover.
-    let hover_actions = move |class: &'static str| {
+    // The message's menu: copy, favorite, add to the dictionary.
+    let text_menu = move || {
+        // Runs `action`, shows `label` as done, and closes the menu a moment later.
+        let finish = move |label: &'static str| {
+            set_done.set(Some(label));
+            spawn_local(async move {
+                gloo_timers::future::TimeoutFuture::new(700).await;
+                if done.get_untracked() == Some(label) {
+                    set_done.set(None);
+                    if text_open.get_untracked() {
+                        signals.ui.set_active_menu.set(None);
+                    }
+                }
+            });
+        };
+        let item = "btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2";
         view! {
-            <div class=class>
-                {star_button("btn btn-ghost btn-xs h-5 min-h-0 px-1.5 text-[10px]")}
-                <Show when=move || !sig.with(|m| m.is_blocked)>
-                    <button class="btn btn-ghost btn-xs h-5 min-h-0 px-1.5 opacity-70 hover:opacity-100" title="원문 복사"
-                        on:click=move |_| sig.with_untracked(|m| copy_to_clipboard(&m.message))>
-                        {icon(icons::COPY, "size-3")}
-                    </button>
-                </Show>
-            </div>
+            <Show when=move || text_open.get()>
+                <Portal>
+                    <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[150px] animate-in fade-in zoom-in-95 duration-100"
+                         style=move || {
+                             let (x, y) = menu_pos.get();
+                             format!("top: {}px; left: {}px;", y + 8, x + 8)
+                         }
+                         on:click=move |ev| ev.stop_propagation()>
+                        <button class=item
+                            on:click=move |_| {
+                                sig.with_untracked(|m| copy_to_clipboard(&m.message));
+                                finish("copy");
+                            }>
+                            {move || if done.get() == Some("copy") { "✓ 복사됨" } else { "📋 메시지 복사" }}
+                        </button>
+                        <Show when=move || sig.with(|m| m.translated.is_some())>
+                            <button class=item
+                                on:click=move |_| {
+                                    sig.with_untracked(|m| copy_to_clipboard(m.translated.as_deref().unwrap_or_default()));
+                                    finish("copy-translation");
+                                }>
+                                {move || if done.get() == Some("copy-translation") { "✓ 복사됨" } else { "📋 번역 복사" }}
+                            </button>
+                        </Show>
+                        <button class=item
+                            on:click=move |_| {
+                                save_favorite();
+                                finish("favorite");
+                            }>
+                            {move || if done.get() == Some("favorite") { "✓ 추가됨" } else { "⭐ 자주 쓰는 메시지에 추가" }}
+                        </button>
+                        <button class=item
+                            on:click=move |_| {
+                                let (key, value) = sig.with_untracked(|m| {
+                                    draft(&selection.get_untracked(), &m.message, m.translated.as_deref())
+                                });
+                                signals.ui.set_dict_draft.set(Some(DictDraft { key, value }));
+                                signals.ui.set_active_menu.set(None);
+                            }>
+                            "📖 사전에 추가"
+                        </button>
+                    </div>
+                </Portal>
+            </Show>
         }
         .into_any()
+    };
+
+    // Hover on the message text: a pointer and a line under it.
+    let text_class = move || {
+        if sig.with(|m| m.is_blocked) {
+            ""
+        } else {
+            "cursor-pointer hover:underline decoration-1 underline-offset-4"
+        }
     };
 
     // Normal rows sit on the text box once the window is see-through.
@@ -253,7 +331,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                         format!("font-bold cursor-pointer hover:underline truncate {color}")
                                     }
                                     style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(2).max(10))
-                                    on:click=toggle_menu
+                                    on:click=toggle_name
                                 >
                                     {move || sig.with(|m| m.nickname.clone())}
                                     {move || sig.with(|m| m.nickname_romaji.clone()).map(|r| view! {
@@ -263,9 +341,9 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                 {name_menu()}
                                 <span class=move || format!("tabular-nums {}", palette.get().meta)>"Lv." {move || sig.with(|m| m.level)}</span>
                                 <time class=move || format!("tabular-nums {}", palette.get().meta)>{display_time}</time>
-                                {hover_actions("ml-auto flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity")}
                             </div>
 
+                            <div class=text_class on:click=toggle_text on:mousedown=note_pointer_down>
                             {move || {
                                 let msg = sig.get();
                                 let p = palette.get();
@@ -295,6 +373,8 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                     }.into_any()
                                 }
                             }}
+                            </div>
+                            {text_menu()}
                         </div>
                     </div>
                 }
@@ -312,9 +392,10 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                 let color = if filtered_to_sender() { "text-success underline" } else { sig.with(|m| box_name(m.channel).0) };
                                 format!("font-semibold cursor-pointer hover:underline {color}")
                             }
-                            on:click=toggle_menu
+                            on:click=toggle_name
                         >{move || sig.with(|m| m.nickname.clone())}</span>
                         <span class="text-white/40 mr-1">":"</span>
+                        <span class=text_class on:click=toggle_text on:mousedown=note_pointer_down>
                         {move || {
                             let msg = sig.get();
                             let kw = signals.config.emphasis_keywords.get();
@@ -335,10 +416,10 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                 }.into_any()
                             }
                         }}
+                        </span>
                     </div>
                     {name_menu()}
-                    // Right after the text; its room is reserved, so rows never reflow on hover.
-                    {hover_actions("shrink-0 self-center flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-base-300 rounded-md shadow border border-base-content/10")}
+                    {text_menu()}
                 </div>
             </Show>
         </Show>

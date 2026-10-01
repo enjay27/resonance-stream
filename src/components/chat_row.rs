@@ -302,11 +302,11 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                 // ==========================================
                 // COMPACT VIEW: subtitle captions on the text box
                 // ==========================================
-                <div class="group relative px-2"
+                <div class="group relative flex items-start gap-1 px-2"
                      style=move || format!("padding-top: {0}px; padding-bottom: {0}px; font-size: {1}px;",
                          signals.config.message_spacing.get().saturating_sub(2),
                          signals.config.font_size.get().saturating_sub(1).max(10))>
-                    <div class=format!("inline-block max-w-full px-2.5 py-1 leading-snug {TEXT_BOX}")>
+                    <div class=format!("min-w-0 px-2.5 py-1 leading-snug {TEXT_BOX}")>
                         <span
                             class=move || {
                                 let color = if filtered_to_sender() { "text-success underline" } else { sig.with(|m| box_name(m.channel).0) };
@@ -337,7 +337,8 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                         }}
                     </div>
                     {name_menu()}
-                    {hover_actions("absolute right-1 top-0.5 hidden group-hover:flex gap-0.5 bg-base-300 rounded-md shadow border border-base-content/10 z-10")}
+                    // Right after the text; its room is reserved, so rows never reflow on hover.
+                    {hover_actions("shrink-0 self-center flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-base-300 rounded-md shadow border border-base-content/10")}
                 </div>
             </Show>
         </Show>

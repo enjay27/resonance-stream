@@ -147,7 +147,7 @@ jobs:
               printf '\n\n'
             fi
             printf '## main 대비 포함된 변경\n'
-            git log --no-merges --format='- %s (`%h`)' origin/main.."$SHA"
+            git log --no-merges --format='- %s (`%h`)' origin/main.."$SHA" | rc_changes
             printf '\n'
             unverified=$(git log --no-merges --format=%B origin/main.."$SHA" | rc_unverified)
             if [ -n "$unverified" ]; then

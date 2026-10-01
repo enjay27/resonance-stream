@@ -51,3 +51,15 @@ rc_unverified() {
 rc_version() {
   sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' | head -1
 }
+
+# The "changes vs main" list (stdin: one "- subject (`sha`)" line per commit);
+# a build with nothing beyond main says so instead of leaving the section empty.
+rc_changes() {
+  local lines
+  lines=$(grep -v '^[[:space:]]*$' || true)
+  if [ -n "$lines" ]; then
+    printf '%s\n' "$lines"
+  else
+    printf '%s\n' '- (없음 -- main과 같은 빌드)'
+  fi
+}

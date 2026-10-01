@@ -50,7 +50,7 @@ the same name, or it will not cross the boundary.
 ## Repository Layout
 
 ```
-.claude/              graft wiring (hooks, helpers), skills/: graft, workflow-control
+.claude/              graft wiring (hooks, helpers), skills/: graft, workflow-control, ui-preview
 .memory/              working memory; see .memory/README.md
 .github/workflows/    CI — the gates, per OS
 justfile              the gates as commands
@@ -148,8 +148,10 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
 
 0. **Test first.** New behaviour or a bug fix has its failing unit test before its code.
 1. **Run the gate for every part touched** (table above). `cargo fmt` is part of it.
-2. **Behaviour check where a gate cannot see it.** UI changes need a manual run
-   (`cargo tauri dev`, Windows, as Administrator); if not done, say so in the commit body.
+2. **Behaviour check where a gate cannot see it.** UI changes are screenshotted in a
+   browser with the `ui-preview` skill (`.claude/skills/ui-preview/`, runs on Linux),
+   and need a manual run (`cargo tauri dev`, Windows, as Administrator); say in the
+   commit body which of the two was done.
 3. **Record the outcome in the memory tree.** `MEMORY.md` is an index under ~40 lines —
    update its *Now* section. Detail goes in `.memory/` (see its README).
 4. **Push the branch and open the PR** — see *Version Control*; CI merges it when green.

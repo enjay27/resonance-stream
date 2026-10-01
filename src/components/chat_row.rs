@@ -1,9 +1,12 @@
+use crate::chat_view::{compact_original_class, translation_pending};
+use crate::components::icons::{self, icon};
 use crate::favorites::add_from_chat;
+use crate::readability::{box_name, needs_backing, row_palette, ORIGINAL_TEXT, TEXT_BOX};
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
 use crate::ui_types::{Channel, ChatMessage};
 use crate::use_context;
-use crate::utils::{copy_to_clipboard, format_time, is_japanese};
+use crate::utils::{copy_to_clipboard, format_time};
 use leptos::portal::Portal;
 use leptos::prelude::*;
 use leptos::reactive::spawn_local;
@@ -120,324 +123,225 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
         }
     };
 
+    // Sender-name click: open / close this row's menu at the pointer.
+    let toggle_menu = move |ev: web_sys::MouseEvent| {
+        ev.stop_propagation();
+        if is_active.get() {
+            signals.ui.set_active_menu_id.set(None);
+        } else {
+            set_menu_pos.set((ev.client_x(), ev.client_y()));
+            signals
+                .ui
+                .set_active_menu_id
+                .set(Some(sig.with_untracked(|m| m.pid)));
+        }
+    };
+    // Underlined when the chat is filtered to this sender.
+    let filtered_to_sender = move || {
+        signals
+            .chat
+            .search_term
+            .with(|s| sig.with(|m| *s == m.nickname))
+    };
+
+    let name_menu = move || {
+        view! {
+            <Show when=move || is_active.get()>
+                <Portal>
+                    <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
+                         style=move || {
+                             let (x, y) = menu_pos.get();
+                             format!("top: {}px; left: {}px;", y + 8, x + 8)
+                         }
+                         on:click=move |ev| ev.stop_propagation()>
+
+                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
+                            on:click=move |_| {
+                                sig.with_untracked(|m| copy_to_clipboard(&m.nickname));
+                                signals.ui.set_active_menu_id.set(None);
+                            }>
+                            "📋 Copy Name"
+                        </button>
+
+                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
+                            on:click=move |_| {
+                                let n = sig.with_untracked(|m| m.nickname.clone());
+                                if signals.chat.search_term.get_untracked() == n {
+                                    signals.chat.set_search_term.set("".into());
+                                } else {
+                                    signals.chat.set_search_term.set(n);
+                                }
+                                signals.ui.set_active_menu_id.set(None);
+                            }>
+                            "🔍 Filter Chat"
+                        </button>
+
+                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2 text-error"
+                            on:click=move |_| {
+                                let target_uid = sig.with_untracked(|m| m.uid);
+                                let target_name = sig.with_untracked(|m| m.nickname.clone());
+                                let blocked_name = sig.with_untracked(|m| m.nickname.clone());
+
+                                spawn_local(async move {
+                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+                                        "uid": target_uid,
+                                        "nickname": target_name
+                                    })).unwrap();
+                                    let _ = invoke("block_user_command", args).await;
+                                });
+
+                                signals.config.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
+                                signals.ui.set_active_menu_id.set(None);
+                            }>
+                            "🚫 Block User"
+                        </button>
+                    </div>
+                </Portal>
+            </Show>
+        }
+        .into_any()
+    };
+
+    // Star + copy, shown on hover.
+    let hover_actions = move |class: &'static str| {
+        view! {
+            <div class=class>
+                {star_button("btn btn-ghost btn-xs h-5 min-h-0 px-1.5 text-[10px]")}
+                <Show when=move || !sig.with(|m| m.is_blocked)>
+                    <button class="btn btn-ghost btn-xs h-5 min-h-0 px-1.5 opacity-70 hover:opacity-100" title="원문 복사"
+                        on:click=move |_| sig.with_untracked(|m| copy_to_clipboard(&m.message))>
+                        {icon(icons::COPY, "size-3")}
+                    </button>
+                </Show>
+            </div>
+        }
+        .into_any()
+    };
+
+    // Normal rows sit on the text box once the window is see-through.
+    let palette =
+        Memo::new(move |_| row_palette(needs_backing(signals.config.overlay_opacity.get())));
+    let pending =
+        move || sig.with(|m| translation_pending(m, signals.config.use_translation.get()));
+    let dots = || view! { <span class="loading loading-dots loading-xs ml-1.5 align-middle opacity-50"></span> };
+
     view! {
         <Show when=move || !(sig.with(|m| m.is_blocked) && signals.config.hide_blocked_messages.get())>
             <Show
                 when=move || signals.config.compact_mode.get()
                 fallback=move || view! {
                     // ==========================================
-                    // STANDARD VIEW (Stacked)
+                    // NORMAL VIEW: header line, translation first, original below
                     // ==========================================
-                    <div class="flex flex-col items-start px-2 group transition-colors hover:bg-base-content/5"
-                         style=move || format!("padding-top: {0}px; padding-bottom: {0}px;", signals.config.message_spacing.get())>
-                        <div class="opacity-90 mb-1 flex gap-2 items-center">
-                            // 1. NICKNAME BUBBLE
-                            <span
-                                class=move || {
-                                    let color_class = if signals.chat.search_term.with(|s| sig.with(|m| *s == m.nickname)) {
-                                        "text-success underline decoration-2"
-                                    } else {
-                                        channel_colors().0
-                                    };
-                                    // ADDED: bg-base-200 and padding to create a solid pill shape!
-                                    format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border border-base-content/5 {}", color_class)
-                                }
-                                style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(1).max(10))
-                                on:click=move |ev| {
-                                    ev.stop_propagation();
-                                    if is_active.get() {
-                                        signals.ui.set_active_menu_id.set(None);
-                                    } else {
-                                        set_menu_pos.set((ev.client_x(), ev.client_y()));
-                                        signals.ui.set_active_menu_id.set(Some(sig.with_untracked(|m| m.pid)));
+                    <div class=move || format!("group mx-1 border-l-2 rounded-r-md transition-colors {}",
+                            channel_colors().1)
+                         style=move || format!("padding-top: {0}px; padding-bottom: {0}px;", signals.config.message_spacing.get() + 2)>
+                        <div class=move || {
+                            let p = palette.get();
+                            if p.container.is_empty() {
+                                "pl-3 pr-2 rounded-r-md hover:bg-base-content/5".to_string()
+                            } else {
+                                format!("ml-1.5 px-2.5 py-1 w-fit max-w-[calc(100%-0.5rem)] {}", p.container)
+                            }
+                        }>
+                            <div class="flex items-center gap-2 text-[11px] leading-5 min-w-0">
+                                <span
+                                    class=move || {
+                                        let color = if filtered_to_sender() {
+                                            "text-success underline decoration-2"
+                                        } else if palette.get().container.is_empty() {
+                                            channel_colors().0
+                                        } else {
+                                            sig.with(|m| box_name(m.channel).0)
+                                        };
+                                        format!("font-bold cursor-pointer hover:underline truncate {color}")
                                     }
-                                }
-                            >
-                                {move || {
-                                    let p = sig.get();
-                                    match p.nickname_romaji {
-                                        Some(r) => format!("{}({})", p.nickname, r),
-                                        None => p.nickname.clone()
-                                    }
-                                }}
-                            </span>
-
-                            <Show when=move || is_active.get()>
-                                <Portal>
-                                    <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
-                                         style=move || {
-                                             let (x, y) = menu_pos.get();
-                                             format!("top: {}px; left: {}px;", y + 8, x + 8)
-                                         }
-                                         on:click=move |ev| ev.stop_propagation()>
-
-                                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
-                                            on:click=move |_| {
-                                                sig.with_untracked(|m| copy_to_clipboard(&m.nickname));
-                                                signals.ui.set_active_menu_id.set(None);
-                                            }>
-                                            "📋 Copy Name"
-                                        </button>
-
-                                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
-                                            on:click=move |_| {
-                                                let n = sig.with_untracked(|m| m.nickname.clone());
-                                                if signals.chat.search_term.get_untracked() == n {
-                                                    signals.chat.set_search_term.set("".into());
-                                                } else {
-                                                    signals.chat.set_search_term.set(n);
-                                                }
-                                                signals.ui.set_active_menu_id.set(None);
-                                            }>
-                                            "🔍 Filter Chat"
-                                        </button>
-
-                                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2 text-error"
-                                            on:click=move |_| {
-                                                let target_uid = sig.with_untracked(|m| m.uid);
-                                                let target_name = sig.with_untracked(|m| m.nickname.clone());
-                                                let blocked_name = sig.with_untracked(|m| m.nickname.clone());
-
-                                                spawn_local(async move {
-                                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                                                        "uid": target_uid,
-                                                        "nickname": target_name
-                                                    })).unwrap();
-                                                    let _ = invoke("block_user_command", args).await;
-                                                });
-
-                                                signals.config.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
-                                                signals.ui.set_active_menu_id.set(None);
-                                            }>
-                                            "🚫 Block User"
-                                        </button>
-                                    </div>
-                                </Portal>
-                            </Show>
-
-                            <span class="text-base-content/50 font-bold text-[10px] bg-base-200 px-1 rounded border border-base-content/5">
-                                "Lv." {move || sig.with(|m| m.level)}
-                            </span>
-                            <time class="ml-1 text-base-content/50 opacity-70 text-[10px] bg-base-200 px-1 rounded border border-base-content/5">
-                                {display_time}
-                            </time>
-                        </div>
-
-                        // 2. MESSAGE BUBBLE
-                        <div class="flex items-center gap-2 w-full mt-0.5">
-                            <div class=move || format!(
-                                "px-3 py-2 w-fit max-w-[85%] bg-base-200 border-y border-r border-base-content/5 border-l-[3px] rounded-md text-base-content shadow-sm transition-all {}",
-                                channel_colors().1
-                            )>
-                                {move || {
-                                    let msg = sig.get();
-
-                                    if msg.is_blocked {
-                                        view! {
-                                            <div class="italic opacity-50 text-base-content/50 font-bold"
-                                                style=move || format!("font-size: {}px;", signals.config.font_size.get())>
-                                                "(차단된 사용자의 메시지입니다)"
-                                            </div>
-                                        }.into_any()
-                                    } else {
-                                        view! {
-                                            <>
-                                                <div class="leading-relaxed font-bold"
-                                                    style=move || format!("font-size: {}px;", signals.config.font_size.get())>
-                                                    {
-                                                        let show_original_prefix = is_japanese(&msg.message) && signals.config.use_translation.get();
-                                                        if show_original_prefix {
-                                                            view! { <span class="text-base-content/50 mr-1.5 font-bold">"[원문]"</span> }.into_any()
-                                                        } else {
-                                                            view! {}.into_any()
-                                                        }
-                                                    }
-                                                    {render_emphasized(&msg.message, &signals.config.emphasis_keywords.get())}
-                                                </div>
-
-                                                {msg.translated.clone().map(|text| view! {
-                                                    <div class="mt-1.5 pt-1.5 border-t border-base-content/10 text-success font-bold animate-in slide-in-from-top-1 duration-200"
-                                                        style=move || format!("font-size: {}px;", signals.config.font_size.get())>
-                                                         <span class="opacity-70 mr-1.5 font-bold">"[번역]"</span>
-                                                         {render_emphasized(&text, &signals.config.emphasis_keywords.get())}
-                                                    </div>
-                                                })}
-                                            </>
-                                        }.into_any()
-                                    }
-                                }}
+                                    style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(2).max(10))
+                                    on:click=toggle_menu
+                                >
+                                    {move || sig.with(|m| m.nickname.clone())}
+                                    {move || sig.with(|m| m.nickname_romaji.clone()).map(|r| view! {
+                                        <span class=move || format!("ml-1 font-normal {}", palette.get().meta)>{r}</span>
+                                    })}
+                                </span>
+                                {name_menu()}
+                                <span class=move || format!("tabular-nums {}", palette.get().meta)>"Lv." {move || sig.with(|m| m.level)}</span>
+                                <time class=move || format!("tabular-nums {}", palette.get().meta)>{display_time}</time>
+                                {hover_actions("ml-auto flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity")}
                             </div>
 
-                            <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 flex gap-1">
-                                {star_button("btn btn-ghost btn-xs text-[10px] h-6 min-h-0 px-2 hover:bg-base-content/10 bg-base-200 rounded-md shadow-sm")}
-                                <button class="btn btn-ghost btn-xs text-[10px] text-base-content/50 h-6 min-h-0 px-2 hover:bg-base-content/10 hover:text-base-content bg-base-200 rounded-md shadow-sm"
-                                    on:click=move |_| sig.with_untracked(|m| copy_to_clipboard(&m.message))>
-                                    "COPY"
-                                </button>
-                            </div>
+                            {move || {
+                                let msg = sig.get();
+                                let p = palette.get();
+                                let fs = signals.config.font_size.get();
+                                let kw = signals.config.emphasis_keywords.get();
+                                if msg.is_blocked {
+                                    view! {
+                                        <div class=format!("italic opacity-60 {}", p.text) style=format!("font-size: {}px;", fs)>
+                                            "(차단된 사용자의 메시지입니다)"
+                                        </div>
+                                    }.into_any()
+                                } else if let Some(text) = msg.translated.clone() {
+                                    view! {
+                                        <div class=format!("leading-snug font-medium animate-in fade-in duration-200 {}", p.text) style=format!("font-size: {}px;", fs)>
+                                            {render_emphasized(&text, &kw)}
+                                        </div>
+                                        <div class=format!("leading-snug mt-0.5 {}", p.original) style=format!("font-size: {}px;", fs.saturating_sub(2).max(10))>
+                                            {render_emphasized(&msg.message, &kw)}
+                                        </div>
+                                    }.into_any()
+                                } else {
+                                    view! {
+                                        <div class=format!("leading-snug font-medium {}", p.text) style=format!("font-size: {}px;", fs)>
+                                            {render_emphasized(&msg.message, &kw)}
+                                            {pending().then(dots)}
+                                        </div>
+                                    }.into_any()
+                                }
+                            }}
                         </div>
                     </div>
                 }
             >
                 // ==========================================
-                // COMPACT VIEW (Inline Wrapping)
+                // COMPACT VIEW: subtitle captions on the text box
                 // ==========================================
-                // 1. Parent is now a standard block with generous line-height for wrapping bubbles
-                <div class="block px-2 group transition-colors hover:bg-base-content/5 w-full leading-[1.7] text-left break-words"
-                     style=move || format!("padding-top: {0}px; padding-bottom: {0}px;", signals.config.message_spacing.get())>
-
-                    // 2. NICKNAME BUBBLE (inline-block so it flows like text)
-                    <span
-                        class=move || {
-                            let color_class = if signals.chat.search_term.with(|s| sig.with(|m| *s == m.nickname)) {
-                                "text-success underline decoration-2"
-                            } else {
-                                channel_colors().0
-                            };
-                            format!("font-black cursor-pointer transition-all hover:brightness-125 tracking-wide bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border border-base-content/5 inline-block align-baseline mr-1.5 {}", color_class)
-                        }
-                        style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(2).max(10))
-                        on:click=move |ev| {
-                            ev.stop_propagation();
-                            if is_active.get() {
-                                signals.ui.set_active_menu_id.set(None);
-                            } else {
-                                set_menu_pos.set((ev.client_x(), ev.client_y()));
-                                signals.ui.set_active_menu_id.set(Some(sig.with_untracked(|m| m.pid)));
+                <div class="group relative px-2"
+                     style=move || format!("padding-top: {0}px; padding-bottom: {0}px; font-size: {1}px;",
+                         signals.config.message_spacing.get().saturating_sub(2),
+                         signals.config.font_size.get().saturating_sub(1).max(10))>
+                    <div class=format!("inline-block max-w-full px-2.5 py-1 leading-snug {TEXT_BOX}")>
+                        <span
+                            class=move || {
+                                let color = if filtered_to_sender() { "text-success underline" } else { sig.with(|m| box_name(m.channel).0) };
+                                format!("font-semibold cursor-pointer hover:underline {color}")
                             }
-                        }
-                    >
+                            on:click=toggle_menu
+                        >{move || sig.with(|m| m.nickname.clone())}</span>
+                        <span class="text-white/40 mr-1">":"</span>
                         {move || {
-                            let p = sig.get();
-                            match p.nickname_romaji {
-                                Some(r) => format!("{}({})", p.nickname, r),
-                                None => p.nickname.clone()
+                            let msg = sig.get();
+                            let kw = signals.config.emphasis_keywords.get();
+                            if msg.is_blocked {
+                                view! { <span class="italic text-white/60">"(차단된 사용자의 메시지)"</span> }.into_any()
+                            } else if let Some(text) = msg.translated.clone() {
+                                let hide = signals.config.hide_original_in_compact.get();
+                                view! {
+                                    <span>{render_emphasized(&text, &kw)}</span>
+                                    <div class=format!("text-[0.85em] {ORIGINAL_TEXT} {}", compact_original_class(hide, true))>
+                                        {render_emphasized(&msg.message, &kw)}
+                                    </div>
+                                }.into_any()
+                            } else {
+                                view! {
+                                    <span>{render_emphasized(&msg.message, &kw)}</span>
+                                    {pending().then(dots)}
+                                }.into_any()
                             }
                         }}
-                    </span>
-
-                    <Show when=move || is_active.get()>
-                        <Portal>
-                            <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
-                                 style=move || {
-                                     let (x, y) = menu_pos.get();
-                                     format!("top: {}px; left: {}px;", y + 8, x + 8)
-                                 }
-                                 on:click=move |ev| ev.stop_propagation()>
-
-                                <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
-                                    on:click=move |_| {
-                                        sig.with_untracked(|m| copy_to_clipboard(&m.nickname));
-                                        signals.ui.set_active_menu_id.set(None);
-                                    }>
-                                    "📋 Copy Name"
-                                </button>
-
-                                <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
-                                    on:click=move |_| {
-                                        let n = sig.with_untracked(|m| m.nickname.clone());
-                                        if signals.chat.search_term.get_untracked() == n {
-                                            signals.chat.set_search_term.set("".into());
-                                        } else {
-                                            signals.chat.set_search_term.set(n);
-                                        }
-                                        signals.ui.set_active_menu_id.set(None);
-                                    }>
-                                    "🔍 Filter Chat"
-                                </button>
-
-                                <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2 text-error"
-                                    on:click=move |_| {
-                                        let target_uid = sig.with_untracked(|m| m.uid);
-                                        let target_name = sig.with_untracked(|m| m.nickname.clone());
-                                        let blocked_name = sig.with_untracked(|m| m.nickname.clone());
-
-                                        spawn_local(async move {
-                                            let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                                                "uid": target_uid,
-                                                "nickname": target_name
-                                            })).unwrap();
-                                            let _ = invoke("block_user_command", args).await;
-                                        });
-
-                                        signals.config.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
-                                        signals.ui.set_active_menu_id.set(None);
-                                    }>
-                                    "🚫 Block User"
-                                </button>
-                            </div>
-                        </Portal>
-                    </Show>
-
-                    // 3. MESSAGE BODY (Inline and wrapping)
-                    {move || {
-                        let msg = sig.get();
-
-                        if msg.is_blocked {
-                            view! {
-                                <span class="italic opacity-50 text-base-content/50 font-bold inline align-baseline"
-                                      style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(2).max(10))>
-                                    "(차단된 사용자의 메시지입니다)"
-                                </span>
-                            }.into_any()
-                        } else {
-                            let emphasized_msg = msg.clone();
-                            let has_translation = msg.translated.is_some();
-                            let hide_orig_pref = signals.config.hide_original_in_compact.get();
-
-                            // Original message view (inline, with box-decoration-clone to wrap backgrounds beautifully)
-                            let original_view = view! {
-                                <span class=move || crate::chat_view::compact_original_class(hide_orig_pref, has_translation, channel_colors().1)
-                                style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(2).max(10))>
-                                    {
-                                        if !hide_orig_pref && is_japanese(&msg.message) && signals.config.use_translation.get() {
-                                            view! { <span class="text-base-content/50 mr-1 font-bold">"[원문]"</span> }.into_any()
-                                        } else {
-                                            view! {}.into_any()
-                                        }
-                                    }
-                                    {render_emphasized(&emphasized_msg.message, &signals.config.emphasis_keywords.get())}
-                                </span>
-                            };
-
-                            // Translated message view
-                            let translated_view = msg.translated.clone().map(|text| {
-                                view! {
-                                    <span class=move || format!(
-                                        "text-success font-bold box-decoration-clone bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border border-base-content/5 inline align-baseline ml-1 {}",
-                                        if hide_orig_pref { "inline group-hover:hidden" } else { "inline" }
-                                    )
-                                    style=move || format!("font-size: {}px;", signals.config.font_size.get().saturating_sub(2).max(10))>
-                                        <Show when=move || !hide_orig_pref>
-                                            <span class="opacity-70 mr-1 font-bold">"[번역]"</span>
-                                        </Show>
-                                        {render_emphasized(&text, &signals.config.emphasis_keywords.get())}
-                                    </span>
-                                }
-                            });
-
-                            view! {
-                                {original_view}
-                                {translated_view}
-                            }.into_any()
-                        }
-                    }}
-
-                    // 4. TIMESTAMP & COPY BUTTON (Inline-block at the end of the text)
-                    <div class="inline-flex items-center align-baseline whitespace-nowrap ml-2 opacity-90 bg-base-200 rounded-md shadow-sm">
-                        <time class="text-[10px] text-base-content/50 whitespace-nowrap block group-hover:hidden min-h-0 px-1.5 py-0">
-                            {display_time}
-                        </time>
-
-                        // --- NEW: HIDE COPY BUTTON ON BLOCKED MESSAGES ---
-                        {star_button("hidden group-hover:flex btn btn-ghost btn-xs text-[10px] h-5 min-h-0 px-1 py-0 hover:bg-base-content/10 leading-none")}
-                        <Show when=move || !sig.with(|m| m.is_blocked)>
-                            <button class="hidden group-hover:flex btn btn-ghost btn-xs text-[10px] font-bold text-base-content/50 h-5 min-h-0 px-1 py-0 hover:bg-base-content/10 hover:text-base-content leading-none"
-                                on:click=move |_| sig.with_untracked(|m| copy_to_clipboard(&m.message))>
-                                "COPY"
-                            </button>
-                        </Show>
                     </div>
+                    {name_menu()}
+                    {hover_actions("absolute right-1 top-0.5 hidden group-hover:flex gap-0.5 bg-base-300 rounded-md shadow border border-base-content/10 z-10")}
                 </div>
             </Show>
         </Show>
@@ -447,7 +351,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
 // CLEANED UP: No more messy text-shadows needed!
 fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
     if keywords.is_empty() || text.is_empty() {
-        return view! { <span class="font-bold">{text.to_string()}</span> }.into_any();
+        return view! { <span>{text.to_string()}</span> }.into_any();
     }
 
     let mut views = Vec::new();
@@ -472,7 +376,7 @@ fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
                 if !before.is_empty() {
                     views.push(
                         view! {
-                            <span class="font-bold">{before.to_string()}</span>
+                            <span>{before.to_string()}</span>
                         }
                         .into_any(),
                     );
@@ -491,7 +395,7 @@ fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
             None => {
                 views.push(
                     view! {
-                        <span class="font-bold">{current_text.to_string()}</span>
+                        <span>{current_text.to_string()}</span>
                     }
                     .into_any(),
                 );

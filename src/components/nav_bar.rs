@@ -1,4 +1,6 @@
 use crate::chat_view::Tab;
+use crate::components::icons::{self, icon};
+use crate::readability::nav_bar_bg;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
 use crate::ui_types::Channel;
@@ -108,17 +110,16 @@ pub fn NavBar() -> impl IntoView {
 
     view! {
         <nav
-            class="relative z-50 flex flex-nowrap items-center justify-between gap-x-2 px-2 py-1 bg-base-content/5 border-b border-base-content/5 min-h-[40px] select-none transition-all duration-300 overflow-visible"
+            class=move || format!("relative z-50 flex flex-nowrap items-center justify-between gap-x-2 px-2 py-1.5 border-b border-base-content/5 min-h-[44px] select-none transition-all duration-300 overflow-visible {}", if signals.config.compact_mode.get() { "!absolute top-0 inset-x-0 !h-8 !min-h-0 !py-0 opacity-0 hover:opacity-100 focus-within:opacity-100 bg-base-300/95 backdrop-blur-md shadow-lg transition-opacity duration-200" } else { nav_bar_bg(signals.config.overlay_opacity.get()) })
             data-tauri-drag-region
         >
             // --- LEFT: DaisyUI Tabs ---
-            <div class="join bg-base-300/50 p-0.5 rounded-lg border border-base-content/5 flex-shrink-0">
+            <div class="flex items-center gap-0.5 bg-base-content/5 p-0.5 rounded-lg min-w-0">
                 {move || {
                     Tab::nav(signals.config.debug_mode.get()).into_iter().map(|tab| {
                         let full = tab.label();
                         let db_key = tab.key();
-                        let icon = tab.icon();
-                        let has_archive_setting = tab.has_archive_setting();
+                                                let has_archive_setting = tab.has_archive_setting();
                         let db_key_click = db_key.to_string();
                         let db_key_drop = db_key.to_string();
                         let is_active = move || signals.config.active_tab.get() == full;
@@ -130,7 +131,7 @@ pub fn NavBar() -> impl IntoView {
                             Tab::All | Tab::Custom => 0,
                         });
 
-                        let (text_color, border_color) = tab.colors();
+                                                let dot = tab.dot_class();
 
                         view! {
                             // REMOVED dropdown classes, replaced with standard relative flex
@@ -138,14 +139,10 @@ pub fn NavBar() -> impl IntoView {
 
                                 // 1. THE TAB BUTTON
                                 <button
+                                    title=full
                                     class=move || format!(
-                                        "join-item btn btn-xs h-7 px-3 rounded-none transition-all font-black border-0 border-b-[3px] !overflow-visible flex flex-nowrap items-center {} {}",
-                                        text_color,
-                                        if is_active() {
-                                            format!("font-black {} {} bg-white/5 opacity-100", text_color, border_color)
-                                        } else {
-                                            format!("font-bold hover:font-black {} border-transparent bg-transparent opacity-70 hover:opacity-100", text_color)
-                                        }
+                                        "flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs whitespace-nowrap transition-colors {}",
+                                        if is_active() { "bg-base-100 shadow-sm font-bold text-base-content" } else { "font-medium text-base-content/60 hover:text-base-content hover:bg-base-content/5" }
                                     )
                                     on:click=move |_| {
                                         signals.config.set_active_tab.set(full.to_string());
@@ -163,25 +160,13 @@ pub fn NavBar() -> impl IntoView {
                                         }
                                     }
                                 >
-                                    // Text only (Shows when narrower than 460px)
-                                    <span class="min-[460px]:hidden flex items-center relative gap-1">
-                                        {full}
-                                        <Show when={move || unread.get() > 0}>
-                                            <span class="absolute -top-1.5 -right-2.5 badge badge-error min-w-[14px] h-[14px] px-1 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200 z-10">
-                                                {move || if unread.get() > 9 { "9+".to_string() } else { unread.get().to_string() }}
-                                            </span>
-                                        </Show>
-                                    </span>
-
-                                    // Text + Emoji (Shows when wider than 460px)
-                                    <span class="hidden min-[460px]:flex items-center relative gap-1">
-                                        {full} " " {icon}
-                                        <Show when={move || unread.get() > 0}>
-                                            <span class="absolute -top-1.5 -right-2.5 badge badge-error min-w-[14px] h-[14px] px-1 text-white text-[9px] font-black border-none shadow-sm shadow-error/30 animate-in zoom-in duration-200 z-10">
-                                                {move || if unread.get() > 9 { "9+".to_string() } else { unread.get().to_string() }}
-                                            </span>
-                                        </Show>
-                                    </span>
+                                    <span class=format!("size-2 rounded-full shrink-0 {dot}")></span>
+                                    <span class=move || if is_active() { "" } else if signals.config.compact_mode.get() { "hidden" } else { "hidden min-[600px]:inline" }>{full}</span>
+                                    <Show when={move || unread.get() > 0}>
+                                        <span class="min-w-4 h-4 px-1 rounded-full bg-error text-error-content text-[10px] font-bold leading-4 text-center">
+                                            {move || if unread.get() > 99 { "99+".to_string() } else { unread.get().to_string() }}
+                                        </span>
+                                    </Show>
                                 </button>
 
                                 // 2. THE SETTINGS DROPDOWN MENU
@@ -300,24 +285,50 @@ pub fn NavBar() -> impl IntoView {
                 </div>
             </div>
 
+            // --- compact mode: the bar shows on hover only -- pin + leave compact ---
+            <Show when=move || signals.config.compact_mode.get()>
+                <div class="flex items-center gap-0.5 ml-auto shrink-0" data-tauri-no-drag>
+                    <button class="btn btn-ghost btn-xs btn-square" title="항상 위에 표시"
+                        class:text-success=move || signals.config.always_on_top.get()
+                        class:text-base-content=move || !signals.config.always_on_top.get()
+                        on:click=move |_| {
+                            let new_state = !signals.config.always_on_top.get();
+                            signals.config.set_always_on_top.set(new_state);
+                            spawn_local(async move {
+                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
+                                let _ = invoke("set_always_on_top", args).await;
+                            });
+                            actions.save_config.dispatch(());
+                        }>
+                        <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-50" }>{icon(icons::PIN, "size-3.5")}</span>
+                    </button>
+                    <button class="btn btn-ghost btn-xs btn-square text-base-content/60 hover:text-base-content" title="컴팩트 모드 끄기"
+                        on:click=move |_| {
+                            signals.config.set_compact_mode.set(false);
+                            actions.save_config.dispatch(());
+                        }>
+                        {icon(icons::EXPAND, "size-3.5")}
+                    </button>
+                </div>
+            </Show>
             // --- RIGHT: Control Icons ---
-            <div class="flex items-center gap-1 ml-auto" data-tauri-no-drag
+            <div class:hidden=move || signals.config.compact_mode.get() class="flex items-center gap-1 ml-auto" data-tauri-no-drag
                 on:mouseenter=move |_| set_is_controls_open.set(true)
                 on:mouseleave=move |_| set_is_controls_open.set(false)
             >
                 <button
                     node_ref=folder_btn_ref
-                    class="btn btn-ghost btn-xs text-lg min-[675px]:hidden z-[60]"
+                    class="btn btn-ghost btn-sm btn-square min-[560px]:hidden z-[60]"
                     class:text-success=move || is_controls_open.get()
                     on:click=move |_| set_is_controls_open.update(|b| *b = !*b)
                 >
-                    {move || if is_controls_open.get() { "▶" } else { "◀" }}
+                    {icon(icons::MORE, "size-4")}
                 </button>
 
                 <div
                     node_ref=controls_container_ref
                     class=move || format!(
-                        "items-center gap-1 min-[675px]:flex min-[675px]:static min-[675px]:bg-transparent min-[675px]:shadow-none min-[675px]:p-0 min-[675px]:border-none transition-all duration-200 z-[55] {}",
+                        "items-center gap-1 min-[560px]:flex min-[560px]:static min-[560px]:bg-transparent min-[560px]:shadow-none min-[560px]:p-0 min-[560px]:border-none transition-all duration-200 z-[55] {}",
                         if is_controls_open.get() {
                             "absolute right-10 top-1.5 flex bg-base-300 p-1 rounded-lg shadow-2xl border border-white/10 animate-in slide-in-from-right-2"
                         } else {
@@ -328,7 +339,7 @@ pub fn NavBar() -> impl IntoView {
                     <div class="tooltip tooltip-bottom" data-tip="Search (Ctrl+F)">
                         <button
                             node_ref=search_btn_ref
-                            class="btn btn-ghost btn-xs text-lg"
+                            class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
                             class:text-success=move || !signals.chat.search_term.get().is_empty()
                             on:click=move |_| {
                                 let new_state = !is_search_open.get_untracked();
@@ -343,21 +354,23 @@ pub fn NavBar() -> impl IntoView {
                                 }
                             }
                         >
-                            "🔍"
+                            {icon(icons::SEARCH, "size-4")}
                         </button>
                     </div>
 
                     <div class="tooltip tooltip-bottom" data-tip="자주 쓰는 메시지">
-                        <button class="btn btn-ghost btn-xs text-lg"
+                        <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
                             on:click=move |_| signals.ui.set_show_favorites.set(true)>
-                            "⭐"
+                            {icon(icons::STAR, "size-4")}
                         </button>
                     </div>
 
                     <div class="tooltip tooltip-bottom" data-tip="Always on Top">
-                        <button class="btn btn-xs"
+                        <button class="btn btn-sm btn-square"
                             class:btn-success=move || signals.config.always_on_top.get()
+                            class:btn-soft=move || signals.config.always_on_top.get()
                             class:btn-ghost=move || !signals.config.always_on_top.get()
+                            class:text-base-content=move || !signals.config.always_on_top.get()
                             on:click=move |_| {
                                 let new_state = !signals.config.always_on_top.get();
                                 signals.config.set_always_on_top.set(new_state);
@@ -367,14 +380,14 @@ pub fn NavBar() -> impl IntoView {
                                 });
                                 actions.save_config.dispatch(());
                             }>
-                            <span class=move || if signals.config.always_on_top.get() { "rotate-45 block" } else { "block" }>"📌"</span>
+                            <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-60" }>{icon(icons::PIN, "size-4")}</span>
                         </button>
                     </div>
 
                     <div class="relative group flex items-center justify-center">
                         <div class="tooltip tooltip-bottom" data-tip="Background Opacity">
-                            <button class="btn btn-ghost btn-xs text-lg">
-                                "🌗"
+                            <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content">
+                                {icon(icons::CONTRAST, "size-4")}
                             </button>
                         </div>
                         <div class="absolute top-full right-1/2 translate-x-1/2 pt-1.5 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
@@ -400,7 +413,7 @@ pub fn NavBar() -> impl IntoView {
                     </div>
 
                     <div class="tooltip tooltip-bottom" data-tip="Compact Mode">
-                        <button class="btn btn-ghost btn-xs text-lg"
+                        <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
                             on:click=move |_| {
                                 let new_compact_state = !signals.config.compact_mode.get_untracked();
                                 signals.config.set_compact_mode.set(new_compact_state);
@@ -410,20 +423,20 @@ pub fn NavBar() -> impl IntoView {
                                 }
                                 actions.save_config.dispatch(());
                             }>
-                            {move || if signals.config.compact_mode.get() { "🔽" } else { "🔼" }}
+                            {move || if signals.config.compact_mode.get() { icon(icons::EXPAND, "size-4") } else { icon(icons::SHRINK, "size-4") }}
                         </button>
                     </div>
 
                     <div class="tooltip tooltip-bottom" data-tip="Clear History">
-                        <button class="btn btn-ghost btn-xs text-lg hover:text-error"
+                        <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content hover:!text-error"
                             on:click=move |_| { actions.clear_history.dispatch(()); }>
-                            "🗑️"
+                            {icon(icons::TRASH, "size-4")}
                         </button>
                     </div>
 
                     <div class="tooltip tooltip-bottom" data-tip="Settings">
-                        <button class="btn btn-ghost btn-xs relative" on:click=move |_| signals.ui.set_show_settings.set(true)>
-                            "⚙️"
+                        <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content" aria-label="Settings" on:click=move |_| signals.ui.set_show_settings.set(true)>
+                            {icon(icons::GEAR, "size-4")}
                         </button>
                     </div>
                 </div>

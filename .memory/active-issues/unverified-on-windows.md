@@ -84,3 +84,7 @@ run as the real app.
 - **Core-review leftovers (2026-10-01, `claude/core-review-leftovers`).** Core gate green (W4, W6, W7 tested). Not run on Windows: W9 (the sniffer loop backing off on a failing socket read -- nothing tests a failing socket) and W8 (translator retry when llama-server exits while loading: try a bad model file or a taken port and watch for "Retrying in Ns..." then the Error after 3 tries).
 
 - **Settings sidebar + window grow (2026-09-30, `claude/settings-sidebar`).** Core/ui/app-cross gates green; the new layout was screenshotted in Chromium with the wasm build and a mocked `__TAURI__` (grow on open, restore with the returned rect on close). Not run on Windows: `grow_window`/`restore_window` on a real monitor (DPI scaling, work area with the taskbar, a second monitor), the transparent overlay while enlarged. Known gap: closing the app while settings is open leaves the enlarged size for `tauri-plugin-window-state` to save.
+- **Main UI redesign (`candidate/main-ui-a-cb`, 2026-10-01).** Screenshotted in
+  `ui-preview` only. Worth a real run: transparency at low opacity (text boxes), title
+  bar / nav drag regions, compact bar hover-reveal (and leaving compact from it), pin,
+  tab right-click menu, sender menu (copy / filter / block), star + copy on hover.

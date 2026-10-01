@@ -92,33 +92,17 @@ impl Tab {
         }
     }
 
-    pub fn icon(self) -> &'static str {
+    /// The tab's colour dot in the tab bar.
+    pub fn dot_class(self) -> &'static str {
         match self {
-            Tab::All => "♾️",
-            Tab::Custom => "⭐",
-            Tab::System => "⚙️",
-            Tab::Channel(Channel::World) => "🌐",
-            Tab::Channel(Channel::Guild) => "🛡️",
-            Tab::Channel(Channel::Party) => "⚔️",
-            Tab::Channel(Channel::Local) => "📍",
-            Tab::Channel(Channel::Beginner) => "🌱",
-        }
-    }
-
-    /// Text and border colour classes of the tab button.
-    pub fn colors(self) -> (&'static str, &'static str) {
-        match self {
-            Tab::All => ("text-base-content", "border-base-content"),
-            Tab::Custom => ("text-success", "border-success"),
-            Tab::System => ("text-warning", "border-warning"),
-            Tab::Channel(Channel::World) => ("text-purple-500", "border-purple-500"),
-            Tab::Channel(Channel::Guild) => ("text-emerald-500", "border-emerald-500"),
-            Tab::Channel(Channel::Party) => ("text-sky-500", "border-sky-500"),
-            Tab::Channel(Channel::Local) => (
-                "text-base-content opacity-70",
-                "border-base-content opacity-70",
-            ),
-            Tab::Channel(Channel::Beginner) => ("text-amber-500", "border-amber-500"),
+            Tab::All => "bg-base-content/60",
+            Tab::Custom => "bg-success",
+            Tab::System => "bg-warning",
+            Tab::Channel(Channel::World) => "bg-purple-500",
+            Tab::Channel(Channel::Guild) => "bg-emerald-500",
+            Tab::Channel(Channel::Party) => "bg-sky-500",
+            Tab::Channel(Channel::Local) => "bg-base-content/30",
+            Tab::Channel(Channel::Beginner) => "bg-amber-500",
         }
     }
 
@@ -394,26 +378,31 @@ pub fn newest_matching<T>(
     page
 }
 
-/// Class string of the compact-mode original-message bubble. Exactly one bare
-/// `display` utility may be present: two (`inline` + `hidden`) are resolved by
-/// stylesheet order, and `inline` wins -- the original stayed visible.
-pub fn compact_original_class(
-    hide_original: bool,
-    has_translation: bool,
-    channel_class: &str,
-) -> String {
-    let display = if hide_original && has_translation {
-        "hidden group-hover:inline"
+/// Display classes of the compact-mode original line under its translation.
+/// Exactly one bare `display` utility may be present: two (`block` +
+/// `hidden`) are resolved by stylesheet order, not by the string -- the
+/// original once stayed visible that way.
+pub fn compact_original_class(hide_original: bool, has_translation: bool) -> &'static str {
+    if hide_original && has_translation {
+        "hidden group-hover:block"
     } else {
-        "inline"
-    };
-    format!(
-        "text-base-content font-bold opacity-90 box-decoration-clone bg-base-200 px-1.5 py-0.5 rounded-md shadow-sm border-y border-r border-base-content/5 border-l-[3px] align-baseline {display} {channel_class}"
-    )
+        "block"
+    }
+}
+
+/// A line the translator will still answer: Japanese, not blocked, not yet
+/// translated, translation on. The row shows a "..." for it.
+pub fn translation_pending(m: &ChatMessage, use_translation: bool) -> bool {
+    use_translation
+        && !m.is_blocked
+        && m.translated.is_none()
+        && crate::ui_types::contains_japanese(&m.message)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     fn bare_display(class: &str) -> Vec<&str> {
         class
             .split_whitespace()
@@ -423,22 +412,50 @@ mod tests {
 
     #[test]
     fn hidden_original_has_no_competing_display_class() {
-        let c = compact_original_class(true, true, "border-l-success");
-        assert_eq!(bare_display(&c), ["hidden"]);
-        assert!(c.contains("group-hover:inline"));
+        let c = compact_original_class(true, true);
+        assert_eq!(bare_display(c), ["hidden"]);
+        assert!(c.contains("group-hover:block"));
     }
 
     #[test]
-    fn original_stays_inline_without_hide_or_without_translation() {
+    fn original_is_shown_without_hide_or_without_translation() {
         for (hide, tr) in [(false, true), (false, false), (true, false)] {
-            assert_eq!(
-                bare_display(&compact_original_class(hide, tr, "x")),
-                ["inline"]
-            );
+            assert_eq!(bare_display(compact_original_class(hide, tr)), ["block"]);
         }
     }
 
-    use super::*;
+    #[test]
+    fn each_tab_has_its_own_dot_colour() {
+        let mut tabs = Tab::nav(true);
+        tabs.dedup();
+        let dots: Vec<_> = tabs.iter().map(|t| t.dot_class()).collect();
+        for (tab, dot) in tabs.iter().zip(&dots) {
+            assert!(dot.starts_with("bg-"), "{tab:?}: {dot}");
+        }
+        let mut unique = dots.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), dots.len(), "{dots:?}");
+    }
+
+    #[test]
+    fn only_an_untranslated_japanese_line_waits_for_a_translation() {
+        let mut m = msg(Channel::World, 50, "a", "こんにちは");
+        assert!(translation_pending(&m, true));
+        assert!(!translation_pending(&m, false), "translation switched off");
+        m.translated = Some("안녕".into());
+        assert!(!translation_pending(&m, true), "already translated");
+        let mut blocked = msg(Channel::World, 50, "a", "こんにちは");
+        blocked.is_blocked = true;
+        assert!(
+            !translation_pending(&blocked, true),
+            "blocked lines are not shown"
+        );
+        assert!(!translation_pending(
+            &msg(Channel::World, 50, "a", "안녕하세요"),
+            true
+        ));
+    }
 
     fn msg(channel: Channel, level: u64, nickname: &str, message: &str) -> ChatMessage {
         ChatMessage {
@@ -476,8 +493,6 @@ mod tests {
         let debug: Vec<_> = Tab::nav(true).iter().map(|t| t.label()).collect();
         assert_eq!(debug.last(), Some(&"시스템"));
         assert_eq!(debug.len(), 8);
-        let icons: Vec<_> = Tab::nav(true).iter().map(|t| t.icon()).collect();
-        assert_eq!(icons, ["♾️", "⭐", "🌐", "🛡️", "⚔️", "📍", "🌱", "⚙️"]);
     }
 
     #[test]
@@ -506,20 +521,17 @@ mod tests {
     }
 
     #[test]
-    fn only_channel_tabs_have_the_archive_switch_and_their_own_colours() {
+    fn only_channel_tabs_have_the_archive_switch_and_their_own_dots() {
         let with: Vec<_> = Tab::nav(true)
             .into_iter()
             .filter(|t| t.has_archive_setting())
             .collect();
         assert_eq!(with.len(), 5);
         assert!(with.iter().all(|t| matches!(t, Tab::Channel(_))));
-        assert_eq!(Tab::Custom.colors(), ("text-success", "border-success"));
+        assert_eq!(Tab::Custom.dot_class(), "bg-success");
         assert_eq!(
-            Tab::Channel(Channel::Local).colors(),
-            (
-                "text-base-content opacity-70",
-                "border-base-content opacity-70"
-            )
+            Tab::Channel(Channel::Local).dot_class(),
+            "bg-base-content/30"
         );
     }
 

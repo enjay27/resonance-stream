@@ -63,3 +63,31 @@ rc_changes() {
     printf '%s\n' '- (없음 -- main과 같은 빌드)'
   fi
 }
+
+# How many merges the dispatch dropdown can reach back (its options are 1..5).
+RC_PICK_MAX=5
+
+# Which merge into rc a manual run builds: the number the dropdown choice
+# starts with ("3 — 2개 전 머지" -> 3). 1 is the latest, and what an empty
+# choice, a push, or anything unreadable means.
+rc_rank() {
+  local n=${1:-}; n=${n%%[!0-9]*}
+  if [ -n "$n" ] && [ "$n" -ge 1 ] && [ "$n" -le "$RC_PICK_MAX" ]; then
+    printf '%s\n' "$n"
+  else
+    printf '%s\n' 1
+  fi
+}
+
+# The <rank>th line of a newest-first commit list (stdin); an error, said in
+# Korean on stderr, when the history is shorter than that.
+rc_nth_merge() {
+  local rank=$1 list count
+  list=$(cat)
+  count=$(grep -c . <<<"$list" || true)
+  if [ "$rank" -gt "$count" ]; then
+    echo "rc에 ${rank}번째 머지가 없습니다 (${count}개뿐)" >&2
+    return 1
+  fi
+  sed -n "${rank}p" <<<"$list"
+}

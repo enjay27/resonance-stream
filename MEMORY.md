@@ -4,7 +4,7 @@
 
 ## Now — 2026-10-01
 
-**Release candidates (2026-10-01, `claude/rc-release-workflow`):** a merge into `rc` builds a plain exe and publishes prerelease `v0.6.0-rc.<branch>[.n]` (newest 5 kept) -- flow in CLAUDE.md *Release candidates*; logic in `.github/scripts/rc-lib.sh` (tested). Workspace version bumped 0.4.0 -> 0.6.0 (v0.5.0 was already released). **Open:** the workflow has never run -- first run is the first merge into `rc`; `rc` itself is created after this merges.
+**Release candidates (2026-10-01, `claude/rc-release-workflow`):** a merge into `rc` builds a plain exe and publishes prerelease `v0.6.0-rc.<branch>[.n]` (newest 5 kept) -- flow in CLAUDE.md *Release candidates*; logic in `.github/scripts/rc-lib.sh` (tested). Workspace version bumped 0.4.0 -> 0.6.0 (v0.5.0 was already released). First runs (2026-10-01): creating `rc` from main ran it once (`v0.6.0-rc.build`, a plain main build -- Kade deletes it by hand), then PR #74 (`candidate/main-ui-a-cb`). An empty "changes vs main" section now reads "(없음)" (`rc_changes`, `claude/rc-notes-empty`).
 
 **UI check method (2026-10-01, `claude/ui-preview-skill`):** every UI task is screenshotted with the `ui-preview` skill -- wasm build + mocked `__TAURI__` + Playwright, on Linux. Steps and limits in [`.claude/skills/ui-preview/SKILL.md`](.claude/skills/ui-preview/SKILL.md).
 

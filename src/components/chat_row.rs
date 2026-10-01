@@ -238,18 +238,14 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                          style=move || format!("padding-top: {0}px; padding-bottom: {0}px;", signals.config.message_spacing.get() + 2)>
                         <div class=move || {
                             let p = palette.get();
-                            if p.container.is_empty() {
-                                "pl-3 pr-2 rounded-r-md hover:bg-base-content/5".to_string()
-                            } else {
-                                format!("ml-1.5 px-2.5 py-1 w-fit max-w-[calc(100%-0.5rem)] {}", p.container)
-                            }
+                            format!("{} {}", p.layout, p.container)
                         }>
                             <div class="flex items-center gap-2 text-[11px] leading-5 min-w-0">
                                 <span
                                     class=move || {
                                         let color = if filtered_to_sender() {
                                             "text-success underline decoration-2"
-                                        } else if palette.get().container.is_empty() {
+                                        } else if !palette.get().backed {
                                             channel_colors().0
                                         } else {
                                             sig.with(|m| box_name(m.channel).0)

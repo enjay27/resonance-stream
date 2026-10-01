@@ -89,6 +89,8 @@ pub struct UiSignals {
     pub set_show_troubleshooter: WriteSignal<bool>,
     pub show_favorites: ReadSignal<bool>,
     pub set_show_favorites: WriteSignal<bool>,
+    pub show_cheatsheet: ReadSignal<bool>,
+    pub set_show_cheatsheet: WriteSignal<bool>,
     pub active_menu_id: ReadSignal<Option<u64>>,
     pub set_active_menu_id: WriteSignal<Option<u64>>,
     pub click_through: ReadSignal<bool>,
@@ -103,6 +105,7 @@ impl UiSignals {
         let (show_dictionary, set_show_dictionary) = signal::<bool>(false);
         let (show_troubleshooter, set_show_troubleshooter) = signal::<bool>(false);
         let (show_favorites, set_show_favorites) = signal::<bool>(false);
+        let (show_cheatsheet, set_show_cheatsheet) = signal::<bool>(false);
         let (active_menu_id, set_active_menu_id) = signal::<Option<u64>>(None);
         let (click_through, set_click_through) = signal::<bool>(false);
         UiSignals {
@@ -116,6 +119,8 @@ impl UiSignals {
             set_show_troubleshooter,
             show_favorites,
             set_show_favorites,
+            show_cheatsheet,
+            set_show_cheatsheet,
             active_menu_id,
             set_active_menu_id,
             click_through,

@@ -97,3 +97,6 @@ run as the real app.
   (`just app-cross-check` and `cargo check --tests` for windows-gnu). Worth a real run: add a
   tab with and without the defaults, delete one, restart and check the tabs and shortcuts
   survive, a shortcut set on a tab message still pastes in-game.
+- **Cheat sheet (`claude/rc-build-ui-fixes-ny8j3w`, 2026-10-01).** ui-preview only. Worth a real run:
+  the book button in the title bar (not a drag region), the modal over the transparent
+  window, click-to-copy of a JP name.

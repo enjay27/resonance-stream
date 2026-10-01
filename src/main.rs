@@ -1,5 +1,6 @@
 mod app;
 pub mod chat_view;
+pub mod cheatsheet;
 pub mod components;
 pub mod config_signals;
 pub mod favorites;

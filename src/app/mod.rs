@@ -5,8 +5,8 @@ mod setup_flow;
 use crate::components::settings::Settings;
 use crate::components::title_bar::TitleBar;
 use crate::components::{
-    AppUpdateModal, ChatContainer, DictionaryModal, FavoritesModal, ModelUpdateModal, NavBar,
-    SetupWizard, Troubleshooter,
+    AppUpdateModal, ChatContainer, CheatSheetModal, DictionaryModal, FavoritesModal,
+    ModelUpdateModal, NavBar, SetupWizard, Troubleshooter,
 };
 use crate::config_signals::ConfigSignals;
 use crate::hooks::use_tray::{setup_tray_listeners, sync_tray_menu};
@@ -136,6 +136,9 @@ pub fn App() -> impl IntoView {
 
             // Favorite Messages Modal
             <FavoritesModal />
+
+            // Class / dungeon names, Japanese and Korean
+            <CheatSheetModal />
 
             // Settings Modal
             <Settings />

@@ -58,5 +58,24 @@ eq "commits listed"   $'- a (`1`)\n- b (`2`)' "$(printf -- '- a (`1`)\n- b (`2`)
 eq "nothing -> (없음)" "- (없음 -- main과 같은 빌드)" "$(printf '' | rc_changes)"
 eq "blank lines only -> (없음)" "- (없음 -- main과 같은 빌드)" "$(printf '\n\n' | rc_changes)"
 
+# --- rc_rank: which merge the dispatch dropdown picked (1 = the latest) ---
+eq "rank from a choice"       "1" "$(rc_rank '1 — 가장 최근 머지')"
+eq "rank 3"                   "3" "$(rc_rank '3 — 2개 전 머지')"
+eq "rank 5"                   "5" "$(rc_rank '5 — 4개 전 머지')"
+eq "empty -> the latest"      "1" "$(rc_rank '')"
+eq "push event (no input)"    "1" "$(rc_rank)"
+eq "nonsense -> the latest"   "1" "$(rc_rank 'latest please')"
+eq "beyond the list -> latest" "1" "$(rc_rank '9 — x')"
+eq "zero -> the latest"       "1" "$(rc_rank '0')"
+
+# --- rc_nth_merge: the Nth line of a newest-first commit list; an error past its end ---
+shas=$'aaa\nbbb\nccc'
+eq "1st is the newest"  "aaa" "$(rc_nth_merge 1 <<<"$shas")"
+eq "2nd"                "bbb" "$(rc_nth_merge 2 <<<"$shas")"
+eq "last"               "ccc" "$(rc_nth_merge 3 <<<"$shas")"
+eq "past the end fails" "failed" "$(rc_nth_merge 4 <<<"$shas" 2>/dev/null || echo failed)"
+eq "empty history fails" "failed" "$(printf '' | rc_nth_merge 1 2>/dev/null || echo failed)"
+eq "past the end says so" "rc에 4번째 머지가 없습니다 (3개뿐)" "$(rc_nth_merge 4 <<<"$shas" 2>&1 >/dev/null || true)"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

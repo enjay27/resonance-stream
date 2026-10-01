@@ -4,6 +4,8 @@
 
 ## Now — 2026-10-01
 
+**Release candidates (2026-10-01, `claude/rc-release-workflow`):** a merge into `rc` builds a plain exe and publishes prerelease `v0.6.0-rc.<branch>[.n]` (newest 5 kept) -- flow in CLAUDE.md *Release candidates*; logic in `.github/scripts/rc-lib.sh` (tested). Workspace version bumped 0.4.0 -> 0.6.0 (v0.5.0 was already released). **Open:** the workflow has never run -- first run is the first merge into `rc`; `rc` itself is created after this merges.
+
 **UI check method (2026-10-01, `claude/ui-preview-skill`):** every UI task is screenshotted with the `ui-preview` skill -- wasm build + mocked `__TAURI__` + Playwright, on Linux. Steps and limits in [`.claude/skills/ui-preview/SKILL.md`](.claude/skills/ui-preview/SKILL.md).
 
 **Settings view (2026-09-30, `claude/settings-sidebar`):** macOS-style -- category sidebar (`settings_nav::SettingsCategory`, remembered in `signals.ui.settings_category`) and one pane per category; a window smaller than 900x640 grows while settings is open (`grow_window`/`restore_window`, fit logic `resonance_core::window::grow_to_fit`). Merged (#70). NOT VERIFIED on Windows -- [`unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).

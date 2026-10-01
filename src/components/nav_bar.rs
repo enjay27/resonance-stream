@@ -311,133 +311,122 @@ pub fn NavBar() -> impl IntoView {
                     </button>
                 </div>
             </Show>
-            // --- RIGHT: Control Icons ---
-            <div class:hidden=move || signals.config.compact_mode.get() class="flex items-center gap-1 ml-auto" data-tauri-no-drag
-                on:mouseenter=move |_| set_is_controls_open.set(true)
-                on:mouseleave=move |_| set_is_controls_open.set(false)
-            >
-                <button
-                    node_ref=folder_btn_ref
-                    class="btn btn-ghost btn-sm btn-square min-[560px]:hidden z-[60]"
-                    class:text-success=move || is_controls_open.get()
-                    on:click=move |_| set_is_controls_open.update(|b| *b = !*b)
-                >
-                    {icon(icons::MORE, "size-4")}
-                </button>
+            // --- RIGHT: favorites, then the folded tools (normal mode) ---
+            <div class:hidden=move || signals.config.compact_mode.get() class="flex items-center gap-1 ml-auto shrink-0" data-tauri-no-drag>
+                <div class="tooltip tooltip-bottom" data-tip="자주 쓰는 메시지">
+                    <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
+                        on:click=move |_| signals.ui.set_show_favorites.set(true)>
+                        {icon(icons::STAR, "size-4")}
+                    </button>
+                </div>
 
-                <div
-                    node_ref=controls_container_ref
-                    class=move || format!(
-                        "items-center gap-1 min-[560px]:flex min-[560px]:static min-[560px]:bg-transparent min-[560px]:shadow-none min-[560px]:p-0 min-[560px]:border-none transition-all duration-200 z-[55] {}",
-                        if is_controls_open.get() {
-                            "absolute right-10 top-1.5 flex bg-base-300 p-1 rounded-lg shadow-2xl border border-white/10 animate-in slide-in-from-right-2"
+                // The tools are always folded behind one button: they open
+                // below the bar, so they never cover the tabs.
+                <div class="relative"
+                    on:mouseenter=move |_| set_is_controls_open.set(true)
+                    on:mouseleave=move |_| set_is_controls_open.set(false)
+                >
+                    <button
+                        node_ref=folder_btn_ref
+                        class="btn btn-ghost btn-sm btn-square"
+                        class:text-success=move || is_controls_open.get()
+                        title="도구"
+                        on:click=move |_| set_is_controls_open.set(true)
+                    >
+                        {icon(icons::MORE, "size-4")}
+                    </button>
+
+                    <div
+                        node_ref=controls_container_ref
+                        class=move || if is_controls_open.get() {
+                            "absolute right-0 top-full pt-1 z-[55]"
                         } else {
                             "hidden"
                         }
-                    )
-                >
-                    <div class="tooltip tooltip-bottom" data-tip="Search (Ctrl+F)">
-                        <button
-                            node_ref=search_btn_ref
-                            class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
-                            class:text-success=move || !signals.chat.search_term.get().is_empty()
-                            on:click=move |_| {
-                                let new_state = !is_search_open.get_untracked();
-                                set_is_search_open.set(new_state);
-                                if new_state {
-                                    request_animation_frame(move || {
-                                        if let Some(el) = search_input_ref.get() {
-                                            let _ = el.focus();
-                                            el.select();
+                    >
+                        <div class="flex items-center gap-1 bg-base-300 p-1 rounded-lg shadow-2xl border border-white/10 animate-in fade-in duration-150">
+                            <div class="tooltip tooltip-bottom" data-tip="Search (Ctrl+F)">
+                                <button
+                                    node_ref=search_btn_ref
+                                    class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
+                                    class:text-success=move || !signals.chat.search_term.get().is_empty()
+                                    on:click=move |_| {
+                                        let new_state = !is_search_open.get_untracked();
+                                        set_is_search_open.set(new_state);
+                                        if new_state {
+                                            request_animation_frame(move || {
+                                                if let Some(el) = search_input_ref.get() {
+                                                    let _ = el.focus();
+                                                    el.select();
+                                                }
+                                            });
                                         }
-                                    });
-                                }
-                            }
-                        >
-                            {icon(icons::SEARCH, "size-4")}
-                        </button>
-                    </div>
-
-                    <div class="tooltip tooltip-bottom" data-tip="자주 쓰는 메시지">
-                        <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
-                            on:click=move |_| signals.ui.set_show_favorites.set(true)>
-                            {icon(icons::STAR, "size-4")}
-                        </button>
-                    </div>
-
-                    <div class="tooltip tooltip-bottom" data-tip="Always on Top">
-                        <button class="btn btn-sm btn-square"
-                            class:btn-success=move || signals.config.always_on_top.get()
-                            class:btn-soft=move || signals.config.always_on_top.get()
-                            class:btn-ghost=move || !signals.config.always_on_top.get()
-                            class:text-base-content=move || !signals.config.always_on_top.get()
-                            on:click=move |_| {
-                                let new_state = !signals.config.always_on_top.get();
-                                signals.config.set_always_on_top.set(new_state);
-                                spawn_local(async move {
-                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
-                                    let _ = invoke("set_always_on_top", args).await;
-                                });
-                                actions.save_config.dispatch(());
-                            }>
-                            <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-60" }>{icon(icons::PIN, "size-4")}</span>
-                        </button>
-                    </div>
-
-                    <div class="relative group flex items-center justify-center">
-                        <div class="tooltip tooltip-bottom" data-tip="Background Opacity">
-                            <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content">
-                                {icon(icons::CONTRAST, "size-4")}
-                            </button>
-                        </div>
-                        <div class="absolute top-full right-1/2 translate-x-1/2 pt-1.5 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
-                            <div class="bg-base-300 border border-base-content/10 rounded-lg shadow-xl p-3 w-32 flex flex-col gap-2 items-center cursor-default">
-                                <span class="text-[9px] font-black text-success uppercase tracking-widest opacity-80">
-                                    {move || format!("투명도: {:.0}%", signals.config.overlay_opacity.get() * 100.0)}
-                                </span>
-                                <input type="range" min="0.0" max="1.0" step="0.05"
-                                    class="range range-xs range-success w-full"
-                                    prop:value=move || signals.config.overlay_opacity.get().to_string()
-                                    on:input=move |ev| {
-                                        let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
-                                        signals.config.set_overlay_opacity.set(val);
                                     }
-                                    on:change=move |ev| {
-                                        let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
-                                        signals.config.set_overlay_opacity.set(val);
+                                >
+                                    {icon(icons::SEARCH, "size-4")}
+                                </button>
+                            </div>
+
+                            <div class="tooltip tooltip-bottom" data-tip="Always on Top">
+                                <button class="btn btn-sm btn-square"
+                                    class:btn-success=move || signals.config.always_on_top.get()
+                                    class:btn-soft=move || signals.config.always_on_top.get()
+                                    class:btn-ghost=move || !signals.config.always_on_top.get()
+                                    class:text-base-content=move || !signals.config.always_on_top.get()
+                                    on:click=move |_| {
+                                        let new_state = !signals.config.always_on_top.get();
+                                        signals.config.set_always_on_top.set(new_state);
+                                        spawn_local(async move {
+                                            let args = serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
+                                            let _ = invoke("set_always_on_top", args).await;
+                                        });
                                         actions.save_config.dispatch(());
-                                    }
-                                />
+                                    }>
+                                    <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-60" }>{icon(icons::PIN, "size-4")}</span>
+                                </button>
+                            </div>
+
+                            <div class="relative group flex items-center justify-center">
+                                <div class="tooltip tooltip-bottom" data-tip="Background Opacity">
+                                    <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content">
+                                        {icon(icons::CONTRAST, "size-4")}
+                                    </button>
+                                </div>
+                                <div class="absolute top-full right-1/2 translate-x-1/2 pt-1.5 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
+                                    <div class="bg-base-300 border border-base-content/10 rounded-lg shadow-xl p-3 w-32 flex flex-col gap-2 items-center cursor-default">
+                                        <span class="text-[9px] font-black text-success uppercase tracking-widest opacity-80">
+                                            {move || format!("투명도: {:.0}%", signals.config.overlay_opacity.get() * 100.0)}
+                                        </span>
+                                        <input type="range" min="0.0" max="1.0" step="0.05"
+                                            class="range range-xs range-success w-full"
+                                            prop:value=move || signals.config.overlay_opacity.get().to_string()
+                                            on:input=move |ev| {
+                                                let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
+                                                signals.config.set_overlay_opacity.set(val);
+                                            }
+                                            on:change=move |ev| {
+                                                let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
+                                                signals.config.set_overlay_opacity.set(val);
+                                                actions.save_config.dispatch(());
+                                            }
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="tooltip tooltip-bottom" data-tip="Clear History">
+                                <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content hover:!text-error"
+                                    on:click=move |_| { actions.clear_history.dispatch(()); }>
+                                    {icon(icons::TRASH, "size-4")}
+                                </button>
+                            </div>
+
+                            <div class="tooltip tooltip-bottom" data-tip="Settings">
+                                <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content" aria-label="Settings" on:click=move |_| signals.ui.set_show_settings.set(true)>
+                                    {icon(icons::GEAR, "size-4")}
+                                </button>
                             </div>
                         </div>
-                    </div>
-
-                    <div class="tooltip tooltip-bottom" data-tip="Compact Mode">
-                        <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
-                            on:click=move |_| {
-                                let new_compact_state = !signals.config.compact_mode.get_untracked();
-                                signals.config.set_compact_mode.set(new_compact_state);
-
-                                if new_compact_state && signals.config.active_tab.get_untracked() != Tab::System.label() {
-                                    signals.config.set_active_tab.set(Tab::Custom.label().to_string());
-                                }
-                                actions.save_config.dispatch(());
-                            }>
-                            {move || if signals.config.compact_mode.get() { icon(icons::EXPAND, "size-4") } else { icon(icons::SHRINK, "size-4") }}
-                        </button>
-                    </div>
-
-                    <div class="tooltip tooltip-bottom" data-tip="Clear History">
-                        <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content hover:!text-error"
-                            on:click=move |_| { actions.clear_history.dispatch(()); }>
-                            {icon(icons::TRASH, "size-4")}
-                        </button>
-                    </div>
-
-                    <div class="tooltip tooltip-bottom" data-tip="Settings">
-                        <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content" aria-label="Settings" on:click=move |_| signals.ui.set_show_settings.set(true)>
-                            {icon(icons::GEAR, "size-4")}
-                        </button>
                     </div>
                 </div>
             </div>

@@ -54,9 +54,11 @@ Windows run needed — [`unverified-on-windows.md`](.memory/active-issues/unveri
 [`.memory/sessions/2026-09-29-ui-improve-port.md`](.memory/sessions/2026-09-29-ui-improve-port.md).
 Kade's calls: sequential pids, both archives, gist has sha256, auto-sync off by default.
 
-**Graft 0.21.1 (2026-09-30):** pinned in `graft-bootstrap.cjs`. `.mcp.json` runs `graft mcp` as
-graft's wiring refresh writes it (committed, `claude/graft-mcp-wiring`); a session only runs
-`graft build`. A later `graft init`/`upgrade` rewrite goes in its own commit.
+**Graft 0.21.1 (2026-10-01, `claude/graft-mcp-wait`):** pinned in `graft-bootstrap.cjs`. `.mcp.json` runs
+`node .claude/helpers/graft-mcp.cjs` again: in a cloud session graft is installed by the bootstrap hook
+*after* MCP servers spawn, and a bare `graft mcp` failed (ENOENT, 2026-10-01). The helper waits up to 25 s.
+graft's refresh does not rewrite it in cloud (bootstrap stamps the current version first); after a local
+`graft init`/`upgrade`, re-point it in its own commit.
 
 **Git workflow (2026-09-30):** each task on a `claude/<name>` branch, push when the local gate
 is green, PR opened by Claude, `.github/workflows/auto-merge.yml` merges it when CI passes

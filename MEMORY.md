@@ -4,6 +4,8 @@
 
 ## Now — 2026-10-01
 
+**Auto-merge only into `main` (2026-10-01, `claude/rc-build-ui-fixes-ny8j3w`):** `auto-merge.yml` merged every green `claude/*` PR whatever its base, so PRs #76-#78 went into `rc` by themselves -- contrary to CLAUDE.md -- and, because a merge made with `GITHUB_TOKEN` starts no `push` run, `release-candidate.yml` built nothing for them (latest candidate: `v0.6.0-rc.main-ui-a-cb`, without #76-#78). Fix: `gh pr list --base main`, so a PR into `rc` stays open for a person to merge (that merge starts the build). Takes effect once it is on `main`. NOT VERIFIED: a real run (a `workflow_run` workflow cannot run here); actionlint clean. Kade builds the current `rc` himself (workflow_dispatch on `release-candidate.yml`).
+
 **Release candidates (2026-10-01, `claude/rc-release-workflow`):** a merge into `rc` builds a plain exe and publishes prerelease `v0.6.0-rc.<branch>[.n]` (newest 5 kept) -- flow in CLAUDE.md *Release candidates*; logic in `.github/scripts/rc-lib.sh` (tested). Workspace version bumped 0.4.0 -> 0.6.0 (v0.5.0 was already released). First runs (2026-10-01): creating `rc` from main ran it once (`v0.6.0-rc.build`, a plain main build -- Kade deletes it by hand), then PR #74 (`candidate/main-ui-a-cb`). An empty "changes vs main" section now reads "(없음)" (`rc_changes`, `claude/rc-notes-empty`).
 
 **UI check method (2026-10-01, `claude/ui-preview-skill`):** every UI task is screenshotted with the `ui-preview` skill -- wasm build + mocked `__TAURI__` + Playwright, on Linux. Steps and limits in [`.claude/skills/ui-preview/SKILL.md`](.claude/skills/ui-preview/SKILL.md).

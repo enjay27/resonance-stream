@@ -208,7 +208,8 @@ git add -A && git commit
   not `move files`). The body says what changed, why, and **what is verified vs open**.
 - `MEMORY.md` and `.memory/` updates go in the branch, before the push.
 - **Claude never commits work it did not do.** Pre-existing changes stay untouched.
-- Only `claude/*` branches auto-merge. `workflow_run` workflows are read from `main`, so a
+- Only `claude/*` branches auto-merge, and only PRs into `main`: a PR into `rc` (or any
+  other branch) stays open until a person merges it. `workflow_run` workflows are read from `main`, so a
   change to `auto-merge.yml` itself takes effect after it has been merged once.
 - Merges made by the workflow use `GITHUB_TOKEN`, which does not start a `push` run on
   `main`; the PR's own run is the gate.

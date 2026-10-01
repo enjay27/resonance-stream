@@ -4,7 +4,9 @@
 
 ## Now — 2026-10-01
 
-**Main UI redesign (2026-10-01, `candidate/main-ui-a-cb`, pushed, NO PR -- Kade tries it on Windows first):** normal = candidate A (translation first, line icons, Korean status pills), compact = CB (subtitle captions, hover-only bar); chat text sits on a tested dark text box (WCAG worst case over white) in compact, and in normal mode below 50 % opacity -- [`sessions/2026-10-01-main-ui-redesign.md`](.memory/sessions/2026-10-01-main-ui-redesign.md).
+**Release candidates (2026-10-01, `claude/rc-release-workflow`):** a merge into `rc` builds a plain exe and publishes prerelease `v0.6.0-rc.<branch>[.n]` (newest 5 kept) -- flow in CLAUDE.md *Release candidates*; logic in `.github/scripts/rc-lib.sh` (tested). Workspace version bumped 0.4.0 -> 0.6.0 (v0.5.0 was already released). **Open:** the workflow has never run -- first run is the first merge into `rc`; `rc` itself is created after this merges.
+
+**Main UI redesign (2026-10-01, `candidate/main-ui-a-cb`, PR into `rc` -- the first release candidate; Kade tries it on Windows before `main`):** normal = candidate A (translation first, line icons, Korean status pills), compact = CB (subtitle captions, hover-only bar); chat text sits on a tested dark text box (WCAG worst case over white) in compact, and in normal mode below 50 % opacity -- [`sessions/2026-10-01-main-ui-redesign.md`](.memory/sessions/2026-10-01-main-ui-redesign.md).
 
 **UI check method (2026-10-01, `claude/ui-preview-skill`):** every UI task is screenshotted with the `ui-preview` skill -- wasm build + mocked `__TAURI__` + Playwright, on Linux. Steps and limits in [`.claude/skills/ui-preview/SKILL.md`](.claude/skills/ui-preview/SKILL.md).
 

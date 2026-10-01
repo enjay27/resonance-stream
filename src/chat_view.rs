@@ -96,7 +96,7 @@ impl Tab {
     pub fn dot_class(self) -> &'static str {
         match self {
             Tab::All => "bg-base-content/60",
-            Tab::Custom => "bg-success",
+            Tab::Custom => "bg-slate-400",
             Tab::System => "bg-warning",
             Tab::Channel(Channel::World) => "bg-purple-500",
             Tab::Channel(Channel::Guild) => "bg-emerald-500",
@@ -528,7 +528,8 @@ mod tests {
             .collect();
         assert_eq!(with.len(), 5);
         assert!(with.iter().all(|t| matches!(t, Tab::Channel(_))));
-        assert_eq!(Tab::Custom.dot_class(), "bg-success");
+        // Gray, so it is not mistaken for the guild tab's green dot.
+        assert_eq!(Tab::Custom.dot_class(), "bg-slate-400");
         assert_eq!(
             Tab::Channel(Channel::Local).dot_class(),
             "bg-base-content/30"

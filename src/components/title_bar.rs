@@ -1,3 +1,5 @@
+use crate::components::icons::{self, icon};
+use crate::status_view::{sniffer_status, translator_status};
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
 use crate::ui_types::{SnifferState, TranslatorState};
@@ -6,128 +8,67 @@ use leptos::task::spawn_local;
 use leptos::IntoView;
 use wasm_bindgen::JsValue;
 
+const PILL: &str =
+    "flex items-center gap-1.5 h-5 px-2 rounded-full text-[10px] font-semibold border transition-colors";
+
 #[component]
 pub fn TitleBar() -> impl IntoView {
     let store = use_context::<AppSignals>().expect("Store missing");
+    let sniffer = move || sniffer_status(store.service.sniffer_state.get());
+    let translator = move || translator_status(store.service.translator_state.get());
 
     view! {
-        // navbar provides the structural flexbox and min-height
-        <div class="navbar bg-base-300/60 backdrop-blur-md min-h-8 h-8 px-2 border-b border-white/5 select-none relative" data-tauri-drag-region>
-
-            // --- LEFT: App Title ---
-            <div class="flex-1 pointer-events-none">
-                <span class="text-[10px] font-black tracking-tighter text-gray-500 opacity-70">
-                    {concat!("Resonance Stream v", env!("CARGO_PKG_VERSION"))}
+        <div class="flex items-center h-8 pl-3 bg-base-300/60 backdrop-blur-md border-b border-base-content/5 select-none" data-tauri-drag-region>
+            // --- LEFT: app name, version, start-up status ---
+            <div class="flex items-baseline gap-2 min-w-0 flex-1 pointer-events-none">
+                <span class="text-[11px] font-bold text-base-content/80 truncate">"Resonance Stream"</span>
+                <span class="text-[10px] text-base-content/40">{concat!("v", env!("CARGO_PKG_VERSION"))}</span>
+                <span class="text-[10px] text-base-content/50 truncate hidden min-[520px]:inline">
+                    "· " {move || store.setup.status_text.get()}
                 </span>
             </div>
 
-            // --- CENTER: App Status (READY / INITIALIZING) ---
-            <div class="absolute left-1/2 -translate-x-1/2 pointer-events-none">
-                <span class="text-[10px] font-black tracking-[0.2em] text-bpsr-green uppercase animate-in fade-in duration-500">
-                    {move || store.setup.status_text.get()}
-                </span>
-            </div>
-
-            // --- RIGHT: System Badges & Controls ---
-            <div class="flex-none flex items-center h-full no-drag">
-
-                // --- ADVANCED SNIFFER BADGE ---
-                <div
-                    class=move || {
-                        let state = store.service.sniffer_state.get();
-                        let base = "badge badge-xs gap-1.5 px-2 py-2 font-black text-[9px] mr-2 shadow-inner transition-all";
-                        match state {
-                            SnifferState::Active => format!("{} badge-success bg-success/10 text-success border-success/20", base),
-                            SnifferState::Error => format!("{} badge-error bg-error/10 text-error border-error/20 cursor-pointer hover:bg-error/20", base),
-                            SnifferState::Off => format!("{} badge-ghost bg-white/5 text-gray-600 border-white/10", base),
-                            // Yellow for transitions
-                            SnifferState::Starting | SnifferState::Binding | SnifferState::Pending => format!("{} badge-warning bg-warning/10 text-warning border-warning/20", base),
-                        }
-                    }
+            // --- RIGHT: service pills ---
+            <div class="flex items-center gap-1.5 no-drag">
+                <div class=move || format!("{PILL} {}", sniffer().0.pill_class())
+                    title="패킷 캡처 상태 (꺼짐·오류일 때 클릭하면 진단)"
                     on:click=move |_| {
-                        let current_state = store.service.sniffer_state.get();
-                        // Open troubleshooter if it's explicitly broken, or if the user wants to test it manually
-                        if matches!(current_state, SnifferState::Error | SnifferState::Off) {
+                        // Open the troubleshooter when capture is broken or off
+                        if matches!(store.service.sniffer_state.get(), SnifferState::Error | SnifferState::Off) {
                             store.ui.set_show_troubleshooter.set(true);
                         }
-                    }
-                >
-                    // The Pulsing Indicator Dot
-                    <div class=move || {
-                        let state = store.service.sniffer_state.get();
-                        let base = "w-1 h-1 rounded-full";
-                        match state {
-                            SnifferState::Active => format!("{} bg-success animate-pulse shadow-[0_0_8px_#00ff88]", base),
-                            SnifferState::Error => format!("{} bg-error", base),
-                            SnifferState::Off => format!("{} bg-gray-600", base),
-                            SnifferState::Starting | SnifferState::Binding | SnifferState::Pending => format!("{} bg-warning animate-pulse shadow-[0_0_8px_#fbbd23]", base),
-                        }
-                    }></div>
-
-                    // The Status Text
-                    {move || match store.service.sniffer_state.get() {
-                        SnifferState::Active => "SNIFFER ON".to_string(),
-                        SnifferState::Error => "ERROR (CLICK)".to_string(),
-                        SnifferState::Off => "SNIFFER OFF".to_string(),
-                        state => state.label(), // e.g., "BINDING"
-                    }}
+                    }>
+                    {icon(icons::RADIO, "size-3")}
+                    <span>{move || sniffer().1}</span>
+                    <span class=move || format!("size-1.5 rounded-full {}", sniffer().0.dot_class())></span>
                 </div>
-
                 <Show when=move || store.config.use_translation.get()>
-                    <div
-                        class=move || {
-                            let state = store.service.translator_state.get();
-                            let base = "badge badge-xs gap-1.5 px-2 py-2 font-black text-[9px] mr-2 shadow-inner transition-all";
-                            match state {
-                                TranslatorState::Active => format!("{} badge-success bg-success/10 text-success border-success/20", base),
-                                TranslatorState::Error => format!("{} badge-error bg-error/10 text-error border-error/20 cursor-pointer hover:bg-error/20", base),
-                                TranslatorState::Off => format!("{} badge-ghost bg-white/5 text-gray-600 border-white/10", base),
-                                // Yellow for transitions
-                                TranslatorState::Starting | TranslatorState::LoadingModel | TranslatorState::CatchingUp | TranslatorState::Restarting => format!("{} badge-warning bg-warning/10 text-warning border-warning/20", base),
-                            }
-                        }
+                    <div class=move || format!("{PILL} {}", translator().0.pill_class())
+                        title="번역 엔진 상태 (오류일 때 클릭하면 내용 표시)"
                         on:click=move |_| {
-                            // Show error alert on click if in Error state
                             if store.service.translator_state.get() == TranslatorState::Error {
                                 if let Some(w) = web_sys::window() {
                                     let _ = w.alert_with_message(&store.service.translator_error.get());
                                 }
                             }
-                        }
-                    >
-                        // The Pulsing Indicator Dot
-                        <div class=move || {
-                            let state = store.service.translator_state.get();
-                            let base = "w-1 h-1 rounded-full";
-                            match state {
-                                TranslatorState::Active => format!("{} bg-success animate-pulse shadow-[0_0_8px_#00ff88]", base),
-                                TranslatorState::Error => format!("{} bg-error", base),
-                                TranslatorState::Off => format!("{} bg-gray-600", base),
-                                TranslatorState::Starting | TranslatorState::LoadingModel | TranslatorState::CatchingUp | TranslatorState::Restarting => format!("{} bg-warning animate-pulse shadow-[0_0_8px_#fbbd23]", base),
-                            }
-                        }></div>
-
-                        // The Status Text
-                        {move || match store.service.translator_state.get() {
-                            TranslatorState::Active => "번역 ON".to_string(),
-                            TranslatorState::Error => "AI ERROR (CLICK)".to_string(),
-                            TranslatorState::Off => "번역 OFF".to_string(),
-                            state => state.label(), // e.g., "STARTING", "LOADING MODEL"
-                        }}
+                        }>
+                        {icon(icons::LANGUAGES, "size-3")}
+                        <span>{move || translator().1}</span>
+                        <span class=move || format!("size-1.5 rounded-full {}", translator().0.dot_class())></span>
                     </div>
                 </Show>
+            </div>
 
-                // Window Control Buttons
-                <div class="flex h-8 ml-1">
-                    <button class="btn btn-ghost btn-xs rounded-none h-full w-10 hover:bg-white/10"
-                        on:click=move |_| { spawn_local(async { let _ = invoke("minimize_window", JsValue::NULL).await; }); }>
-                        <span class="opacity-70 text-[10px]">"—"</span>
-                    </button>
-                    <button class="btn btn-ghost btn-xs rounded-none h-full w-10 hover:bg-error hover:text-error-content transition-colors group"
-                        on:click=move |_| { spawn_local(async { let _ = invoke("close_window", JsValue::NULL).await; }); }>
-                        <span class="opacity-70 group-hover:opacity-100 text-xs">"✕"</span>
-                    </button>
-                </div>
+            // --- Window controls ---
+            <div class="flex h-8 ml-2 no-drag">
+                <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors" title="최소화"
+                    on:click=move |_| { spawn_local(async { let _ = invoke("minimize_window", JsValue::NULL).await; }); }>
+                    {icon(icons::MINUS, "size-3.5")}
+                </button>
+                <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-error hover:text-error-content transition-colors" title="닫기"
+                    on:click=move |_| { spawn_local(async { let _ = invoke("close_window", JsValue::NULL).await; }); }>
+                    {icon(icons::CLOSE, "size-3.5")}
+                </button>
             </div>
         </div>
     }

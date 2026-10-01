@@ -2,6 +2,7 @@ mod chat_container;
 pub mod chat_row;
 mod dictionary_modal;
 mod favorites_modal;
+pub mod icons;
 mod nav_bar;
 mod network_troubleshooter;
 pub mod settings;

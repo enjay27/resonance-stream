@@ -4,6 +4,8 @@
 
 ## Now — 2026-10-01
 
+**Main UI redesign (2026-10-01, `candidate/main-ui-a-cb`, pushed, NO PR -- Kade tries it on Windows first):** normal = candidate A (translation first, line icons, Korean status pills), compact = CB (subtitle captions, hover-only bar); chat text sits on a tested dark text box (WCAG worst case over white) in compact, and in normal mode below 50 % opacity -- [`sessions/2026-10-01-main-ui-redesign.md`](.memory/sessions/2026-10-01-main-ui-redesign.md).
+
 **UI check method (2026-10-01, `claude/ui-preview-skill`):** every UI task is screenshotted with the `ui-preview` skill -- wasm build + mocked `__TAURI__` + Playwright, on Linux. Steps and limits in [`.claude/skills/ui-preview/SKILL.md`](.claude/skills/ui-preview/SKILL.md).
 
 **Settings view (2026-09-30, `claude/settings-sidebar`):** macOS-style -- category sidebar (`settings_nav::SettingsCategory`, remembered in `signals.ui.settings_category`) and one pane per category; a window smaller than 900x640 grows while settings is open (`grow_window`/`restore_window`, fit logic `resonance_core::window::grow_to_fit`). Merged (#70). NOT VERIFIED on Windows -- [`unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md).

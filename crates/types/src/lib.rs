@@ -449,6 +449,9 @@ pub struct FavoriteMessage {
     pub note: String,
     #[serde(default)]
     pub shortcut: String,
+    /// Name of the favorites tab it is filed under; empty is the default tab.
+    #[serde(default)]
+    pub tab: String,
 }
 
 /// Missed Japanese messages a translator start translates when the config
@@ -473,7 +476,7 @@ pub fn default_favorite_messages() -> Vec<FavoriteMessage> {
     .map(|(text, note)| FavoriteMessage {
         text: text.to_string(),
         note: note.to_string(),
-        shortcut: String::new(),
+        ..Default::default()
     })
     .collect()
 }
@@ -718,6 +721,24 @@ mod tests {
         assert_eq!(fav.text, "hi");
         assert!(fav.note.is_empty());
         assert!(fav.shortcut.is_empty());
+        // ... and lands in the default tab (an empty name).
+        assert!(fav.tab.is_empty());
+        assert!(defaults.iter().all(|f| f.tab.is_empty()));
+    }
+
+    #[test]
+    fn a_favorites_tab_is_stored_under_its_name() {
+        let fav = FavoriteMessage {
+            text: "hi".into(),
+            tab: "레이드".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&fav).unwrap();
+        assert_eq!(json["tab"], "레이드");
+        assert_eq!(
+            serde_json::from_value::<FavoriteMessage>(json).unwrap(),
+            fav
+        );
     }
 
     #[test]

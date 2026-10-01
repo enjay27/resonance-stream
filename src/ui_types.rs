@@ -60,6 +60,9 @@ pub struct AppConfig {
     pub message_spacing: u32,
     #[serde(default = "default_favorite_messages")]
     pub favorite_messages: Vec<FavoriteMessage>,
+    /// Names of the favorites tabs the user made (the default tab is not listed).
+    #[serde(default)]
+    pub favorite_tabs: Vec<String>,
     /// Days of daily chat logs to keep; 0 keeps them all.
     #[serde(default)]
     pub chat_log_retention_days: u32,

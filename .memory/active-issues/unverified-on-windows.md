@@ -92,3 +92,8 @@ run as the real app.
   real run: the folded tools (hover / click, panel below the bar), the compact button by
   close in the title bar, star + copy beside each compact message, and that rows keep
   their size when the opacity slider crosses 50 %.
+- **Favorite tabs (`claude/rc-build-ui-fixes-ny8j3w`, 2026-10-01).** ui-preview only; the
+  `src-tauri` change (`favorite_tabs` in `AppConfig`, one test) was only type-checked
+  (`just app-cross-check` and `cargo check --tests` for windows-gnu). Worth a real run: add a
+  tab with and without the defaults, delete one, restart and check the tabs and shortcuts
+  survive, a shortcut set on a tab message still pastes in-game.

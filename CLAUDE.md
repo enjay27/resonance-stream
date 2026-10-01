@@ -44,6 +44,8 @@ the same name, or it will not cross the boundary.
 - **Remote metadata:** a public gist (`downloader/gist.rs`) carries app/model/dictionary
   versions and the custom dictionary. Public URLs, not secrets.
 - **Packaging:** `package.bat` → `cargo tauri build` → NSIS installer in `dist/`.
+  Test builds: a merge into `rc` publishes a plain exe as a GitHub prerelease (see
+  *Release candidates*). The app version is `[workspace.package] version` in `Cargo.toml`.
 
 ---
 
@@ -210,6 +212,26 @@ git add -A && git commit
   change to `auto-merge.yml` itself takes effect after it has been merged once.
 - Merges made by the workflow use `GITHUB_TOKEN`, which does not start a `push` run on
   `main`; the PR's own run is the gate.
+
+### Release candidates (`rc`)
+
+A change that needs a run on Kade's Windows PC before `main` goes through `rc`:
+
+1. Work on `candidate/<feature>` (from `main`), gate green, push. Open a PR **into `rc`**
+   -- Kade or another maintainer merges it by hand (auto-merge never touches it).
+2. The merge starts `.github/workflows/release-candidate.yml`: CI's gates, then a
+   Windows build of the plain exe (`tauri build --no-bundle`, no installer), then a
+   GitHub **prerelease** `v<version>-rc.<feature>` (`.2`, `.3` ... for a repeat
+   build of the same branch) with the exe, `SHA256SUMS.txt`, and Korean notes: how to
+   run it, the merged PR's description, the commits not yet on `main`, and their
+   `NOT VERIFIED` lines. Only the newest 5 candidates (and their tags) are kept.
+   Tag / notes logic: `.github/scripts/rc-lib.sh`, tested by `rc-lib.test.sh` (CI).
+3. After Kade's test, the **same branch** goes to `main` in its own PR. `rc` is never
+   merged into `main`; it is kept current by merging `main` into it.
+
+Prereleases never become "Latest", and the app's update check reads the gist, not
+GitHub releases, so users never see a candidate. The candidate exe shares the
+installed app's data folder (same identifier): config, model, chat logs.
 
 ### Never commit
 - Secrets, `.env`.

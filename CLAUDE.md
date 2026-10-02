@@ -63,6 +63,7 @@ crates/core/           resonance-core — pure logic, tested on any OS
   src/history.rs        ChatHistory (backend chat log) + load_recent (daily chat_logs reload)
   src/workers.rs        worker decisions: translator on/off/restart, stale jobs, port
   src/download.rs       download checks: HTTPS, length + SHA-256, progress, versions
+  src/sniffer_net.rs    sniffer network setup: per-exe firewall rule name, adapter pick (route first)
 crates/llama/          resonance-llama — llama-server HTTP client (/completion, /health), any OS
 crates/types/          resonance-types — DTOs shared across the Tauri boundary (serde only)
 src/                  ui crate (resonance-stream-ui)

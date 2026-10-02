@@ -1,19 +1,25 @@
 use local_ip_address::list_afinet_netifas;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::env;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::time::Duration;
 use tauri::AppHandle;
+
+use resonance_core::sniffer_net::{
+    pick_interface, rule_name_for, InterfacePick, PickRule, LEGACY_RULE_NAME,
+};
 
 use super::emit_sniffer_state;
 use crate::protocol::types::{LogLevel, SnifferState, SystemLogLevel};
 use crate::{inject_system_message, NetworkInterface};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000; //
-const RULE_NAME: &str = "Resonance Stream (Packet Sniffing)"; //
 const RECV_BUFFER_BYTES: usize = 4 * 1024 * 1024;
+/// Any routable public address: asking the OS how it would reach it tells which
+/// adapter the default route uses. Nothing is sent to it.
+const ROUTE_PROBE_ADDR: Ipv4Addr = Ipv4Addr::new(8, 8, 8, 8);
 
 // --- 3. NETWORK INITIALIZATION ---
 pub fn initialize_network_socket(
@@ -51,22 +57,28 @@ pub fn initialize_network_socket(
                     "Sniffer",
                     "Invalid manual IP format. Falling back to Auto-Detect.",
                 );
-                find_game_interface_ip().unwrap_or(std::net::Ipv4Addr::new(127, 0, 0, 1))
+                find_game_interface()
+                    .map(|pick| pick.ip)
+                    .unwrap_or(std::net::Ipv4Addr::new(127, 0, 0, 1))
             }
         }
     } else {
-        match find_game_interface_ip() {
-            Some(ip) => {
+        match find_game_interface() {
+            Some(InterfacePick { ip, rule }) => {
+                let how = match rule {
+                    PickRule::Route => "default route",
+                    PickRule::ListOrder => "first physical adapter",
+                };
                 inject_system_message(
                     app,
                     SystemLogLevel::Info,
                     "Sniffer",
-                    format!("Auto-Targeting Network Interface: {}", ip),
+                    format!("Auto-Targeting Network Interface: {} ({})", ip, how),
                 );
                 emit_sniffer_state(
                     app,
                     SnifferState::Binding,
-                    &format!("Auto-Targeting Network Interface: {}", ip),
+                    &format!("Auto-Targeting Network Interface: {} ({})", ip, how),
                 );
                 ip
             }
@@ -163,45 +175,30 @@ pub fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, S
     Ok(socket)
 }
 
-pub fn find_game_interface_ip() -> Option<std::net::Ipv4Addr> {
-    let network_interfaces = list_afinet_netifas().ok()?;
-
-    // Aggressive blocklist for common Virtual Adapters and VPNs
-    let ignore_list = [
-        "Loopback",
-        "vEthernet",
-        "TAP",
-        "Tailscale",
-        "WireGuard",
-        "OpenVPN",
-        "Radmin",
-        "Hamachi",
-        "ZeroTier",
-        "VMware",
-        "VirtualBox",
-        "WSL",
-        "Npcap",
-    ];
-
-    for (name, ip) in network_interfaces {
-        let name_lower = name.to_lowercase();
-
-        // Skip if the adapter name contains any of the blocked keywords
-        if ignore_list
-            .iter()
-            .any(|&keyword| name_lower.contains(&keyword.to_lowercase()))
-        {
-            continue;
-        }
-
-        if let std::net::IpAddr::V4(ipv4) = ip {
-            // Usually, your main LAN IP starts with 192, 10, or 172
-            if !ipv4.is_loopback() && !ipv4.is_link_local() {
-                return Some(ipv4);
-            }
-        }
+/// The source address the OS would use to reach the internet, i.e. the adapter
+/// of the default route. `None` when there is no route (offline).
+fn route_source_ip() -> Option<Ipv4Addr> {
+    // `connect` on a UDP socket only selects the route; no packet leaves.
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect((ROUTE_PROBE_ADDR, 80)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) => Some(ip),
+        IpAddr::V6(_) => None,
     }
-    None
+}
+
+/// The adapter to sniff on, when the user has not chosen one: the routed adapter,
+/// else the first physical one (`resonance_core::sniffer_net::pick_interface`).
+pub fn find_game_interface() -> Option<InterfacePick> {
+    let candidates: Vec<(String, Ipv4Addr)> = list_afinet_netifas()
+        .ok()?
+        .into_iter()
+        .filter_map(|(name, ip)| match ip {
+            IpAddr::V4(ipv4) => Some((name, ipv4)),
+            IpAddr::V6(_) => None,
+        })
+        .collect();
+    pick_interface(&candidates, route_source_ip())
 }
 
 #[tauri::command]
@@ -223,11 +220,15 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
 
 #[tauri::command]
 pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, String> {
-    // Delete old rule first (a stale rule may point at an old exe path)
-    remove_firewall_rule();
-
     if let Ok(exe_path) = env::current_exe() {
         if let Some(path_str) = exe_path.to_str() {
+            // The rule is per exe (the dev and the installed exe each get
+            // their own), so only this exe's rule is replaced. The one rule
+            // older versions shared between all exes is dropped.
+            let rule_name = rule_name_for(path_str);
+            remove_firewall_rule(&rule_name);
+            remove_firewall_rule(LEGACY_RULE_NAME);
+
             inject_system_message(
                 &app,
                 SystemLogLevel::Info,
@@ -242,7 +243,7 @@ pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, Str
                     "firewall",
                     "add",
                     "rule",
-                    &format!("name={}", RULE_NAME),
+                    &format!("name={}", rule_name),
                     "dir=in",
                     "action=allow",
                     "protocol=TCP",
@@ -279,27 +280,37 @@ pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, Str
     }
 }
 
-pub fn remove_firewall_rule() {
+pub fn remove_firewall_rule(rule_name: &str) {
     let _ = Command::new("netsh")
         .args([
             "advfirewall",
             "firewall",
             "delete",
             "rule",
-            &format!("name={}", RULE_NAME),
+            &format!("name={}", rule_name),
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .status();
 }
 
+/// Whether the firewall has the rule for the running exe. A rule made for
+/// another exe (the dev build while this is the installed one, or the reverse)
+/// does not count: it would not let this exe receive the game's packets.
 pub fn check_firewall_rule() -> bool {
+    let Some(exe_path) = env::current_exe().ok() else {
+        return false;
+    };
+    let Some(path_str) = exe_path.to_str() else {
+        return false;
+    };
+    let rule_name = rule_name_for(path_str);
     let result = Command::new("netsh")
         .args([
             "advfirewall",
             "firewall",
             "show",
             "rule",
-            &format!("name={}", RULE_NAME),
+            &format!("name={}", rule_name),
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .output();

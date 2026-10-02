@@ -86,3 +86,33 @@ run as the real app.
 - **Settings sidebar + window grow (2026-09-30, `claude/settings-sidebar`).** Core/ui/app-cross gates green; the new layout was screenshotted in Chromium with the wasm build and a mocked `__TAURI__` (grow on open, restore with the returned rect on close). Not run on Windows: `grow_window`/`restore_window` on a real monitor (DPI scaling, work area with the taskbar, a second monitor), the transparent overlay while enlarged. Known gap: closing the app while settings is open leaves the enlarged size for `tauri-plugin-window-state` to save.
 
 - **System-log dedup (`claude/log-spam-dedup`, 2026-10-02).** Core gate green (`log_throttle`, 9 tests); app cross-check only. Worth a real run: leave the game idle in a lobby for 2+ minutes -- the system tab should show one "No game traffic for 15s." and then "(repeated N more times)" about a minute later, not a line every 15 s; start the translator and check the system tab no longer fills with "Polling .../health..." (set log level to trace).
+- **Firewall rule per exe (2026-10-02, `candidate/firewall-per-exe`).** Cross-checked only; `netsh` was never run. Check on Windows: (1) `cargo tauri dev` -> wizard -> allow -> chat is captured; (2) run the installed/release exe -> the wizard appears once (its rule does not exist yet) -> allow -> captured; (3) back to dev: no wizard, still captured (`netsh advfirewall firewall show rule name=all | findstr "Packet Sniffing"` lists two rules, each with its own `Program:`); (4) the old un-hashed rule is gone after the first setup.
+
+- **Main UI redesign (`candidate/main-ui-a-cb`, 2026-10-01).** Screenshotted in
+  `ui-preview` only. Worth a real run: transparency at low opacity (text boxes), title
+  bar / nav drag regions, compact bar hover-reveal (and leaving compact from it), pin,
+  tab right-click menu, sender menu (copy / filter / block), star + copy on hover.
+- **rc UI fixes (`claude/rc-build-ui-fixes-ny8j3w`, 2026-10-01).** ui-preview only. Worth a
+  real run: the folded tools (hover / click, panel below the bar), the compact button by
+  close in the title bar, star + copy beside each compact message, and that rows keep
+  their size when the opacity slider crosses 50 %.
+- **Favorite tabs (`claude/rc-build-ui-fixes-ny8j3w`, 2026-10-01).** ui-preview only; the
+  `src-tauri` change (`favorite_tabs` in `AppConfig`, one test) was only type-checked
+  (`just app-cross-check` and `cargo check --tests` for windows-gnu). Worth a real run: add a
+  tab with and without the defaults, delete one, restart and check the tabs and shortcuts
+  survive, a shortcut set on a tab message still pastes in-game.
+- **Cheat sheet (`claude/rc-build-ui-fixes-ny8j3w`, 2026-10-01).** ui-preview only. Worth a real run:
+  the book button in the title bar (not a drag region), the modal over the transparent
+  window, click-to-copy of a JP name.
+- **Chat row menus + add to dictionary (`claude/rc-build-ui-fixes-ny8j3w`, 2026-10-01).** ui-preview
+  only. Worth a real run: the pointer and underline on the message text, selecting a word and
+  clicking (the menu keeps the selection), double click, a click after a drag-to-scroll opening
+  nothing, "사전에 추가" saving and the next translation using the term (and `auto_sync_latest_dict`
+  overwriting it), copy / favorite feedback.
+- **Japanese study view (2026-10-02).** `annotate_furigana` and the `translation_view`
+  config field were cross-checked for `x86_64-pc-windows-gnu` only; the app tests (incl.
+  `the_translation_view_shows_translations_when_missing_and_round_trips`) run on Windows
+  CI. Worth a real run: the badge picker, 공부 모드 (ruby over kanji, hover shows the
+  translation, normal + compact), the first-line latency (dictionary loads on first use),
+  and the exe size with the embedded IPADIC (~46 MB of it).
+- **Route-based interface pick (2026-10-02, `candidate/route-interface-pick`).** Core-tested (`pick_interface`), app cross-checked only. Check on Windows: (1) two live adapters (Ethernet + Wi-Fi) -> the system tab says `Auto-Targeting Network Interface: <ip> (default route)` and that is the adapter the game uses (`ipconfig` / `route print 0.0.0.0`), capture works without the manual picker; (2) a full-tunnel VPN on: the pick is the physical adapter, `(first physical adapter)`, and capture still works (this is the open question -- if packets are seen on the VPN adapter instead, the virtual-adapter rule is wrong); (3) offline: no crash, falls back to the list. **CI note:** this branch's gate ran in a session that cannot download lindera's dictionary -- core tests (196, furigana module excluded) and the app cross-check ran with the furigana dependency cut out in the working tree only; CI is the first full run.

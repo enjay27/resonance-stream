@@ -4,9 +4,10 @@
 //! so a field added to `AppConfig` and forgotten here is a compile error
 //! instead of a setting that silently does not save (or load).
 
+use crate::favorites::{clean_tabs, normalize};
 use crate::ui_types::{
     default_catch_up_limit, default_favorite_messages, AppConfig, Channel, ComputeMode,
-    FavoriteMessage, LogLevel, TabSwitchModifier, Theme, Tier, ALL_TAB,
+    FavoriteMessage, LogLevel, TabSwitchModifier, Theme, Tier, TranslationView, ALL_TAB,
 };
 use leptos::prelude::{signal, GetUntracked, ReadSignal, Set, WriteSignal};
 use std::collections::HashMap;
@@ -24,6 +25,8 @@ pub struct ConfigSignals {
     pub set_init_done: WriteSignal<bool>,
     pub use_translation: ReadSignal<bool>,
     pub set_use_translation: WriteSignal<bool>,
+    pub translation_view: ReadSignal<TranslationView>,
+    pub set_translation_view: WriteSignal<TranslationView>,
     pub compute_mode: ReadSignal<ComputeMode>,
     pub set_compute_mode: WriteSignal<ComputeMode>,
     pub compact_mode: ReadSignal<bool>,
@@ -82,6 +85,8 @@ pub struct ConfigSignals {
     pub set_message_spacing: WriteSignal<u32>,
     pub favorite_messages: ReadSignal<Vec<FavoriteMessage>>,
     pub set_favorite_messages: WriteSignal<Vec<FavoriteMessage>>,
+    pub favorite_tabs: ReadSignal<Vec<String>>,
+    pub set_favorite_tabs: WriteSignal<Vec<String>>,
     pub chat_log_retention_days: ReadSignal<u32>,
     pub set_chat_log_retention_days: WriteSignal<u32>,
     pub raw_capture: ReadSignal<bool>,
@@ -93,6 +98,8 @@ impl ConfigSignals {
     pub fn new() -> Self {
         let (init_done, set_init_done) = signal::<bool>(false);
         let (use_translation, set_use_translation) = signal::<bool>(false);
+        let (translation_view, set_translation_view) =
+            signal::<TranslationView>(TranslationView::default());
         let (compute_mode, set_compute_mode) = signal::<ComputeMode>(ComputeMode::default());
         let (compact_mode, set_compact_mode) = signal::<bool>(false);
         let (always_on_top, set_always_on_top) = signal::<bool>(false);
@@ -128,6 +135,7 @@ impl ConfigSignals {
         let (message_spacing, set_message_spacing) = signal::<u32>(4);
         let (favorite_messages, set_favorite_messages) =
             signal::<Vec<FavoriteMessage>>(default_favorite_messages());
+        let (favorite_tabs, set_favorite_tabs) = signal::<Vec<String>>(Vec::new());
         let (chat_log_retention_days, set_chat_log_retention_days) = signal::<u32>(0);
         let (raw_capture, set_raw_capture) = signal::<bool>(false);
         ConfigSignals {
@@ -135,6 +143,8 @@ impl ConfigSignals {
             set_init_done,
             use_translation,
             set_use_translation,
+            translation_view,
+            set_translation_view,
             compute_mode,
             set_compute_mode,
             compact_mode,
@@ -193,6 +203,8 @@ impl ConfigSignals {
             set_message_spacing,
             favorite_messages,
             set_favorite_messages,
+            favorite_tabs,
+            set_favorite_tabs,
             chat_log_retention_days,
             set_chat_log_retention_days,
             raw_capture,
@@ -205,6 +217,7 @@ impl ConfigSignals {
         AppConfig {
             init_done: self.init_done.get_untracked(),
             use_translation: self.use_translation.get_untracked(),
+            translation_view: self.translation_view.get_untracked(),
             compute_mode: self.compute_mode.get_untracked(),
             compact_mode: self.compact_mode.get_untracked(),
             always_on_top: self.always_on_top.get_untracked(),
@@ -234,6 +247,7 @@ impl ConfigSignals {
             archive_ignored_channels: self.archive_ignored_channels.get_untracked(),
             message_spacing: self.message_spacing.get_untracked(),
             favorite_messages: self.favorite_messages.get_untracked(),
+            favorite_tabs: self.favorite_tabs.get_untracked(),
             chat_log_retention_days: self.chat_log_retention_days.get_untracked(),
             raw_capture: self.raw_capture.get_untracked(),
         }
@@ -244,6 +258,7 @@ impl ConfigSignals {
         let AppConfig {
             init_done,
             use_translation,
+            translation_view,
             compute_mode,
             compact_mode,
             always_on_top,
@@ -273,11 +288,13 @@ impl ConfigSignals {
             archive_ignored_channels,
             message_spacing,
             favorite_messages,
+            favorite_tabs,
             chat_log_retention_days,
             raw_capture,
         } = config;
         self.set_init_done.set(init_done);
         self.set_use_translation.set(use_translation);
+        self.set_translation_view.set(translation_view);
         self.set_compute_mode.set(compute_mode);
         self.set_compact_mode.set(compact_mode);
         self.set_always_on_top.set(always_on_top);
@@ -320,7 +337,11 @@ impl ConfigSignals {
         self.set_archive_ignored_channels
             .set(archive_ignored_channels);
         self.set_message_spacing.set(message_spacing);
+        let favorite_tabs = clean_tabs(favorite_tabs);
+        let mut favorite_messages = favorite_messages;
+        normalize(&mut favorite_messages, &favorite_tabs);
         self.set_favorite_messages.set(favorite_messages);
+        self.set_favorite_tabs.set(favorite_tabs);
         self.set_chat_log_retention_days
             .set(chat_log_retention_days);
         self.set_raw_capture.set(raw_capture);
@@ -337,6 +358,7 @@ mod tests {
         AppConfig {
             init_done: true,
             use_translation: true,
+            translation_view: TranslationView::Study,
             compute_mode: ComputeMode::Gpu,
             compact_mode: true,
             always_on_top: true,
@@ -367,8 +389,10 @@ mod tests {
             message_spacing: 9,
             favorite_messages: vec![FavoriteMessage {
                 text: "hi".into(),
+                tab: "레이드".into(),
                 ..Default::default()
             }],
+            favorite_tabs: vec!["레이드".into(), "던전".into()],
             chat_log_retention_days: 5,
             raw_capture: true,
         }
@@ -389,6 +413,7 @@ mod tests {
     fn fresh_signals_hold_the_pre_config_defaults() {
         let config = ConfigSignals::new().to_config();
         assert!(!config.init_done && !config.use_translation);
+        assert_eq!(config.translation_view, TranslationView::On);
         assert_eq!(config.active_tab, ALL_TAB);
         assert_eq!(
             config.custom_tab_filters,
@@ -401,6 +426,39 @@ mod tests {
         assert_eq!(config.tab_switch_key, "Tab");
         assert!(config.tab_limits.is_empty());
         assert_eq!(config.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn hand_edited_favorite_tabs_load_cleaned_and_orphans_go_to_the_default_tab() {
+        let signals = ConfigSignals::new();
+        let mut config = odd_config();
+        config.favorite_tabs = vec![" 레이드 ".into(), "".into(), "레이드".into(), "기본".into()];
+        config.favorite_messages = vec![
+            FavoriteMessage {
+                text: "a".into(),
+                tab: "레이드".into(),
+                ..Default::default()
+            },
+            FavoriteMessage {
+                text: "b".into(),
+                tab: "사라진 탭".into(),
+                ..Default::default()
+            },
+        ];
+        signals.apply(config);
+        let held = signals.to_config();
+        assert_eq!(held.favorite_tabs, ["레이드"]);
+        let filed: Vec<_> = held
+            .favorite_messages
+            .iter()
+            .map(|f| f.tab.as_str())
+            .collect();
+        assert_eq!(filed, ["레이드", ""]);
+    }
+
+    #[test]
+    fn fresh_signals_have_no_favorite_tabs() {
+        assert!(ConfigSignals::new().to_config().favorite_tabs.is_empty());
     }
 
     #[test]

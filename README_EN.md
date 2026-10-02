@@ -93,6 +93,10 @@ With translation enabled, **Resonance Stream** uses about **2.3 GB** of data for
 
 ---
 
+## 🙏 Data credits
+
+* The on'yomi fallback table for furigana is generated from [KANJIDIC2](https://www.edrdg.org/wiki/index.php/KANJIDIC_Project). © Electronic Dictionary Research and Development Group, [CC BY-SA 4.0](https://www.edrdg.org/edrdg/licence.html).
+
 ## 👤 Author
 
 * **Enjay** ([kdkyoung@gmail.com](mailto:kdkyoung@gmail.com))

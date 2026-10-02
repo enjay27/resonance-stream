@@ -91,6 +91,10 @@
 
 ---
 
+## 🙏 데이터 출처
+
+* 후리가나의 음독(온요미) 보조 표는 [KANJIDIC2](https://www.edrdg.org/wiki/index.php/KANJIDIC_Project) 데이터를 바탕으로 만들었습니다. © Electronic Dictionary Research and Development Group, [CC BY-SA 4.0](https://www.edrdg.org/edrdg/licence.html).
+
 ## 👤 개발자
 
 * **Enjay** ([kdkyoung@gmail.com](mailto:kdkyoung@gmail.com))

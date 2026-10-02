@@ -4,7 +4,7 @@ use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use resonance_types::{
     default_catch_up_limit, default_favorite_messages, Channel, ComputeMode, FavoriteMessage,
-    LogLevel, TabSwitchModifier, Theme, Tier, ALL_TAB, CUSTOM_TAB,
+    LogLevel, TabSwitchModifier, Theme, Tier, TranslationView, ALL_TAB, CUSTOM_TAB,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -20,7 +20,12 @@ use tauri::{AppHandle, Manager, State};
 #[serde(default)]
 pub struct AppConfig {
     pub init_done: bool,
+    /// Whether the translator exists at all (the settings switch); what rows
+    /// show of it is `translation_view`.
     pub use_translation: bool,
+    /// What a chat row shows: translations, only the original, or the study view.
+    #[serde(default)]
+    pub translation_view: TranslationView,
     pub compute_mode: ComputeMode,
     pub compact_mode: bool,
     pub always_on_top: bool,
@@ -66,6 +71,10 @@ pub struct AppConfig {
     /// Chat lines to copy or paste by shortcut; see `shortcut.rs`.
     #[serde(default = "default_favorite_messages")]
     pub favorite_messages: Vec<FavoriteMessage>,
+    /// Names of the favorites tabs the user made (the default tab is not
+    /// listed); each message carries its own tab name.
+    #[serde(default)]
+    pub favorite_tabs: Vec<String>,
     /// Days of daily chat logs (chat_logs/) to keep; 0 keeps them all.
     #[serde(default)]
     pub chat_log_retention_days: u32,
@@ -110,6 +119,7 @@ impl Default for AppConfig {
         Self {
             init_done: false,
             use_translation: false,
+            translation_view: TranslationView::default(),
             compute_mode: ComputeMode::default(),
             compact_mode: false,
             always_on_top: false,
@@ -139,6 +149,7 @@ impl Default for AppConfig {
             archive_ignored_channels: default_archive_ignored_channels(),
             message_spacing: default_spacing(),
             favorite_messages: default_favorite_messages(),
+            favorite_tabs: Vec::new(),
             chat_log_retention_days: 0,
             raw_capture: false,
         }
@@ -333,10 +344,36 @@ mod tests {
     }
 
     #[test]
+    fn the_translation_view_shows_translations_when_missing_and_round_trips() {
+        assert_eq!(AppConfig::default().translation_view, TranslationView::On);
+        let old: AppConfig = serde_json::from_str(r#"{"init_done": true}"#).unwrap();
+        assert_eq!(old.translation_view, TranslationView::On);
+        let config: AppConfig = serde_json::from_str(r#"{"translation_view": "study"}"#).unwrap();
+        assert_eq!(config.translation_view, TranslationView::Study);
+        let saved = serde_json::to_value(&config).unwrap();
+        assert_eq!(saved["translation_view"], "study");
+    }
+
+    #[test]
     fn raw_capture_is_off_by_default() {
         assert!(!AppConfig::default().raw_capture);
         let config: AppConfig = serde_json::from_str(r#"{"init_done": true}"#).unwrap();
         assert!(!config.raw_capture);
+    }
+
+    #[test]
+    fn favorite_tabs_are_empty_when_missing_and_round_trip() {
+        assert!(AppConfig::default().favorite_tabs.is_empty());
+        let old: AppConfig = serde_json::from_str(r#"{"init_done": true}"#).unwrap();
+        assert!(old.favorite_tabs.is_empty());
+        let config: AppConfig = serde_json::from_str(
+            r#"{"favorite_tabs": ["레이드"], "favorite_messages": [{"text": "hi", "tab": "레이드"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(config.favorite_tabs, ["레이드"]);
+        assert_eq!(config.favorite_messages[0].tab, "레이드");
+        let saved = serde_json::to_value(&config).unwrap();
+        assert_eq!(saved["favorite_tabs"][0], "레이드");
     }
 
     #[test]

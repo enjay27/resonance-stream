@@ -50,6 +50,33 @@ impl fmt::Display for UpdateSignatureError {
     }
 }
 
+/// The public keys (base64 minisign) a shipped app trusts for updates.
+///
+/// Two: the primary signs releases, the backup is kept offline so it can take
+/// over (a release signed by it is accepted by every app that has this list)
+/// if the primary is ever lost or leaked. Public keys; the private halves are
+/// never in the repo.
+pub const TRUSTED_UPDATE_KEYS: &[&str] = &[
+    // primary -- key id 9005FB9491133B75
+    "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwMDVGQjk0OTExMzNCNzUKUldSMU94T1JsUHNGa1BlTXZwOTRLSHRKOXRHUTlqYjFkTWQ0cUtGTkJmWDBucHZuUTMzMER4OS8K",
+    // backup -- key id 0099CF719FD83012
+    "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDAwOTlDRjcxOUZEODMwMTIKUldRU01OaWZjYytaQUdZQndlcHRDWUdLNHkrWlljUU1FSS9PNXBSQXhPRnMvbERhTW16SXB3TlQK",
+];
+
+/// Where the signature of the update at `download_url` is published.
+pub fn signature_url(download_url: &str) -> String {
+    format!("{download_url}.sig")
+}
+
+/// [`verify_update`] against [`TRUSTED_UPDATE_KEYS`].
+pub fn verify_with_app_keys(
+    data: &[u8],
+    signature_b64: &str,
+    announced_version: &str,
+) -> Result<(), UpdateSignatureError> {
+    verify_update(data, signature_b64, TRUSTED_UPDATE_KEYS, announced_version)
+}
+
 /// Is `data` signed (`signature_b64`) by one of `trusted_keys` (base64
 /// minisign public keys), for exactly `announced_version`?
 pub fn verify_update(
@@ -195,5 +222,39 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_app_trusts_two_distinct_valid_keys() {
+        assert_eq!(TRUSTED_UPDATE_KEYS.len(), 2, "primary + backup");
+        let ids: Vec<String> = TRUSTED_UPDATE_KEYS
+            .iter()
+            .map(|key| {
+                let text = decode_text(key).expect("base64 text");
+                assert!(
+                    PublicKey::decode(&text).is_ok(),
+                    "{key} is not a minisign key"
+                );
+                text.lines().next().unwrap().to_string() // "...public key: <ID>"
+            })
+            .collect();
+        assert_ne!(ids[0], ids[1], "primary and backup must be different keys");
+    }
+
+    #[test]
+    fn a_signature_from_neither_app_key_is_refused() {
+        // SIG_A is signed by a throwaway test key, not by an app key.
+        assert_eq!(
+            verify_with_app_keys(DATA, SIG_A, "0.7.0"),
+            Err(UpdateSignatureError::NotSignedByTrustedKey)
+        );
+    }
+
+    #[test]
+    fn the_signature_sits_next_to_the_exe() {
+        assert_eq!(
+            signature_url("https://github.com/o/r/releases/download/v0.7.0/app.exe"),
+            "https://github.com/o/r/releases/download/v0.7.0/app.exe.sig"
+        );
     }
 }

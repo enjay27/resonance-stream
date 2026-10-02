@@ -72,7 +72,7 @@ but replaces code that works); `self_update` crate (not read).
 5. Update dialog shows a failed download / bad signature (today `let _ = invoke(...)` hangs).
 6. Transition: copies <= 0.6 have no verification; the first release that does reaches them over
    the old SHA-256 path, trusted once.
-**PRs:** 1 verify (done) -> 2 keys embedded + app wiring (needs Kade's public keys) -> 3 stable
+**PRs:** 1 verify (done) -> 2 keys embedded + app wiring (done, glue not built here) -> 3 stable
 release workflow (sign + publish) -> 4 retire the gist app entry / dialog errors.
 
 ## B (original notes, kept for the facts). `tauri-plugin-updater`

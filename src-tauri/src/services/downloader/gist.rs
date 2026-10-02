@@ -29,6 +29,14 @@ pub fn published_sha256(url: &str) -> Option<String> {
     Some(entry.sha256.clone()).filter(|hash| !hash.is_empty())
 }
 
+/// The app version the gist announced in the last update check -- what a
+/// downloaded update's signature must have been made for.
+pub fn published_app_version() -> Option<String> {
+    let guard = LAST_METADATA.lock();
+    let version = guard.as_ref()?.app.latest_version.clone();
+    Some(version).filter(|version| !version.is_empty())
+}
+
 // --- 2. The Single Unified Fetch Command ---
 #[tauri::command]
 pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, String> {

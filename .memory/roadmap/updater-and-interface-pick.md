@@ -47,7 +47,35 @@ first bind; at most it could re-pick after a watchdog trip. (c) The ui troublesh
 (`src/components/network_troubleshooter.rs`) scans adapters one by one; it could try the
 routed one first.
 
-## B. `tauri-plugin-updater` -- bigger, needs a design talk first
+## B. DECIDED 2026-10-02 (Kade) -- signed plain-exe updates, in progress (`candidate/updater`)
+
+**Requirement:** the app stays a **portable plain exe**. Rejected: `tauri-plugin-updater`'s
+`install()` + NSIS (checked in tauri-bundler 2.10.1 `installer.nsi`: it installs to the registered
+or default dir -- Program Files / LocalAppData -- with registry, uninstaller and shortcuts, so a
+portable exe would silently become a second, installed copy). Rejected for now: the plugin's
+`check`/`download` with our own swap (works -- `Update::download` verifies, `install` is separate --
+but replaces code that works); `self_update` crate (not read).
+
+**Chosen design (lifecycle-level, the format is the commitment):**
+1. Signature = `tauri signer` / minisign over the exact exe; trusted comment carries `version:`.
+   Verified with `minisign-verify` in `resonance_core::update_signature::verify_update` (pure,
+   tested; **PR 1, done**): any key of a *list* may have signed (rotation), the signed version must
+   equal the announced one (no rollback), a missing version is refused.
+2. **Two keypairs** made by Kade (`cargo tauri signer generate`, self-generated -- there is no
+   "official" key). Both public keys go in the app; primary private key = Actions secret
+   (`TAURI_SIGNING_PRIVATE_KEY` + password); backup private key offline (NAS). Never committed.
+   A TLS cert (DSM) is not a minisign key and rotates -- not usable.
+3. Verify after download **and again right before the swap** (`restart_to_apply_update` renames
+   whatever sits at `update_temp.exe` today).
+4. **App-update info comes from GitHub Releases** (stable-release workflow publishes exe + `.sig`
+   + manifest), not the gist; the gist keeps model + dictionary data.
+5. Update dialog shows a failed download / bad signature (today `let _ = invoke(...)` hangs).
+6. Transition: copies <= 0.6 have no verification; the first release that does reaches them over
+   the old SHA-256 path, trusted once.
+**PRs:** 1 verify (done) -> 2 keys embedded + app wiring (done, glue not built here) -> 3 stable release workflow, sign + publish
+(written, never run) -> 4 the app reads `latest.json` instead of the gist + dialog errors (done). **Bridge:** v0.6.0 is the first signed release; the gist `app` entry stays pointing at it for copies that predate the signed updater (Kade edits it, after the release exists).
+
+## B (original notes, kept for the facts). `tauri-plugin-updater`
 
 **Today.** A hand-rolled update path, not a plugin:
 - `check_all_updates` (`downloader/gist.rs:34`) reads the public gist; a newer

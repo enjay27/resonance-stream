@@ -12,5 +12,7 @@ pub mod paste;
 pub mod protocol;
 pub mod sniffer_net;
 pub mod text;
+pub mod update_feed;
+pub mod update_signature;
 pub mod window;
 pub mod workers;

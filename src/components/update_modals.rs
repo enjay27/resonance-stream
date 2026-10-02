@@ -8,7 +8,14 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 
-/// App update: release notes, skip, download with progress, restart to apply.
+/// What the backend said went wrong: Tauri rejects a command with its error
+/// string.
+fn error_text(error: &JsValue) -> String {
+    error.as_string().unwrap_or_else(|| format!("{:?}", error))
+}
+
+/// App update: release notes, skip, download with progress, restart to apply;
+/// a failed download or signature check ends in an error step (3) with a retry.
 #[component]
 pub fn AppUpdateModal() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
@@ -20,6 +27,8 @@ pub fn AppUpdateModal() -> impl IntoView {
         set_app_update_step,
         app_update_progress,
         set_app_update_progress,
+        app_update_error,
+        set_app_update_error,
         ..
     } = signals.updates;
     let set_status_text = signals.setup.set_status_text;
@@ -36,10 +45,10 @@ pub fn AppUpdateModal() -> impl IntoView {
                         serde_json::from_value::<ProgressPayload>(ev["payload"].clone())
                     {
                         if payload.current_file.contains("앱 업데이트") {
+                            // Only the bar: "done" is the command succeeding,
+                            // i.e. the signature check passing, not 100 % of
+                            // the bytes.
                             set_app_update_progress.set(payload.percent);
-                            if payload.percent >= 100 {
-                                set_app_update_step.set(2);
-                            }
                         }
                     }
                 }
@@ -51,7 +60,13 @@ pub fn AppUpdateModal() -> impl IntoView {
             let args =
                 serde_wasm_bindgen::to_value(&serde_json::json!({ "downloadUrl": download_url }))
                     .unwrap();
-            let _ = invoke("download_app_update", args).await;
+            match invoke("download_app_update", args).await {
+                Ok(_) => set_app_update_step.set(2),
+                Err(e) => {
+                    set_app_update_error.set(error_text(&e));
+                    set_app_update_step.set(3);
+                }
+            }
         });
     };
 
@@ -111,18 +126,56 @@ pub fn AppUpdateModal() -> impl IntoView {
                                     </div>
                                 }.into_any(),
 
-                                _ => view! {
+                                2 => view! {
                                     <div class="space-y-4 py-4 animate-in zoom-in text-center">
                                         <div class="text-4xl mb-2">"🎉"</div>
                                         <p class="text-lg font-bold text-success">"다운로드 완료!"</p>
-                                        <p class="text-xs opacity-70">"새로운 버전을 적용하려면 앱을 재시작해야 합니다."</p>
+                                        <p class="text-xs opacity-70">"서명 확인을 마쳤습니다. 새로운 버전을 적용하려면 앱을 재시작해야 합니다."</p>
                                         <button class="btn btn-success btn-block mt-4 gap-2"
                                             on:click=move |_| {
                                                 set_status_text.set("재시작 중...".to_string());
-                                                spawn_local(async move { let _ = invoke("restart_to_apply_update", JsValue::NULL).await; });
+                                                spawn_local(async move {
+                                                    // On success the app exits and nothing comes back.
+                                                    if let Err(e) = invoke("restart_to_apply_update", JsValue::NULL).await {
+                                                        set_app_update_error.set(error_text(&e));
+                                                        set_app_update_step.set(3);
+                                                    }
+                                                });
                                             }>
                                             "재시작 및 적용"
                                         </button>
+                                    </div>
+                                }.into_any(),
+
+                                _ => view! {
+                                    <div class="space-y-3 py-2 animate-in fade-in">
+                                        <p class="text-sm font-bold text-error">"업데이트를 설치하지 않았습니다."</p>
+                                        <p class="text-xs opacity-70">
+                                            "받은 파일이 올바르지 않거나 다운로드에 실패했습니다. 현재 버전은 그대로 사용할 수 있습니다."
+                                        </p>
+                                        <div class="bg-base-200 p-3 rounded text-xs font-mono opacity-80 break-words">
+                                            {move || app_update_error.get()}
+                                        </div>
+                                        <div class="modal-action">
+                                            <button class="btn btn-ghost text-base-content/50"
+                                                on:click=move |_| {
+                                                    set_show_app_update_modal.set(false);
+                                                    set_app_update_step.set(0);
+                                                    set_app_update_error.set(String::new());
+                                                }>
+                                                "닫기"
+                                            </button>
+                                            <button class="btn btn-success"
+                                                on:click={
+                                                    let url = data.app.download_url.clone();
+                                                    move |_| {
+                                                        set_app_update_error.set(String::new());
+                                                        start_app_update(url.clone());
+                                                    }
+                                                }>
+                                                "다시 시도"
+                                            </button>
+                                        </div>
                                     </div>
                                 }.into_any(),
                             }}

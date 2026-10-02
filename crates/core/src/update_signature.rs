@@ -63,11 +63,6 @@ pub const TRUSTED_UPDATE_KEYS: &[&str] = &[
     "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDAwOTlDRjcxOUZEODMwMTIKUldRU01OaWZjYytaQUdZQndlcHRDWUdLNHkrWlljUU1FSS9PNXBSQXhPRnMvbERhTW16SXB3TlQK",
 ];
 
-/// Where the signature of the update at `download_url` is published.
-pub fn signature_url(download_url: &str) -> String {
-    format!("{download_url}.sig")
-}
-
 /// [`verify_update`] against [`TRUSTED_UPDATE_KEYS`].
 pub fn verify_with_app_keys(
     data: &[u8],
@@ -247,14 +242,6 @@ mod tests {
         assert_eq!(
             verify_with_app_keys(DATA, SIG_A, "0.7.0"),
             Err(UpdateSignatureError::NotSignedByTrustedKey)
-        );
-    }
-
-    #[test]
-    fn the_signature_sits_next_to_the_exe() {
-        assert_eq!(
-            signature_url("https://github.com/o/r/releases/download/v0.7.0/app.exe"),
-            "https://github.com/o/r/releases/download/v0.7.0/app.exe.sig"
         );
     }
 }

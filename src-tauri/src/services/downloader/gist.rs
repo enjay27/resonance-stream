@@ -3,6 +3,7 @@ use crate::protocol::types::SystemLogLevel;
 use parking_lot::Mutex;
 use resonance_core::download::is_newer_version;
 use resonance_core::text::Dictionary;
+use resonance_core::update_feed::{parse_feed, UpdateFeed};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,38 +11,55 @@ use tauri::{AppHandle, Manager};
 
 const METADATA_URL: &str =
     "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/metadata.json";
+/// The update feed of the newest stable release (`release.yml` publishes it);
+/// the app learns about its own updates here, not from the gist.
+const FEED_URL: &str =
+    "https://github.com/enjay27/resonance-stream/releases/latest/download/latest.json";
+/// A feed is a few lines of JSON plus release notes.
+const FEED_MAX_BYTES: usize = 256 * 1024;
 const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/custom_dict.json";
 
 // --- 1. Structs matching the unified Gist JSON: shared with the UI ---
 pub use resonance_types::{GistMetadata, RemoteDictionary, UpdateCheckResult, VersionInfo};
 
-/// The metadata from the last update check. The app updater looks its
-/// expected SHA-256 up here by URL, so the hash comes from the gist.
-static LAST_METADATA: Mutex<Option<GistMetadata>> = Mutex::new(None);
+/// The release the last update check announced. The app updater downloads
+/// and verifies exactly this one: its url, its version and its signature.
+static LAST_FEED: Mutex<Option<UpdateFeed>> = Mutex::new(None);
 
-/// The SHA-256 the gist published for `url`, if any.
-pub fn published_sha256(url: &str) -> Option<String> {
-    let guard = LAST_METADATA.lock();
-    let metadata = guard.as_ref()?;
-    let entry = [&metadata.app, &metadata.model]
-        .into_iter()
-        .find(|entry| entry.download_url == url)?;
-    Some(entry.sha256.clone()).filter(|hash| !hash.is_empty())
+/// The release the last update check announced, if there was one.
+pub fn announced_update() -> Option<UpdateFeed> {
+    LAST_FEED.lock().clone()
 }
 
-/// The app version the gist announced in the last update check -- what a
-/// downloaded update's signature must have been made for.
-pub fn published_app_version() -> Option<String> {
-    let guard = LAST_METADATA.lock();
-    let version = guard.as_ref()?.app.latest_version.clone();
-    Some(version).filter(|version| !version.is_empty())
+/// Reads the release feed. `Ok(None)`: no stable release exists yet (404).
+async fn fetch_update_feed() -> Result<Option<UpdateFeed>, String> {
+    let mut res = reqwest::Client::new()
+        .get(FEED_URL)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+    if res.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !res.status().is_success() {
+        return Err(format!("Update feed returned: {}", res.status()));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
+        body.extend_from_slice(&chunk);
+        if body.len() > FEED_MAX_BYTES {
+            return Err("The update feed is too large".to_string());
+        }
+    }
+    let text = String::from_utf8(body).map_err(|_| "The update feed is not text".to_string())?;
+    parse_feed(&text).map(Some)
 }
 
 // --- 2. The Single Unified Fetch Command ---
 #[tauri::command]
 pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, String> {
     let client = reqwest::Client::new();
-    let remote_data: GistMetadata = client
+    let mut remote_data: GistMetadata = client
         .get(METADATA_URL)
         .send()
         .await
@@ -53,12 +71,32 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
     let metadata = crate::config::load_metadata(&app);
     let current_app_version = app.package_info().version.to_string();
 
-    *LAST_METADATA.lock() = Some(remote_data.clone());
+    // App Check: from the release feed, not the gist (whose `app` entry only
+    // serves copies that predate this). A feed that cannot be read is no
+    // update -- never a reason to fail the model / dictionary check.
+    let feed = match fetch_update_feed().await {
+        Ok(feed) => feed,
+        Err(e) => {
+            log::warn!("[Updater] No app update info: {}", e);
+            None
+        }
+    };
+    *LAST_FEED.lock() = feed.clone();
+    remote_data.app = feed
+        .as_ref()
+        .map(|feed| VersionInfo {
+            latest_version: feed.version.clone(),
+            download_url: feed.url.clone(),
+            release_notes: feed.notes.clone(),
+            sha256: String::new(),
+        })
+        .unwrap_or_default();
 
-    // App Check: only a newer version is an update (a stale gist must not
-    // offer a downgrade)
-    let mut app_update_available =
-        is_newer_version(&remote_data.app.latest_version, &current_app_version);
+    // Only a newer version is an update (a stale feed must not offer a
+    // downgrade).
+    let mut app_update_available = feed
+        .as_ref()
+        .is_some_and(|feed| is_newer_version(&feed.version, &current_app_version));
     if let Some(ignored) = &metadata.ignored_app_version {
         if ignored == &remote_data.app.latest_version {
             app_update_available = false;

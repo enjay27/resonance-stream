@@ -104,6 +104,10 @@ pub struct UpdateSignals {
     pub set_app_update_step: WriteSignal<i32>,
     pub app_update_progress: ReadSignal<u8>,
     pub set_app_update_progress: WriteSignal<u8>,
+    /// Why the app update failed (download or signature check); shown in the
+    /// dialog's error step (`app_update_step` 3).
+    pub app_update_error: ReadSignal<String>,
+    pub set_app_update_error: WriteSignal<String>,
     pub model_update_step: ReadSignal<i32>,
     pub set_model_update_step: WriteSignal<i32>,
     pub model_update_progress: ReadSignal<u8>,
@@ -117,6 +121,7 @@ impl UpdateSignals {
         let (pending_update_data, set_pending_update_data) = signal::<Option<GistMetadata>>(None);
         let (app_update_step, set_app_update_step) = signal::<i32>(0);
         let (app_update_progress, set_app_update_progress) = signal::<u8>(0);
+        let (app_update_error, set_app_update_error) = signal::<String>(String::new());
         let (model_update_step, set_model_update_step) = signal::<i32>(0);
         let (model_update_progress, set_model_update_progress) = signal::<u8>(0);
         UpdateSignals {
@@ -130,6 +135,8 @@ impl UpdateSignals {
             set_app_update_step,
             app_update_progress,
             set_app_update_progress,
+            app_update_error,
+            set_app_update_error,
             model_update_step,
             set_model_update_step,
             model_update_progress,

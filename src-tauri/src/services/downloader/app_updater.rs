@@ -1,86 +1,62 @@
 use super::ProgressPayload;
 use log::info;
-use resonance_core::download::check_download_url;
-use resonance_core::update_signature::{signature_url, verify_with_app_keys};
+use parking_lot::Mutex;
+use resonance_core::update_feed::UpdateFeed;
+use resonance_core::update_signature::verify_with_app_keys;
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tauri::{AppHandle, Emitter};
 
-/// A minisign signature is a few hundred bytes; anything bigger is not one.
-const SIGNATURE_MAX_BYTES: usize = 4096;
+/// The release whose exe is sitting in `update_temp.exe`, once it has passed
+/// the signature check. `restart_to_apply_update` checks the file again
+/// against it right before the swap.
+static DOWNLOADED: Mutex<Option<UpdateFeed>> = Mutex::new(None);
 
-/// The signature published next to the update (`<download_url>.sig`).
-async fn fetch_signature(url: &str) -> Result<String, String> {
-    check_download_url(url)?;
-    let mut res = reqwest::Client::new()
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !res.status().is_success() {
-        return Err(format!(
-            "Could not fetch the update signature. Server returned: {}",
-            res.status()
-        ));
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
-        body.extend_from_slice(&chunk);
-        if body.len() > SIGNATURE_MAX_BYTES {
-            return Err("The update signature is too large".to_string());
-        }
-    }
-    String::from_utf8(body).map_err(|_| "The update signature is not text".to_string())
-}
-
-/// Is the exe at `exe` signed by one of the app's built-in keys, for
-/// `version`? Reads the whole file: it is checked as it will be installed.
-fn verify_file(exe: &Path, signature: &str, version: &str) -> Result<(), String> {
+/// Is the exe at `exe` signed by one of the app's built-in keys, for the
+/// version `feed` announced? Reads the whole file: it is checked as it will
+/// be installed.
+fn verify_file(exe: &Path, feed: &UpdateFeed) -> Result<(), String> {
     let data = fs::read(exe).map_err(|e| format!("Could not read the update to check it: {e}"))?;
-    verify_with_app_keys(&data, signature, version).map_err(|e| e.to_string())
+    verify_with_app_keys(&data, &feed.signature, &feed.version).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn download_app_update(app: AppHandle, download_url: String) -> Result<(), String> {
     info!("Downloading application update...");
 
-    // 1. Get paths
+    // 1. Only the release the last check announced.
+    let feed = super::gist::announced_update()
+        .ok_or("No update has been announced; check for updates first")?;
+    if download_url != feed.url {
+        return Err("The update to download is not the announced one".to_string());
+    }
+    *DOWNLOADED.lock() = None;
+
+    // 2. Get paths
     let current_exe = env::current_exe().map_err(|e| e.to_string())?;
     let current_dir = current_exe.parent().ok_or("Failed to get exe directory")?;
     let temp_exe = current_dir.join("update_temp.exe");
 
-    let sig_path = temp_exe.with_extension("exe.sig");
-    let version = super::gist::published_app_version()
-        .ok_or("The update check has not announced a version; refusing to install")?;
-
-    // 2. Download the new version (HTTPS only). The exe runs as
+    // 3. Download the new version (HTTPS only). The exe runs as
     // Administrator after restart, so it is only installed when one of the
-    // app's built-in keys signed it for exactly the announced version; a
-    // published SHA-256 is still checked on top.
-    let sha256 = super::gist::published_sha256(&download_url);
+    // app's built-in keys signed it for exactly the announced version.
     super::fetch::download_file(
         &app,
-        &download_url,
+        &feed.url,
         &temp_exe,
         "앱 업데이트", // Keep this exact string, we check it in the UI!
-        sha256.as_deref(),
+        None,
     )
     .await?;
 
-    // 3. Check the signature; a file that fails is thrown away.
-    let checked = async {
-        let signature = fetch_signature(&signature_url(&download_url)).await?;
-        verify_file(&temp_exe, &signature, &version)?;
-        fs::write(&sig_path, signature).map_err(|e| e.to_string())
-    }
-    .await;
-    if let Err(e) = checked {
+    // 4. Check the signature; a file that fails is thrown away.
+    if let Err(e) = verify_file(&temp_exe, &feed) {
         let _ = fs::remove_file(&temp_exe);
-        let _ = fs::remove_file(&sig_path);
         return Err(e);
     }
+    *DOWNLOADED.lock() = Some(feed);
 
     // Explicit 100% signal
     let _ = app.emit(
@@ -104,16 +80,15 @@ pub fn restart_to_apply_update(app: AppHandle) -> Result<(), String> {
     let exe_name = current_exe.file_name().unwrap().to_string_lossy();
 
     let temp_exe = current_dir.join("update_temp.exe");
-    let sig_path = temp_exe.with_extension("exe.sig");
     let old_exe = current_dir.join(format!("{}.old", exe_name));
 
     // Check again what is about to be installed: the file has sat on disk
     // since the download.
-    let version = super::gist::published_app_version()
-        .ok_or("The update check has not announced a version; refusing to install")?;
-    let signature = fs::read_to_string(&sig_path)
-        .map_err(|_| "The update has no signature file; download it again".to_string())?;
-    verify_file(&temp_exe, &signature, &version)?;
+    let feed = DOWNLOADED
+        .lock()
+        .clone()
+        .ok_or("No verified update has been downloaded")?;
+    verify_file(&temp_exe, &feed)?;
 
     // Clean up old backups
     if old_exe.exists() {
@@ -124,7 +99,6 @@ pub fn restart_to_apply_update(app: AppHandle) -> Result<(), String> {
     fs::rename(&current_exe, &old_exe)
         .map_err(|e| format!("Failed to backup current exe: {}", e))?;
     fs::rename(&temp_exe, &current_exe).map_err(|e| format!("Failed to install new exe: {}", e))?;
-    let _ = fs::remove_file(&sig_path);
 
     // Spawn the new executable
     Command::new(&current_exe)

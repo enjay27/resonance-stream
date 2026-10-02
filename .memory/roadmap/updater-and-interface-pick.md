@@ -73,7 +73,7 @@ but replaces code that works); `self_update` crate (not read).
 6. Transition: copies <= 0.6 have no verification; the first release that does reaches them over
    the old SHA-256 path, trusted once.
 **PRs:** 1 verify (done) -> 2 keys embedded + app wiring (done, glue not built here) -> 3 stable release workflow, sign + publish
-(written, never run) -> 4 the app reads `latest.json` instead of the gist, retire the gist app entry / dialog errors.
+(written, never run) -> 4 the app reads `latest.json` instead of the gist + dialog errors (done). **Bridge:** v0.6.0 is the first signed release; the gist `app` entry stays pointing at it for copies that predate the signed updater (Kade edits it, after the release exists).
 
 ## B (original notes, kept for the facts). `tauri-plugin-updater`
 

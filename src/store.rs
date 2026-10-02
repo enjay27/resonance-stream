@@ -79,6 +79,7 @@ mod tests {
         assert_eq!(s.updates.app_update_step.get_untracked(), 0);
         assert_eq!(s.updates.model_update_step.get_untracked(), 0);
         assert_eq!(s.updates.app_update_progress.get_untracked(), 0);
+        assert!(s.updates.app_update_error.get_untracked().is_empty());
         assert_eq!(s.updates.model_update_progress.get_untracked(), 0);
     }
 

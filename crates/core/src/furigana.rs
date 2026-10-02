@@ -4,7 +4,8 @@
 //! [`spans_from_tokens`] is the pure part: it takes a morphological analyser's
 //! tokens (surface text and katakana reading) and puts the reading over the
 //! kanji only, leaving okurigana (走**った**) plain. A word the analyser has no
-//! reading for is read kanji by kanji in on'yomi ([`crate::kanji_on`]). Which
+//! reading for is read kanji by kanji in on'yomi ([`crate::kanji_on`]); so are
+//! single kanji the analyser gives side by side (響奏, not ひびきそう). Which
 //! analyser makes the tokens is the adapter's business, so this part is tested
 //! without one.
 
@@ -23,12 +24,22 @@ pub type Token<'a> = (&'a str, Option<&'a str>);
 /// The line as [`RubySpan`]s. The spans' text, joined, is exactly the tokens'
 /// surfaces, joined; neighbouring plain pieces are merged into one span.
 pub fn spans_from_tokens<'a>(tokens: impl IntoIterator<Item = Token<'a>>) -> Vec<RubySpan> {
+    let tokens: Vec<Token> = tokens.into_iter().collect();
     let mut out = Vec::new();
-    for (surface, reading) in tokens {
+    for (i, &(surface, reading)) in tokens.iter().enumerate() {
         let reading = reading
             .filter(|r| *r != "*")
             .map(to_hiragana)
             .filter(|r| !r.is_empty() && r.chars().all(is_hiragana_or_mark));
+        // A kanji the dictionary knows only apart from its neighbours (響奏:
+        // 響 ひびき, 奏 そう) is no word of Japanese: on'yomi, like a coined
+        // Sino-Japanese compound, where the table has one.
+        let reading = match single_kanji(surface) {
+            Some(kanji) if in_single_kanji_run(&tokens, i) => {
+                on_reading(kanji).map(str::to_string).or(reading)
+            }
+            _ => reading,
+        };
         match reading {
             Some(reading) if surface.chars().any(is_kanji) => {
                 for span in align(surface, &reading) {
@@ -51,6 +62,20 @@ pub fn spans_from_tokens<'a>(tokens: impl IntoIterator<Item = Token<'a>>) -> Vec
         }
     }
     out
+}
+
+/// The kanji when `surface` is exactly one (not 々, which repeats the kanji
+/// before it).
+fn single_kanji(surface: &str) -> Option<char> {
+    let mut chars = surface.chars();
+    let c = chars.next()?;
+    (chars.next().is_none() && is_kanji(c) && c != '々').then_some(c)
+}
+
+/// Whether the token at `i` is one of two or more single-kanji tokens in a row.
+fn in_single_kanji_run(tokens: &[Token], i: usize) -> bool {
+    let single = |j: usize| single_kanji(tokens[j].0).is_some();
+    single(i) && ((i > 0 && single(i - 1)) || (i + 1 < tokens.len() && single(i + 1)))
 }
 
 /// A word's surface cut so the reading sits over its kanji only. When the
@@ -285,6 +310,44 @@ mod tests {
     }
 
     #[test]
+    fn single_kanji_words_side_by_side_are_read_in_on_yomi() {
+        // 響奏 is no Japanese word: the dictionary has 響 (ひびき, a name) and
+        // 奏 (そう) separately, and ひびきそう mixes kun and on. Read as a
+        // Sino-Japanese pair instead.
+        assert_eq!(
+            spans(&[("響", Some("ヒビキ")), ("奏", Some("ソウ"))]),
+            [r("響", "きょう"), r("奏", "そう")]
+        );
+        // Longer runs too; a kanji with no on'yomi keeps its own reading.
+        assert_eq!(
+            spans(&[
+                ("泡", Some("アワ")),
+                ("影", Some("カゲ")),
+                ("畑", Some("ハタケ"))
+            ]),
+            [r("泡", "ほう"), r("影", "えい"), r("畑", "はたけ")]
+        );
+    }
+
+    #[test]
+    fn a_single_kanji_word_on_its_own_or_next_to_other_words_keeps_its_reading() {
+        // Alone, or with kana or a longer word between/after: not a run.
+        assert_eq!(
+            spans(&[
+                ("響", Some("ヒビキ")),
+                ("の", Some("ノ")),
+                ("奏", Some("ソウ"))
+            ]),
+            [r("響", "ひびき"), p("の"), r("奏", "そう")]
+        );
+        assert_eq!(
+            spans(&[("響", Some("ヒビキ")), ("奏者", Some("ソウシャ"))]),
+            [r("響", "ひびき"), r("奏者", "そうしゃ")]
+        );
+        assert_eq!(spans(&[("山", Some("ヤマ"))]), [r("山", "やま")]);
+    }
+
+    #[test]
     fn okurigana_stays_plain_and_neighbouring_plain_pieces_merge() {
         assert_eq!(
             spans(&[("走っ", Some("ハシッ")), ("た", Some("タ"))]),
@@ -429,6 +492,21 @@ mod tests {
         assert_eq!(
             f.annotate("巨塔M6"),
             [r("巨", "きょ"), r("塔", "とう"), p("M6")]
+        );
+    }
+
+    #[test]
+    fn two_kanji_the_dictionary_only_knows_apart_are_read_in_on_yomi() {
+        let f = analyser();
+        assert_eq!(f.annotate("響奏"), [r("響", "きょう"), r("奏", "そう")]);
+        assert_eq!(
+            f.annotate("響奏の力"),
+            [
+                r("響", "きょう"),
+                r("奏", "そう"),
+                p("の"),
+                r("力", "ちから")
+            ]
         );
     }
 

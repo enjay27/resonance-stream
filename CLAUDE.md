@@ -235,6 +235,19 @@ Prereleases never become "Latest", and the app's update check reads the gist, no
 GitHub releases, so users never see a candidate. The candidate exe shares the
 installed app's data folder (same identifier): config, model, chat logs.
 
+### Stable releases (signed plain exe)
+
+An app update is installed only if one of the keys built into the app
+(`TRUSTED_UPDATE_KEYS`, `crates/core/src/update_signature.rs`) signed it for the
+announced version -- so a stable release is built and signed by
+`.github/workflows/release.yml`, never by hand: bump `[workspace.package] version`,
+merge to `main`, then push the tag `v<version>` on it. The workflow gates, builds
+the plain exe, signs it with the `TAURI_SIGNING_PRIVATE_KEY` secret, checks the
+signature the way the app will (`examples/verify_update.rs`) and publishes the exe,
+`<exe>.sig` and `latest.json` (the update feed). The private keys are never
+committed; the backup key stays offline. Tag / feed helpers:
+`.github/scripts/release-lib.sh` (tests in CI).
+
 ### Never commit
 - Secrets, `.env`.
 - Build output: `target/`, `dist/`, `style/output.css`, `*.exe`.

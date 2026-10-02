@@ -2,7 +2,9 @@
 
 **Index, not the record.** Only what would be *false* the moment it goes stale lives here.
 
-## Now — 2026-10-01
+## Now — 2026-10-02
+
+**Japanese study view (2026-10-02, `claude/japanese-study-furigana-ayn1k0`, off `rc`):** a title-bar badge (번역 ON / 번역 OFF / 공부 모드, `config.translation_view`) picks what rows show; 공부 모드 shows each Japanese message with furigana and the translation only on hover (normal and compact). Settings' 번역 toggle (`use_translation`) is still the master switch. Furigana = lindera + embedded IPADIC in `crates/core/src/furigana.rs`, asked per row via `annotate_furigana`; pure UI bits in `src/ruby_view.rs`, `src/translation_view.rs`. **Open:** the exe grows by the ~46 MB dictionary (unmeasured on Windows); the build downloads it from Lindera.dev (blocked in the cloud session -- core tests ran on a re-encoded 2007 IPADIC, CI uses the official pack: a reading may differ); `cargo tauri dev` not run. Screenshotted in `ui-preview`. Detail: [`sessions/2026-10-02-japanese-study-furigana.md`](.memory/sessions/2026-10-02-japanese-study-furigana.md).
 
 **Chat row menus + add to dictionary (2026-10-01, `claude/rc-build-ui-fixes-ny8j3w`, off `rc`):** a chat row has two menus: the sender's name (copy name / filter / block, unchanged) and the message text (copy message / copy translation / favorite / add to dictionary) -- `MenuKind`/`RowMenu` in `view_signals.rs`, `ui.active_menu` replaces `active_menu_id`. The message text shows a pointer and an underline on hover; the hover star/copy buttons are gone. A double click selects a word and (re)opens the menu with it; "사전에 추가" opens `AddToDictionaryModal` (`ui.dict_draft`): key = the selected word, else the whole original; value = the translation when nothing is selected; existing key -> 덮어쓰기. Reads and writes the file through `get_local_dictionary` / `save_local_dictionary`; pure logic in `src/dictionary_edit.rs`. With drag-to-scroll on, a click after a drag (> 4 px) opens nothing. Screenshotted in `ui-preview`; NOT run on Windows.
 

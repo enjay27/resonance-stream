@@ -2,16 +2,27 @@ use crate::chat_view::{compact_original_class, translation_pending};
 use crate::dictionary_edit::draft;
 use crate::favorites::add_from_chat;
 use crate::readability::{box_name, needs_backing, row_palette, ORIGINAL_TEXT, TEXT_BOX};
+use crate::ruby_view::{mark, RubyCache};
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
-use crate::ui_types::{Channel, ChatMessage};
+use crate::translation_view::{effective, shows_translation, HOVER_ONLY};
+use crate::ui_types::{Channel, ChatMessage, RubySpan, TranslationView};
 use crate::use_context;
-use crate::utils::{copy_to_clipboard, format_time};
+use crate::utils::{copy_to_clipboard, format_time, is_japanese};
 use crate::view_signals::{DictDraft, MenuKind, RowMenu};
 use leptos::portal::Portal;
 use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use leptos::{component, view, IntoView};
+use std::cell::RefCell;
+
+/// Lines already given furigana: a row that is built again (a tab switch,
+/// paging) does not ask the backend again.
+const RUBY_CACHE_LINES: usize = 2000;
+
+thread_local! {
+    static RUBY_CACHE: RefCell<RubyCache> = RefCell::new(RubyCache::new(RUBY_CACHE_LINES));
+}
 
 #[component]
 pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
@@ -299,8 +310,51 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
     // Normal rows sit on the text box once the window is see-through.
     let palette =
         Memo::new(move |_| row_palette(needs_backing(signals.config.overlay_opacity.get())));
-    let pending =
-        move || sig.with(|m| translation_pending(m, signals.config.use_translation.get()));
+    // What this row shows of the translation: on, off, or the study view.
+    let mode = move || {
+        effective(
+            signals.config.translation_view.get(),
+            signals.config.use_translation.get(),
+        )
+    };
+    let pending = move || {
+        sig.with(|m| {
+            translation_pending(
+                m,
+                signals.config.use_translation.get() && shows_translation(mode()),
+            )
+        })
+    };
+
+    // Study view: the furigana of this row's line, asked for once, when the
+    // view is on and the line is Japanese.
+    let (ruby, set_ruby) = signal(None::<Vec<RubySpan>>);
+    Effect::new(move |_| {
+        if mode() != TranslationView::Study || ruby.with_untracked(Option::is_some) {
+            return;
+        }
+        let (text, blocked) = sig.with_untracked(|m| (m.message.clone(), m.is_blocked));
+        if blocked || !is_japanese(&text) {
+            return;
+        }
+        if let Some(spans) = RUBY_CACHE.with(|c| c.borrow().get(&text).cloned()) {
+            set_ruby.set(Some(spans));
+            return;
+        }
+        spawn_local(async move {
+            let args =
+                serde_wasm_bindgen::to_value(&serde_json::json!({ "texts": [&text] })).unwrap();
+            let Ok(answer) = invoke("annotate_furigana", args).await else {
+                return;
+            };
+            if let Ok(mut lines) = serde_wasm_bindgen::from_value::<Vec<Vec<RubySpan>>>(answer) {
+                if let Some(spans) = lines.pop() {
+                    RUBY_CACHE.with(|c| c.borrow_mut().put(&text, spans.clone()));
+                    set_ruby.set(Some(spans));
+                }
+            }
+        });
+    });
     let dots = || view! { <span class="loading loading-dots loading-xs ml-1.5 align-middle opacity-50"></span> };
 
     view! {
@@ -349,13 +403,27 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                 let p = palette.get();
                                 let fs = signals.config.font_size.get();
                                 let kw = signals.config.emphasis_keywords.get();
+                                let mode = mode();
                                 if msg.is_blocked {
                                     view! {
                                         <div class=format!("italic opacity-60 {}", p.text) style=format!("font-size: {}px;", fs)>
                                             "(차단된 사용자의 메시지입니다)"
                                         </div>
                                     }.into_any()
-                                } else if let Some(text) = msg.translated.clone() {
+                                } else if mode == TranslationView::Study {
+                                    // The Japanese with furigana; the translation only under the pointer.
+                                    let translated = msg.translated.clone();
+                                    view! {
+                                        <div class=format!("leading-snug font-medium {}", p.text) style=format!("font-size: {}px;", fs)>
+                                            {render_original(&msg.message, ruby.get(), &kw)}
+                                        </div>
+                                        {translated.map(|text| view! {
+                                            <div class=format!("leading-snug mt-0.5 animate-in fade-in duration-200 {} {HOVER_ONLY}", p.original) style=format!("font-size: {}px;", fs.saturating_sub(2).max(10))>
+                                                {render_emphasized(&text, &kw)}
+                                            </div>
+                                        })}
+                                    }.into_any()
+                                } else if let Some(text) = msg.translated.clone().filter(|_| shows_translation(mode)) {
                                     view! {
                                         <div class=format!("leading-snug font-medium animate-in fade-in duration-200 {}", p.text) style=format!("font-size: {}px;", fs)>
                                             {render_emphasized(&text, &kw)}
@@ -399,9 +467,20 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                         {move || {
                             let msg = sig.get();
                             let kw = signals.config.emphasis_keywords.get();
+                            let mode = mode();
                             if msg.is_blocked {
                                 view! { <span class="italic text-white/60">"(차단된 사용자의 메시지)"</span> }.into_any()
-                            } else if let Some(text) = msg.translated.clone() {
+                            } else if mode == TranslationView::Study {
+                                let translated = msg.translated.clone();
+                                view! {
+                                    <span>{render_original(&msg.message, ruby.get(), &kw)}</span>
+                                    {translated.map(|text| view! {
+                                        <div class=format!("text-[0.85em] {ORIGINAL_TEXT} {HOVER_ONLY}")>
+                                            {render_emphasized(&text, &kw)}
+                                        </div>
+                                    })}
+                                }.into_any()
+                            } else if let Some(text) = msg.translated.clone().filter(|_| shows_translation(mode)) {
                                 let hide = signals.config.hide_original_in_compact.get();
                                 view! {
                                     <span>{render_emphasized(&text, &kw)}</span>
@@ -424,6 +503,38 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
             </Show>
         </Show>
     }
+}
+
+/// A message's original: with furigana once the backend has answered, as
+/// plain text until then (and for a line without Japanese).
+fn render_original(text: &str, spans: Option<Vec<RubySpan>>, keywords: &[String]) -> AnyView {
+    match spans {
+        Some(spans) => render_ruby(&spans, keywords),
+        None => render_emphasized(text, keywords).into_any(),
+    }
+}
+
+/// Spans as `<ruby>` (reading over the kanji) and plain text, the emphasis
+/// keywords marked the way `render_emphasized` marks them.
+fn render_ruby(spans: &[RubySpan], keywords: &[String]) -> AnyView {
+    mark(spans, keywords)
+        .into_iter()
+        .map(|piece| {
+            let class = if piece.emphasized {
+                "text-warning font-black mx-0.5"
+            } else {
+                ""
+            };
+            match piece.reading {
+                Some(reading) => view! {
+                    <ruby class=class>{piece.text}<rt data-reading=reading></rt></ruby>
+                }
+                .into_any(),
+                None => view! { <span class=class>{piece.text}</span> }.into_any(),
+            }
+        })
+        .collect_view()
+        .into_any()
 }
 
 // CLEANED UP: No more messy text-shadows needed!

@@ -12,6 +12,9 @@ chrono = { version = "0.4.43", default-features = false }
 etherparse = "0.19.0"
 kakasi = "0.1.0"
 lazy_static = "1.5.0"
+# IPADIC is embedded in the binary; its build script downloads the dictionary
+# (Lindera.dev) on the first build.
+lindera = { version = "6.2.0", default-features = false, features = ["embed-ipadic"] }
 log = "0.4.29"
 regex = "1.12.3"
 semver = "1"

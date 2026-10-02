@@ -5,7 +5,9 @@ pub use self::network::*;
 use self::raw_capture::RawCapture;
 pub use self::raw_capture::{open_captures_folder, set_raw_capture};
 
-use crate::{inject_system_message, store_and_emit, TranslationJob};
+use crate::{
+    inject_system_message, inject_system_message_throttled, store_and_emit, TranslationJob,
+};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -286,7 +288,7 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
 
             if now.saturating_sub(last) > 15 {
                 // If it was previously active, throw the error state
-                inject_system_message(
+                inject_system_message_throttled(
                     &app,
                     SystemLogLevel::Warning,
                     "Sniffer",

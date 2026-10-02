@@ -201,12 +201,9 @@ pub fn wait_for_server(
                 format!("AI Engine failed to start: llama-server exited ({status}): {last_words}")
             });
         }
-        inject_system_message(
-            app,
-            SystemLogLevel::Trace,
-            "Translator",
-            format!("Polling {}/health...", server_url()),
-        );
+        // Once a second for as long as the model loads: the log file only, not
+        // the 200-line system history, where it pushes out the useful lines.
+        log::trace!("[Translator] Polling {}/health...", server_url());
 
         if resonance_llama::health_ok(&client, &server_url()) {
             inject_system_message(

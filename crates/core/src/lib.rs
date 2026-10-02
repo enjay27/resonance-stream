@@ -5,6 +5,7 @@
 pub mod capture;
 pub mod download;
 pub mod history;
+pub mod log_throttle;
 pub mod paste;
 pub mod protocol;
 pub mod text;

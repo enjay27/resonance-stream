@@ -3,9 +3,13 @@
 //!
 //! [`spans_from_tokens`] is the pure part: it takes a morphological analyser's
 //! tokens (surface text and katakana reading) and puts the reading over the
-//! kanji only, leaving okurigana (走**った**) plain. Which analyser makes the
-//! tokens is the adapter's business, so this part is tested without one.
+//! kanji only, leaving okurigana (走**った**) plain. A word the analyser has no
+//! reading for is read kanji by kanji in on'yomi ([`crate::kanji_on`]); so are
+//! single kanji the analyser gives side by side (響奏, not ひびきそう). Which
+//! analyser makes the tokens is the adapter's business, so this part is tested
+//! without one.
 
+use crate::kanji_on::on_reading;
 use lindera::dictionary::load_dictionary;
 use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
@@ -20,22 +24,58 @@ pub type Token<'a> = (&'a str, Option<&'a str>);
 /// The line as [`RubySpan`]s. The spans' text, joined, is exactly the tokens'
 /// surfaces, joined; neighbouring plain pieces are merged into one span.
 pub fn spans_from_tokens<'a>(tokens: impl IntoIterator<Item = Token<'a>>) -> Vec<RubySpan> {
+    let tokens: Vec<Token> = tokens.into_iter().collect();
     let mut out = Vec::new();
-    for (surface, reading) in tokens {
+    for (i, &(surface, reading)) in tokens.iter().enumerate() {
         let reading = reading
             .filter(|r| *r != "*")
             .map(to_hiragana)
             .filter(|r| !r.is_empty() && r.chars().all(is_hiragana_or_mark));
+        // A kanji the dictionary knows only apart from its neighbours (響奏:
+        // 響 ひびき, 奏 そう) is no word of Japanese: on'yomi, like a coined
+        // Sino-Japanese compound, where the table has one.
+        let reading = match single_kanji(surface) {
+            Some(kanji) if in_single_kanji_run(&tokens, i) => {
+                on_reading(kanji).map(str::to_string).or(reading)
+            }
+            _ => reading,
+        };
         match reading {
             Some(reading) if surface.chars().any(is_kanji) => {
                 for span in align(surface, &reading) {
                     push(&mut out, span);
                 }
             }
+            // The analyser does not know the word (巨塔): read each kanji on
+            // its own in on'yomi, and leave what has none (kana, 畑) plain.
+            None if surface.chars().any(is_kanji) => {
+                for c in surface.chars() {
+                    let mut buf = [0; 4];
+                    let text: &str = c.encode_utf8(&mut buf);
+                    match on_reading(c) {
+                        Some(reading) => push(&mut out, RubySpan::with_reading(text, reading)),
+                        None => push(&mut out, RubySpan::plain(text)),
+                    }
+                }
+            }
             _ => push(&mut out, RubySpan::plain(surface)),
         }
     }
     out
+}
+
+/// The kanji when `surface` is exactly one (not 々, which repeats the kanji
+/// before it).
+fn single_kanji(surface: &str) -> Option<char> {
+    let mut chars = surface.chars();
+    let c = chars.next()?;
+    (chars.next().is_none() && is_kanji(c) && c != '々').then_some(c)
+}
+
+/// Whether the token at `i` is one of two or more single-kanji tokens in a row.
+fn in_single_kanji_run(tokens: &[Token], i: usize) -> bool {
+    let single = |j: usize| single_kanji(tokens[j].0).is_some();
+    single(i) && ((i > 0 && single(i - 1)) || (i + 1 < tokens.len() && single(i + 1)))
 }
 
 /// A word's surface cut so the reading sits over its kanji only. When the
@@ -145,6 +185,31 @@ fn to_hiragana(text: &str) -> String {
     text.chars().map(hiragana).collect()
 }
 
+/// The analyser's words laid over `text` by their byte ranges, with whatever
+/// the analyser skipped between them (it drops spaces) put back as plain words.
+/// `None` when the ranges are out of order, overlap, or fall outside `text`.
+fn restore_dropped(
+    text: &str,
+    found: Vec<(usize, usize, Option<String>)>,
+) -> Option<Vec<(String, Option<String>)>> {
+    let mut words = Vec::with_capacity(found.len());
+    let mut at = 0;
+    for (start, end, reading) in found {
+        if start < at || end < start {
+            return None;
+        }
+        if start > at {
+            words.push((text.get(at..start)?.to_string(), None));
+        }
+        words.push((text.get(start..end)?.to_string(), reading));
+        at = end;
+    }
+    if at < text.len() {
+        words.push((text.get(at..)?.to_string(), None));
+    }
+    Some(words)
+}
+
 /// The analyser: lindera with the IPADIC dictionary embedded in the binary.
 pub struct Furigana {
     segmenter: Segmenter,
@@ -175,19 +240,19 @@ impl Furigana {
             }
         };
         // IPADIC details: ..., [7] reading (katakana), [8] pronunciation.
-        let words: Vec<(String, Option<String>)> = tokens
+        let found = tokens
             .iter_mut()
             .map(|token| {
-                let surface = token.surface.to_string();
                 let reading = token.details().get(7).map(|r| r.to_string());
-                (surface, reading)
+                (token.byte_start, token.byte_end, reading)
             })
             .collect();
-        // The analyser must not lose or change a character (it may drop
-        // spaces): a line that does not read back as itself is shown plain.
-        if words.iter().map(|(s, _)| s.as_str()).collect::<String>() != text {
+        // The analyser drops spaces: they are put back from the tokens' byte
+        // ranges. A line that still does not read back as itself (ranges that
+        // do not fit, a changed surface) is shown plain.
+        let Some(words) = restore_dropped(text, found) else {
             return vec![RubySpan::plain(text)];
-        }
+        };
         spans_from_tokens(words.iter().map(|(s, r)| (s.as_str(), r.as_deref())))
     }
 }
@@ -239,6 +304,120 @@ mod tests {
     }
 
     #[test]
+    fn a_word_without_a_reading_is_read_kanji_by_kanji_in_on_yomi() {
+        // 巨塔 is not in the dictionary: the analyser gives no reading.
+        assert_eq!(spans(&[("巨塔", None)]), [r("巨", "きょ"), r("塔", "とう")]);
+        assert_eq!(
+            spans(&[("巨塔", Some("*"))]),
+            [r("巨", "きょ"), r("塔", "とう")]
+        );
+    }
+
+    #[test]
+    fn the_on_yomi_fallback_leaves_kana_and_kanji_without_on_yomi_plain() {
+        // Kana in an unknown word stay plain and merge with their neighbours;
+        // 畑 has no on'yomi, so it stays plain too.
+        assert_eq!(
+            spans(&[("巨塔化け", None)]),
+            [r("巨", "きょ"), r("塔", "とう"), r("化", "か"), p("け")]
+        );
+        assert_eq!(spans(&[("畑", None)]), [p("畑")]);
+        assert_eq!(
+            spans(&[("巨畑", None), ("だ", None)]),
+            [r("巨", "きょ"), p("畑だ")]
+        );
+    }
+
+    #[test]
+    fn a_word_with_a_reading_does_not_use_the_on_yomi_fallback() {
+        // 山 is known as やま: the analyser's reading wins over さん.
+        assert_eq!(spans(&[("山", Some("ヤマ"))]), [r("山", "やま")]);
+    }
+
+    #[test]
+    fn single_kanji_words_side_by_side_are_read_in_on_yomi() {
+        // 響奏 is no Japanese word: the dictionary has 響 (ひびき, a name) and
+        // 奏 (そう) separately, and ひびきそう mixes kun and on. Read as a
+        // Sino-Japanese pair instead.
+        assert_eq!(
+            spans(&[("響", Some("ヒビキ")), ("奏", Some("ソウ"))]),
+            [r("響", "きょう"), r("奏", "そう")]
+        );
+        // Longer runs too; a kanji with no on'yomi keeps its own reading.
+        assert_eq!(
+            spans(&[
+                ("泡", Some("アワ")),
+                ("影", Some("カゲ")),
+                ("畑", Some("ハタケ"))
+            ]),
+            [r("泡", "ほう"), r("影", "えい"), r("畑", "はたけ")]
+        );
+    }
+
+    #[test]
+    fn a_single_kanji_word_on_its_own_or_next_to_other_words_keeps_its_reading() {
+        // Alone, or with kana or a longer word between/after: not a run.
+        assert_eq!(
+            spans(&[
+                ("響", Some("ヒビキ")),
+                ("の", Some("ノ")),
+                ("奏", Some("ソウ"))
+            ]),
+            [r("響", "ひびき"), p("の"), r("奏", "そう")]
+        );
+        assert_eq!(
+            spans(&[("響", Some("ヒビキ")), ("奏者", Some("ソウシャ"))]),
+            [r("響", "ひびき"), r("奏者", "そうしゃ")]
+        );
+        assert_eq!(spans(&[("山", Some("ヤマ"))]), [r("山", "やま")]);
+    }
+
+    #[test]
+    fn what_the_analyser_dropped_between_words_is_put_back_plain() {
+        let w = |s: &str, r: Option<&str>| (s.to_string(), r.map(str::to_string));
+        // "墓M6 @D ５周": the spaces (bytes 5 and 8) are not in any range.
+        let text = "墓M6 @D ５周";
+        let found = vec![
+            (0, 3, Some("ハカ".to_string())),
+            (3, 4, None),
+            (4, 5, None),
+            (6, 7, None),
+            (7, 8, None),
+            (9, 12, Some("ゴ".to_string())),
+            (12, 15, Some("シュウ".to_string())),
+        ];
+        assert_eq!(
+            restore_dropped(text, found),
+            Some(vec![
+                w("墓", Some("ハカ")),
+                w("M", None),
+                w("6", None),
+                w(" ", None),
+                w("@", None),
+                w("D", None),
+                w(" ", None),
+                w("５", Some("ゴ")),
+                w("周", Some("シュウ")),
+            ])
+        );
+        // A skipped tail is put back too; nothing skipped changes nothing.
+        assert_eq!(
+            restore_dropped("墓 ", vec![(0, 3, Some("ハカ".to_string()))]),
+            Some(vec![w("墓", Some("ハカ")), w(" ", None)])
+        );
+        assert_eq!(restore_dropped("", vec![]), Some(vec![]));
+    }
+
+    #[test]
+    fn ranges_that_do_not_fit_the_text_are_refused() {
+        let r = |a, b| (a, b, None);
+        assert_eq!(restore_dropped("abc", vec![r(2, 3), r(0, 1)]), None); // out of order
+        assert_eq!(restore_dropped("abc", vec![r(0, 2), r(1, 3)]), None); // overlap
+        assert_eq!(restore_dropped("abc", vec![r(0, 9)]), None); // past the end
+        assert_eq!(restore_dropped("墓", vec![r(0, 2)]), None); // inside a character
+    }
+
+    #[test]
     fn okurigana_stays_plain_and_neighbouring_plain_pieces_merge() {
         assert_eq!(
             spans(&[("走っ", Some("ハシッ")), ("た", Some("タ"))]),
@@ -277,10 +456,13 @@ mod tests {
             ]),
             [p("パーティーを22、")]
         );
-        // The analyser did not know the word: no guess.
-        assert_eq!(spans(&[("深淵", None)]), [p("深淵")]);
-        assert_eq!(spans(&[("深淵", Some("*"))]), [p("深淵")]);
-        assert_eq!(spans(&[("深淵", Some(""))]), [p("深淵")]);
+        // The analyser did not know the word (empty or "*" counts as no
+        // reading): it is read kanji by kanji, see
+        // `a_word_without_a_reading_is_read_kanji_by_kanji_in_on_yomi`.
+        assert_eq!(
+            spans(&[("深淵", Some(""))]),
+            [r("深", "しん"), r("淵", "えん")]
+        );
     }
 
     #[test]
@@ -369,6 +551,52 @@ mod tests {
         assert_eq!(
             f.annotate("明日22時から"),
             [r("明日", "あした"), p("22"), r("時", "じ"), p("から")]
+        );
+    }
+
+    #[test]
+    fn a_word_the_dictionary_lacks_is_read_in_on_yomi() {
+        let f = analyser();
+        // (No space in the line: some lindera builds drop spaces, and a line
+        // that does not read back as itself is shown plain.)
+        assert_eq!(
+            f.annotate("巨塔M6"),
+            [r("巨", "きょ"), r("塔", "とう"), p("M6")]
+        );
+    }
+
+    #[test]
+    fn two_kanji_the_dictionary_only_knows_apart_are_read_in_on_yomi() {
+        let f = analyser();
+        assert_eq!(f.annotate("響奏"), [r("響", "きょう"), r("奏", "そう")]);
+        assert_eq!(
+            f.annotate("響奏の力"),
+            [
+                r("響", "きょう"),
+                r("奏", "そう"),
+                p("の"),
+                r("力", "ちから")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_line_with_spaces_is_still_read() {
+        // The analyser drops spaces; the line must not come back plain for it.
+        let f = analyser();
+        assert_eq!(
+            f.annotate("墓M6 @D ５周"),
+            [r("墓", "はか"), p("M6 @D ５"), r("周", "しゅう")]
+        );
+        assert_eq!(
+            f.annotate("巨塔M6 5周 @D"),
+            [
+                r("巨", "きょ"),
+                r("塔", "とう"),
+                p("M6 5"),
+                r("周", "しゅう"),
+                p(" @D")
+            ]
         );
     }
 

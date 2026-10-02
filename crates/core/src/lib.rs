@@ -6,6 +6,7 @@ pub mod capture;
 pub mod download;
 pub mod furigana;
 pub mod history;
+pub mod kanji_on;
 pub mod log_throttle;
 pub mod paste;
 pub mod protocol;

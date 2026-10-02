@@ -41,8 +41,11 @@ the same name, or it will not cross the boundary.
 - **Translation:** llama.cpp server (Vulkan build, downloaded at runtime from this
   repo's releases) on `127.0.0.1:8080`, or a free port if 8080 is taken; only the PID the
   app started is ever killed. Pre/post-processing in `crates/core/src/text.rs`.
-- **Remote metadata:** a public gist (`downloader/gist.rs`) carries app/model/dictionary
-  versions and the custom dictionary. Public URLs, not secrets.
+- **Remote metadata:** a public gist (`downloader/gist.rs`) carries model/dictionary
+  versions and the custom dictionary; the app's own update comes from the newest stable
+  release's `latest.json` (see *Stable releases*), checked against signing keys built into
+  the app. The gist's `app` entry is ignored by the app and kept only for copies that
+  predate the signed updater (the 0.6.0 bridge release). Public URLs, not secrets.
 - **Packaging:** `package.bat` → `cargo tauri build` → NSIS installer in `dist/`.
   Test builds: a merge into `rc` publishes a plain exe as a GitHub prerelease (see
   *Release candidates*). The app version is `[workspace.package] version` in `Cargo.toml`.
@@ -234,6 +237,19 @@ A change that needs a run on Kade's Windows PC before `main` goes through `rc`:
 Prereleases never become "Latest", and the app's update check reads the gist, not
 GitHub releases, so users never see a candidate. The candidate exe shares the
 installed app's data folder (same identifier): config, model, chat logs.
+
+### Stable releases (signed plain exe)
+
+An app update is installed only if one of the keys built into the app
+(`TRUSTED_UPDATE_KEYS`, `crates/core/src/update_signature.rs`) signed it for the
+announced version -- so a stable release is built and signed by
+`.github/workflows/release.yml`, never by hand: bump `[workspace.package] version`,
+merge to `main`, then push the tag `v<version>` on it. The workflow gates, builds
+the plain exe, signs it with the `TAURI_SIGNING_PRIVATE_KEY` secret, checks the
+signature the way the app will (`examples/verify_update.rs`) and publishes the exe,
+`<exe>.sig` and `latest.json` (the update feed). The private keys are never
+committed; the backup key stays offline. Tag / feed helpers:
+`.github/scripts/release-lib.sh` (tests in CI).
 
 ### Never commit
 - Secrets, `.env`.

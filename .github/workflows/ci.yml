@@ -49,6 +49,8 @@ jobs:
       - run: just ui-check
       - name: release-candidate helpers
         run: bash .github/scripts/rc-lib.test.sh
+      - name: stable-release helpers
+        run: bash .github/scripts/release-lib.test.sh
 
   app:
     name: app gate (Windows)

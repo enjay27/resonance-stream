@@ -504,8 +504,9 @@ pub struct ProgressPayload {
     pub total_percent: u8,
 }
 
-/// One entry of the gist's metadata.json.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+/// One entry of the gist's metadata.json (and, for the app, what the release
+/// feed announced -- the backend fills `GistMetadata::app` from it).
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct VersionInfo {
     pub latest_version: String,
     pub download_url: String,
@@ -524,6 +525,9 @@ pub struct RemoteDictionary {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GistMetadata {
+    /// The gist's own `app` entry is ignored: the app learns about its updates
+    /// from the release feed. The gist keeps it for copies that predate that.
+    #[serde(default)]
     pub app: VersionInfo,
     pub model: VersionInfo,
     pub dictionary: RemoteDictionary,
@@ -743,6 +747,20 @@ mod tests {
         )
         .unwrap();
         assert!(without.sha256.is_empty());
+    }
+
+    #[test]
+    fn a_gist_without_an_app_entry_still_parses() {
+        // The app learns about its own updates from the release feed now; the
+        // gist's `app` entry only serves copies that predate that, so it may
+        // go once none are left.
+        let gist: GistMetadata = serde_json::from_str(
+            r#"{"model":{"latest_version":"m1","download_url":"https://x/m","release_notes":""},
+                "dictionary":{"version":"d1","updated_at":"2026-10-02"}}"#,
+        )
+        .unwrap();
+        assert!(gist.app.latest_version.is_empty());
+        assert_eq!(gist.model.latest_version, "m1");
     }
 
     #[test]

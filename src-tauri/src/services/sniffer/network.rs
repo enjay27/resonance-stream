@@ -7,12 +7,13 @@ use std::process::Command;
 use std::time::Duration;
 use tauri::AppHandle;
 
+use resonance_core::sniffer_net::{rule_name_for, LEGACY_RULE_NAME};
+
 use super::emit_sniffer_state;
 use crate::protocol::types::{LogLevel, SnifferState, SystemLogLevel};
 use crate::{inject_system_message, NetworkInterface};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000; //
-const RULE_NAME: &str = "Resonance Stream (Packet Sniffing)"; //
 const RECV_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 
 // --- 3. NETWORK INITIALIZATION ---
@@ -223,11 +224,15 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
 
 #[tauri::command]
 pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, String> {
-    // Delete old rule first (a stale rule may point at an old exe path)
-    remove_firewall_rule();
-
     if let Ok(exe_path) = env::current_exe() {
         if let Some(path_str) = exe_path.to_str() {
+            // The rule is per exe (the dev and the installed exe each get
+            // their own), so only this exe's rule is replaced. The one rule
+            // older versions shared between all exes is dropped.
+            let rule_name = rule_name_for(path_str);
+            remove_firewall_rule(&rule_name);
+            remove_firewall_rule(LEGACY_RULE_NAME);
+
             inject_system_message(
                 &app,
                 SystemLogLevel::Info,
@@ -242,7 +247,7 @@ pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, Str
                     "firewall",
                     "add",
                     "rule",
-                    &format!("name={}", RULE_NAME),
+                    &format!("name={}", rule_name),
                     "dir=in",
                     "action=allow",
                     "protocol=TCP",
@@ -279,27 +284,37 @@ pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, Str
     }
 }
 
-pub fn remove_firewall_rule() {
+pub fn remove_firewall_rule(rule_name: &str) {
     let _ = Command::new("netsh")
         .args([
             "advfirewall",
             "firewall",
             "delete",
             "rule",
-            &format!("name={}", RULE_NAME),
+            &format!("name={}", rule_name),
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .status();
 }
 
+/// Whether the firewall has the rule for the running exe. A rule made for
+/// another exe (the dev build while this is the installed one, or the reverse)
+/// does not count: it would not let this exe receive the game's packets.
 pub fn check_firewall_rule() -> bool {
+    let Some(exe_path) = env::current_exe().ok() else {
+        return false;
+    };
+    let Some(path_str) = exe_path.to_str() else {
+        return false;
+    };
+    let rule_name = rule_name_for(path_str);
     let result = Command::new("netsh")
         .args([
             "advfirewall",
             "firewall",
             "show",
             "rule",
-            &format!("name={}", RULE_NAME),
+            &format!("name={}", rule_name),
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .output();

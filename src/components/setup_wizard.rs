@@ -15,7 +15,10 @@ pub fn SetupWizard(
     let (firewall_agreed, set_firewall_agreed) = signal(false);
 
     view! {
-        <div class="flex items-center justify-center min-h-screen bg-base-100 p-6">
+        // Fills what the title bar leaves and scrolls inside it; the inner wrapper keeps the
+        // card centred when it fits and lets it start at the top when it does not.
+        <div class="flex-1 min-h-0 overflow-y-auto bg-base-100 p-6">
+          <div class="min-h-full flex items-center justify-center">
             <div class="card w-full max-w-md bg-base-200 shadow-2xl border border-white/5">
                 <div class="card-body gap-6">
                     // --- PROGRESS STEPS ---
@@ -145,6 +148,7 @@ pub fn SetupWizard(
                     }}
                 </div>
             </div>
+          </div>
         </div>
     }
 }

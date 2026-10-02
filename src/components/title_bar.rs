@@ -30,7 +30,7 @@ pub fn TitleBar() -> impl IntoView {
     let (picker_open, set_picker_open) = signal(false);
 
     view! {
-        <div class=move || format!("relative z-30 flex items-center h-8 pl-3 backdrop-blur-md border-b border-base-content/5 select-none transition-colors {}", title_bar_bg(store.config.overlay_opacity.get())) data-tauri-drag-region>
+        <div class=move || format!("relative z-[60] flex items-center h-8 pl-3 backdrop-blur-md border-b border-base-content/5 select-none transition-colors {}", title_bar_bg(store.config.overlay_opacity.get())) data-tauri-drag-region>
             // --- LEFT: app name, version, start-up status ---
             <div class="flex items-baseline gap-2 min-w-0 flex-1 pointer-events-none">
                 <span class="text-[11px] font-bold text-base-content/80 truncate">"Resonance Stream"</span>

@@ -381,6 +381,14 @@ string_enum! {
 }
 
 string_enum! {
+    /// What a chat row shows of the translation (`config.json`
+    /// `translation_view`). `Study` shows the Japanese with furigana and the
+    /// translation only while the pointer is over the row. Whether the
+    /// translator runs at all is `use_translation`, a separate switch.
+    TranslationView { On => "on", Off => "off", Study => "study" } default On
+}
+
+string_enum! {
     /// The least severe system-log line the log shows (`config.json` `log_level`).
     LogLevel { Trace => "trace", Debug => "debug", Info => "info", Warn => "warn", Error => "error" } default Info
 }
@@ -449,6 +457,9 @@ pub struct FavoriteMessage {
     pub note: String,
     #[serde(default)]
     pub shortcut: String,
+    /// Name of the favorites tab it is filed under; empty is the default tab.
+    #[serde(default)]
+    pub tab: String,
 }
 
 /// Missed Japanese messages a translator start translates when the config
@@ -473,7 +484,7 @@ pub fn default_favorite_messages() -> Vec<FavoriteMessage> {
     .map(|(text, note)| FavoriteMessage {
         text: text.to_string(),
         note: note.to_string(),
-        shortcut: String::new(),
+        ..Default::default()
     })
     .collect()
 }
@@ -524,6 +535,34 @@ pub struct UpdateCheckResult {
     pub model_update_available: bool,
     pub dict_update_available: bool,
     pub remote_data: GistMetadata,
+}
+
+// --- Furigana ---
+
+/// A piece of a Japanese line for display: `text` as written, with its
+/// hiragana `reading` when it contains kanji. The spans of a line, joined,
+/// are the line.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct RubySpan {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reading: Option<String>,
+}
+
+impl RubySpan {
+    pub fn plain(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            reading: None,
+        }
+    }
+
+    pub fn with_reading(text: impl Into<String>, reading: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            reading: Some(reading.into()),
+        }
+    }
 }
 
 // --- Rules both sides apply ---
@@ -718,6 +757,24 @@ mod tests {
         assert_eq!(fav.text, "hi");
         assert!(fav.note.is_empty());
         assert!(fav.shortcut.is_empty());
+        // ... and lands in the default tab (an empty name).
+        assert!(fav.tab.is_empty());
+        assert!(defaults.iter().all(|f| f.tab.is_empty()));
+    }
+
+    #[test]
+    fn a_favorites_tab_is_stored_under_its_name() {
+        let fav = FavoriteMessage {
+            text: "hi".into(),
+            tab: "레이드".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&fav).unwrap();
+        assert_eq!(json["tab"], "레이드");
+        assert_eq!(
+            serde_json::from_value::<FavoriteMessage>(json).unwrap(),
+            fav
+        );
     }
 
     #[test]
@@ -783,6 +840,41 @@ mod tests {
         assert_eq!(
             ComputeMode::ALL.len() + Tier::ALL.len() + Theme::ALL.len(),
             8
+        );
+    }
+
+    #[test]
+    fn the_translation_view_is_its_lowercase_name_and_defaults_to_showing_translations() {
+        use serde_json::{from_value, json, to_value};
+        for (value, name) in [
+            (TranslationView::On, "on"),
+            (TranslationView::Off, "off"),
+            (TranslationView::Study, "study"),
+        ] {
+            assert_eq!(to_value(value).unwrap(), name);
+            assert_eq!(from_value::<TranslationView>(json!(name)).unwrap(), value);
+        }
+        // A config from before the setting, or a hand-edited value: today's behaviour.
+        assert_eq!(TranslationView::default(), TranslationView::On);
+        assert_eq!(
+            from_value::<TranslationView>(json!("furigana")).unwrap(),
+            TranslationView::On
+        );
+    }
+
+    #[test]
+    fn a_ruby_span_reads_as_plain_text_when_it_has_no_reading() {
+        let plain: RubySpan = serde_json::from_str(r#"{"text":"を"}"#).unwrap();
+        assert_eq!(plain, RubySpan::plain("を"));
+        let with = RubySpan::with_reading("日", "にち");
+        assert_eq!(
+            serde_json::to_value(&with).unwrap(),
+            serde_json::json!({"text": "日", "reading": "にち"})
+        );
+        // A plain span puts no `reading` key on the wire.
+        assert_eq!(
+            serde_json::to_value(RubySpan::plain("を")).unwrap(),
+            serde_json::json!({"text": "を"})
         );
     }
 

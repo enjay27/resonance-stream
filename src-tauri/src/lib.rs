@@ -137,6 +137,7 @@ pub fn run() {
             start_sniffer_command,
             open_captures_folder,
             get_chat_history,
+            annotate_furigana,
             get_system_history,
             get_service_states,
             check_all_updates,

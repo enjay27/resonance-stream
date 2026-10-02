@@ -5,8 +5,8 @@ mod setup_flow;
 use crate::components::settings::Settings;
 use crate::components::title_bar::TitleBar;
 use crate::components::{
-    AppUpdateModal, ChatContainer, DictionaryModal, FavoritesModal, ModelUpdateModal, NavBar,
-    SetupWizard, Troubleshooter,
+    AddToDictionaryModal, AppUpdateModal, ChatContainer, CheatSheetModal, DictionaryModal,
+    FavoritesModal, ModelUpdateModal, NavBar, SetupWizard, Troubleshooter,
 };
 use crate::config_signals::ConfigSignals;
 use crate::hooks::use_tray::{setup_tray_listeners, sync_tray_menu};
@@ -27,8 +27,8 @@ pub fn App() -> impl IntoView {
         ..
     } = signals.config;
     let UiSignals {
-        active_menu_id,
-        set_active_menu_id,
+        active_menu,
+        set_active_menu,
         ..
     } = signals.ui;
     let set_current_time = signals.chat.set_current_time;
@@ -104,8 +104,8 @@ pub fn App() -> impl IntoView {
             }
             // Note: Use `signals.config.overlay_opacity.get()` if your app.rs uses the signals struct instead of local signals.
         >
-            <Show when=move || active_menu_id.get().is_some()>
-                <div class="menu-overlay" on:click=move |_| set_active_menu_id.set(None)></div>
+            <Show when=move || active_menu.get().is_some()>
+                <div class="menu-overlay" on:click=move |_| set_active_menu.set(None)></div>
             </Show>
             <Show when=move || !compact_mode.get()>
                 <TitleBar />
@@ -134,8 +134,14 @@ pub fn App() -> impl IntoView {
             // Dictionary Modal
             <DictionaryModal />
 
+            // Add a term from a chat message
+            <AddToDictionaryModal />
+
             // Favorite Messages Modal
             <FavoritesModal />
+
+            // Class / dungeon names, Japanese and Korean
+            <CheatSheetModal />
 
             // Settings Modal
             <Settings />

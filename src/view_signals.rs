@@ -8,6 +8,41 @@ use crate::ui_types::{ChatMessage, SystemLogLevel, SystemMessage};
 use leptos::prelude::{signal, ArcRwSignal, ReadSignal, WriteSignal};
 use std::collections::HashMap;
 
+/// Which of a chat row's two menus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuKind {
+    /// Opened by the sender's name: copy name, filter, block.
+    Sender,
+    /// Opened by the message text: copy, favorite, add to the dictionary.
+    Message,
+}
+
+/// An open chat row menu: the message (by pid) and which menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowMenu {
+    pub pid: u64,
+    pub kind: MenuKind,
+}
+
+impl RowMenu {
+    /// What a click on `target` leaves open: its menu, or nothing when that
+    /// menu was the one open (a second click closes it).
+    pub fn toggled(open: Option<RowMenu>, target: RowMenu) -> Option<RowMenu> {
+        if open == Some(target) {
+            None
+        } else {
+            Some(target)
+        }
+    }
+}
+
+/// A term on its way into the dictionary: the dialog's starting key and value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DictDraft {
+    pub key: String,
+    pub value: String,
+}
+
 /// The chat list and system log and what the user is doing with them: search, scroll position, unread counts.
 #[derive(Copy, Clone, Debug)]
 pub struct ChatSignals {
@@ -89,8 +124,14 @@ pub struct UiSignals {
     pub set_show_troubleshooter: WriteSignal<bool>,
     pub show_favorites: ReadSignal<bool>,
     pub set_show_favorites: WriteSignal<bool>,
-    pub active_menu_id: ReadSignal<Option<u64>>,
-    pub set_active_menu_id: WriteSignal<Option<u64>>,
+    pub show_cheatsheet: ReadSignal<bool>,
+    pub set_show_cheatsheet: WriteSignal<bool>,
+    /// The chat row menu that is open, if any (one at a time).
+    pub active_menu: ReadSignal<Option<RowMenu>>,
+    pub set_active_menu: WriteSignal<Option<RowMenu>>,
+    /// The term being added to the dictionary from a chat message; the dialog is open while it is set.
+    pub dict_draft: ReadSignal<Option<DictDraft>>,
+    pub set_dict_draft: WriteSignal<Option<DictDraft>>,
     pub click_through: ReadSignal<bool>,
     pub set_click_through: WriteSignal<bool>,
 }
@@ -103,7 +144,9 @@ impl UiSignals {
         let (show_dictionary, set_show_dictionary) = signal::<bool>(false);
         let (show_troubleshooter, set_show_troubleshooter) = signal::<bool>(false);
         let (show_favorites, set_show_favorites) = signal::<bool>(false);
-        let (active_menu_id, set_active_menu_id) = signal::<Option<u64>>(None);
+        let (show_cheatsheet, set_show_cheatsheet) = signal::<bool>(false);
+        let (active_menu, set_active_menu) = signal::<Option<RowMenu>>(None);
+        let (dict_draft, set_dict_draft) = signal::<Option<DictDraft>>(None);
         let (click_through, set_click_through) = signal::<bool>(false);
         UiSignals {
             show_settings,
@@ -116,10 +159,49 @@ impl UiSignals {
             set_show_troubleshooter,
             show_favorites,
             set_show_favorites,
-            active_menu_id,
-            set_active_menu_id,
+            show_cheatsheet,
+            set_show_cheatsheet,
+            active_menu,
+            set_active_menu,
+            dict_draft,
+            set_dict_draft,
             click_through,
             set_click_through,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NAME: RowMenu = RowMenu {
+        pid: 7,
+        kind: MenuKind::Sender,
+    };
+    const TEXT: RowMenu = RowMenu {
+        pid: 7,
+        kind: MenuKind::Message,
+    };
+
+    #[test]
+    fn a_click_opens_its_menu_and_a_second_click_closes_it() {
+        assert_eq!(RowMenu::toggled(None, NAME), Some(NAME));
+        assert_eq!(RowMenu::toggled(Some(NAME), NAME), None);
+    }
+
+    #[test]
+    fn the_name_and_the_text_of_a_row_have_separate_menus() {
+        assert_eq!(RowMenu::toggled(Some(NAME), TEXT), Some(TEXT));
+        assert_eq!(RowMenu::toggled(Some(TEXT), NAME), Some(NAME));
+    }
+
+    #[test]
+    fn another_rows_menu_is_replaced() {
+        let other = RowMenu {
+            pid: 8,
+            kind: MenuKind::Message,
+        };
+        assert_eq!(RowMenu::toggled(Some(TEXT), other), Some(other));
     }
 }

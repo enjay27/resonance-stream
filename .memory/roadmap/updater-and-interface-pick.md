@@ -4,7 +4,9 @@ Two backend features from the 2026-09-30 review's "ideas, not defects" list. **N
 started.** Each is its own task (one branch, one PR; CLAUDE.md *Version Control*). They are
 independent: do either first. Facts below were read from `main` at `1af65f8`.
 
-## A. Route-based network interface pick -- recommended first (smaller, pure core)
+## A. Route-based network interface pick -- DONE 2026-10-02 (`candidate/route-interface-pick`)
+
+**Done:** shape 1-3 below as written (`pick_interface` in `crates/core/src/sniffer_net.rs`, glue `find_game_interface` in `network.rs`); question (a) decided in code -- a route through a virtual adapter is not trusted -- and pinned by a test; needs the Windows check in `unverified-on-windows.md`. **Still open:** (b), (c) below. The text that follows is the plan as written before the work.
 
 **Today.** `find_game_interface_ip()` (`src-tauri/src/services/sniffer/network.rs:166`)
 returns the *first* adapter, in the order `list_afinet_netifas()` gives, whose name does not

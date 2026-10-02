@@ -6,10 +6,10 @@ use serde_with::DisplayFromStr;
 pub use resonance_types::{
     contains_japanese, default_catch_up_limit, default_favorite_messages, Channel, ChatMessage,
     ComputeMode, FavoriteMessage, FolderStatus, GistMetadata, LogLevel, NetworkInterface,
-    ProgressPayload, RemoteDictionary, ServiceStates, SnifferState, SnifferStatePayload,
+    ProgressPayload, RemoteDictionary, RubySpan, ServiceStates, SnifferState, SnifferStatePayload,
     SystemLogLevel, SystemMessage, TabSwitchModifier, Theme, Tier, TranslationResult,
-    TranslatorState, TranslatorStatePayload, UpdateCheckResult, VersionInfo, WindowRect, ALL_TAB,
-    CUSTOM_TAB, SYSTEM_TAB,
+    TranslationView, TranslatorState, TranslatorStatePayload, UpdateCheckResult, VersionInfo,
+    WindowRect, ALL_TAB, CUSTOM_TAB, SYSTEM_TAB,
 };
 
 #[serde_as]
@@ -17,6 +17,8 @@ pub use resonance_types::{
 pub struct AppConfig {
     pub init_done: bool,
     pub use_translation: bool,
+    #[serde(default)]
+    pub translation_view: TranslationView,
     pub compute_mode: ComputeMode,
     pub compact_mode: bool,
     pub always_on_top: bool,

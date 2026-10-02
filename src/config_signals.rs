@@ -7,7 +7,7 @@
 use crate::favorites::{clean_tabs, normalize};
 use crate::ui_types::{
     default_catch_up_limit, default_favorite_messages, AppConfig, Channel, ComputeMode,
-    FavoriteMessage, LogLevel, TabSwitchModifier, Theme, Tier, ALL_TAB,
+    FavoriteMessage, LogLevel, TabSwitchModifier, Theme, Tier, TranslationView, ALL_TAB,
 };
 use leptos::prelude::{signal, GetUntracked, ReadSignal, Set, WriteSignal};
 use std::collections::HashMap;
@@ -25,6 +25,8 @@ pub struct ConfigSignals {
     pub set_init_done: WriteSignal<bool>,
     pub use_translation: ReadSignal<bool>,
     pub set_use_translation: WriteSignal<bool>,
+    pub translation_view: ReadSignal<TranslationView>,
+    pub set_translation_view: WriteSignal<TranslationView>,
     pub compute_mode: ReadSignal<ComputeMode>,
     pub set_compute_mode: WriteSignal<ComputeMode>,
     pub compact_mode: ReadSignal<bool>,
@@ -96,6 +98,8 @@ impl ConfigSignals {
     pub fn new() -> Self {
         let (init_done, set_init_done) = signal::<bool>(false);
         let (use_translation, set_use_translation) = signal::<bool>(false);
+        let (translation_view, set_translation_view) =
+            signal::<TranslationView>(TranslationView::default());
         let (compute_mode, set_compute_mode) = signal::<ComputeMode>(ComputeMode::default());
         let (compact_mode, set_compact_mode) = signal::<bool>(false);
         let (always_on_top, set_always_on_top) = signal::<bool>(false);
@@ -139,6 +143,8 @@ impl ConfigSignals {
             set_init_done,
             use_translation,
             set_use_translation,
+            translation_view,
+            set_translation_view,
             compute_mode,
             set_compute_mode,
             compact_mode,
@@ -211,6 +217,7 @@ impl ConfigSignals {
         AppConfig {
             init_done: self.init_done.get_untracked(),
             use_translation: self.use_translation.get_untracked(),
+            translation_view: self.translation_view.get_untracked(),
             compute_mode: self.compute_mode.get_untracked(),
             compact_mode: self.compact_mode.get_untracked(),
             always_on_top: self.always_on_top.get_untracked(),
@@ -251,6 +258,7 @@ impl ConfigSignals {
         let AppConfig {
             init_done,
             use_translation,
+            translation_view,
             compute_mode,
             compact_mode,
             always_on_top,
@@ -286,6 +294,7 @@ impl ConfigSignals {
         } = config;
         self.set_init_done.set(init_done);
         self.set_use_translation.set(use_translation);
+        self.set_translation_view.set(translation_view);
         self.set_compute_mode.set(compute_mode);
         self.set_compact_mode.set(compact_mode);
         self.set_always_on_top.set(always_on_top);
@@ -349,6 +358,7 @@ mod tests {
         AppConfig {
             init_done: true,
             use_translation: true,
+            translation_view: TranslationView::Study,
             compute_mode: ComputeMode::Gpu,
             compact_mode: true,
             always_on_top: true,
@@ -403,6 +413,7 @@ mod tests {
     fn fresh_signals_hold_the_pre_config_defaults() {
         let config = ConfigSignals::new().to_config();
         assert!(!config.init_done && !config.use_translation);
+        assert_eq!(config.translation_view, TranslationView::On);
         assert_eq!(config.active_tab, ALL_TAB);
         assert_eq!(
             config.custom_tab_filters,

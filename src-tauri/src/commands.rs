@@ -1,6 +1,7 @@
-//! Tauri commands for chat/system history and the translator toggle.
+//! Tauri commands for chat/system history, the translator toggle and furigana.
 
 use crate::{inject_system_message, AppState, ChatMessage, SystemLogLevel, SystemMessage};
+use resonance_types::RubySpan;
 use tauri::{AppHandle, State};
 
 #[tauri::command]
@@ -56,4 +57,15 @@ pub fn launch_translator(app: AppHandle, state: State<'_, AppState>) {
     let model_path = crate::get_model_path(&app);
     let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
     *slot = Some(tx);
+}
+
+/// Furigana for Japanese lines, one list of spans per line, in order. The
+/// analysis itself is `resonance_core::furigana`; it takes microseconds a line,
+/// so it runs right here on the async runtime.
+#[tauri::command]
+pub async fn annotate_furigana(texts: Vec<String>) -> Vec<Vec<RubySpan>> {
+    texts
+        .iter()
+        .map(|text| resonance_core::furigana::annotate(text))
+        .collect()
 }

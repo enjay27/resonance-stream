@@ -3,9 +3,12 @@
 //!
 //! [`spans_from_tokens`] is the pure part: it takes a morphological analyser's
 //! tokens (surface text and katakana reading) and puts the reading over the
-//! kanji only, leaving okurigana (走**った**) plain. Which analyser makes the
-//! tokens is the adapter's business, so this part is tested without one.
+//! kanji only, leaving okurigana (走**った**) plain. A word the analyser has no
+//! reading for is read kanji by kanji in on'yomi ([`crate::kanji_on`]). Which
+//! analyser makes the tokens is the adapter's business, so this part is tested
+//! without one.
 
+use crate::kanji_on::on_reading;
 use lindera::dictionary::load_dictionary;
 use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
@@ -30,6 +33,18 @@ pub fn spans_from_tokens<'a>(tokens: impl IntoIterator<Item = Token<'a>>) -> Vec
             Some(reading) if surface.chars().any(is_kanji) => {
                 for span in align(surface, &reading) {
                     push(&mut out, span);
+                }
+            }
+            // The analyser does not know the word (巨塔): read each kanji on
+            // its own in on'yomi, and leave what has none (kana, 畑) plain.
+            None if surface.chars().any(is_kanji) => {
+                for c in surface.chars() {
+                    let mut buf = [0; 4];
+                    let text: &str = c.encode_utf8(&mut buf);
+                    match on_reading(c) {
+                        Some(reading) => push(&mut out, RubySpan::with_reading(text, reading)),
+                        None => push(&mut out, RubySpan::plain(text)),
+                    }
                 }
             }
             _ => push(&mut out, RubySpan::plain(surface)),
@@ -239,6 +254,37 @@ mod tests {
     }
 
     #[test]
+    fn a_word_without_a_reading_is_read_kanji_by_kanji_in_on_yomi() {
+        // 巨塔 is not in the dictionary: the analyser gives no reading.
+        assert_eq!(spans(&[("巨塔", None)]), [r("巨", "きょ"), r("塔", "とう")]);
+        assert_eq!(
+            spans(&[("巨塔", Some("*"))]),
+            [r("巨", "きょ"), r("塔", "とう")]
+        );
+    }
+
+    #[test]
+    fn the_on_yomi_fallback_leaves_kana_and_kanji_without_on_yomi_plain() {
+        // Kana in an unknown word stay plain and merge with their neighbours;
+        // 畑 has no on'yomi, so it stays plain too.
+        assert_eq!(
+            spans(&[("巨塔化け", None)]),
+            [r("巨", "きょ"), r("塔", "とう"), r("化", "か"), p("け")]
+        );
+        assert_eq!(spans(&[("畑", None)]), [p("畑")]);
+        assert_eq!(
+            spans(&[("巨畑", None), ("だ", None)]),
+            [r("巨", "きょ"), p("畑だ")]
+        );
+    }
+
+    #[test]
+    fn a_word_with_a_reading_does_not_use_the_on_yomi_fallback() {
+        // 山 is known as やま: the analyser's reading wins over さん.
+        assert_eq!(spans(&[("山", Some("ヤマ"))]), [r("山", "やま")]);
+    }
+
+    #[test]
     fn okurigana_stays_plain_and_neighbouring_plain_pieces_merge() {
         assert_eq!(
             spans(&[("走っ", Some("ハシッ")), ("た", Some("タ"))]),
@@ -277,10 +323,13 @@ mod tests {
             ]),
             [p("パーティーを22、")]
         );
-        // The analyser did not know the word: no guess.
-        assert_eq!(spans(&[("深淵", None)]), [p("深淵")]);
-        assert_eq!(spans(&[("深淵", Some("*"))]), [p("深淵")]);
-        assert_eq!(spans(&[("深淵", Some(""))]), [p("深淵")]);
+        // The analyser did not know the word (empty or "*" counts as no
+        // reading): it is read kanji by kanji, see
+        // `a_word_without_a_reading_is_read_kanji_by_kanji_in_on_yomi`.
+        assert_eq!(
+            spans(&[("深淵", Some(""))]),
+            [r("深", "しん"), r("淵", "えん")]
+        );
     }
 
     #[test]
@@ -369,6 +418,17 @@ mod tests {
         assert_eq!(
             f.annotate("明日22時から"),
             [r("明日", "あした"), p("22"), r("時", "じ"), p("から")]
+        );
+    }
+
+    #[test]
+    fn a_word_the_dictionary_lacks_is_read_in_on_yomi() {
+        let f = analyser();
+        // (No space in the line: some lindera builds drop spaces, and a line
+        // that does not read back as itself is shown plain.)
+        assert_eq!(
+            f.annotate("巨塔M6"),
+            [r("巨", "きょ"), r("塔", "とう"), p("M6")]
         );
     }
 

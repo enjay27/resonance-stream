@@ -4,6 +4,7 @@
 use crate::{AppState, ChatMessage, SystemLogLevel, SystemMessage};
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
+use resonance_core::log_throttle::LogThrottle;
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -12,6 +13,24 @@ use tauri::{Emitter, Manager};
 lazy_static! {
     // Stores: (Message Fingerprint, Arrival Time)
     static ref CHAT_DEDUPE_CACHE: Mutex<VecDeque<(u64, Instant)>> = Mutex::new(VecDeque::new());
+    static ref LOG_THROTTLE: Mutex<LogThrottle> = Mutex::new(LogThrottle::default());
+}
+
+/// [`inject_system_message`] for a line a loop may write again and again:
+/// identical lines are held back for a minute, and the next one says how many
+/// were. Not for lines a user action can repeat -- those must always show.
+pub fn inject_system_message_throttled<S: AsRef<str>>(
+    app: &tauri::AppHandle,
+    level: SystemLogLevel,
+    source: &str,
+    message: S,
+) {
+    let text = LOG_THROTTLE
+        .lock()
+        .check(source, message.as_ref(), Instant::now());
+    if let Some(text) = text {
+        inject_system_message(app, level, source, text);
+    }
 }
 
 pub fn inject_system_message<S: Into<String>>(

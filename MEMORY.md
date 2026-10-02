@@ -2,7 +2,9 @@
 
 **Index, not the record.** Only what would be *false* the moment it goes stale lives here.
 
-## Now — 2026-10-01
+## Now — 2026-10-02
+
+**System-log spam (2026-10-02, `claude/log-spam-dedup`, off `main`):** `resonance_core::log_throttle::LogThrottle` (tested) holds identical `(source, message)` lines back for 60 s and reports "(repeated N more times)" on the next; `inject_system_message_throttled` (`events.rs`) uses it, opt-in -- only the sniffer watchdog ("No game traffic for 15s", every 15 s while idle) so far, because a user action can repeat other lines and those must always show. The per-second `Polling .../health...` line now goes to the log file only (it filled the 200-line system history during a model load). **Open:** the "dictionary" half of the review note -- no repeating dictionary line was found, only two Success lines per sync. NOT VERIFIED on Windows: the app glue (cross-check only).
 
 **Release-candidate dispatch picks a merge (2026-10-01, `claude/rc-build-ui-fixes-ny8j3w`):** a manual run of `release-candidate.yml` has a `which` dropdown -- latest merge into rc (default; also what a push and an empty value mean) or the 2nd..5th newest. GitHub inputs are fixed options, so it counts merges instead of listing PRs; the run summary names the PR taken. A new `pick` job resolves the commit (`rc_rank`, `rc_nth_merge` in `rc-lib.sh`, tested); build and release use it, and only rank 1 re-runs the gates. **rc must get this file** (merge `main` into `rc`): a manual run reads the workflow from the branch it runs on. NOT VERIFIED: a real run (dry-run of the pick against rc's history only); actionlint and shellcheck clean.
 

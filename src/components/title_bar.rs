@@ -4,7 +4,8 @@ use crate::readability::title_bar_bg;
 use crate::status_view::{sniffer_status, translator_status};
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
-use crate::ui_types::{SnifferState, TranslatorState};
+use crate::translation_view::{effective, hint, label, pill_class};
+use crate::ui_types::{SnifferState, TranslationView, TranslatorState};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos::IntoView;
@@ -19,9 +20,17 @@ pub fn TitleBar() -> impl IntoView {
     let actions = use_context::<AppActions>().expect("AppActions missing");
     let sniffer = move || sniffer_status(store.service.sniffer_state.get());
     let translator = move || translator_status(store.service.translator_state.get());
+    // The translation badge: what rows show of the translation (on / off / study).
+    let view_now = move || {
+        effective(
+            store.config.translation_view.get(),
+            store.config.use_translation.get(),
+        )
+    };
+    let (picker_open, set_picker_open) = signal(false);
 
     view! {
-        <div class=move || format!("flex items-center h-8 pl-3 backdrop-blur-md border-b border-base-content/5 select-none transition-colors {}", title_bar_bg(store.config.overlay_opacity.get())) data-tauri-drag-region>
+        <div class=move || format!("relative z-30 flex items-center h-8 pl-3 backdrop-blur-md border-b border-base-content/5 select-none transition-colors {}", title_bar_bg(store.config.overlay_opacity.get())) data-tauri-drag-region>
             // --- LEFT: app name, version, start-up status ---
             <div class="flex items-baseline gap-2 min-w-0 flex-1 pointer-events-none">
                 <span class="text-[11px] font-bold text-base-content/80 truncate">"Resonance Stream"</span>
@@ -45,6 +54,44 @@ pub fn TitleBar() -> impl IntoView {
                     <span>{move || sniffer().1}</span>
                     <span class=move || format!("size-1.5 rounded-full {}", sniffer().0.dot_class())></span>
                 </div>
+                <Show when=move || store.config.init_done.get()>
+                    <div class="relative" on:mouseleave=move |_| set_picker_open.set(false)>
+                        <button class=move || format!("{PILL} {}", pill_class(view_now()))
+                            title="번역 표시 방식 (번역 ON / 번역 OFF / 공부 모드)"
+                            on:click=move |_| set_picker_open.update(|open| *open = !*open)>
+                            <span>{move || label(view_now())}</span>
+                        </button>
+                        <Show when=move || picker_open.get()>
+                            <div class="absolute right-0 top-5 pt-1 z-50">
+                                <div class="w-60 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col">
+                                    {TranslationView::ALL.iter().copied().map(|choice| {
+                                        // "On" needs the translator; it is switched on in settings.
+                                        let unavailable = move || {
+                                            choice == TranslationView::On
+                                                && !store.config.use_translation.get()
+                                        };
+                                        view! {
+                                            <button
+                                                class=move || format!("btn btn-ghost btn-sm justify-start flex-col items-start gap-0 h-auto min-h-0 py-1.5 px-2 font-normal {}",
+                                                    if view_now() == choice { "bg-base-content/10" } else { "" })
+                                                disabled=unavailable
+                                                on:click=move |_| {
+                                                    store.config.set_translation_view.set(choice);
+                                                    actions.save_config.dispatch(());
+                                                    set_picker_open.set(false);
+                                                }>
+                                                <span class="text-xs font-semibold">{label(choice)}</span>
+                                                <span class="text-[10px] text-base-content/50">
+                                                    {move || if unavailable() { "설정에서 번역을 켜면 쓸 수 있어요" } else { hint(choice) }}
+                                                </span>
+                                            </button>
+                                        }
+                                    }).collect_view()}
+                                </div>
+                            </div>
+                        </Show>
+                    </div>
+                </Show>
                 <Show when=move || store.config.use_translation.get()>
                     <div class=move || format!("{PILL} {}", translator().0.pill_class())
                         title="번역 엔진 상태 (오류일 때 클릭하면 내용 표시)"

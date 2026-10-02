@@ -5,3 +5,15 @@
 @theme {
     --color-bpsr-green: #00ff88; /* */
 }
+
+/* Furigana (study view). The reading is drawn from the rt's data-reading, not
+   written into it: text in the DOM is part of every selection and copy, and
+   the dictionary draft is built from the selected text. */
+ruby rt {
+    font-size: 0.55em;
+    -webkit-user-select: none;
+    user-select: none;
+}
+ruby rt::before {
+    content: attr(data-reading);
+}

@@ -105,3 +105,9 @@ run as the real app.
   clicking (the menu keeps the selection), double click, a click after a drag-to-scroll opening
   nothing, "사전에 추가" saving and the next translation using the term (and `auto_sync_latest_dict`
   overwriting it), copy / favorite feedback.
+- **Japanese study view (2026-10-02).** `annotate_furigana` and the `translation_view`
+  config field were cross-checked for `x86_64-pc-windows-gnu` only; the app tests (incl.
+  `the_translation_view_shows_translations_when_missing_and_round_trips`) run on Windows
+  CI. Worth a real run: the badge picker, 공부 모드 (ruby over kanji, hover shows the
+  translation, normal + compact), the first-line latency (dictionary loads on first use),
+  and the exe size with the embedded IPADIC (~46 MB of it).

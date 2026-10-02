@@ -4,6 +4,7 @@
 
 pub mod capture;
 pub mod download;
+pub mod furigana;
 pub mod history;
 pub mod paste;
 pub mod protocol;

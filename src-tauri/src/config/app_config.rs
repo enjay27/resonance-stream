@@ -4,7 +4,7 @@ use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use resonance_types::{
     default_catch_up_limit, default_favorite_messages, Channel, ComputeMode, FavoriteMessage,
-    LogLevel, TabSwitchModifier, Theme, Tier, ALL_TAB, CUSTOM_TAB,
+    LogLevel, TabSwitchModifier, Theme, Tier, TranslationView, ALL_TAB, CUSTOM_TAB,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -20,7 +20,12 @@ use tauri::{AppHandle, Manager, State};
 #[serde(default)]
 pub struct AppConfig {
     pub init_done: bool,
+    /// Whether the translator exists at all (the settings switch); what rows
+    /// show of it is `translation_view`.
     pub use_translation: bool,
+    /// What a chat row shows: translations, only the original, or the study view.
+    #[serde(default)]
+    pub translation_view: TranslationView,
     pub compute_mode: ComputeMode,
     pub compact_mode: bool,
     pub always_on_top: bool,
@@ -114,6 +119,7 @@ impl Default for AppConfig {
         Self {
             init_done: false,
             use_translation: false,
+            translation_view: TranslationView::default(),
             compute_mode: ComputeMode::default(),
             compact_mode: false,
             always_on_top: false,
@@ -335,6 +341,17 @@ mod tests {
         assert_eq!(config.theme, Theme::Light);
         assert_eq!(config.blocked_users.get(&7).map(String::as_str), Some("x"));
         assert_eq!(config.font_size, 14); // absent: default
+    }
+
+    #[test]
+    fn the_translation_view_shows_translations_when_missing_and_round_trips() {
+        assert_eq!(AppConfig::default().translation_view, TranslationView::On);
+        let old: AppConfig = serde_json::from_str(r#"{"init_done": true}"#).unwrap();
+        assert_eq!(old.translation_view, TranslationView::On);
+        let config: AppConfig = serde_json::from_str(r#"{"translation_view": "study"}"#).unwrap();
+        assert_eq!(config.translation_view, TranslationView::Study);
+        let saved = serde_json::to_value(&config).unwrap();
+        assert_eq!(saved["translation_view"], "study");
     }
 
     #[test]

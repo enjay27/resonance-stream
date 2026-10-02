@@ -185,6 +185,31 @@ fn to_hiragana(text: &str) -> String {
     text.chars().map(hiragana).collect()
 }
 
+/// The analyser's words laid over `text` by their byte ranges, with whatever
+/// the analyser skipped between them (it drops spaces) put back as plain words.
+/// `None` when the ranges are out of order, overlap, or fall outside `text`.
+fn restore_dropped(
+    text: &str,
+    found: Vec<(usize, usize, Option<String>)>,
+) -> Option<Vec<(String, Option<String>)>> {
+    let mut words = Vec::with_capacity(found.len());
+    let mut at = 0;
+    for (start, end, reading) in found {
+        if start < at || end < start {
+            return None;
+        }
+        if start > at {
+            words.push((text.get(at..start)?.to_string(), None));
+        }
+        words.push((text.get(start..end)?.to_string(), reading));
+        at = end;
+    }
+    if at < text.len() {
+        words.push((text.get(at..)?.to_string(), None));
+    }
+    Some(words)
+}
+
 /// The analyser: lindera with the IPADIC dictionary embedded in the binary.
 pub struct Furigana {
     segmenter: Segmenter,
@@ -215,19 +240,19 @@ impl Furigana {
             }
         };
         // IPADIC details: ..., [7] reading (katakana), [8] pronunciation.
-        let words: Vec<(String, Option<String>)> = tokens
+        let found = tokens
             .iter_mut()
             .map(|token| {
-                let surface = token.surface.to_string();
                 let reading = token.details().get(7).map(|r| r.to_string());
-                (surface, reading)
+                (token.byte_start, token.byte_end, reading)
             })
             .collect();
-        // The analyser must not lose or change a character (it may drop
-        // spaces): a line that does not read back as itself is shown plain.
-        if words.iter().map(|(s, _)| s.as_str()).collect::<String>() != text {
+        // The analyser drops spaces: they are put back from the tokens' byte
+        // ranges. A line that still does not read back as itself (ranges that
+        // do not fit, a changed surface) is shown plain.
+        let Some(words) = restore_dropped(text, found) else {
             return vec![RubySpan::plain(text)];
-        }
+        };
         spans_from_tokens(words.iter().map(|(s, r)| (s.as_str(), r.as_deref())))
     }
 }
@@ -345,6 +370,51 @@ mod tests {
             [r("響", "ひびき"), r("奏者", "そうしゃ")]
         );
         assert_eq!(spans(&[("山", Some("ヤマ"))]), [r("山", "やま")]);
+    }
+
+    #[test]
+    fn what_the_analyser_dropped_between_words_is_put_back_plain() {
+        let w = |s: &str, r: Option<&str>| (s.to_string(), r.map(str::to_string));
+        // "墓M6 @D ５周": the spaces (bytes 5 and 8) are not in any range.
+        let text = "墓M6 @D ５周";
+        let found = vec![
+            (0, 3, Some("ハカ".to_string())),
+            (3, 4, None),
+            (4, 5, None),
+            (6, 7, None),
+            (7, 8, None),
+            (9, 12, Some("ゴ".to_string())),
+            (12, 15, Some("シュウ".to_string())),
+        ];
+        assert_eq!(
+            restore_dropped(text, found),
+            Some(vec![
+                w("墓", Some("ハカ")),
+                w("M", None),
+                w("6", None),
+                w(" ", None),
+                w("@", None),
+                w("D", None),
+                w(" ", None),
+                w("５", Some("ゴ")),
+                w("周", Some("シュウ")),
+            ])
+        );
+        // A skipped tail is put back too; nothing skipped changes nothing.
+        assert_eq!(
+            restore_dropped("墓 ", vec![(0, 3, Some("ハカ".to_string()))]),
+            Some(vec![w("墓", Some("ハカ")), w(" ", None)])
+        );
+        assert_eq!(restore_dropped("", vec![]), Some(vec![]));
+    }
+
+    #[test]
+    fn ranges_that_do_not_fit_the_text_are_refused() {
+        let r = |a, b| (a, b, None);
+        assert_eq!(restore_dropped("abc", vec![r(2, 3), r(0, 1)]), None); // out of order
+        assert_eq!(restore_dropped("abc", vec![r(0, 2), r(1, 3)]), None); // overlap
+        assert_eq!(restore_dropped("abc", vec![r(0, 9)]), None); // past the end
+        assert_eq!(restore_dropped("墓", vec![r(0, 2)]), None); // inside a character
     }
 
     #[test]
@@ -506,6 +576,26 @@ mod tests {
                 r("奏", "そう"),
                 p("の"),
                 r("力", "ちから")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_line_with_spaces_is_still_read() {
+        // The analyser drops spaces; the line must not come back plain for it.
+        let f = analyser();
+        assert_eq!(
+            f.annotate("墓M6 @D ５周"),
+            [r("墓", "はか"), p("M6 @D ５"), r("周", "しゅう")]
+        );
+        assert_eq!(
+            f.annotate("巨塔M6 5周 @D"),
+            [
+                r("巨", "きょ"),
+                r("塔", "とう"),
+                p("M6 5"),
+                r("周", "しゅう"),
+                p(" @D")
             ]
         );
     }

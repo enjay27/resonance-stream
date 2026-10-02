@@ -113,6 +113,12 @@ run as the real app.
   config field were cross-checked for `x86_64-pc-windows-gnu` only; the app tests (incl.
   `the_translation_view_shows_translations_when_missing_and_round_trips`) run on Windows
   CI. Worth a real run: the badge picker, 공부 모드 (ruby over kanji, hover shows the
-  translation, normal + compact), the first-line latency (dictionary loads on first use),
-  and the exe size with the embedded IPADIC (~46 MB of it).
+  translation, normal + compact), the first-line latency (dictionary loads on first use).
+  Seen by Kade (2026-10-02, 0.6.0): the badge and ruby over kanji. The release exe is 59 MB
+  with the embedded IPADIC.
 - **Route-based interface pick (2026-10-02, `candidate/route-interface-pick`).** Core-tested (`pick_interface`), app cross-checked only. Check on Windows: (1) two live adapters (Ethernet + Wi-Fi) -> the system tab says `Auto-Targeting Network Interface: <ip> (default route)` and that is the adapter the game uses (`ipconfig` / `route print 0.0.0.0`), capture works without the manual picker; (2) a full-tunnel VPN on: the pick is the physical adapter, `(first physical adapter)`, and capture still works (this is the open question -- if packets are seen on the VPN adapter instead, the virtual-adapter rule is wrong); (3) offline: no crash, falls back to the list. **CI note:** this branch's gate ran in a session that cannot download lindera's dictionary -- core tests (196, furigana module excluded) and the app cross-check ran with the furigana dependency cut out in the working tree only; CI is the first full run.
+- **Signed app updates (2026-10-02, v0.6.0).** The 0.5.0 -> 0.6.0 hop through the gist ran
+  0.5.0's old code, so none of the new path has run: the feed (`latest.json`), signature check,
+  verify-before-swap, the dialog's error step, the backup key. Checks A1-A5 in
+  [`sessions/2026-10-02-0.6.0-windows-verification-handoff.md`](../sessions/2026-10-02-0.6.0-windows-verification-handoff.md);
+  A1 needs a release newer than 0.6.0.

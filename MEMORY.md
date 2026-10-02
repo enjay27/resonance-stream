@@ -89,8 +89,11 @@ Kade's calls: sequential pids, both archives, gist has sha256, auto-sync off by 
 **Graft 0.21.1 (2026-10-01, `claude/graft-mcp-wait`):** pinned in `graft-bootstrap.cjs`. `.mcp.json` runs
 `node .claude/helpers/graft-mcp.cjs` again: in a cloud session graft is installed by the bootstrap hook
 *after* MCP servers spawn, and a bare `graft mcp` failed (ENOENT, 2026-10-01). The helper waits up to 25 s.
-graft's refresh does not rewrite it in cloud (bootstrap stamps the current version first); after a local
-`graft init`/`upgrade`, re-point it in its own commit.
+**Experiment result (2026-10-02, `experiment/graft-mcp-bare`):** a fresh cloud session on a bare `graft mcp` failed
+again (`ENOENT`, graft was installed minutes later by the bootstrap) -- the wrapper stays. Also: graft's session-start
+refresh *can* rewrite `.mcp.json` to the bare form in cloud (the earlier "does not rewrite it" was false), so after any
+`graft init`/`upgrade`/refresh check `git diff .mcp.json` and re-point it in its own commit. `graft init --agents claude
+--no-global --yes` run by hand is idempotent (no diff).
 
 **Git workflow (2026-09-30):** each task on a `claude/<name>` branch, push when the local gate
 is green, PR opened by Claude, `.github/workflows/auto-merge.yml` merges it when CI passes

@@ -591,6 +591,64 @@ pub fn contains_japanese(text: &str) -> bool {
     })
 }
 
+// --- Popup windows ---
+
+/// Every popup window's label starts with this; the capability file allows
+/// `popup-*`.
+pub const POPUP_LABEL_PREFIX: &str = "popup-";
+
+/// A tool the app opens in a window of its own (not a modal over the chat), so
+/// the chat stays visible while it is used. `open_popup` takes one; the same
+/// word names the window, and the page in it picks its view from the label.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PopupKind {
+    /// Class and dungeon names, Japanese and Korean.
+    CheatSheet,
+    /// Favorite messages: copy, edit, shortcuts.
+    Favorites,
+}
+
+impl PopupKind {
+    pub const ALL: [PopupKind; 2] = [PopupKind::CheatSheet, PopupKind::Favorites];
+
+    /// The window's label.
+    pub fn label(self) -> &'static str {
+        match self {
+            PopupKind::CheatSheet => "popup-cheatsheet",
+            PopupKind::Favorites => "popup-favorites",
+        }
+    }
+
+    /// The kind of the window with this label; `None` for the main window or
+    /// anything else.
+    pub fn from_label(label: &str) -> Option<PopupKind> {
+        PopupKind::ALL.into_iter().find(|k| k.label() == label)
+    }
+
+    /// The window's title bar text.
+    pub fn title(self) -> &'static str {
+        match self {
+            PopupKind::CheatSheet => "직업 · 던전 이름",
+            PopupKind::Favorites => "자주 쓰는 메시지",
+        }
+    }
+
+    /// Inner size (width, height) in logical pixels when first opened; the
+    /// window-state plugin remembers a resized one.
+    pub fn size(self) -> (f64, f64) {
+        match self {
+            PopupKind::CheatSheet => (420.0, 560.0),
+            PopupKind::Favorites => (480.0, 620.0),
+        }
+    }
+}
+
+/// Is this window label a popup's?
+pub fn is_popup_label(label: &str) -> bool {
+    label.starts_with(POPUP_LABEL_PREFIX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1070,6 +1128,53 @@ mod tests {
         // Full-width Latin and half-width Korean are not Japanese.
         assert!(!contains_japanese("ｗｗｗ ＡＢＣ"));
         assert!(!contains_japanese("ﾡ"));
+    }
+
+    // --- popup windows ---
+
+    #[test]
+    fn a_popup_kind_round_trips_through_its_window_label() {
+        for kind in PopupKind::ALL {
+            assert_eq!(PopupKind::from_label(kind.label()), Some(kind));
+        }
+    }
+
+    #[test]
+    fn popup_labels_are_distinct_and_start_with_the_popup_prefix() {
+        let labels: Vec<_> = PopupKind::ALL.iter().map(|k| k.label()).collect();
+        for (i, label) in labels.iter().enumerate() {
+            assert!(label.starts_with(POPUP_LABEL_PREFIX), "{label}");
+            assert!(!labels[..i].contains(label), "{label} is used twice");
+        }
+    }
+
+    #[test]
+    fn only_popup_labels_are_popups() {
+        assert!(is_popup_label("popup-cheatsheet"));
+        assert!(!is_popup_label("main"));
+        assert!(!is_popup_label(""));
+        assert_eq!(PopupKind::from_label("main"), None);
+        assert_eq!(PopupKind::from_label("popup-nothing"), None);
+    }
+
+    #[test]
+    fn a_popup_kind_crosses_as_a_lowercase_word() {
+        assert_eq!(
+            serde_json::to_string(&PopupKind::CheatSheet).unwrap(),
+            "\"cheatsheet\""
+        );
+        let back: PopupKind = serde_json::from_str("\"favorites\"").unwrap();
+        assert_eq!(back, PopupKind::Favorites);
+        assert!(serde_json::from_str::<PopupKind>("\"other\"").is_err());
+    }
+
+    #[test]
+    fn a_popup_has_a_korean_title_and_a_usable_size() {
+        for kind in PopupKind::ALL {
+            assert!(!kind.title().is_empty());
+            let (w, h) = kind.size();
+            assert!(w >= 300.0 && h >= 300.0, "{kind:?}: {w}x{h}");
+        }
     }
 
     #[test]

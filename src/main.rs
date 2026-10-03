@@ -7,6 +7,7 @@ pub mod dictionary_edit;
 pub mod download_progress;
 pub mod favorites;
 pub mod hooks;
+pub mod popup_view;
 pub mod readability;
 pub mod ruby_view;
 pub mod service_state;
@@ -22,13 +23,14 @@ pub mod utils;
 pub mod view_signals;
 
 use app::*;
+use components::PopupApp;
 use leptos::prelude::*;
 
 fn main() {
     console_error_panic_hook::set_once();
-    mount_to_body(|| {
-        view! {
-            <App/>
-        }
-    })
+    match popup_view::current_popup() {
+        // A popup window (open_popup): its tool alone, no chat.
+        Some(kind) => mount_to_body(move || view! { <PopupApp kind=kind/> }),
+        None => mount_to_body(|| view! { <App/> }),
+    }
 }

@@ -1,12 +1,13 @@
 mod chat_container;
 pub mod chat_row;
-mod cheatsheet_modal;
+mod cheatsheet_window;
 mod dictionary_add_modal;
 mod dictionary_modal;
 mod favorites_modal;
 pub mod icons;
 mod nav_bar;
 mod network_troubleshooter;
+mod popup_app;
 pub mod settings;
 mod setup_wizard;
 pub mod title_bar;
@@ -14,11 +15,12 @@ mod update_modals;
 
 pub use chat_container::ChatContainer;
 pub use chat_row::ChatRow;
-pub use cheatsheet_modal::CheatSheetModal;
+pub use cheatsheet_window::CheatSheetWindow;
 pub use dictionary_add_modal::AddToDictionaryModal;
 pub use dictionary_modal::DictionaryModal;
 pub use favorites_modal::FavoritesModal;
 pub use nav_bar::NavBar;
 pub use network_troubleshooter::Troubleshooter;
+pub use popup_app::PopupApp;
 pub use setup_wizard::SetupWizard;
 pub use update_modals::{AppUpdateModal, ModelUpdateModal};

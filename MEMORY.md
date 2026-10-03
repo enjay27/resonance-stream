@@ -4,6 +4,8 @@
 
 ## Now — 2026-10-03
 
+**Trusted hosts (2026-10-03, `claude/claude-md-trusted-hosts`):** `Lindera.dev` is now reachable from cloud sessions, so the full core gate (furigana dictionary) builds without the SourceForge workaround in `sessions/2026-10-02-japanese-study-furigana.md`. New CLAUDE.md rule: a blocked host is asked for (Kade adds it to the trusted hosts), never worked around.
+
 **Roadmap since 09-28 (2026-10-03, `claude/roadmap-since-0928`):** the open items as a checklist in priority order -- [`roadmap/roadmap-since-0928.md`](.memory/roadmap/roadmap-since-0928.md). First: K1, the update download that hangs at 0% (GitHub #96, a user report), then release 0.6.1 and one Windows session for the signed-update checks. Nothing in it is started.
 
 ## 2026-10-02

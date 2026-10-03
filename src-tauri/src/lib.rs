@@ -151,6 +151,7 @@ pub fn run() {
             save_local_dictionary,
             clear_chat_history,
             set_always_on_top,
+            open_popup,
             load_config,
             save_config,
             minimize_window,

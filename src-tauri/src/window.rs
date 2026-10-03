@@ -1,9 +1,50 @@
-//! Tauri commands that act on the overlay window itself.
+//! Tauri commands that act on the overlay window itself, and the popup
+//! windows that open beside it.
+
+use resonance_types::{is_popup_label, PopupKind};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 #[tauri::command]
 pub fn set_always_on_top(window: tauri::Window, on_top: bool) {
     // This simple method toggles the window state
     let _ = window.set_always_on_top(on_top);
+    // The popups stay with the overlay: pinned over the game when it is.
+    for (label, popup) in window.app_handle().webview_windows() {
+        if is_popup_label(&label) {
+            let _ = popup.set_always_on_top(on_top);
+        }
+    }
+}
+
+/// Opens a tool in a window of its own, so the chat stays visible: the existing
+/// window is brought to the front, else a new one is made. It is owned by the
+/// overlay (above it, closed with it) and pinned when the overlay is. The page
+/// in it picks its view from the window's label (`PopupKind::label`).
+///
+/// `async` on purpose: creating a window from a synchronous command can
+/// deadlock on Windows.
+#[tauri::command]
+pub async fn open_popup(app: tauri::AppHandle, kind: PopupKind) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(kind.label()) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        return window.set_focus().map_err(|e| e.to_string());
+    }
+    let main = app
+        .get_webview_window("main")
+        .ok_or("the main window was not found")?;
+    let (width, height) = kind.size();
+    WebviewWindowBuilder::new(&app, kind.label(), WebviewUrl::App("index.html".into()))
+        .title(kind.title())
+        .inner_size(width, height)
+        .min_inner_size(300.0, 300.0)
+        .resizable(true)
+        .always_on_top(main.is_always_on_top().unwrap_or(false))
+        .parent(&main)
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

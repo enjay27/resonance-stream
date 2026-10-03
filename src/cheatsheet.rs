@@ -168,6 +168,24 @@ const CLASS_GROUPS: &[Group] = &[Group {
     entries: CLASSES,
 }];
 
+/// The line pieces drawn in front of a child row, so a class and its trees (a
+/// dungeon and its stages) read as a tree. All are absolutely placed in the
+/// row, on one vertical line: the elbow runs from the row's top down to its
+/// middle and across to the name; the stem carries the line on down to the
+/// next child. The last child has no stem, so the line ends at it.
+const TREE_ELBOW: &str =
+    "absolute left-4 top-0 h-1/2 w-3 border-l border-b border-base-content/25 rounded-bl-md";
+const TREE_STEM: &str = "absolute left-4 top-1/2 bottom-0 border-l border-base-content/25";
+
+/// The pieces for a child row; `last` is the last child of its parent.
+pub fn tree_lines(last: bool) -> &'static [&'static str] {
+    if last {
+        &[TREE_ELBOW]
+    } else {
+        &[TREE_ELBOW, TREE_STEM]
+    }
+}
+
 /// The newest season among `groups`.
 pub fn latest_season(groups: &[Group]) -> Option<u8> {
     groups
@@ -682,5 +700,30 @@ mod tests {
     #[test]
     fn the_sections_are_named() {
         assert_eq!(Section::ALL.map(|s| s.label()), ["직업", "던전"]);
+    }
+
+    #[test]
+    fn a_child_hangs_from_a_line_and_only_the_last_one_ends_it() {
+        let classes = |c: &str| c.split_whitespace().map(str::to_string).collect::<Vec<_>>();
+        let has = |c: &[String], need: &str| c.contains(&need.to_string());
+        let middle = tree_lines(false);
+        let last = tree_lines(true);
+        // Every child gets the elbow: a line down to its row's middle, then across.
+        assert_eq!(middle[0], last[0]);
+        let elbow = classes(last[0]);
+        for need in ["absolute", "top-0", "h-1/2", "border-l", "border-b"] {
+            assert!(has(&elbow, need), "{need}");
+        }
+        // The line goes on past a middle child, and stops at the last one's elbow.
+        assert_eq!(last.len(), 1);
+        assert_eq!(middle.len(), 2);
+        let stem = classes(middle[1]);
+        for need in ["absolute", "top-1/2", "bottom-0", "border-l"] {
+            assert!(has(&stem, need), "{need}");
+        }
+        // The elbow and the stem sit on the same vertical line.
+        let left = |c: &[String]| c.iter().find(|x| x.starts_with("left-")).cloned();
+        assert!(left(&elbow).is_some());
+        assert_eq!(left(&elbow), left(&stem));
     }
 }

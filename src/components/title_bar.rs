@@ -5,12 +5,10 @@ use crate::status_view::{sniffer_status, translator_status};
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
 use crate::translation_view::{effective, hint, label, pill_class};
-use crate::ui_types::{SnifferState, SystemLogLevel, TranslationView, TranslatorState};
-use crate::utils::add_system_log;
+use crate::ui_types::{SnifferState, TranslationView, TranslatorState};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos::IntoView;
-use resonance_types::PopupKind;
 use wasm_bindgen::JsValue;
 
 const PILL: &str =
@@ -113,18 +111,6 @@ pub fn TitleBar() -> impl IntoView {
 
             // --- Window controls ---
             <div class="flex h-8 ml-2 no-drag">
-                // Class and dungeon names (JP / KO), right next to minimize.
-                <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors" title="직업 · 던전 이름 (일본어 / 한국어)"
-                    on:click=move |_| {
-                        spawn_local(async {
-                            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "kind": PopupKind::CheatSheet })).unwrap();
-                            if let Err(e) = invoke("open_popup", args).await {
-                                add_system_log(SystemLogLevel::Error, "Popup", &format!("{:?}", e));
-                            }
-                        });
-                    }>
-                    {icon(icons::BOOK, "size-3.5")}
-                </button>
                 <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors" title="최소화"
                     on:click=move |_| { spawn_local(async { let _ = invoke("minimize_window", JsValue::NULL).await; }); }>
                     {icon(icons::MINUS, "size-3.5")}

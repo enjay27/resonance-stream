@@ -4,6 +4,8 @@
 
 ## Now — 2026-10-03
 
+**Release-notes rule (2026-10-03, `claude/release-notes-rule`):** CLAUDE.md *Stable releases* now says release notes are short, a simple summary, in Korean (users read them in the release page and the update dialog). **Not enforced:** `release.yml` still pastes the English commit subjects since the last stable tag -- proposed fix (needs Kade's OK, edits CI): a hand-written Korean `release-notes/vX.Y.Z.md` per release that the workflow uses as the notes and fails without (missing, empty or over ~12 lines).
+
 **K20 needs no code (2026-10-03, `claude/release-notes-cap`):** 0.6.0 was the first stable tag, so its notes had no previous release to start from; with `v0.6.0` tagged the next notes are the 8 commits since it. Roadmap K20 stays unticked until the 0.6.1 notes are seen. **Next on the roadmap: cut 0.6.1** -- waits on Kade (K1's Windows results, and the go-ahead to bump the version and push the tag, which publishes to every user).
 
 **K3: a broken update feed turns into a red run (2026-10-03, `claude/release-latest-guard`):** `check-release-feed.sh` reads what the app reads (newest stable release + `releases/latest/download/latest.json`) and fails when the app would silently find no update; `release.yml` runs it after publishing, the new `release-feed-check.yml` daily and on release events. Pure part `release_feed_problem` in `release-lib.sh`, tested (`release-lib.test.sh`, CI). Dry run against v0.6.0: healthy. **NOT VERIFIED:** a real Actions run of either workflow (first at the 0.6.1 release; run `release-feed-check.yml` once by hand). Roadmap K3 stays unticked until then.

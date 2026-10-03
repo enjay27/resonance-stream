@@ -4,7 +4,7 @@
 //! game's chat). A class lists its two trees (specializations) under it; the dungeons are
 //! grouped by season, and the seasons that have elapsed fold.
 
-use crate::cheatsheet::{is_open, search, Entry, GroupHits, Section, SOURCE_NOTE};
+use crate::cheatsheet::{is_open, search, tree_lines, Entry, GroupHits, Section, SOURCE_NOTE};
 use crate::components::icons::{self, icon};
 use crate::utils::copy_to_clipboard;
 use leptos::prelude::*;
@@ -12,20 +12,23 @@ use leptos::task::spawn_local;
 
 /// One entry: the Korean name is the main one, and every Japanese name it
 /// has -- the official one, then the fan names -- is a chip that copies itself
-/// on a click. `branch` is the tree connector in front of a specialization
-/// (empty for a class or a dungeon).
+/// on a click. `child` is `Some(last)` for a row hanging under its parent
+/// (`last`: the parent's last child), drawn with tree lines; `None` for a class or
+/// a dungeon.
 #[component]
 fn NameRow(
     entry: Entry,
     copied: ReadSignal<Option<&'static str>>,
     copy: Callback<&'static str>,
-    #[prop(optional)] branch: &'static str,
+    #[prop(optional)] child: Option<bool>,
 ) -> impl IntoView {
-    let small = !branch.is_empty();
+    let small = child.is_some();
     view! {
-        <div class=if small { "flex items-baseline gap-3 px-3 py-1" } else { "flex items-baseline gap-3 px-3 py-2" }>
+        <div class=if small { "relative flex items-baseline gap-3 pl-8 pr-3 py-1" } else { "flex items-baseline gap-3 px-3 py-2" }>
+            {child.map(|last| tree_lines(last).iter().map(|piece| view! {
+                <span class=format!("pointer-events-none {piece}") aria-hidden="true"></span>
+            }).collect_view())}
             <div class="flex-1 min-w-0 flex items-baseline gap-1.5">
-                <span class="w-3 shrink-0 text-base-content/30 text-xs select-none">{branch}</span>
                 <span class=if small { "min-w-0 text-xs font-semibold break-words select-text" } else { "min-w-0 text-sm font-bold break-words select-text" }>{entry.ko}</span>
             </div>
             <div class="flex-1 min-w-0 flex flex-wrap items-center gap-1">
@@ -107,7 +110,7 @@ fn GroupView(
                             <NameRow entry=hit.entry copied=copied copy=copy />
                             {hit.children.into_iter().enumerate().map(|(i, child)| view! {
                                 <NameRow entry=child copied=copied copy=copy
-                                    branch=if i == last { "└" } else { "├" } />
+                                    child=i == last />
                             }).collect_view()}
                         </div>
                     }

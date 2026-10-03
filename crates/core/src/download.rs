@@ -124,6 +124,10 @@ impl StallWatch {
         }
     }
 
+    pub fn limit(&self) -> Duration {
+        self.limit
+    }
+
     /// A chunk of `bytes` arrived at `now`. An empty one is not progress: a
     /// server that only trickles empty chunks is still stuck.
     pub fn data_arrived(&mut self, bytes: usize, now: Instant) {
@@ -390,6 +394,11 @@ mod tests {
         let watch = StallWatch::new(secs(30), t0);
         assert_eq!(watch.remaining(t0 - secs(50)), secs(30));
         assert!(!watch.is_stalled(t0 - secs(50)));
+    }
+
+    #[test]
+    fn a_watch_reports_its_limit() {
+        assert_eq!(StallWatch::new(secs(12), Instant::now()).limit(), secs(12));
     }
 
     #[test]

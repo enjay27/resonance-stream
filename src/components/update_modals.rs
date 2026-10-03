@@ -1,5 +1,6 @@
 //! "Update available" modals for the app and the AI model.
 
+use crate::download_progress::{bar_label, bar_value, is_cancelled, RELEASES_URL};
 use crate::status_signals::UpdateSignals;
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
@@ -63,8 +64,12 @@ pub fn AppUpdateModal() -> impl IntoView {
             match invoke("download_app_update", args).await {
                 Ok(_) => set_app_update_step.set(2),
                 Err(e) => {
-                    set_app_update_error.set(error_text(&e));
-                    set_app_update_step.set(3);
+                    let reason = error_text(&e);
+                    // A cancel already put the dialog back to step 0.
+                    if !is_cancelled(&reason) {
+                        set_app_update_error.set(reason);
+                        set_app_update_step.set(3);
+                    }
                 }
             }
         });
@@ -121,8 +126,24 @@ pub fn AppUpdateModal() -> impl IntoView {
                                 1 => view! {
                                     <div class="space-y-2 py-4 animate-in fade-in text-center">
                                         <p class="text-sm font-bold opacity-80">"업데이트 파일을 다운로드 중입니다..."</p>
-                                        <progress class="progress progress-success w-full h-4" value=move || app_update_progress.get().to_string() max="100"></progress>
-                                        <span class="text-xs font-mono">{move || format!("{}%", app_update_progress.get())}</span>
+                                        // No value until the first percent: a moving bar, not a stuck "0%".
+                                        <progress class="progress progress-success w-full h-4"
+                                            value=move || bar_value(app_update_progress.get()).map(|v| v.to_string())
+                                            max="100"></progress>
+                                        <span class="text-xs font-mono">{move || bar_label(app_update_progress.get())}</span>
+                                        <div class="modal-action justify-center">
+                                            <button class="btn btn-ghost btn-sm text-base-content/50"
+                                                on:click=move |_| {
+                                                    spawn_local(async move {
+                                                        // Returns once the download has let go of its file.
+                                                        let _ = invoke("cancel_app_update", JsValue::NULL).await;
+                                                        set_app_update_progress.set(0);
+                                                        set_app_update_step.set(0);
+                                                    });
+                                                }>
+                                                "취소"
+                                            </button>
+                                        </div>
                                     </div>
                                 }.into_any(),
 
@@ -164,6 +185,15 @@ pub fn AppUpdateModal() -> impl IntoView {
                                                     set_app_update_error.set(String::new());
                                                 }>
                                                 "닫기"
+                                            </button>
+                                            <button class="btn btn-outline"
+                                                on:click=move |_| {
+                                                    spawn_local(async move {
+                                                        let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "url": RELEASES_URL })).unwrap();
+                                                        let _ = invoke("open_browser", args).await;
+                                                    });
+                                                }>
+                                                "직접 다운로드"
                                             </button>
                                             <button class="btn btn-success"
                                                 on:click={

@@ -4,6 +4,8 @@
 
 ## Now — 2026-10-03
 
+**K1: update download no longer hangs at 0% (2026-10-03, `claude/update-download-stall`):** `fetch::download_file` (model, llama server, app update) gives up when the host does not answer in 15 s or no byte arrives for 30 s (`resonance_core::download::StallWatch`, tested; `guarded` wait in `fetch.rs` with `tokio` `time`); the app update can be cancelled (`cancel_app_update`, flag read every second, one download at a time); the dialog shows a moving bar + "연결 중..." until the first percent, a 취소 button, and a 직접 다운로드 button on the error step (`src/download_progress.rs`). Screenshotted in `ui-preview`. **NOT VERIFIED on Windows:** `guarded`'s 4 app tests (CI runs them), a real stalled/cut download (roadmap check A3), cancel against a real download. Reach: only copies on the release after this one benefit; a stuck 0.6.0 copy downloads the exe by hand. Roadmap: [`roadmap/roadmap-since-0928.md`](.memory/roadmap/roadmap-since-0928.md) K1 stays unticked until A3 ran.
+
 **Trusted hosts (2026-10-03, `claude/claude-md-trusted-hosts`):** `Lindera.dev` is now reachable from cloud sessions, so the full core gate (furigana dictionary) builds without the SourceForge workaround in `sessions/2026-10-02-japanese-study-furigana.md`. New CLAUDE.md rule: a blocked host is asked for (Kade adds it to the trusted hosts), never worked around.
 
 **Roadmap since 09-28 (2026-10-03, `claude/roadmap-since-0928`):** the open items as a checklist in priority order -- [`roadmap/roadmap-since-0928.md`](.memory/roadmap/roadmap-since-0928.md). First: K1, the update download that hangs at 0% (GitHub #96, a user report), then release 0.6.1 and one Windows session for the signed-update checks. Nothing in it is started.

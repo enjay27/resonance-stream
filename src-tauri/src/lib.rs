@@ -143,6 +143,7 @@ pub fn run() {
             check_all_updates,
             ignore_update,
             download_app_update,
+            cancel_app_update,
             restart_to_apply_update,
             sync_dictionary,
             get_dict_version,

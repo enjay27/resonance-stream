@@ -37,6 +37,14 @@ pub fn needs_backing(overlay_opacity: f32) -> bool {
 pub const CHROME_BACKED_ALPHA: f64 = 0.95;
 pub const CHROME_BACKED: &str = "bg-base-300/95";
 
+/// A flat bar button: 40 px wide, as tall as its bar. The title bar's window
+/// controls, the popups' and the nav bar's buttons are all this one box.
+pub const WINDOW_BUTTON: &str = "w-10 h-full grid place-items-center shrink-0 text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors";
+/// [`WINDOW_BUTTON`] while it is "on" (the pin, an active search, the open tools).
+pub const WINDOW_BUTTON_ACTIVE: &str = "w-10 h-full grid place-items-center shrink-0 text-success hover:bg-base-content/10 transition-colors";
+/// The close button: the same box with the red hover.
+pub const WINDOW_BUTTON_CLOSE: &str = "w-10 h-full grid place-items-center shrink-0 text-base-content/60 hover:bg-error hover:text-error-content transition-colors";
+
 /// Title bar background at this window opacity.
 pub fn title_bar_bg(overlay_opacity: f32) -> &'static str {
     if needs_backing(overlay_opacity) {
@@ -238,6 +246,37 @@ mod tests {
         assert!((contrast(WHITE, [0, 0, 0]) - 21.0).abs() < 0.01);
         assert!((contrast(WHITE, WHITE) - 1.0).abs() < 0.001);
         assert!((contrast([0x76, 0x76, 0x76], WHITE) - 4.54).abs() < 0.02);
+    }
+
+    #[test]
+    fn the_bar_buttons_are_one_title_bar_sized_flat_button() {
+        let classes = |c: &str| c.split_whitespace().map(str::to_string).collect::<Vec<_>>();
+        let plain = classes(WINDOW_BUTTON);
+        // 40 px wide, as tall as the bar: the title bar's, the popups' and the nav bar's.
+        for need in ["w-10", "h-full", "grid", "place-items-center", "shrink-0"] {
+            assert!(plain.contains(&need.to_string()), "{need}");
+        }
+        assert!(plain.contains(&"hover:bg-base-content/10".to_string()));
+        // Close is the same box with the red hover, nothing else.
+        let close = classes(WINDOW_BUTTON_CLOSE);
+        assert!(close.contains(&"hover:bg-error".to_string()));
+        assert!(!close.contains(&"hover:bg-base-content/10".to_string()));
+        for need in ["w-10", "h-full", "grid", "place-items-center", "shrink-0"] {
+            assert!(close.contains(&need.to_string()), "{need}");
+        }
+        // "On" only changes the colour: same box, green, no grey text class to compete.
+        let active = classes(WINDOW_BUTTON_ACTIVE);
+        for need in [
+            "w-10",
+            "h-full",
+            "grid",
+            "place-items-center",
+            "shrink-0",
+            "text-success",
+        ] {
+            assert!(active.contains(&need.to_string()), "{need}");
+        }
+        assert!(!active.iter().any(|c| c.starts_with("text-base-content")));
     }
 
     #[test]

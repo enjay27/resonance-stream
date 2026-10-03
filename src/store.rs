@@ -104,8 +104,6 @@ mod tests {
         assert!(!s.ui.show_settings.get_untracked());
         assert!(!s.ui.show_dictionary.get_untracked());
         assert!(!s.ui.show_troubleshooter.get_untracked());
-        assert!(!s.ui.show_favorites.get_untracked());
-        assert!(!s.ui.show_cheatsheet.get_untracked());
         assert!(s.ui.active_menu.get_untracked().is_none());
         assert!(s.ui.dict_draft.get_untracked().is_none());
         assert!(!s.ui.click_through.get_untracked());

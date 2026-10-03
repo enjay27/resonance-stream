@@ -5,7 +5,7 @@
 use sha2::{Digest, Sha256};
 use std::io;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Only HTTPS downloads: the app runs as Administrator and executes what it
 /// downloads (the updater, the llama server), so a plain-HTTP URL could be
@@ -95,6 +95,64 @@ impl ProgressThrottle {
         self.last = Some(percent);
         Some(percent)
     }
+}
+
+/// How long a download may take to reach its server. Past this the host is
+/// not answering (blocked, offline, a dead proxy), and waiting longer only
+/// leaves the progress bar at 0%.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long a download may go without a single byte arriving, before the
+/// response headers and between chunks. Not a limit on the whole download: a
+/// multi-GB model on a slow link may take an hour as long as it keeps moving.
+pub const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Tells a stuck download from a slow one: it is stuck when no data has
+/// arrived for `limit`. The clock is passed in, so this is tested without
+/// waiting.
+#[derive(Debug, Clone)]
+pub struct StallWatch {
+    limit: Duration,
+    last_data: Instant,
+}
+
+impl StallWatch {
+    pub fn new(limit: Duration, now: Instant) -> Self {
+        Self {
+            limit,
+            last_data: now,
+        }
+    }
+
+    pub fn limit(&self) -> Duration {
+        self.limit
+    }
+
+    /// A chunk of `bytes` arrived at `now`. An empty one is not progress: a
+    /// server that only trickles empty chunks is still stuck.
+    pub fn data_arrived(&mut self, bytes: usize, now: Instant) {
+        if bytes > 0 {
+            self.last_data = now;
+        }
+    }
+
+    /// How much longer the next chunk may take; zero once stalled.
+    pub fn remaining(&self, now: Instant) -> Duration {
+        self.limit
+            .saturating_sub(now.saturating_duration_since(self.last_data))
+    }
+
+    pub fn is_stalled(&self, now: Instant) -> bool {
+        self.remaining(now).is_zero()
+    }
+}
+
+/// The reason shown to the user (and logged) when a download stalls.
+pub fn stall_error(limit: Duration) -> String {
+    format!(
+        "No data received for {} s; the connection looks stuck.",
+        limit.as_secs()
+    )
 }
 
 /// SHA-256 (lowercase hex) of a file, read in large chunks -- the model is
@@ -275,6 +333,85 @@ mod tests {
         let err = replace_file(&dir.join("missing"), &dir.join("x"), 2, Duration::ZERO);
         assert!(err.is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- stall detection -------------------------------------------------
+
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    #[test]
+    fn a_fresh_watch_allows_the_whole_limit() {
+        let t0 = Instant::now();
+        let watch = StallWatch::new(secs(30), t0);
+        assert_eq!(watch.remaining(t0), secs(30));
+        assert!(!watch.is_stalled(t0));
+    }
+
+    #[test]
+    fn the_wait_counts_down_and_ends_at_the_limit() {
+        let t0 = Instant::now();
+        let watch = StallWatch::new(secs(30), t0);
+        assert_eq!(watch.remaining(t0 + secs(10)), secs(20));
+        assert!(!watch.is_stalled(t0 + secs(29)));
+        assert!(watch.is_stalled(t0 + secs(30)));
+        assert_eq!(watch.remaining(t0 + secs(300)), Duration::ZERO);
+    }
+
+    #[test]
+    fn data_restarts_the_wait() {
+        let t0 = Instant::now();
+        let mut watch = StallWatch::new(secs(30), t0);
+        watch.data_arrived(1024, t0 + secs(25));
+        assert_eq!(watch.remaining(t0 + secs(25)), secs(30));
+        assert!(!watch.is_stalled(t0 + secs(54)));
+        assert!(watch.is_stalled(t0 + secs(55)));
+    }
+
+    #[test]
+    fn an_empty_chunk_is_not_progress() {
+        let t0 = Instant::now();
+        let mut watch = StallWatch::new(secs(30), t0);
+        watch.data_arrived(0, t0 + secs(25));
+        assert!(watch.is_stalled(t0 + secs(30)));
+    }
+
+    #[test]
+    fn a_slow_but_steady_download_never_stalls() {
+        let t0 = Instant::now();
+        let mut watch = StallWatch::new(secs(30), t0);
+        for i in 1..=100 {
+            let now = t0 + secs(29 * i);
+            assert!(!watch.is_stalled(now), "chunk {i}");
+            watch.data_arrived(1, now);
+        }
+    }
+
+    #[test]
+    fn a_clock_that_steps_back_does_not_panic() {
+        let t0 = Instant::now() + secs(100);
+        let watch = StallWatch::new(secs(30), t0);
+        assert_eq!(watch.remaining(t0 - secs(50)), secs(30));
+        assert!(!watch.is_stalled(t0 - secs(50)));
+    }
+
+    #[test]
+    fn a_watch_reports_its_limit() {
+        assert_eq!(StallWatch::new(secs(12), Instant::now()).limit(), secs(12));
+    }
+
+    #[test]
+    fn the_stall_message_names_the_wait() {
+        let message = stall_error(secs(30));
+        assert!(message.contains("30 s"), "{message}");
+        assert!(message.to_lowercase().contains("no data"), "{message}");
+    }
+
+    #[test]
+    fn connecting_gives_up_before_a_stalled_transfer_would() {
+        assert!(CONNECT_TIMEOUT <= STALL_TIMEOUT);
+        assert!(STALL_TIMEOUT >= secs(10), "a slow link must not be cut off");
     }
 
     #[test]

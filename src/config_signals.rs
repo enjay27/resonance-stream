@@ -7,9 +7,11 @@
 use crate::favorites::{clean_tabs, normalize};
 use crate::ui_types::{
     default_catch_up_limit, default_favorite_messages, AppConfig, Channel, ComputeMode,
-    FavoriteMessage, LogLevel, TabSwitchModifier, Theme, Tier, TranslationView, ALL_TAB,
+    FavoriteMessage, FavoriteTab, LogLevel, TabSwitchModifier, Theme, Tier, TranslationView,
+    ALL_TAB,
 };
 use leptos::prelude::{signal, GetUntracked, ReadSignal, Set, WriteSignal};
+use resonance_types::FavoritesState;
 use std::collections::HashMap;
 
 /// A saved font size of this or less is taken for a broken config.
@@ -85,8 +87,8 @@ pub struct ConfigSignals {
     pub set_message_spacing: WriteSignal<u32>,
     pub favorite_messages: ReadSignal<Vec<FavoriteMessage>>,
     pub set_favorite_messages: WriteSignal<Vec<FavoriteMessage>>,
-    pub favorite_tabs: ReadSignal<Vec<String>>,
-    pub set_favorite_tabs: WriteSignal<Vec<String>>,
+    pub favorite_tabs: ReadSignal<Vec<FavoriteTab>>,
+    pub set_favorite_tabs: WriteSignal<Vec<FavoriteTab>>,
     pub chat_log_retention_days: ReadSignal<u32>,
     pub set_chat_log_retention_days: WriteSignal<u32>,
     pub raw_capture: ReadSignal<bool>,
@@ -135,7 +137,7 @@ impl ConfigSignals {
         let (message_spacing, set_message_spacing) = signal::<u32>(4);
         let (favorite_messages, set_favorite_messages) =
             signal::<Vec<FavoriteMessage>>(default_favorite_messages());
-        let (favorite_tabs, set_favorite_tabs) = signal::<Vec<String>>(Vec::new());
+        let (favorite_tabs, set_favorite_tabs) = signal::<Vec<FavoriteTab>>(Vec::new());
         let (chat_log_retention_days, set_chat_log_retention_days) = signal::<u32>(0);
         let (raw_capture, set_raw_capture) = signal::<bool>(false);
         ConfigSignals {
@@ -253,6 +255,25 @@ impl ConfigSignals {
         }
     }
 
+    /// The favorites held, as `save_favorites` takes them.
+    pub fn favorites_state(&self) -> FavoritesState {
+        FavoritesState {
+            messages: self.favorite_messages.get_untracked(),
+            tabs: self.favorite_tabs.get_untracked(),
+        }
+    }
+
+    /// Takes the favorites the backend holds -- loaded, or saved by another
+    /// window -- cleaned like a loaded config: tab names tidied, a message
+    /// whose tab is gone filed under the default tab.
+    pub fn apply_favorites(&self, favorites: FavoritesState) {
+        let tabs = clean_tabs(favorites.tabs);
+        let mut messages = favorites.messages;
+        normalize(&mut messages, &tabs);
+        self.set_favorite_messages.set(messages);
+        self.set_favorite_tabs.set(tabs);
+    }
+
     /// Loads a config read from disk into the signals.
     pub fn apply(&self, config: AppConfig) {
         let AppConfig {
@@ -337,11 +358,10 @@ impl ConfigSignals {
         self.set_archive_ignored_channels
             .set(archive_ignored_channels);
         self.set_message_spacing.set(message_spacing);
-        let favorite_tabs = clean_tabs(favorite_tabs);
-        let mut favorite_messages = favorite_messages;
-        normalize(&mut favorite_messages, &favorite_tabs);
-        self.set_favorite_messages.set(favorite_messages);
-        self.set_favorite_tabs.set(favorite_tabs);
+        self.apply_favorites(FavoritesState {
+            messages: favorite_messages,
+            tabs: favorite_tabs,
+        });
         self.set_chat_log_retention_days
             .set(chat_log_retention_days);
         self.set_raw_capture.set(raw_capture);
@@ -389,10 +409,10 @@ mod tests {
             message_spacing: 9,
             favorite_messages: vec![FavoriteMessage {
                 text: "hi".into(),
-                tab: "레이드".into(),
+                tab: 2,
                 ..Default::default()
             }],
-            favorite_tabs: vec!["레이드".into(), "던전".into()],
+            favorite_tabs: vec![tab(2, "레이드"), tab(5, "던전")],
             chat_log_retention_days: 5,
             raw_capture: true,
         }
@@ -428,32 +448,69 @@ mod tests {
         assert_eq!(config.theme, Theme::Dark);
     }
 
+    fn tab(id: u32, name: &str) -> FavoriteTab {
+        FavoriteTab {
+            id,
+            name: name.into(),
+        }
+    }
+
+    fn msg(text: &str, tab: u32) -> FavoriteMessage {
+        FavoriteMessage {
+            text: text.into(),
+            tab,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn hand_edited_favorite_tabs_load_cleaned_and_orphans_go_to_the_default_tab() {
         let signals = ConfigSignals::new();
         let mut config = odd_config();
-        config.favorite_tabs = vec![" 레이드 ".into(), "".into(), "레이드".into(), "기본".into()];
-        config.favorite_messages = vec![
-            FavoriteMessage {
-                text: "a".into(),
-                tab: "레이드".into(),
-                ..Default::default()
-            },
-            FavoriteMessage {
-                text: "b".into(),
-                tab: "사라진 탭".into(),
-                ..Default::default()
-            },
-        ];
+        config.favorite_tabs = vec![tab(1, " 레이드 "), tab(2, ""), tab(1, "레이드")];
+        config.favorite_messages = vec![msg("a", 1), msg("b", 9)];
         signals.apply(config);
         let held = signals.to_config();
-        assert_eq!(held.favorite_tabs, ["레이드"]);
-        let filed: Vec<_> = held
-            .favorite_messages
+        let tabs: Vec<_> = held
+            .favorite_tabs
             .iter()
-            .map(|f| f.tab.as_str())
+            .map(|t| (t.id, t.name.as_str()))
             .collect();
-        assert_eq!(filed, ["레이드", ""]);
+        assert_eq!(
+            tabs,
+            [(1, "레이드"), (2, "탭 2"), (3, "레이드")],
+            "names tidied, the repeated id made fresh, no tab lost"
+        );
+        let filed: Vec<_> = held.favorite_messages.iter().map(|f| f.tab).collect();
+        assert_eq!(filed, [1, 0]);
+    }
+
+    #[test]
+    fn a_favorites_update_from_another_window_is_cleaned_like_a_loaded_config() {
+        let signals = ConfigSignals::new();
+        let before = signals.to_config();
+        signals.apply_favorites(FavoritesState {
+            messages: vec![msg("a", 4), msg("b", 9)],
+            tabs: vec![tab(4, " 레이드 "), tab(4, "레이드"), tab(6, "")],
+        });
+        let held = signals.favorites_state();
+        let tabs: Vec<_> = held.tabs.iter().map(|t| (t.id, t.name.as_str())).collect();
+        assert_eq!(tabs, [(4, "레이드"), (7, "레이드"), (6, "탭 3")]);
+        let filed: Vec<_> = held.messages.iter().map(|f| f.tab).collect();
+        assert_eq!(filed, [4, 0]);
+        // Nothing but the favorites moved.
+        let after = signals.to_config();
+        assert_eq!(after.overlay_opacity, before.overlay_opacity);
+        assert_eq!(after.theme, before.theme);
+    }
+
+    #[test]
+    fn the_favorites_state_is_what_the_signals_hold() {
+        let signals = ConfigSignals::new();
+        let held = signals.favorites_state();
+        let config = signals.to_config();
+        assert_eq!(held.messages, config.favorite_messages);
+        assert_eq!(held.tabs, config.favorite_tabs);
     }
 
     #[test]

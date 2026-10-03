@@ -16,6 +16,10 @@ pub const ALL_TAB: &str = "전체";
 pub const CUSTOM_TAB: &str = "커스텀";
 pub const SYSTEM_TAB: &str = "시스템";
 
+/// What `download_app_update` is rejected with when the user cancels it. The
+/// update dialog tells a cancel from a failure by this text.
+pub const UPDATE_CANCELLED: &str = "Update download cancelled";
+
 /// A chat channel. On the wire and on disk it is its upper-case name
 /// (`"WORLD"`, `"GUILD"`, ...); a name this enum does not know -- an old log, a
 /// channel the game has that we do not show separately yet (the beginner
@@ -457,9 +461,35 @@ pub struct FavoriteMessage {
     pub note: String,
     #[serde(default)]
     pub shortcut: String,
-    /// Name of the favorites tab it is filed under; empty is the default tab.
+    /// Id of the favorites tab it is filed under (`FavoriteTab::id`);
+    /// `DEFAULT_FAVORITE_TAB` is the default tab.
     #[serde(default)]
-    pub tab: String,
+    pub tab: u32,
+}
+
+/// The id of the default favorites tab: always there, first, not in
+/// `FavoritesState::tabs`, and not removable.
+pub const DEFAULT_FAVORITE_TAB: u32 = 0;
+
+/// A user's favorites tab. The id never changes while the tab lives (a message
+/// refers to its tab by it), so tabs may share a name, be renamed and be
+/// reordered; the order of `FavoritesState::tabs` is the order on screen.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct FavoriteTab {
+    pub id: u32,
+    pub name: String,
+}
+
+/// The favorites as the favorites popup and the main window exchange them
+/// (`get_favorites`, `save_favorites`, the `favorites-changed` event): the
+/// messages and the tabs. The backend is the one source of truth, so two
+/// windows never overwrite each other's settings.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoritesState {
+    pub messages: Vec<FavoriteMessage>,
+    #[serde(default)]
+    pub tabs: Vec<FavoriteTab>,
 }
 
 /// Missed Japanese messages a translator start translates when the config
@@ -585,6 +615,64 @@ pub fn contains_japanese(text: &str) -> bool {
             | '\u{FF66}'..='\u{FF9F}'  // half-width katakana
         )
     })
+}
+
+// --- Popup windows ---
+
+/// Every popup window's label starts with this; the capability file allows
+/// `popup-*`.
+pub const POPUP_LABEL_PREFIX: &str = "popup-";
+
+/// A tool the app opens in a window of its own (not a modal over the chat), so
+/// the chat stays visible while it is used. `open_popup` takes one; the same
+/// word names the window, and the page in it picks its view from the label.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PopupKind {
+    /// Class and dungeon names, Japanese and Korean.
+    CheatSheet,
+    /// Favorite messages: copy, edit, shortcuts.
+    Favorites,
+}
+
+impl PopupKind {
+    pub const ALL: [PopupKind; 2] = [PopupKind::CheatSheet, PopupKind::Favorites];
+
+    /// The window's label.
+    pub fn label(self) -> &'static str {
+        match self {
+            PopupKind::CheatSheet => "popup-cheatsheet",
+            PopupKind::Favorites => "popup-favorites",
+        }
+    }
+
+    /// The kind of the window with this label; `None` for the main window or
+    /// anything else.
+    pub fn from_label(label: &str) -> Option<PopupKind> {
+        PopupKind::ALL.into_iter().find(|k| k.label() == label)
+    }
+
+    /// The window's title bar text.
+    pub fn title(self) -> &'static str {
+        match self {
+            PopupKind::CheatSheet => "직업 · 던전 이름",
+            PopupKind::Favorites => "자주 쓰는 메시지",
+        }
+    }
+
+    /// Inner size (width, height) in logical pixels when first opened; the
+    /// window-state plugin remembers a resized one.
+    pub fn size(self) -> (f64, f64) {
+        match self {
+            PopupKind::CheatSheet => (420.0, 560.0),
+            PopupKind::Favorites => (480.0, 620.0),
+        }
+    }
+}
+
+/// Is this window label a popup's?
+pub fn is_popup_label(label: &str) -> bool {
+    label.starts_with(POPUP_LABEL_PREFIX)
 }
 
 #[cfg(test)]
@@ -764,6 +852,36 @@ mod tests {
     }
 
     #[test]
+    fn the_favorites_cross_as_one_camel_case_object() {
+        let state = FavoritesState {
+            messages: vec![FavoriteMessage {
+                text: "hi".into(),
+                note: "안녕".into(),
+                shortcut: "Alt+F1".into(),
+                tab: 3,
+            }],
+            tabs: vec![FavoriteTab {
+                id: 3,
+                name: "raid".into(),
+            }],
+        };
+        let json = serde_json::to_value(&state).unwrap();
+        assert_eq!(json["messages"][0]["text"], "hi");
+        assert_eq!(json["messages"][0]["tab"], 3);
+        assert_eq!(json["tabs"][0]["id"], 3);
+        assert_eq!(json["tabs"][0]["name"], "raid");
+        let back: FavoritesState = serde_json::from_value(json).unwrap();
+        assert_eq!(back, state);
+    }
+
+    #[test]
+    fn a_favorites_object_missing_its_tabs_still_loads() {
+        let state: FavoritesState = serde_json::from_str(r#"{"messages":[]}"#).unwrap();
+        assert!(state.messages.is_empty());
+        assert!(state.tabs.is_empty());
+    }
+
+    #[test]
     fn favorite_defaults_have_no_shortcut_and_shortcut_is_optional() {
         let defaults = default_favorite_messages();
         assert!(!defaults.is_empty());
@@ -775,24 +893,30 @@ mod tests {
         assert_eq!(fav.text, "hi");
         assert!(fav.note.is_empty());
         assert!(fav.shortcut.is_empty());
-        // ... and lands in the default tab (an empty name).
-        assert!(fav.tab.is_empty());
-        assert!(defaults.iter().all(|f| f.tab.is_empty()));
+        // ... and lands in the default tab.
+        assert_eq!(fav.tab, DEFAULT_FAVORITE_TAB);
+        assert!(defaults.iter().all(|f| f.tab == DEFAULT_FAVORITE_TAB));
     }
 
     #[test]
-    fn a_favorites_tab_is_stored_under_its_name() {
+    fn a_favorites_tab_is_stored_under_its_id() {
         let fav = FavoriteMessage {
             text: "hi".into(),
-            tab: "레이드".into(),
+            tab: 2,
             ..Default::default()
         };
         let json = serde_json::to_value(&fav).unwrap();
-        assert_eq!(json["tab"], "레이드");
+        assert_eq!(json["tab"], 2);
         assert_eq!(
             serde_json::from_value::<FavoriteMessage>(json).unwrap(),
             fav
         );
+    }
+
+    #[test]
+    fn the_default_favorites_tab_is_id_zero() {
+        assert_eq!(DEFAULT_FAVORITE_TAB, 0);
+        assert_eq!(FavoriteMessage::default().tab, DEFAULT_FAVORITE_TAB);
     }
 
     #[test]
@@ -1066,6 +1190,53 @@ mod tests {
         // Full-width Latin and half-width Korean are not Japanese.
         assert!(!contains_japanese("ｗｗｗ ＡＢＣ"));
         assert!(!contains_japanese("ﾡ"));
+    }
+
+    // --- popup windows ---
+
+    #[test]
+    fn a_popup_kind_round_trips_through_its_window_label() {
+        for kind in PopupKind::ALL {
+            assert_eq!(PopupKind::from_label(kind.label()), Some(kind));
+        }
+    }
+
+    #[test]
+    fn popup_labels_are_distinct_and_start_with_the_popup_prefix() {
+        let labels: Vec<_> = PopupKind::ALL.iter().map(|k| k.label()).collect();
+        for (i, label) in labels.iter().enumerate() {
+            assert!(label.starts_with(POPUP_LABEL_PREFIX), "{label}");
+            assert!(!labels[..i].contains(label), "{label} is used twice");
+        }
+    }
+
+    #[test]
+    fn only_popup_labels_are_popups() {
+        assert!(is_popup_label("popup-cheatsheet"));
+        assert!(!is_popup_label("main"));
+        assert!(!is_popup_label(""));
+        assert_eq!(PopupKind::from_label("main"), None);
+        assert_eq!(PopupKind::from_label("popup-nothing"), None);
+    }
+
+    #[test]
+    fn a_popup_kind_crosses_as_a_lowercase_word() {
+        assert_eq!(
+            serde_json::to_string(&PopupKind::CheatSheet).unwrap(),
+            "\"cheatsheet\""
+        );
+        let back: PopupKind = serde_json::from_str("\"favorites\"").unwrap();
+        assert_eq!(back, PopupKind::Favorites);
+        assert!(serde_json::from_str::<PopupKind>("\"other\"").is_err());
+    }
+
+    #[test]
+    fn a_popup_has_a_korean_title_and_a_usable_size() {
+        for kind in PopupKind::ALL {
+            assert!(!kind.title().is_empty());
+            let (w, h) = kind.size();
+            assert!(w >= 300.0 && h >= 300.0, "{kind:?}: {w}x{h}");
+        }
     }
 
     #[test]

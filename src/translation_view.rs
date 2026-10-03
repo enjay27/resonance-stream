@@ -15,6 +15,16 @@ pub fn effective(view: TranslationView, use_translation: bool) -> TranslationVie
     }
 }
 
+/// The small chevron on the title-bar badge: points down (a menu opens here),
+/// flips up while that menu is open.
+pub fn chevron_class(open: bool) -> &'static str {
+    if open {
+        "size-3 transition-transform rotate-180"
+    } else {
+        "size-3 transition-transform"
+    }
+}
+
 /// The title-bar badge's text.
 pub fn label(view: TranslationView) -> &'static str {
     match view {
@@ -120,5 +130,19 @@ mod tests {
             .collect();
         assert_eq!(display, ["hidden"]);
         assert!(HOVER_ONLY.contains("group-hover:block"));
+    }
+
+    #[test]
+    fn the_picker_chevron_points_down_and_flips_up_while_the_menu_is_open() {
+        let classes = |c: &str| c.split_whitespace().map(str::to_string).collect::<Vec<_>>();
+        let closed = classes(chevron_class(false));
+        let open = classes(chevron_class(true));
+        assert!(!closed.contains(&"rotate-180".to_string()));
+        assert!(open.contains(&"rotate-180".to_string()));
+        // Same small box either way, and it turns smoothly rather than jumping.
+        for c in [&closed, &open] {
+            assert!(c.contains(&"size-3".to_string()));
+            assert!(c.contains(&"transition-transform".to_string()));
+        }
     }
 }

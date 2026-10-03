@@ -1,5 +1,6 @@
 use parking_lot::{Mutex, RwLock};
 use resonance_core::history::ChatHistory;
+use resonance_types::PopupKind;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tauri::Manager;
@@ -31,9 +32,21 @@ pub use window::*;
 pub fn run() {
     logging::init_logger();
 
+    // A popup is placed by `show_popup`, hidden, just before it is shown: the
+    // plugin restoring it at creation would show it first at the default place.
+    let window_state_plugin = PopupKind::ALL
+        .into_iter()
+        .fold(
+            tauri_plugin_window_state::Builder::default(),
+            |plugin, kind| plugin.skip_initial_state(kind.label()),
+        )
+        .build();
+
     let app = tauri::Builder::default()
+        .on_window_event(window::on_window_event)
         .setup(|app| {
             let handle = app.handle().clone();
+            window::prewarm_popups(handle.clone());
             // --- STATE FIRST: everything below logs through it and reads its config ---
             let config = read_config_file(&handle);
             let dictionary = resonance_core::text::Dictionary::load(&dictionary_path(&handle));
@@ -123,7 +136,7 @@ pub fn run() {
 
             Ok(())
         })
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(window_state_plugin)
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())

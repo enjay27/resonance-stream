@@ -273,9 +273,8 @@ pub fn FavoritesWindow() -> impl IntoView {
         }
     };
 
-    // The window's own title bar carries the title and the close button.
     view! {
-        <div class="relative h-screen flex flex-col bg-base-100 text-base-content overflow-hidden">
+        <div class="relative h-full flex flex-col bg-base-100 text-base-content overflow-hidden">
             // --- TABS: the default tab, the user's, and "+" ---
             <div class="flex items-center gap-1 px-3 pt-2 overflow-x-auto custom-scrollbar" role="tablist">
                 {move || {

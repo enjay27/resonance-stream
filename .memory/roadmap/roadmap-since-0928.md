@@ -24,7 +24,7 @@ K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
   until the first percent, a manual-download button. A guild mate's update succeeded before
   the friend reported, so the friend's cause was probably their network; still unconfirmed.
   **Reach:** only copies on 0.6.1 or later get the fix; a stuck 0.6.0 copy downloads the exe by
-  hand once -- put that link in the 0.6.1 notes and the README.
+  hand once -- the link is in the 0.6.1 notes and the README (`claude/release-0-6-1`).
 - [ ] **K3. Keep `latest` a signed release** (`release.yml`)
   - What breaks it is a release made *outside* the workflow (the workflow itself always uploads
     `latest.json`, the exe and the `.sig`, and verifies the signature first): a hand-made
@@ -50,8 +50,17 @@ K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
   in-app dialog, which had no height limit. (An earlier note here blamed "no previous stable
   tag"; that was a shallow clone hiding the old tags.) Now the app shows only the Korean user
   summary, the commit list is collapsed on the release page, and the dialog box scrolls.
-- [ ] **Cut 0.6.1** (Kade, 2026-10-03: **not yet -- it goes with UI fixes**, still to be listed): write `release-notes/v0.6.1.md`, bump `[workspace.package] version`, merge to `main`, push tag `v0.6.1`.
-  The gist `app` entry is **not** touched.
+- [ ] **Cut 0.6.1** (Kade, 2026-10-03: "push 0.6.1 first") -- prepared in `claude/release-0-6-1`:
+  `release-notes/v0.6.1.md` (checked with `release_notes_problem`), `[workspace.package] version`
+  0.6.1 (+ `Cargo.lock`), the README link for stuck 0.6.0 copies. **Left for Kade, after that PR
+  merges: push tag `v0.6.1` on `main`** (publishes to every user). The gist `app` entry is **not**
+  touched. Ticks when the tag run is green *and* `release.yml`'s new last step (feed read-back)
+  passed -- that also closes K3.
+  What 0.6.1 contains besides K1/K3/K20 -- the UI fixes it waited for, all on `main`: row menu
+  outside click (#104), cheat sheet + favorites as popup windows (#105-#107), favorites table
+  (#108), nav bar order / one-width buttons / translation picker (#110-#112), cheat sheet data:
+  nine classes with trees, Korean first with fan names, dungeons by season, tree lines
+  (#113-#116). Not run on Windows yet: #108, #110-#116 (Kade ran the popups, #105-#107).
 
 ### Windows session W1 (Kade at the keyboard, `cargo tauri dev` / installed exe as Administrator)
 
@@ -95,6 +104,10 @@ Order: verify first (K4, K6, K7 in W1), then build on the answers.
   - Decision for Kade, optional: create the firewall rule automatically when it is missing (the
     app already runs as Administrator). Not built.
 
+- [ ] **K26. Favorites tabs by stable id** (Kade, 2026-10-03: stable ids, not position keys --
+  tab order may become movable later; no backup file; a blank tab name becomes "탭 N") --
+  plan: [`favorites-stable-ids.md`](favorites-stable-ids.md). Duplicate tab names allowed.
+
 ---
 
 ## Release 0.7.0 -- decisions and gaps (P2)
@@ -116,8 +129,10 @@ Small and independent first; the ones that wait on Kade last.
   current `main` and screenshot with `ui-preview`.
 - [ ] **K16. Furigana misses** -- IPADIC reads 一人 as イチ ニン; CI's dictionary may differ from
   the one the core tests ran on. Check CI's readings, add an override list if it matters.
-- [ ] **K15. Cheat-sheet data** -- check against the official JP/KO sites; add the remaining 6
-  classes and the dungeons; then clear `SOURCE_NOTE`. Kade adds in-game slang.
+- [ ] **K15. Cheat-sheet data** -- the nine classes with their trees and the season dungeons are
+  in (#113-#116, as Kade gave them). Left: check the names against the official JP/KO sites, then
+  clear `SOURCE_NOTE`; add fan names as Kade learns them (`Entry.ja`, after the official one);
+  add the next season as a new group right after 상시 (the previous one folds by itself).
 - [ ] **K12. History from other channels** -- shown as WORLD and queued for translation (~30
   lines per refresh) and may flood the translator. Decide which history to keep (Kade).
 - [ ] **K11. W8 gap** -- llama-server binds its port itself, so pick-then-bind cannot be closed;
@@ -145,8 +160,8 @@ Small and independent first; the ones that wait on Kade last.
 
 ## Order at a glance
 
-1. K1 -> K3 -> K20 -> **release 0.6.1**  (K3b alongside, offline)
+1. K1 -> K3 -> K20 -> **release 0.6.1**  (K3b alongside, offline) -- prepared, waits for the tag
 2. **W1 session:** K2, K4, K6, K7, K25
-3. K5 (+ any fix W1 finds) -> **release 0.6.2**
+3. K5, K26 (+ any fix W1 finds) -> **release 0.6.2**
 4. K18, K13, K19, K17, K14, K16 -> K15, K12, K11, K10, K9, K8 (Kade's) -> **release 0.7.0**
 5. K21-K24 whenever

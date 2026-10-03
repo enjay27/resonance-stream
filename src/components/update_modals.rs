@@ -89,7 +89,7 @@ pub fn AppUpdateModal() -> impl IntoView {
                                 0 => view! {
                                     <div class="animate-in fade-in">
                                         <p class="text-sm font-bold">"버전: " {data.app.latest_version.clone()}</p>
-                                        <div class="bg-base-200 p-3 rounded text-xs opacity-80 whitespace-pre-wrap mt-2">
+                                        <div class="bg-base-200 p-3 rounded text-xs opacity-80 whitespace-pre-wrap mt-2 max-h-48 overflow-y-auto">
                                             {data.app.release_notes.clone()}
                                         </div>
                                         <div class="modal-action">
@@ -280,7 +280,7 @@ pub fn ModelUpdateModal() -> impl IntoView {
                                 0 => view! {
                                     <div class="animate-in fade-in">
                                         <p class="text-sm font-bold">"버전: " {data.model.latest_version.clone()}</p>
-                                        <div class="bg-base-200 p-3 rounded text-xs opacity-80 whitespace-pre-wrap mt-2">
+                                        <div class="bg-base-200 p-3 rounded text-xs opacity-80 whitespace-pre-wrap mt-2 max-h-48 overflow-y-auto">
                                             {data.model.release_notes.clone()}
                                         </div>
                                         <div class="modal-action">

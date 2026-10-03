@@ -250,8 +250,9 @@ installed app's data folder (same identifier): config, model, chat logs.
 An app update is installed only if one of the keys built into the app
 (`TRUSTED_UPDATE_KEYS`, `crates/core/src/update_signature.rs`) signed it for the
 announced version -- so a stable release is built and signed by
-`.github/workflows/release.yml`, never by hand: bump `[workspace.package] version`,
-merge to `main`, then push the tag `v<version>` on it. The workflow gates, builds
+`.github/workflows/release.yml`, never by hand: bump `[workspace.package] version`, write
+`release-notes/v<version>.md` (copy `release-notes/TEMPLATE.md`), merge to `main`, then
+push the tag `v<version>` on it. The workflow gates, builds
 the plain exe, signs it with the `TAURI_SIGNING_PRIVATE_KEY` secret, checks the
 signature the way the app will (`examples/verify_update.rs`) and publishes the exe,
 `<exe>.sig` and `latest.json` (the update feed). The private keys are never
@@ -267,13 +268,18 @@ deletes a release); both run `.github/scripts/check-release-feed.sh`. A red run 
 users get no update: delete the hand-made release or mark it prerelease, then run the
 workflow again.
 
-**Release notes are short, a simple summary, and in Korean.** Users read them -- on the
-release page and in the app's update dialog (`latest.json`'s `notes`). Write a few plain
-lines (about 10 at most) on what changes for someone who uses the app, in everyday words:
-no commit subjects, PR numbers, file or function names, and no English. This is for every
-stable release; candidate (`rc`) notes are for the tester and keep their own format.
-`release.yml` does not enforce it yet (it still pastes the commits since the last stable
-tag), so read the notes before tagging and replace them if they are not this.
+**Release notes: simple for users, detailed for maintainers.** `release-notes/v<version>.md`
+has two layers. Above the line `## 개발자용 상세` is the **user summary**: a few plain
+lines (about 10, at most 12) in Korean, in everyday words -- no commit subjects, PR
+numbers, file or function names, no English. It is what the app's update dialog shows
+(`latest.json`'s `notes`) and the top of the release page. Below that line is the
+**maintainer detail** (technical, any length, English is fine); the release page puts it,
+with the commit list since the previous stable tag, in one collapsed block, and the app
+never shows it. `release.yml` refuses to start without the file, or when the summary is
+empty, over 12 lines, has a line without Korean, or still has the `<<작성>>` placeholder
+(`release_notes_problem`, tested in `release-lib.test.sh`). The update dialog's notes box
+also scrolls past a fixed height, so a long note can never push its buttons off screen.
+Candidate (`rc`) notes are for the tester and keep their own format.
 
 ### Never commit
 - Secrets, `.env`.

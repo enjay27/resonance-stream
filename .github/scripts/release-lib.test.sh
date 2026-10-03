@@ -129,5 +129,70 @@ eq  "live: a feed that is not up yet is waited for" "0" "$(live o/r v0.6.1 FAKE_
 eq  "live: ... but not forever" "1" "$(live o/r v0.6.1 FAKE_CURL_FAILS=3 | cut -d'|' -f1)"
 rm -rf "$fake"
 
+# --- release notes: a short Korean summary for users, detail for maintainers ---
+notes_file=$'이번 업데이트에서 바뀐 점\n- 업데이트를 받다가 멈추던 문제를 고쳤어요.\n- 업데이트 창에 취소 버튼이 생겼어요.\n\n## 개발자용 상세\n- StallWatch: no data for 30 s ends the download\n- fetch::guarded'
+user_expected=$'이번 업데이트에서 바뀐 점\n- 업데이트를 받다가 멈추던 문제를 고쳤어요.\n- 업데이트 창에 취소 버튼이 생겼어요.'
+nproblem() { # nproblem <max> <notes> -> "rc|reason"
+  local out rc
+  out=$(release_notes_problem "$1" <<<"$2" 2>&1); rc=$?
+  printf '%s|%s' "$rc" "$out"
+}
+
+eq "user part: what comes before the marker" "$user_expected" "$(release_notes_user_part <<<"$notes_file")"
+eq "user part: trailing blank lines dropped" "한 줄" "$(printf '한 줄\n\n\n## 개발자용 상세\nx\n' | release_notes_user_part)"
+eq "user part: leading blank lines dropped" "한 줄" "$(printf '\n\n한 줄\n' | release_notes_user_part)"
+eq "user part: no marker -> the whole file" $'가\n나' "$(printf '가\n나\n' | release_notes_user_part)"
+eq "user part: CRLF (a file saved on Windows)" $'가\n나' "$(printf '가\r\n나\r\n\r\n## 개발자용 상세\r\nx\r\n' | release_notes_user_part)"
+eq "dev part: from the marker on" $'## 개발자용 상세\n- StallWatch: no data for 30 s ends the download\n- fetch::guarded' "$(release_notes_dev_part <<<"$notes_file")"
+eq "dev part: none without the marker" "" "$(printf '가\n나\n' | release_notes_dev_part)"
+
+eq "notes: a short Korean summary passes" "0|" "$(nproblem 12 "$notes_file")"
+eq "notes: detail may be English and long" "0|" "$(nproblem 12 "$(printf '가\n## 개발자용 상세\n'; seq 1 50 | sed 's/^/- detail /')")"
+eq "notes: CRLF passes" "0|" "$(nproblem 12 "$(printf '가\r\n나\r\n')")"
+twelve=$(seq 1 12 | sed 's/^/- 고친 점 /')
+thirteen=$(seq 1 13 | sed 's/^/- 고친 점 /')
+eq  "notes: exactly the limit passes" "0|" "$(nproblem 12 "$twelve")"
+res=$(nproblem 12 "$thirteen")
+eq  "notes: one over the limit fails" "1" "${res%%|*}"
+has "notes: ... and names the limit" "$res" "12"
+res=$(nproblem 12 $'## 개발자용 상세\n- 내용')
+eq  "notes: no user part fails" "1" "${res%%|*}"
+res=$(nproblem 12 $'- 업데이트가 멈추던 문제를 고쳤어요.\n- The update no longer hangs at 0%')
+eq  "notes: an English line fails" "1" "${res%%|*}"
+has "notes: ... and shows that line" "$res" "The update no longer hangs"
+eq  "notes: an empty file fails" "1" "$(nproblem 12 "" | cut -d'|' -f1)"
+
+commits=$(mktemp)
+printf -- '- 첫 커밋\n- second commit\n' > "$commits"
+body=$(release_page_body "$commits" <<<"$notes_file")
+has "page: the user part comes first" "${body%%<details>*}" "업데이트 창에 취소 버튼이 생겼어요."
+eq  "page: ... and the detail is not outside the fold" "no" "$([[ ${body%%<details>*} == *StallWatch* ]] && echo yes || echo no)"
+has "page: the fold is titled" "$body" "<summary>개발자용 상세</summary>"
+has "page: the dev part is inside the fold" "${body#*<summary>}" "StallWatch: no data for 30 s ends the download"
+eq  "page: ... without its marker heading" "no" "$([[ $body == *'## 개발자용 상세'* ]] && echo yes || echo no)"
+has "page: the commit list is inside the fold" "${body#*<summary>}" "- second commit"
+eq  "page: the fold is closed at the end" "</details>" "$(tail -n 1 <<<"$body")"
+eq  "page: exactly one fold" "1" "$(grep -c '<details>' <<<"$body")"
+rm -f "$commits"
+
+# An unedited template must not be published.
+res=$(nproblem 12 $'- 고친 점을 쉬운 말로 <<작성>>\n')
+eq  "notes: a left-over placeholder fails" "1" "${res%%|*}"
+has "notes: ... named" "$res" "<<"
+
+# --- release_previous_stable_tag: where the commit list starts ---
+repo=$(mktemp -d)
+(
+  cd "$repo" && git init -q . && git config user.email t@t && git config user.name t
+  git commit -q --allow-empty -m a && git tag v0.5.0
+  git commit -q --allow-empty -m b && git tag v0.5.1-beta && git tag v0.6.0-rc.x
+  git commit -q --allow-empty -m c && git tag v0.6.0
+  git commit -q --allow-empty -m d && git tag v0.6.1
+)
+eq "previous stable: skips candidates and betas" "v0.5.0" "$(cd "$repo" && release_previous_stable_tag v0.6.0)"
+eq "previous stable: the one right before" "v0.6.0" "$(cd "$repo" && release_previous_stable_tag v0.6.1)"
+eq "previous stable: none before the first" "" "$(cd "$repo" && release_previous_stable_tag v0.5.0)"
+rm -rf "$repo"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

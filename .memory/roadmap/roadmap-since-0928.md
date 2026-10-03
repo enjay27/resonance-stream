@@ -19,6 +19,7 @@ K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
 ## Release 0.6.1 -- updates you can trust (P0)
 
 - [ ] **K1. Auto-update stuck at 0%** (GitHub #96; friend's report 2026-10-03)
+  - **Status 2026-10-03:** code done on `claude/update-download-stall` (stall + connect timeouts for every download, cancel for the app update, indeterminate bar, manual-download button). Stays unticked until check A3 (below) ran on Windows; the reporter's cause is still unconfirmed.
   - Cause candidates (read, not run): `reqwest::Client::new()` in `downloader/fetch.rs` has no
     connect or stall timeout; step 1 of `update_modals.rs` has no cancel; no `Content-Length`
     keeps the bar at 0% (`ProgressThrottle::update` returns `None` for total 0).

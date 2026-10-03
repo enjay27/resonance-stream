@@ -16,6 +16,10 @@ pub const ALL_TAB: &str = "전체";
 pub const CUSTOM_TAB: &str = "커스텀";
 pub const SYSTEM_TAB: &str = "시스템";
 
+/// What `download_app_update` is rejected with when the user cancels it. The
+/// update dialog tells a cancel from a failure by this text.
+pub const UPDATE_CANCELLED: &str = "Update download cancelled";
+
 /// A chat channel. On the wire and on disk it is its upper-case name
 /// (`"WORLD"`, `"GUILD"`, ...); a name this enum does not know -- an old log, a
 /// channel the game has that we do not show separately yet (the beginner

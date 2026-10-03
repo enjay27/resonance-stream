@@ -2,7 +2,11 @@
 
 **Index, not the record.** Only what would be *false* the moment it goes stale lives here.
 
-## Now — 2026-10-02
+## Now — 2026-10-03
+
+**Roadmap since 09-28 (2026-10-03, `claude/roadmap-since-0928`):** the open items as a checklist in priority order -- [`roadmap/roadmap-since-0928.md`](.memory/roadmap/roadmap-since-0928.md). First: K1, the update download that hangs at 0% (GitHub #96, a user report), then release 0.6.1 and one Windows session for the signed-update checks. Nothing in it is started.
+
+## 2026-10-02
 
 **v0.6.0 released (2026-10-02) -- signed updates live; next: verify on Windows.** Handoff for that session: [`sessions/2026-10-02-0.6.0-windows-verification-handoff.md`](.memory/sessions/2026-10-02-0.6.0-windows-verification-handoff.md). The app updates itself from the newest stable release's `latest.json` and installs only an exe that one of two built-in keys (primary `9005FB94...`, offline backup `0099CF71...`) signed for the announced version (`resonance_core::update_signature` / `update_feed`, `app_updater.rs`, verified again before the swap); stable releases come only from `release.yml` (tag `v<x.y.z>` on main; secrets `TAURI_SIGNING_PRIVATE_KEY` + `_PASSWORD`). v0.6.0 is the bridge: the gist's `app` entry (Kade edits it) points at it for copies <= 0.5.x and stays. **Verified:** release workflow run; the published exe against the real feed; Kade's 0.5.0 -> 0.6.0 update through the gist (old code, no signature check). **NOT VERIFIED:** the signed path (needs a release newer than 0.6.0), verify-before-swap, the error dialog, the backup key (never signed with), all on Windows. Design: [`roadmap/updater-and-interface-pick.md`](.memory/roadmap/updater-and-interface-pick.md) B.
 

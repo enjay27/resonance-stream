@@ -148,9 +148,169 @@ pub fn add_from_chat(
     true
 }
 
+/// One of a favorite's boxes in the table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Field {
+    /// The message (Japanese): what is pasted into the game.
+    Text,
+    /// The reminder under it (its meaning in Korean); never sent.
+    Note,
+    /// The global shortcut, as an accelerator ("Alt+F1"); empty is none.
+    Shortcut,
+}
+
+/// Why an edit was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditError {
+    /// A message needs text.
+    EmptyText,
+}
+
+impl EditError {
+    pub fn message(self) -> &'static str {
+        match self {
+            EditError::EmptyText => "메시지는 비워 둘 수 없습니다.",
+        }
+    }
+}
+
+/// Sets one box of the message at `index` (text and note are trimmed).
+/// `Ok(true)` when it changed -- only then is there something to save;
+/// `Ok(false)` when it was already that, or the row is gone. A refused edit
+/// changes nothing.
+pub fn set_field(
+    list: &mut [FavoriteMessage],
+    index: usize,
+    field: Field,
+    value: &str,
+) -> Result<bool, EditError> {
+    let Some(fav) = list.get_mut(index) else {
+        return Ok(false);
+    };
+    let value = match field {
+        Field::Shortcut => value,
+        Field::Text | Field::Note => value.trim(),
+    };
+    if field == Field::Text && value.is_empty() {
+        return Err(EditError::EmptyText);
+    }
+    let slot = match field {
+        Field::Text => &mut fav.text,
+        Field::Note => &mut fav.note,
+        Field::Shortcut => &mut fav.shortcut,
+    };
+    if slot == value {
+        return Ok(false);
+    }
+    *slot = value.to_string();
+    Ok(true)
+}
+
+/// The places in `list` of the messages filed under `tab`: a row's key in the
+/// table is its place in the whole list.
+pub fn indices_in_tab(list: &[FavoriteMessage], tab: &str) -> Vec<usize> {
+    list.iter()
+        .enumerate()
+        .filter(|(_, f)| f.tab == tab)
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// A message for `tab` from the boxes of the table's blank row; refused
+/// without text.
+pub fn new_message(
+    tab: &str,
+    text: &str,
+    note: &str,
+    shortcut: &str,
+) -> Result<FavoriteMessage, EditError> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(EditError::EmptyText);
+    }
+    Ok(FavoriteMessage {
+        text: text.to_string(),
+        note: note.trim().to_string(),
+        shortcut: shortcut.to_string(),
+        tab: tab.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- the table's boxes ---
+
+    #[test]
+    fn a_box_is_set_trimmed_and_reports_whether_it_changed() {
+        let mut list = vec![fav("こんにちは", ""), fav("またね", "")];
+        assert_eq!(
+            set_field(&mut list, 1, Field::Text, "  さよなら "),
+            Ok(true)
+        );
+        assert_eq!(list[1].text, "さよなら");
+        assert_eq!(set_field(&mut list, 1, Field::Text, "さよなら"), Ok(false));
+        assert_eq!(set_field(&mut list, 0, Field::Note, " 안녕 "), Ok(true));
+        assert_eq!(list[0].note, "안녕");
+        assert_eq!(list[0].text, "こんにちは", "the other boxes stay");
+    }
+
+    #[test]
+    fn the_message_box_cannot_be_emptied_but_the_note_can() {
+        let mut list = vec![FavoriteMessage {
+            text: "こんにちは".into(),
+            note: "안녕".into(),
+            ..Default::default()
+        }];
+        assert_eq!(
+            set_field(&mut list, 0, Field::Text, "   "),
+            Err(EditError::EmptyText)
+        );
+        assert_eq!(list[0].text, "こんにちは", "a refused edit changes nothing");
+        assert_eq!(set_field(&mut list, 0, Field::Note, ""), Ok(true));
+        assert!(list[0].note.is_empty());
+    }
+
+    #[test]
+    fn a_shortcut_is_set_and_cleared_as_given() {
+        let mut list = vec![fav("a", "")];
+        assert_eq!(set_field(&mut list, 0, Field::Shortcut, "Alt+F1"), Ok(true));
+        assert_eq!(list[0].shortcut, "Alt+F1");
+        assert_eq!(set_field(&mut list, 0, Field::Shortcut, ""), Ok(true));
+        assert!(list[0].shortcut.is_empty());
+        assert_eq!(set_field(&mut list, 0, Field::Shortcut, ""), Ok(false));
+    }
+
+    #[test]
+    fn a_box_of_a_row_that_is_gone_is_ignored() {
+        let mut list = vec![fav("a", "")];
+        assert_eq!(set_field(&mut list, 5, Field::Text, "b"), Ok(false));
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn a_tabs_rows_are_found_by_their_place_in_the_whole_list() {
+        let list = vec![
+            fav("a", ""),
+            fav("b", "레이드"),
+            fav("c", ""),
+            fav("d", "레이드"),
+        ];
+        assert_eq!(indices_in_tab(&list, ""), [0, 2]);
+        assert_eq!(indices_in_tab(&list, "레이드"), [1, 3]);
+        assert!(indices_in_tab(&list, "없는 탭").is_empty());
+    }
+
+    #[test]
+    fn a_new_row_becomes_a_message_in_its_tab_once_it_has_text() {
+        let made = new_message("레이드", "  よろしく ", " 잘 부탁 ", "Alt+F2").unwrap();
+        assert_eq!(made.text, "よろしく");
+        assert_eq!(made.note, "잘 부탁");
+        assert_eq!(made.shortcut, "Alt+F2");
+        assert_eq!(made.tab, "레이드");
+        assert_eq!(new_message("", "  ", "메모", ""), Err(EditError::EmptyText));
+    }
 
     #[test]
     fn adds_text_with_translation_as_note() {

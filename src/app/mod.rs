@@ -35,6 +35,15 @@ pub fn App() -> impl IntoView {
 
     provide_context(signals);
 
+    // A click anywhere else closes the open row menu. The sender / message
+    // triggers and the menus themselves stop their clicks (chat_row.rs), so
+    // only a click "somewhere else" gets here.
+    window_event_listener(leptos::ev::click, move |_| {
+        if active_menu.get_untracked().is_some() {
+            set_active_menu.set(None);
+        }
+    });
+
     // --- CONFIG ACTIONS ---
     let actions = actions::create_actions(signals);
     let finalize_setup = setup_flow::finalize_setup(signals, actions.save_config);
@@ -104,9 +113,6 @@ pub fn App() -> impl IntoView {
             }
             // Note: Use `signals.config.overlay_opacity.get()` if your app.rs uses the signals struct instead of local signals.
         >
-            <Show when=move || active_menu.get().is_some()>
-                <div class="menu-overlay" on:click=move |_| set_active_menu.set(None)></div>
-            </Show>
             <Show when=move || !compact_mode.get()>
                 <TitleBar />
             </Show>

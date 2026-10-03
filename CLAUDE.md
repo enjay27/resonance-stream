@@ -147,6 +147,13 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
 - **Auto-correction restraint.** Self-correct at most **2** times, then stop and ask.
 - **Never report a gate as passed when it could not run.** A Linux session cannot
   build `src-tauri/`; say so, and leave it to the Windows CI job.
+- **A blocked host is asked for, not worked around.** A session can only reach the hosts
+  in its environment's trusted-host list. When a build, download or test needs a host
+  that is blocked (e.g. `Lindera.dev`, which the furigana dictionary's build script
+  downloads from), stop and ask Kade to add it -- name the host and what needs it. Do not
+  substitute a mirror, re-encode another copy, patch a dependency or stub the result to
+  get past it. Until it is added, the gate that needs it is reported as not run.
+  `Lindera.dev` is trusted since 2026-10-03.
 
 ---
 

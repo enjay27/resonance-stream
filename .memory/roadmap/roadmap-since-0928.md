@@ -107,6 +107,9 @@ Order: verify first (K4, K6, K7 in W1), then build on the answers.
 - [ ] **K26. Favorites tabs by stable id** (Kade, 2026-10-03: stable ids, not position keys --
   tab order may become movable later; no backup file; a blank tab name becomes "탭 N") --
   plan: [`favorites-stable-ids.md`](favorites-stable-ids.md). Duplicate tab names allowed.
+  Built (2026-10-03, `candidate/favorites-stable-ids`, PR into `rc` for Kade's Windows test; the same
+  branch goes to `main` in its own PR afterwards): ticks when Kade's checks in
+  `unverified-on-windows.md` pass on his real config. Not in it: renaming / moving a tab.
 
 ---
 

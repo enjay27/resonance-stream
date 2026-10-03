@@ -1,10 +1,11 @@
 use crate::{inject_system_message, AppState, SystemLogLevel, TranslatorState};
 use resonance_core::download::write_atomic;
+use resonance_core::favorites_migration::migrate_favorites;
 use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use resonance_types::{
     default_catch_up_limit, default_favorite_messages, Channel, ComputeMode, FavoriteMessage,
-    LogLevel, TabSwitchModifier, Theme, Tier, TranslationView, ALL_TAB, CUSTOM_TAB,
+    FavoriteTab, LogLevel, TabSwitchModifier, Theme, Tier, TranslationView, ALL_TAB, CUSTOM_TAB,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -71,10 +72,11 @@ pub struct AppConfig {
     /// Chat lines to copy or paste by shortcut; see `shortcut.rs`.
     #[serde(default = "default_favorite_messages")]
     pub favorite_messages: Vec<FavoriteMessage>,
-    /// Names of the favorites tabs the user made (the default tab is not
-    /// listed); each message carries its own tab name.
+    /// The favorites tabs the user made, in display order (the default tab,
+    /// id 0, is not listed); each message carries the id of its tab. A file
+    /// from before tabs had ids is converted on load (`parse_config`).
     #[serde(default)]
-    pub favorite_tabs: Vec<String>,
+    pub favorite_tabs: Vec<FavoriteTab>,
     /// Days of daily chat logs (chat_logs/) to keep; 0 keeps them all.
     #[serde(default)]
     pub chat_log_retention_days: u32,
@@ -193,6 +195,15 @@ fn get_config_path(app: &AppHandle) -> PathBuf {
     config_dir.join("config.json")
 }
 
+/// A `config.json` as text -> the config. A file written before the favorites
+/// tabs had ids (names instead) is converted first, so every tab and favorite
+/// survives; a file already in the new shape is read as it is.
+fn parse_config(content: &str) -> serde_json::Result<AppConfig> {
+    let mut json: serde_json::Value = serde_json::from_str(content)?;
+    migrate_favorites(&mut json);
+    serde_json::from_value(json)
+}
+
 /// Reads `config.json`, writing the defaults first if it does not exist yet.
 /// Only start-up (and early callers before the state exists) read the file.
 pub fn read_config_file(app: &AppHandle) -> AppConfig {
@@ -208,7 +219,7 @@ pub fn read_config_file(app: &AppHandle) -> AppConfig {
     }
 
     match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|e| {
+        Ok(content) => parse_config(&content).unwrap_or_else(|e| {
             // Keep the unreadable file: the next save would overwrite it.
             let backup = path.with_extension("json.bad");
             let _ = fs::copy(&path, &backup);
@@ -408,13 +419,58 @@ mod tests {
         let old: AppConfig = serde_json::from_str(r#"{"init_done": true}"#).unwrap();
         assert!(old.favorite_tabs.is_empty());
         let config: AppConfig = serde_json::from_str(
-            r#"{"favorite_tabs": ["레이드"], "favorite_messages": [{"text": "hi", "tab": "레이드"}]}"#,
+            r#"{"favorite_tabs": [{"id": 3, "name": "레이드"}], "favorite_messages": [{"text": "hi", "tab": 3}]}"#,
         )
         .unwrap();
-        assert_eq!(config.favorite_tabs, ["레이드"]);
-        assert_eq!(config.favorite_messages[0].tab, "레이드");
+        assert_eq!(config.favorite_tabs[0].id, 3);
+        assert_eq!(config.favorite_tabs[0].name, "레이드");
+        assert_eq!(config.favorite_messages[0].tab, 3);
         let saved = serde_json::to_value(&config).unwrap();
-        assert_eq!(saved["favorite_tabs"][0], "레이드");
+        assert_eq!(saved["favorite_tabs"][0]["id"], 3);
+        assert_eq!(saved["favorite_tabs"][0]["name"], "레이드");
+    }
+
+    #[test]
+    fn a_config_with_tab_names_is_converted_when_read() {
+        let config = parse_config(
+            r#"{"init_done": true,
+                "favorite_tabs": ["레이드", "던전"],
+                "favorite_messages": [
+                    {"text": "a", "tab": ""},
+                    {"text": "b", "shortcut": "Alt+F1", "tab": "던전"}]}"#,
+        )
+        .unwrap();
+        assert!(config.init_done, "the rest of the file is read as before");
+        let tabs: Vec<_> = config
+            .favorite_tabs
+            .iter()
+            .map(|t| (t.id, t.name.as_str()))
+            .collect();
+        assert_eq!(tabs, [(1, "레이드"), (2, "던전")]);
+        let filed: Vec<_> = config.favorite_messages.iter().map(|f| f.tab).collect();
+        assert_eq!(filed, [0, 2]);
+        assert_eq!(config.favorite_messages[1].shortcut, "Alt+F1");
+    }
+
+    #[test]
+    fn a_config_in_the_new_shape_is_read_as_it_is_and_one_without_favorites_gets_the_defaults() {
+        let json = r#"{"favorite_tabs": [{"id": 4, "name": "레이드"}],
+                       "favorite_messages": [{"text": "a", "tab": 4}]}"#;
+        let config = parse_config(json).unwrap();
+        assert_eq!(config.favorite_tabs[0].id, 4);
+        assert_eq!(config.favorite_messages[0].tab, 4);
+        assert_eq!(
+            parse_config(&serde_json::to_string(&config).unwrap())
+                .unwrap()
+                .favorites(),
+            config.favorites(),
+            "saving and reading again changes nothing"
+        );
+
+        let bare = parse_config(r#"{"init_done": true}"#).unwrap();
+        assert_eq!(bare.favorite_messages, default_favorite_messages());
+        assert!(bare.favorite_tabs.is_empty());
+        assert!(parse_config("not json").is_err());
     }
 
     #[test]
@@ -424,9 +480,12 @@ mod tests {
                 text: "hi".into(),
                 note: "안녕".into(),
                 shortcut: "Alt+F1".into(),
-                tab: "레이드".into(),
+                tab: 1,
             }],
-            tabs: vec!["레이드".into()],
+            tabs: vec![FavoriteTab {
+                id: 1,
+                name: "레이드".into(),
+            }],
         };
         let config = AppConfig::default().with_favorites(state.clone());
         assert_eq!(config.favorite_messages, state.messages);
@@ -443,7 +502,10 @@ mod tests {
                 text: "from the popup".into(),
                 ..Default::default()
             }],
-            tabs: vec!["레이드".into()],
+            tabs: vec![FavoriteTab {
+                id: 1,
+                name: "레이드".into(),
+            }],
         });
         let stale = AppConfig {
             overlay_opacity: 0.5,

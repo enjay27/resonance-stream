@@ -4,6 +4,7 @@
 
 pub mod capture;
 pub mod download;
+pub mod favorites_migration;
 pub mod furigana;
 pub mod history;
 pub mod kanji_on;

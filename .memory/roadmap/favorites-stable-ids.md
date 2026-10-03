@@ -2,7 +2,7 @@
 
 Decided by Kade: **stable ids** (not position keys -- he may want to move tabs later), **no
 backup file**, a blank tab name becomes **"탭 N"**, duplicate names allowed, **after 0.6.1**.
-Nothing is built yet. Why ids and not positions: with positions every reorder renames every
+**Built 2026-10-03 on `candidate/favorites-stable-ids`** (see *As built* at the end); waiting for Kade's Windows test. Why ids and not positions: with positions every reorder renames every
 key; with an id a tab is the same tab wherever it sits in the list, so "move tab" later is just
 reordering `tabs`.
 
@@ -59,3 +59,18 @@ and removes only that tab's messages; the star adds to 기본.
 
 ## Not in this task
 Renaming a tab and moving a tab (the id design keeps both cheap -- a later PR).
+
+## As built (2026-10-03)
+- Types: `FavoriteTab { id, name }`, `DEFAULT_FAVORITE_TAB = 0`, `FavoriteMessage.tab: u32`
+  (`crates/types`).
+- **Conversion in `crates/core` (`favorites_migration::migrate_favorites`), not in `types`** (CLAUDE.md:
+  new pure logic goes in core), **on the raw JSON before it becomes an `AppConfig`**
+  (`parse_config` in `app_config.rs`): turning a name into an id needs the tab list and the messages
+  together, which a per-field deserializer cannot see. The ui never meets the old shape -- the
+  backend always sends the converted config. New ids start after the largest existing one.
+- `favorites.rs`: `add_tab` returns the id; `TabError::Taken` is gone; `clean_tabs` keeps ids and
+  fixes names (trim, cut to 12, blank -> "탭 N" by place) and gives a repeated or 0 id a fresh one
+  (no tab is lost); `shown_tab` -- a window whose open tab another window deleted shows 기본.
+- The conversion is not written back to disk by itself: it is deterministic, and the next save
+  (any favorites change) writes the new shape. Going back to a 0.6.x exe after that reads the
+  file as unreadable -> defaults, the old file kept as `config.json.bad` (accepted, as planned).

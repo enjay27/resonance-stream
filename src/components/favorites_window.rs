@@ -6,7 +6,7 @@
 use crate::config_signals::ConfigSignals;
 use crate::favorites::{
     add_tab, delete_tab, fill_with_defaults, indices_in_tab, locate, new_message, set_field,
-    tab_summary, Field, DEFAULT_TAB, DEFAULT_TAB_LABEL, MAX_TAB_NAME_CHARS,
+    shown_tab, tab_label, tab_summary, Field, DEFAULT_TAB, MAX_TAB_NAME_CHARS,
 };
 use crate::favorites_sync;
 use crate::shortcut_keys::{
@@ -62,13 +62,13 @@ pub fn FavoritesWindow() -> impl IntoView {
         ..
     } = signals.config;
 
-    // The tab on show (its stored name; empty is the default tab) and the two
+    // The tab the window has open (its id; 0 is the default tab) and the two
     // questions the strip can ask: add a tab, or confirm deleting one.
-    let (active_tab, set_active_tab) = signal(DEFAULT_TAB.to_string());
+    let (active_tab, set_active_tab) = signal(DEFAULT_TAB);
     let (adding_tab, set_adding_tab) = signal(false);
     let (new_tab_name, set_new_tab_name) = signal(String::new());
     let (new_tab_error, set_new_tab_error) = signal(None::<&'static str>);
-    let (deleting_tab, set_deleting_tab) = signal(None::<String>);
+    let (deleting_tab, set_deleting_tab) = signal(None::<u32>);
 
     // The box recording a shortcut: a row's (by its place in the whole list --
     // the key of the table's rows) or the blank row's.
@@ -117,7 +117,7 @@ pub fn FavoritesWindow() -> impl IntoView {
 
     // The blank row got its text: it joins the tab, and a new blank row follows.
     let add_from_draft = move || match new_message(
-        &active_tab.get_untracked(),
+        shown_tab(&favorite_tabs.get_untracked(), active_tab.get_untracked()),
         &draft_text.get_untracked(),
         &draft_note.get_untracked(),
         &draft_shortcut.get_untracked(),
@@ -143,9 +143,9 @@ pub fn FavoritesWindow() -> impl IntoView {
         favorites_sync::save(signals.config);
     };
 
-    let switch_tab = move |name: String| {
+    let switch_tab = move |id: u32| {
         reset_boxes();
-        set_active_tab.set(name);
+        set_active_tab.set(id);
     };
 
     let open_add_tab = move || {
@@ -158,14 +158,14 @@ pub fn FavoritesWindow() -> impl IntoView {
     let confirm_add_tab = move |fill: bool| {
         let mut tabs = favorite_tabs.get_untracked();
         match add_tab(&mut tabs, &new_tab_name.get_untracked()) {
-            Ok(name) => {
+            Ok(id) => {
                 set_favorite_tabs.set(tabs);
                 if fill {
                     set_favorite_messages.update(|list| {
-                        fill_with_defaults(list, &name);
+                        fill_with_defaults(list, id);
                     });
                 }
-                switch_tab(name);
+                switch_tab(id);
                 set_adding_tab.set(false);
                 favorites_sync::save(signals.config);
             }
@@ -173,14 +173,14 @@ pub fn FavoritesWindow() -> impl IntoView {
         }
     };
 
-    let confirm_delete_tab = move |name: String| {
+    let confirm_delete_tab = move |id: u32| {
         let mut tabs = favorite_tabs.get_untracked();
         let mut list = favorite_messages.get_untracked();
-        delete_tab(&mut tabs, &mut list, &name);
+        delete_tab(&mut tabs, &mut list, id);
         set_favorite_tabs.set(tabs);
         set_favorite_messages.set(list);
         set_deleting_tab.set(None);
-        switch_tab(DEFAULT_TAB.to_string());
+        switch_tab(DEFAULT_TAB);
         favorites_sync::save(signals.config);
     };
 
@@ -243,16 +243,14 @@ pub fn FavoritesWindow() -> impl IntoView {
                     ))),
                     Some(Conflict::Favorite(i)) => {
                         let (tab, place) = favorite_messages
-                            .with_untracked(|list| locate(list, i))
+                            .with_untracked(|list| {
+                                favorite_tabs.with_untracked(|tabs| locate(list, tabs, i))
+                            })
                             .unwrap_or_default();
                         set_error.set(Some(format!(
                             "{}: [{}] {}번 메시지가 이미 사용 중입니다.",
                             display(&accelerator),
-                            if tab.is_empty() {
-                                DEFAULT_TAB_LABEL
-                            } else {
-                                &tab
-                            },
+                            tab,
                             place
                         )))
                     }
@@ -335,17 +333,15 @@ pub fn FavoritesWindow() -> impl IntoView {
             // --- TABS: the default tab, the user's, and "+" ---
             <div class="flex items-center gap-1 px-3 pt-2 overflow-x-auto custom-scrollbar" role="tablist">
                 {move || {
-                    let mut names = vec![DEFAULT_TAB.to_string()];
-                    names.extend(favorite_tabs.get());
-                    names.into_iter().map(|name| {
+                    let tabs = favorite_tabs.get();
+                    let mut ids = vec![DEFAULT_TAB];
+                    ids.extend(tabs.iter().map(|t| t.id));
+                    ids.into_iter().map(|id| {
                         let is_active = {
-                            let name = name.clone();
-                            move || active_tab.get() == name
+                            move || shown_tab(&favorite_tabs.get(), active_tab.get()) == id
                         };
-                        let label = if name == DEFAULT_TAB { DEFAULT_TAB_LABEL.to_string() } else { name.clone() };
-                        let removable = name != DEFAULT_TAB;
-                        let pick = name.clone();
-                        let ask_delete = name.clone();
+                        let label = tab_label(&tabs, id).to_string();
+                        let removable = id != DEFAULT_TAB;
                         let is_active_btn = is_active.clone();
                         view! {
                             <div class=move || format!(
@@ -354,7 +350,7 @@ pub fn FavoritesWindow() -> impl IntoView {
                             )>
                                 <button class="h-7 px-2.5" role="tab"
                                     aria-selected=move || is_active_btn().to_string()
-                                    on:click=move |_| switch_tab(pick.clone())>
+                                    on:click=move |_| switch_tab(id)>
                                     {label}
                                 </button>
                                 <Show when={
@@ -362,10 +358,7 @@ pub fn FavoritesWindow() -> impl IntoView {
                                     move || removable && is_active()
                                 }>
                                     <button class="h-7 pr-2 text-base-content/50 hover:text-error" title="탭 삭제"
-                                        on:click={
-                                            let ask_delete = ask_delete.clone();
-                                            move |_| set_deleting_tab.set(Some(ask_delete.clone()))
-                                        }>
+                                        on:click=move |_| set_deleting_tab.set(Some(id))>
                                         "✕"
                                     </button>
                                 </Show>
@@ -402,7 +395,10 @@ pub fn FavoritesWindow() -> impl IntoView {
                     </thead>
                     // One body per message: its two lines are one row.
                     <For
-                        each={move || favorite_messages.with(|l| indices_in_tab(l, &active_tab.get()))}
+                        each={move || {
+                            let tab = favorite_tabs.with(|t| shown_tab(t, active_tab.get()));
+                            favorite_messages.with(|l| indices_in_tab(l, tab))
+                        }}
                         key=|index| *index
                         children=move |index| view! {
                             <tbody class="border-b border-base-content/5">
@@ -500,9 +496,9 @@ pub fn FavoritesWindow() -> impl IntoView {
             // --- WARN: deleting a tab deletes its messages ---
             <Show when=move || deleting_tab.get().is_some()>
                 {move || {
-                    let name = deleting_tab.get().unwrap_or_default();
-                    let (count, keyed) = favorite_messages.with(|l| tab_summary(l, &name));
-                    let target = name.clone();
+                    let id = deleting_tab.get().unwrap_or(DEFAULT_TAB);
+                    let name = favorite_tabs.with(|t| tab_label(t, id).to_string());
+                    let (count, keyed) = favorite_messages.with(|l| tab_summary(l, id));
                     view! {
                         <div class="absolute inset-0 z-20 grid place-items-center bg-base-300/80 p-4">
                             <div class="w-full max-w-xs flex flex-col gap-2 p-3 rounded-lg bg-base-200 border border-error/40 shadow-xl">
@@ -513,7 +509,7 @@ pub fn FavoritesWindow() -> impl IntoView {
                                 </p>
                                 <div class="flex justify-end gap-1">
                                     <button class="btn btn-ghost btn-xs" on:click=move |_| set_deleting_tab.set(None)>"취소"</button>
-                                    <button class="btn btn-error btn-xs" on:click=move |_| confirm_delete_tab(target.clone())>"삭제"</button>
+                                    <button class="btn btn-error btn-xs" on:click=move |_| confirm_delete_tab(id)>"삭제"</button>
                                 </div>
                             </div>
                         </div>

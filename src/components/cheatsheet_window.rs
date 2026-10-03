@@ -24,9 +24,8 @@ pub fn CheatSheetWindow() -> impl IntoView {
         });
     };
 
-    // The window's own title bar carries the title and the close button.
     view! {
-        <div class="h-screen flex flex-col bg-base-100 text-base-content">
+        <div class="h-full flex flex-col bg-base-100 text-base-content">
         <div class="flex items-center gap-2 px-3 pt-2">
             <div class="flex items-center gap-1" role="tablist">
                 {Section::ALL.into_iter().map(|s| view! {

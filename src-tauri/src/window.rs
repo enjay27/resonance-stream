@@ -2,7 +2,11 @@
 //! windows that open beside it.
 
 use resonance_types::{is_popup_label, PopupKind};
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use std::time::Duration;
+use tauri::{
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
+use tauri_plugin_window_state::{StateFlags, WindowExt};
 
 #[tauri::command]
 pub fn set_always_on_top(window: tauri::Window, on_top: bool) {
@@ -16,35 +20,98 @@ pub fn set_always_on_top(window: tauri::Window, on_top: bool) {
     }
 }
 
-/// Opens a tool in a window of its own, so the chat stays visible: the existing
-/// window is brought to the front, else a new one is made. It is owned by the
-/// overlay (above it, closed with it) and pinned when the overlay is. The page
-/// in it picks its view from the window's label (`PopupKind::label`).
-///
-/// `async` on purpose: creating a window from a synchronous command can
-/// deadlock on Windows.
-#[tauri::command]
-pub async fn open_popup(app: tauri::AppHandle, kind: PopupKind) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(kind.label()) {
-        let _ = window.unminimize();
-        let _ = window.show();
-        return window.set_focus().map_err(|e| e.to_string());
-    }
+/// Creates a popup's window, hidden. Its page starts loading at once, so by
+/// the time it is shown it is ready. It has no native title bar (the page
+/// draws its own, like the main window's) and is owned by the overlay (above
+/// it, closed with it), pinned when the overlay is. The page in it picks its
+/// view from the window's label (`PopupKind::label`).
+fn create_popup(app: &AppHandle, kind: PopupKind) -> Result<WebviewWindow, String> {
     let main = app
         .get_webview_window("main")
         .ok_or("the main window was not found")?;
     let (width, height) = kind.size();
-    WebviewWindowBuilder::new(&app, kind.label(), WebviewUrl::App("index.html".into()))
+    let window = WebviewWindowBuilder::new(app, kind.label(), WebviewUrl::App("index.html".into()))
         .title(kind.title())
         .inner_size(width, height)
         .min_inner_size(300.0, 300.0)
         .resizable(true)
+        .decorations(false)
+        .shadow(true)
+        .center()
+        // Hidden until `show_popup` has put it back where it was left: shown
+        // at once it would appear at the default place and jump.
+        .visible(false)
         .always_on_top(main.is_always_on_top().unwrap_or(false))
         .parent(&main)
         .map_err(|e| e.to_string())?
         .build()
         .map_err(|e| e.to_string())?;
-    Ok(())
+    // Closing a popup only hides it: opening it again is instant.
+    let hider = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = hider.hide();
+        }
+    });
+    Ok(window)
+}
+
+/// Shows a popup (creating it if it was not made yet), at its saved size and
+/// place, in front. A popup that is already open is only brought forward.
+fn show_popup(app: &AppHandle, kind: PopupKind) -> Result<(), String> {
+    let window = match app.get_webview_window(kind.label()) {
+        Some(window) => window,
+        None => create_popup(app, kind)?,
+    };
+    if !window.is_visible().unwrap_or(false) {
+        // Size and place only: with `VISIBLE` the plugin would show it itself,
+        // before we are ready.
+        let _ = window.restore_state(StateFlags::SIZE | StateFlags::POSITION);
+    }
+    let _ = window.unminimize();
+    window.show().map_err(|e| e.to_string())?;
+    // A popup kept hidden has an old copy of the settings: let its page refresh.
+    let _ = app.emit_to(kind.label(), "popup-shown", ());
+    window.set_focus().map_err(|e| e.to_string())
+}
+
+/// Opens a tool in a window of its own, so the chat stays visible (see
+/// `show_popup`).
+///
+/// `async` on purpose: creating a window from a synchronous command can
+/// deadlock on Windows.
+#[tauri::command]
+pub async fn open_popup(app: AppHandle, kind: PopupKind) -> Result<(), String> {
+    show_popup(&app, kind)
+}
+
+/// Creates every popup's window, hidden, a moment after start-up, so opening
+/// one is instant (the cost is the idle web view of each). Later, off the main
+/// thread: building a window there can deadlock on Windows.
+pub fn prewarm_popups(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        for kind in PopupKind::ALL {
+            if app.get_webview_window(kind.label()).is_none() {
+                if let Err(e) = create_popup(&app, kind) {
+                    log::warn!("popup {} not prepared: {e}", kind.label());
+                }
+            }
+        }
+    });
+}
+
+/// Closing the overlay ends the app, so the hidden popups (which would keep it
+/// alive as windows) go with it.
+pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
+    if window.label() == "main" && matches!(event, WindowEvent::CloseRequested { .. }) {
+        for (label, popup) in window.app_handle().webview_windows() {
+            if is_popup_label(&label) {
+                let _ = popup.destroy();
+            }
+        }
+    }
 }
 
 #[tauri::command]

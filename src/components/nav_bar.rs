@@ -23,6 +23,29 @@ pub fn NavBar() -> impl IntoView {
     let (is_controls_open, set_is_controls_open) = signal(false);
     let (context_menu_open, set_context_menu_open) = signal(None::<String>);
 
+    // The buttons both modes show -- cheat sheet, favorites, pin -- share their handlers.
+    // Both open in a window of their own (`open_popup`).
+    let open_popup = |kind: PopupKind| {
+        spawn_local(async move {
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "kind": kind })).unwrap();
+            if let Err(e) = invoke("open_popup", args).await {
+                add_system_log(SystemLogLevel::Error, "Popup", &format!("{:?}", e));
+            }
+        });
+    };
+    let open_cheatsheet = move |_| open_popup(PopupKind::CheatSheet);
+    let open_favorites = move |_| open_popup(PopupKind::Favorites);
+    let toggle_pin = move |_| {
+        let new_state = !signals.config.always_on_top.get();
+        signals.config.set_always_on_top.set(new_state);
+        spawn_local(async move {
+            let args =
+                serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
+            let _ = invoke("set_always_on_top", args).await;
+        });
+        actions.save_config.dispatch(());
+    };
+
     // --- NODE REFERENCES ---
     let search_input_ref = NodeRef::<Input>::new();
     let search_container_ref = NodeRef::<Div>::new();
@@ -112,7 +135,7 @@ pub fn NavBar() -> impl IntoView {
 
     view! {
         <nav
-            class=move || format!("relative z-50 flex flex-nowrap items-center justify-between gap-x-2 px-2 py-1.5 border-b border-base-content/5 min-h-[44px] select-none transition-all duration-300 overflow-visible {}", if signals.config.compact_mode.get() { "!absolute top-0 inset-x-0 !h-8 !min-h-0 !py-0 opacity-0 hover:opacity-100 focus-within:opacity-100 bg-base-300/95 backdrop-blur-md shadow-lg transition-opacity duration-200" } else { nav_bar_bg(signals.config.overlay_opacity.get()) })
+            class=move || format!("relative z-50 flex flex-nowrap items-center justify-between gap-x-2 px-2 py-1.5 border-b border-base-content/5 min-h-[44px] select-none transition-all duration-300 overflow-visible {}", if signals.config.compact_mode.get() { "!absolute top-0 inset-x-0 !h-8 !min-h-0 !py-0 !pr-0 opacity-0 hover:opacity-100 focus-within:opacity-100 bg-base-300/95 backdrop-blur-md shadow-lg transition-opacity duration-200" } else { nav_bar_bg(signals.config.overlay_opacity.get()) })
             data-tauri-drag-region
         >
             // --- LEFT: DaisyUI Tabs ---
@@ -287,45 +310,64 @@ pub fn NavBar() -> impl IntoView {
                 </div>
             </div>
 
-            // --- compact mode: the bar shows on hover only -- pin + leave compact ---
+            // --- compact mode: the bar shows on hover only. Same order as normal mode;
+            //     expand + close are title-bar sized and flush right, so expand sits where
+            //     the title bar's compact button is. ---
             <Show when=move || signals.config.compact_mode.get()>
-                <div class="flex items-center gap-0.5 ml-auto shrink-0" data-tauri-no-drag>
-                    <button class="btn btn-ghost btn-xs btn-square" title="항상 위에 표시"
-                        class:text-success=move || signals.config.always_on_top.get()
-                        class:text-base-content=move || !signals.config.always_on_top.get()
-                        on:click=move |_| {
-                            let new_state = !signals.config.always_on_top.get();
-                            signals.config.set_always_on_top.set(new_state);
-                            spawn_local(async move {
-                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
-                                let _ = invoke("set_always_on_top", args).await;
-                            });
-                            actions.save_config.dispatch(());
-                        }>
-                        <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-50" }>{icon(icons::PIN, "size-3.5")}</span>
-                    </button>
-                    <button class="btn btn-ghost btn-xs btn-square text-base-content/60 hover:text-base-content" title="컴팩트 모드 끄기"
+                <div class="flex items-center h-full ml-auto shrink-0" data-tauri-no-drag>
+                    <div class="flex items-center gap-0.5 mr-1">
+                        <button class="btn btn-ghost btn-xs btn-square text-base-content/60 hover:text-base-content" title="직업 · 던전 이름 (일본어 / 한국어)"
+                            on:click=open_cheatsheet>
+                            {icon(icons::BOOK, "size-3.5")}
+                        </button>
+                        <button class="btn btn-ghost btn-xs btn-square text-base-content/60 hover:text-base-content" title="자주 쓰는 메시지"
+                            on:click=open_favorites>
+                            {icon(icons::STAR, "size-3.5")}
+                        </button>
+                        <button class="btn btn-ghost btn-xs btn-square" title="항상 위에 표시"
+                            class:text-success=move || signals.config.always_on_top.get()
+                            class:text-base-content=move || !signals.config.always_on_top.get()
+                            on:click=toggle_pin>
+                            <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-50" }>{icon(icons::PIN, "size-3.5")}</span>
+                        </button>
+                    </div>
+                    <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors" title="컴팩트 모드 끄기"
                         on:click=move |_| {
                             signals.config.set_compact_mode.set(false);
                             actions.save_config.dispatch(());
                         }>
                         {icon(icons::EXPAND, "size-3.5")}
                     </button>
+                    <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-error hover:text-error-content transition-colors" title="닫기"
+                        on:click=move |_| { spawn_local(async { let _ = invoke("close_window", JsValue::NULL).await; }); }>
+                        {icon(icons::CLOSE, "size-3.5")}
+                    </button>
                 </div>
             </Show>
-            // --- RIGHT: favorites, then the folded tools (normal mode) ---
+            // --- RIGHT: cheat sheet, favorites, pin, then the folded tools (normal mode) ---
             <div class:hidden=move || signals.config.compact_mode.get() class="flex items-center gap-1 ml-auto shrink-0" data-tauri-no-drag>
+                <div class="tooltip tooltip-bottom" data-tip="직업 · 던전 이름">
+                    <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
+                        on:click=open_cheatsheet>
+                        {icon(icons::BOOK, "size-4")}
+                    </button>
+                </div>
+
                 <div class="tooltip tooltip-bottom" data-tip="자주 쓰는 메시지">
                     <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
-                        on:click=move |_| {
-                            spawn_local(async {
-                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "kind": PopupKind::Favorites })).unwrap();
-                                if let Err(e) = invoke("open_popup", args).await {
-                                    add_system_log(SystemLogLevel::Error, "Popup", &format!("{:?}", e));
-                                }
-                            });
-                        }>
+                        on:click=open_favorites>
                         {icon(icons::STAR, "size-4")}
+                    </button>
+                </div>
+
+                <div class="tooltip tooltip-bottom" data-tip="Always on Top">
+                    <button class="btn btn-sm btn-square"
+                        class:btn-success=move || signals.config.always_on_top.get()
+                        class:btn-soft=move || signals.config.always_on_top.get()
+                        class:btn-ghost=move || !signals.config.always_on_top.get()
+                        class:text-base-content=move || !signals.config.always_on_top.get()
+                        on:click=toggle_pin>
+                        <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-60" }>{icon(icons::PIN, "size-4")}</span>
                     </button>
                 </div>
 
@@ -373,25 +415,6 @@ pub fn NavBar() -> impl IntoView {
                                     }
                                 >
                                     {icon(icons::SEARCH, "size-4")}
-                                </button>
-                            </div>
-
-                            <div class="tooltip tooltip-bottom" data-tip="Always on Top">
-                                <button class="btn btn-sm btn-square"
-                                    class:btn-success=move || signals.config.always_on_top.get()
-                                    class:btn-soft=move || signals.config.always_on_top.get()
-                                    class:btn-ghost=move || !signals.config.always_on_top.get()
-                                    class:text-base-content=move || !signals.config.always_on_top.get()
-                                    on:click=move |_| {
-                                        let new_state = !signals.config.always_on_top.get();
-                                        signals.config.set_always_on_top.set(new_state);
-                                        spawn_local(async move {
-                                            let args = serde_wasm_bindgen::to_value(&serde_json::json!({"onTop": new_state})).unwrap();
-                                            let _ = invoke("set_always_on_top", args).await;
-                                        });
-                                        actions.save_config.dispatch(());
-                                    }>
-                                    <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-60" }>{icon(icons::PIN, "size-4")}</span>
                                 </button>
                             </div>
 

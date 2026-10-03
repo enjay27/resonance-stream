@@ -1,11 +1,42 @@
 //! The cheat sheet: class and dungeon names in Japanese and Korean, the page of
-//! its popup window. Click a Japanese name to copy it (to paste into the
-//! game's chat).
+//! its popup window. A class lists its two trees (specializations) under it.
+//! Click a Japanese name to copy it (to paste into the game's chat).
 
-use crate::cheatsheet::{search, Section, SOURCE_NOTE};
+use crate::cheatsheet::{search, Entry, Section, SOURCE_NOTE};
 use crate::utils::copy_to_clipboard;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+
+/// One name in both languages: the Japanese one copies on a click. `branch` is
+/// the tree connector in front of a specialization (empty for a class or a dungeon).
+#[component]
+fn NameRow(
+    entry: Entry,
+    copied: ReadSignal<Option<&'static str>>,
+    copy: Callback<&'static str>,
+    #[prop(optional)] branch: &'static str,
+) -> impl IntoView {
+    let small = !branch.is_empty();
+    view! {
+        <div class=if small { "flex items-center gap-3 pl-3 pr-3 py-1" } else { "flex items-center gap-3 px-3 py-2" }>
+            <div class="flex-1 min-w-0 flex items-baseline gap-1.5">
+                <span class="w-3 shrink-0 text-base-content/30 text-xs select-none">{branch}</span>
+                <button class=if small { "min-w-0 text-left text-xs font-semibold break-words hover:text-success transition-colors" } else { "min-w-0 text-left text-sm font-bold break-words hover:text-success transition-colors" }
+                    title="클릭하여 복사"
+                    on:click=move |_| copy.run(entry.ja)>
+                    {entry.ja}
+                    <span class="ml-1 text-success text-xs font-normal">
+                        {move || if copied.get() == Some(entry.ja) { "✓" } else { "" }}
+                    </span>
+                </button>
+                {(!entry.also.is_empty()).then(|| view! {
+                    <span class="text-[10px] text-base-content/50 break-words">{entry.also}</span>
+                })}
+            </div>
+            <span class=if small { "flex-1 min-w-0 text-xs text-base-content/70 break-words select-text" } else { "flex-1 min-w-0 text-sm text-base-content/80 break-words select-text" }>{entry.ko}</span>
+        </div>
+    }
+}
 
 #[component]
 pub fn CheatSheetWindow() -> impl IntoView {
@@ -23,6 +54,8 @@ pub fn CheatSheetWindow() -> impl IntoView {
             }
         });
     };
+
+    let copy_cb = Callback::new(copy);
 
     view! {
         <div class="h-full flex flex-col bg-base-100 text-base-content">
@@ -56,18 +89,18 @@ pub fn CheatSheetWindow() -> impl IntoView {
                 if rows.is_empty() {
                     view! { <div class="text-xs text-base-content/50 text-center py-6">"검색 결과가 없습니다."</div> }.into_any()
                 } else {
-                    rows.into_iter().map(|e| view! {
-                        <div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-base-200 border border-base-content/5">
-                            <button class="flex-1 min-w-0 text-left text-sm font-bold break-words hover:text-success transition-colors"
-                                title="클릭하여 복사"
-                                on:click=move |_| copy(e.ja)>
-                                {e.ja}
-                                <span class="ml-1 text-success text-xs font-normal">
-                                    {move || if copied.get() == Some(e.ja) { "✓" } else { "" }}
-                                </span>
-                            </button>
-                            <span class="flex-1 min-w-0 text-sm text-base-content/80 break-words select-text">{e.ko}</span>
-                        </div>
+                    rows.into_iter().map(|hit| {
+                        let last = hit.trees.len().saturating_sub(1);
+                        let pad = if hit.trees.is_empty() { "" } else { "pb-1" };
+                        view! {
+                            <div class=format!("rounded-lg bg-base-200 border border-base-content/5 {pad}")>
+                                <NameRow entry=hit.entry copied=copied copy=copy_cb />
+                                {hit.trees.into_iter().enumerate().map(|(i, tree)| view! {
+                                    <NameRow entry=tree copied=copied copy=copy_cb
+                                        branch=if i == last { "└" } else { "├" } />
+                                }).collect_view()}
+                            </div>
+                        }
                     }).collect_view().into_any()
                 }
             }}

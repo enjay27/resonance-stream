@@ -1,6 +1,6 @@
 use crate::chat_view::Tab;
 use crate::components::icons::{self, icon};
-use crate::readability::title_bar_bg;
+use crate::readability::{title_bar_bg, WINDOW_BUTTON, WINDOW_BUTTON_CLOSE};
 use crate::status_view::{sniffer_status, translator_status};
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
@@ -111,13 +111,13 @@ pub fn TitleBar() -> impl IntoView {
 
             // --- Window controls ---
             <div class="flex h-8 ml-2 no-drag">
-                <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors" title="최소화"
+                <button class=WINDOW_BUTTON title="최소화"
                     on:click=move |_| { spawn_local(async { let _ = invoke("minimize_window", JsValue::NULL).await; }); }>
                     {icon(icons::MINUS, "size-3.5")}
                 </button>
                 // Compact mode sits next to close: easy to hit.
                 <Show when=move || store.config.init_done.get()>
-                    <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors" title="컴팩트 모드"
+                    <button class=WINDOW_BUTTON title="컴팩트 모드"
                         on:click=move |_| {
                             store.config.set_compact_mode.set(true);
                             if store.config.active_tab.get_untracked() != Tab::System.label() {
@@ -128,7 +128,7 @@ pub fn TitleBar() -> impl IntoView {
                         {icon(icons::SHRINK, "size-3.5")}
                     </button>
                 </Show>
-                <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-error hover:text-error-content transition-colors" title="닫기"
+                <button class=WINDOW_BUTTON_CLOSE title="닫기"
                     on:click=move |_| { spawn_local(async { let _ = invoke("close_window", JsValue::NULL).await; }); }>
                     {icon(icons::CLOSE, "size-3.5")}
                 </button>

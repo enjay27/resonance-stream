@@ -4,6 +4,7 @@
 use crate::components::icons::{self, icon};
 use crate::components::{CheatSheetWindow, FavoritesWindow};
 use crate::favorites_sync;
+use crate::readability::{WINDOW_BUTTON, WINDOW_BUTTON_CLOSE};
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
 use crate::ui_types::{AppConfig, Theme};
@@ -12,9 +13,6 @@ use leptos::task::spawn_local;
 use resonance_types::PopupKind;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
-
-/// The same buttons as the main title bar's.
-const BUTTON: &str = "w-10 h-full grid place-items-center text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors";
 
 fn apply_theme(theme: Theme) {
     if let Some(root) = web_sys::window()
@@ -50,11 +48,11 @@ fn PopupTitleBar(title: &'static str) -> impl IntoView {
                 <span class="text-[10px] text-base-content/40 truncate">{concat!("Resonance Stream v", env!("CARGO_PKG_VERSION"))}</span>
             </div>
             <div class="flex h-8 ml-2 no-drag">
-                <button class=BUTTON title="최소화"
+                <button class=WINDOW_BUTTON title="최소화"
                     on:click=move |_| { spawn_local(async { let _ = invoke("minimize_window", JsValue::NULL).await; }); }>
                     {icon(icons::MINUS, "size-3.5")}
                 </button>
-                <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-error hover:text-error-content transition-colors" title="닫기"
+                <button class=WINDOW_BUTTON_CLOSE title="닫기"
                     on:click=move |_| { spawn_local(async { let _ = invoke("close_window", JsValue::NULL).await; }); }>
                     {icon(icons::CLOSE, "size-3.5")}
                 </button>

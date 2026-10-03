@@ -2,7 +2,9 @@
 //! with the app's theme. The window's own title bar carries the title and the
 //! close button.
 
-use crate::components::CheatSheetWindow;
+use crate::components::{CheatSheetWindow, FavoritesWindow};
+use crate::favorites_sync;
+use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
 use crate::ui_types::{AppConfig, Theme};
 use leptos::prelude::*;
@@ -22,21 +24,24 @@ fn apply_theme(theme: Theme) {
 #[component]
 pub fn PopupApp(kind: PopupKind) -> impl IntoView {
     apply_theme(Theme::default());
-    // The same theme as the main window, from the saved config.
-    spawn_local(async {
+    // This window's own copy of the settings, from the saved config: the theme
+    // is the main window's, and the favorites window checks a shortcut against
+    // the tab-switch keys. Only the favorites are ever saved from here
+    // (`favorites_sync::save`), never the whole config.
+    let signals = AppSignals::new();
+    provide_context(signals);
+    spawn_local(async move {
         if let Ok(config) = invoke("load_config", JsValue::NULL).await {
             if let Ok(config) = serde_wasm_bindgen::from_value::<AppConfig>(config) {
                 apply_theme(config.theme);
+                signals.config.apply(config);
             }
         }
+        favorites_sync::listen_for_changes(signals.config).await;
     });
 
     match kind {
         PopupKind::CheatSheet => view! { <CheatSheetWindow /> }.into_any(),
-        // Opened by the favorites change that follows; nothing opens it yet.
-        PopupKind::Favorites => view! {
-            <div class="h-screen grid place-items-center bg-base-100 text-base-content/60 text-sm">"준비 중"</div>
-        }
-        .into_any(),
+        PopupKind::Favorites => view! { <FavoritesWindow /> }.into_any(),
     }
 }

@@ -466,6 +466,18 @@ pub struct FavoriteMessage {
     pub tab: String,
 }
 
+/// The favorites as the favorites popup and the main window exchange them
+/// (`get_favorites`, `save_favorites`, the `favorites-changed` event): the
+/// messages and the tab names. The backend is the one source of truth, so two
+/// windows never overwrite each other's settings.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoritesState {
+    pub messages: Vec<FavoriteMessage>,
+    #[serde(default)]
+    pub tabs: Vec<String>,
+}
+
 /// Missed Japanese messages a translator start translates when the config
 /// does not say (`translation_catch_up_limit`, both AppConfigs).
 pub fn default_catch_up_limit() -> usize {
@@ -823,6 +835,31 @@ mod tests {
         .unwrap();
         assert!(gist.app.latest_version.is_empty());
         assert_eq!(gist.model.latest_version, "m1");
+    }
+
+    #[test]
+    fn the_favorites_cross_as_one_camel_case_object() {
+        let state = FavoritesState {
+            messages: vec![FavoriteMessage {
+                text: "hi".into(),
+                note: "안녕".into(),
+                shortcut: "Alt+F1".into(),
+                tab: "raid".into(),
+            }],
+            tabs: vec!["raid".into()],
+        };
+        let json = serde_json::to_value(&state).unwrap();
+        assert_eq!(json["messages"][0]["text"], "hi");
+        assert_eq!(json["tabs"][0], "raid");
+        let back: FavoritesState = serde_json::from_value(json).unwrap();
+        assert_eq!(back, state);
+    }
+
+    #[test]
+    fn a_favorites_object_missing_its_tabs_still_loads() {
+        let state: FavoritesState = serde_json::from_str(r#"{"messages":[]}"#).unwrap();
+        assert!(state.messages.is_empty());
+        assert!(state.tabs.is_empty());
     }
 
     #[test]

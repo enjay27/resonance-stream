@@ -10,6 +10,7 @@ use crate::ui_types::{
     FavoriteMessage, LogLevel, TabSwitchModifier, Theme, Tier, TranslationView, ALL_TAB,
 };
 use leptos::prelude::{signal, GetUntracked, ReadSignal, Set, WriteSignal};
+use resonance_types::FavoritesState;
 use std::collections::HashMap;
 
 /// A saved font size of this or less is taken for a broken config.
@@ -253,6 +254,25 @@ impl ConfigSignals {
         }
     }
 
+    /// The favorites held, as `save_favorites` takes them.
+    pub fn favorites_state(&self) -> FavoritesState {
+        FavoritesState {
+            messages: self.favorite_messages.get_untracked(),
+            tabs: self.favorite_tabs.get_untracked(),
+        }
+    }
+
+    /// Takes the favorites the backend holds -- loaded, or saved by another
+    /// window -- cleaned like a loaded config: tab names tidied, a message
+    /// whose tab is gone filed under the default tab.
+    pub fn apply_favorites(&self, favorites: FavoritesState) {
+        let tabs = clean_tabs(favorites.tabs);
+        let mut messages = favorites.messages;
+        normalize(&mut messages, &tabs);
+        self.set_favorite_messages.set(messages);
+        self.set_favorite_tabs.set(tabs);
+    }
+
     /// Loads a config read from disk into the signals.
     pub fn apply(&self, config: AppConfig) {
         let AppConfig {
@@ -337,11 +357,10 @@ impl ConfigSignals {
         self.set_archive_ignored_channels
             .set(archive_ignored_channels);
         self.set_message_spacing.set(message_spacing);
-        let favorite_tabs = clean_tabs(favorite_tabs);
-        let mut favorite_messages = favorite_messages;
-        normalize(&mut favorite_messages, &favorite_tabs);
-        self.set_favorite_messages.set(favorite_messages);
-        self.set_favorite_tabs.set(favorite_tabs);
+        self.apply_favorites(FavoritesState {
+            messages: favorite_messages,
+            tabs: favorite_tabs,
+        });
         self.set_chat_log_retention_days
             .set(chat_log_retention_days);
         self.set_raw_capture.set(raw_capture);
@@ -454,6 +473,44 @@ mod tests {
             .map(|f| f.tab.as_str())
             .collect();
         assert_eq!(filed, ["레이드", ""]);
+    }
+
+    #[test]
+    fn a_favorites_update_from_another_window_is_cleaned_like_a_loaded_config() {
+        let signals = ConfigSignals::new();
+        let before = signals.to_config();
+        signals.apply_favorites(FavoritesState {
+            messages: vec![
+                FavoriteMessage {
+                    text: "a".into(),
+                    tab: "레이드".into(),
+                    ..Default::default()
+                },
+                FavoriteMessage {
+                    text: "b".into(),
+                    tab: "사라진 탭".into(),
+                    ..Default::default()
+                },
+            ],
+            tabs: vec![" 레이드 ".into(), "레이드".into(), "".into()],
+        });
+        let held = signals.favorites_state();
+        assert_eq!(held.tabs, ["레이드"]);
+        let filed: Vec<_> = held.messages.iter().map(|f| f.tab.as_str()).collect();
+        assert_eq!(filed, ["레이드", ""]);
+        // Nothing but the favorites moved.
+        let after = signals.to_config();
+        assert_eq!(after.overlay_opacity, before.overlay_opacity);
+        assert_eq!(after.theme, before.theme);
+    }
+
+    #[test]
+    fn the_favorites_state_is_what_the_signals_hold() {
+        let signals = ConfigSignals::new();
+        let held = signals.favorites_state();
+        let config = signals.to_config();
+        assert_eq!(held.messages, config.favorite_messages);
+        assert_eq!(held.tabs, config.favorite_tabs);
     }
 
     #[test]

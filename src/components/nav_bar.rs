@@ -3,11 +3,13 @@ use crate::components::icons::{self, icon};
 use crate::readability::nav_bar_bg;
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
-use crate::ui_types::Channel;
+use crate::ui_types::{Channel, SystemLogLevel};
+use crate::utils::add_system_log;
 use leptos::ev::{click, keydown};
 use leptos::html::{Button, Div, Input};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use resonance_types::PopupKind;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsValue;
 use web_sys::Node;
@@ -315,7 +317,14 @@ pub fn NavBar() -> impl IntoView {
             <div class:hidden=move || signals.config.compact_mode.get() class="flex items-center gap-1 ml-auto shrink-0" data-tauri-no-drag>
                 <div class="tooltip tooltip-bottom" data-tip="자주 쓰는 메시지">
                     <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
-                        on:click=move |_| signals.ui.set_show_favorites.set(true)>
+                        on:click=move |_| {
+                            spawn_local(async {
+                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "kind": PopupKind::Favorites })).unwrap();
+                                if let Err(e) = invoke("open_popup", args).await {
+                                    add_system_log(SystemLogLevel::Error, "Popup", &format!("{:?}", e));
+                                }
+                            });
+                        }>
                         {icon(icons::STAR, "size-4")}
                     </button>
                 </div>

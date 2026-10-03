@@ -154,6 +154,7 @@ pub fn run() {
             open_popup,
             load_config,
             save_config,
+            save_favorites,
             minimize_window,
             close_window,
             open_app_data_folder,

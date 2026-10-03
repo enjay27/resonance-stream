@@ -33,6 +33,8 @@ pub async fn setup_event_listeners(signals: AppSignals) {
     let update_message_closure = create_update_message_handler(signals);
     let firewall_closure = create_firewall_missing_handler(signals);
 
+    crate::favorites_sync::listen_for_changes(signals.config).await;
+
     // 2. Register all listeners
     listen("packet-event", &packet_closure).await;
     listen("system-event", &system_closure).await;

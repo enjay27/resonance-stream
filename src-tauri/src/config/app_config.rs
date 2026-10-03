@@ -11,7 +11,7 @@ use serde_with::serde_as;
 use serde_with::DisplayFromStr;
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// `#[serde(default)]`: a field missing from the file (an older version, a
 /// hand edit) takes its default instead of failing the whole file.
@@ -156,6 +156,29 @@ impl Default for AppConfig {
     }
 }
 
+impl AppConfig {
+    /// The favorites part of the config, as the windows exchange it.
+    pub fn favorites(&self) -> resonance_types::FavoritesState {
+        resonance_types::FavoritesState {
+            messages: self.favorite_messages.clone(),
+            tabs: self.favorite_tabs.clone(),
+        }
+    }
+
+    pub fn with_favorites(mut self, favorites: resonance_types::FavoritesState) -> Self {
+        self.favorite_messages = favorites.messages;
+        self.favorite_tabs = favorites.tabs;
+        self
+    }
+
+    /// This config with the favorites of `stored`. A whole-config save comes
+    /// from a window's copy that may not have heard of a favorite another
+    /// window just saved; the favorites change only through `save_favorites`.
+    pub fn keeping_favorites_of(self, stored: &AppConfig) -> Self {
+        self.with_favorites(stored.favorites())
+    }
+}
+
 fn get_config_path(app: &AppHandle) -> PathBuf {
     let config_dir = app
         .path()
@@ -223,7 +246,25 @@ pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig
     // One save at a time: two overlapping saves would each compare against
     // the same old config and start (or stop) the same worker twice.
     let _saving = state.config_lock.lock();
+    let config = config.keeping_favorites_of(&state.config.read());
     apply_config(&app, &state, config);
+}
+
+/// Replaces the favorites only -- every other setting is left as it is, so the
+/// favorites popup can never overwrite the main window's newer settings --
+/// then tells every window (`favorites-changed`). The global shortcuts follow
+/// (`apply_config`). async: writes the file.
+#[tauri::command(async)]
+pub fn save_favorites(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    favorites: resonance_types::FavoritesState,
+) {
+    modify_config(&app, &state, |config| {
+        config.favorite_messages = favorites.messages;
+        config.favorite_tabs = favorites.tabs;
+    });
+    let _ = app.emit("favorites-changed", state.config.read().favorites());
 }
 
 /// Read-modify-write of the live config under the save lock, so a change
@@ -374,6 +415,46 @@ mod tests {
         assert_eq!(config.favorite_messages[0].tab, "레이드");
         let saved = serde_json::to_value(&config).unwrap();
         assert_eq!(saved["favorite_tabs"][0], "레이드");
+    }
+
+    #[test]
+    fn the_favorites_round_trip_through_the_config() {
+        let state = resonance_types::FavoritesState {
+            messages: vec![resonance_types::FavoriteMessage {
+                text: "hi".into(),
+                note: "안녕".into(),
+                shortcut: "Alt+F1".into(),
+                tab: "레이드".into(),
+            }],
+            tabs: vec!["레이드".into()],
+        };
+        let config = AppConfig::default().with_favorites(state.clone());
+        assert_eq!(config.favorite_messages, state.messages);
+        assert_eq!(config.favorite_tabs, state.tabs);
+        assert_eq!(config.favorites(), state);
+    }
+
+    #[test]
+    fn a_whole_config_save_keeps_the_stored_favorites() {
+        // The stored config has a favorite the popup just added; the main
+        // window saves its settings from a copy that has not heard of it.
+        let stored = AppConfig::default().with_favorites(resonance_types::FavoritesState {
+            messages: vec![resonance_types::FavoriteMessage {
+                text: "from the popup".into(),
+                ..Default::default()
+            }],
+            tabs: vec!["레이드".into()],
+        });
+        let stale = AppConfig {
+            overlay_opacity: 0.5,
+            ..AppConfig::default()
+        };
+        let saved = stale.keeping_favorites_of(&stored);
+        assert_eq!(saved.favorites(), stored.favorites());
+        assert_eq!(
+            saved.overlay_opacity, 0.5,
+            "the other settings are the new ones"
+        );
     }
 
     #[test]

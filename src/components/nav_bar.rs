@@ -1,6 +1,6 @@
 use crate::chat_view::Tab;
 use crate::components::icons::{self, icon};
-use crate::readability::nav_bar_bg;
+use crate::readability::{nav_bar_bg, WINDOW_BUTTON, WINDOW_BUTTON_ACTIVE, WINDOW_BUTTON_CLOSE};
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
 use crate::ui_types::{Channel, SystemLogLevel};
@@ -13,6 +13,34 @@ use resonance_types::PopupKind;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsValue;
 use web_sys::Node;
+
+/// One button of the bar's right-hand group: a flat 40 px box with an icon,
+/// green while `active`. Every button there -- search, cheat sheet, favorites,
+/// pin, the tools, expand -- is this one component, so they all share a width.
+#[component]
+fn NavButton<F>(
+    title: &'static str,
+    on_click: F,
+    /// Lit up (green): the pin is on, a search is set, the tools are open.
+    #[prop(into, optional)]
+    active: Signal<bool>,
+    #[prop(optional)] button_ref: NodeRef<Button>,
+    children: Children,
+) -> impl IntoView
+where
+    F: Fn(web_sys::MouseEvent) + 'static,
+{
+    view! {
+        <button
+            node_ref=button_ref
+            class=move || if active.get() { WINDOW_BUTTON_ACTIVE } else { WINDOW_BUTTON }
+            title=title
+            on:click=on_click
+        >
+            {children()}
+        </button>
+    }
+}
 
 #[component]
 pub fn NavBar() -> impl IntoView {
@@ -52,6 +80,19 @@ pub fn NavBar() -> impl IntoView {
     let search_btn_ref = NodeRef::<Button>::new();
     let controls_container_ref = NodeRef::<Div>::new();
     let folder_btn_ref = NodeRef::<Button>::new();
+
+    let toggle_search = move |_| {
+        let new_state = !is_search_open.get_untracked();
+        set_is_search_open.set(new_state);
+        if new_state {
+            request_animation_frame(move || {
+                if let Some(el) = search_input_ref.get() {
+                    let _ = el.focus();
+                    el.select();
+                }
+            });
+        }
+    };
 
     // ==========================================
     // GLOBAL KEYBOARD SHORTCUT (Ctrl+F)
@@ -310,158 +351,117 @@ pub fn NavBar() -> impl IntoView {
                 </div>
             </div>
 
-            // --- compact mode: the bar shows on hover only. Same order as normal mode;
-            //     expand + close are title-bar sized and flush right, so expand sits where
-            //     the title bar's compact button is. ---
-            <Show when=move || signals.config.compact_mode.get()>
-                <div class="flex items-center h-full ml-auto shrink-0" data-tauri-no-drag>
-                    <div class="flex items-center gap-0.5 mr-1">
-                        <button class="btn btn-ghost btn-xs btn-square text-base-content/60 hover:text-base-content" title="직업 · 던전 이름 (일본어 / 한국어)"
-                            on:click=open_cheatsheet>
-                            {icon(icons::BOOK, "size-3.5")}
-                        </button>
-                        <button class="btn btn-ghost btn-xs btn-square text-base-content/60 hover:text-base-content" title="자주 쓰는 메시지"
-                            on:click=open_favorites>
-                            {icon(icons::STAR, "size-3.5")}
-                        </button>
-                        <button class="btn btn-ghost btn-xs btn-square" title="항상 위에 표시"
-                            class:text-success=move || signals.config.always_on_top.get()
-                            class:text-base-content=move || !signals.config.always_on_top.get()
-                            on:click=toggle_pin>
-                            <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-50" }>{icon(icons::PIN, "size-3.5")}</span>
-                        </button>
-                    </div>
-                    <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-base-content/10 hover:text-base-content transition-colors" title="컴팩트 모드 끄기"
-                        on:click=move |_| {
+            // --- RIGHT: search, cheat sheet, favorites, pin, then the folded tools
+            //     (normal mode) or expand + close (compact mode). Every button is a
+            //     title-bar sized `NavButton`, so expand sits where the title bar's
+            //     compact button is. ---
+            <div class="relative z-10 flex items-center h-full ml-auto shrink-0" data-tauri-no-drag>
+                <NavButton title="대화 검색 (Ctrl+F)" button_ref=search_btn_ref
+                    active=Signal::derive(move || !signals.chat.search_term.get().is_empty())
+                    on_click=toggle_search>
+                    {icon(icons::SEARCH, "size-4")}
+                </NavButton>
+                <NavButton title="직업 · 던전 이름 (일본어 / 한국어)" on_click=open_cheatsheet>
+                    {icon(icons::BOOK, "size-4")}
+                </NavButton>
+                <NavButton title="자주 쓰는 메시지" on_click=open_favorites>
+                    {icon(icons::STAR, "size-4")}
+                </NavButton>
+                <NavButton title="항상 위에 표시" on_click=toggle_pin
+                    active=Signal::derive(move || signals.config.always_on_top.get())>
+                    <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-60" }>{icon(icons::PIN, "size-4")}</span>
+                </NavButton>
+
+                <Show
+                    when=move || signals.config.compact_mode.get()
+                    fallback=move || view! {
+                        // The tools are always folded behind one button: they open
+                        // below the bar, so they never cover the tabs.
+                        <div class="relative h-full"
+                            on:mouseenter=move |_| set_is_controls_open.set(true)
+                            on:mouseleave=move |_| set_is_controls_open.set(false)
+                        >
+                            <NavButton title="도구" button_ref=folder_btn_ref
+                                active=is_controls_open
+                                on_click=move |_| set_is_controls_open.set(true)>
+                                {icon(icons::MORE, "size-4")}
+                            </NavButton>
+
+                            <div
+                                node_ref=controls_container_ref
+                                class=move || if is_controls_open.get() {
+                                    "absolute right-0 top-full pt-1 z-[55]"
+                                } else {
+                                    "hidden"
+                                }
+                            >
+                                <ToolsMenu signals=signals actions=actions />
+                            </div>
+                        </div>
+                    }
+                >
+                    <NavButton title="컴팩트 모드 끄기"
+                        on_click=move |_| {
                             signals.config.set_compact_mode.set(false);
                             actions.save_config.dispatch(());
                         }>
-                        {icon(icons::EXPAND, "size-3.5")}
-                    </button>
-                    <button class="w-10 h-full grid place-items-center text-base-content/60 hover:bg-error hover:text-error-content transition-colors" title="닫기"
+                        {icon(icons::EXPAND, "size-4")}
+                    </NavButton>
+                    <button class=WINDOW_BUTTON_CLOSE title="닫기"
                         on:click=move |_| { spawn_local(async { let _ = invoke("close_window", JsValue::NULL).await; }); }>
-                        {icon(icons::CLOSE, "size-3.5")}
+                        {icon(icons::CLOSE, "size-4")}
+                    </button>
+                </Show>
+            </div>
+        </nav>
+    }
+}
+
+/// The folded tools -- opacity, clear history, settings -- under the bar's `…` button.
+#[component]
+fn ToolsMenu(signals: AppSignals, actions: AppActions) -> impl IntoView {
+    view! {
+        <div class="flex items-center gap-1 bg-base-300 p-1 rounded-lg shadow-2xl border border-white/10 animate-in fade-in duration-150">
+            <div class="relative group flex items-center justify-center">
+                <div class="tooltip tooltip-bottom" data-tip="Background Opacity">
+                    <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content">
+                        {icon(icons::CONTRAST, "size-4")}
                     </button>
                 </div>
-            </Show>
-            // --- RIGHT: cheat sheet, favorites, pin, then the folded tools (normal mode) ---
-            <div class:hidden=move || signals.config.compact_mode.get() class="flex items-center gap-1 ml-auto shrink-0" data-tauri-no-drag>
-                <div class="tooltip tooltip-bottom" data-tip="직업 · 던전 이름">
-                    <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
-                        on:click=open_cheatsheet>
-                        {icon(icons::BOOK, "size-4")}
-                    </button>
-                </div>
-
-                <div class="tooltip tooltip-bottom" data-tip="자주 쓰는 메시지">
-                    <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
-                        on:click=open_favorites>
-                        {icon(icons::STAR, "size-4")}
-                    </button>
-                </div>
-
-                <div class="tooltip tooltip-bottom" data-tip="Always on Top">
-                    <button class="btn btn-sm btn-square"
-                        class:btn-success=move || signals.config.always_on_top.get()
-                        class:btn-soft=move || signals.config.always_on_top.get()
-                        class:btn-ghost=move || !signals.config.always_on_top.get()
-                        class:text-base-content=move || !signals.config.always_on_top.get()
-                        on:click=toggle_pin>
-                        <span class=move || if signals.config.always_on_top.get() { "block" } else { "block rotate-45 opacity-60" }>{icon(icons::PIN, "size-4")}</span>
-                    </button>
-                </div>
-
-                // The tools are always folded behind one button: they open
-                // below the bar, so they never cover the tabs.
-                <div class="relative"
-                    on:mouseenter=move |_| set_is_controls_open.set(true)
-                    on:mouseleave=move |_| set_is_controls_open.set(false)
-                >
-                    <button
-                        node_ref=folder_btn_ref
-                        class="btn btn-ghost btn-sm btn-square"
-                        class:text-success=move || is_controls_open.get()
-                        title="도구"
-                        on:click=move |_| set_is_controls_open.set(true)
-                    >
-                        {icon(icons::MORE, "size-4")}
-                    </button>
-
-                    <div
-                        node_ref=controls_container_ref
-                        class=move || if is_controls_open.get() {
-                            "absolute right-0 top-full pt-1 z-[55]"
-                        } else {
-                            "hidden"
-                        }
-                    >
-                        <div class="flex items-center gap-1 bg-base-300 p-1 rounded-lg shadow-2xl border border-white/10 animate-in fade-in duration-150">
-                            <div class="tooltip tooltip-bottom" data-tip="Search (Ctrl+F)">
-                                <button
-                                    node_ref=search_btn_ref
-                                    class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content"
-                                    class:text-success=move || !signals.chat.search_term.get().is_empty()
-                                    on:click=move |_| {
-                                        let new_state = !is_search_open.get_untracked();
-                                        set_is_search_open.set(new_state);
-                                        if new_state {
-                                            request_animation_frame(move || {
-                                                if let Some(el) = search_input_ref.get() {
-                                                    let _ = el.focus();
-                                                    el.select();
-                                                }
-                                            });
-                                        }
-                                    }
-                                >
-                                    {icon(icons::SEARCH, "size-4")}
-                                </button>
-                            </div>
-
-                            <div class="relative group flex items-center justify-center">
-                                <div class="tooltip tooltip-bottom" data-tip="Background Opacity">
-                                    <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content">
-                                        {icon(icons::CONTRAST, "size-4")}
-                                    </button>
-                                </div>
-                                <div class="absolute top-full right-1/2 translate-x-1/2 pt-1.5 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
-                                    <div class="bg-base-300 border border-base-content/10 rounded-lg shadow-xl p-3 w-32 flex flex-col gap-2 items-center cursor-default">
-                                        <span class="text-[9px] font-black text-success uppercase tracking-widest opacity-80">
-                                            {move || format!("투명도: {:.0}%", signals.config.overlay_opacity.get() * 100.0)}
-                                        </span>
-                                        <input type="range" min="0.0" max="1.0" step="0.05"
-                                            class="range range-xs range-success w-full"
-                                            prop:value=move || signals.config.overlay_opacity.get().to_string()
-                                            on:input=move |ev| {
-                                                let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
-                                                signals.config.set_overlay_opacity.set(val);
-                                            }
-                                            on:change=move |ev| {
-                                                let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
-                                                signals.config.set_overlay_opacity.set(val);
-                                                actions.save_config.dispatch(());
-                                            }
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="tooltip tooltip-bottom" data-tip="Clear History">
-                                <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content hover:!text-error"
-                                    on:click=move |_| { actions.clear_history.dispatch(()); }>
-                                    {icon(icons::TRASH, "size-4")}
-                                </button>
-                            </div>
-
-                            <div class="tooltip tooltip-bottom" data-tip="Settings">
-                                <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content" aria-label="Settings" on:click=move |_| signals.ui.set_show_settings.set(true)>
-                                    {icon(icons::GEAR, "size-4")}
-                                </button>
-                            </div>
-                        </div>
+                <div class="absolute top-full right-1/2 translate-x-1/2 pt-1.5 z-50 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200">
+                    <div class="bg-base-300 border border-base-content/10 rounded-lg shadow-xl p-3 w-32 flex flex-col gap-2 items-center cursor-default">
+                        <span class="text-[9px] font-black text-success uppercase tracking-widest opacity-80">
+                            {move || format!("투명도: {:.0}%", signals.config.overlay_opacity.get() * 100.0)}
+                        </span>
+                        <input type="range" min="0.0" max="1.0" step="0.05"
+                            class="range range-xs range-success w-full"
+                            prop:value=move || signals.config.overlay_opacity.get().to_string()
+                            on:input=move |ev| {
+                                let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
+                                signals.config.set_overlay_opacity.set(val);
+                            }
+                            on:change=move |ev| {
+                                let val = event_target_value(&ev).parse::<f32>().unwrap_or(0.85);
+                                signals.config.set_overlay_opacity.set(val);
+                                actions.save_config.dispatch(());
+                            }
+                        />
                     </div>
                 </div>
             </div>
-        </nav>
+
+            <div class="tooltip tooltip-bottom" data-tip="Clear History">
+                <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content hover:!text-error"
+                    on:click=move |_| { actions.clear_history.dispatch(()); }>
+                    {icon(icons::TRASH, "size-4")}
+                </button>
+            </div>
+
+            <div class="tooltip tooltip-bottom" data-tip="Settings">
+                <button class="btn btn-ghost btn-sm btn-square text-base-content/60 hover:text-base-content" aria-label="Settings" on:click=move |_| signals.ui.set_show_settings.set(true)>
+                    {icon(icons::GEAR, "size-4")}
+                </button>
+            </div>
+        </div>
     }
 }

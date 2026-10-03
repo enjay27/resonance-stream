@@ -18,21 +18,13 @@ K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
 
 ## Release 0.6.1 -- updates you can trust (P0)
 
-- [ ] **K1. Auto-update stuck at 0%** (GitHub #96; friend's report 2026-10-03)
-  - **Status 2026-10-03:** code done on `claude/update-download-stall` (stall + connect timeouts for every download, cancel for the app update, indeterminate bar, manual-download button). Stays unticked until check A3 (below) ran on Windows; the reporter's cause is still unconfirmed.
-  - Cause candidates (read, not run): `reqwest::Client::new()` in `downloader/fetch.rs` has no
-    connect or stall timeout; step 1 of `update_modals.rs` has no cancel; no `Content-Length`
-    keeps the bar at 0% (`ProgressThrottle::update` returns `None` for total 0).
-  - Test first: a mock server that never answers / stalls mid-body / omits `Content-Length`;
-    the stall decision as a pure function in `crates/core/src/download.rs`.
-  - Do: connect + stall timeout -> error step ("다시 시도"); cancel / close in the download
-    step; indeterminate bar when the size is unknown; error step links the releases page.
-  - Ask the reporter first: app version, folder of the exe, is `update_temp.exe.part` there,
-    can the machine open github.com. It decides which cause is real.
-  - Done when: core + ui tests green, `just app-cross-check` green, and on Windows check A3
-    below (network cut mid-download) shows the error and retry works.
-  - **Reach:** the fix can only help copies that already run 0.6.1. A stuck 0.6.0 copy
-    downloads the exe by hand once -- put that link in the 0.6.1 release notes and the README.
+- [x] **K1. Auto-update stuck at 0%** (GitHub #96; friend's report 2026-10-03) -- done and
+  verified on Windows by Kade (2026-10-03): `claude/update-download-stall`, merged as #99.
+  Stall + connect timeouts for every download, cancel for the app update, an indeterminate bar
+  until the first percent, a manual-download button. A guild mate's update succeeded before
+  the friend reported, so the friend's cause was probably their network; still unconfirmed.
+  **Reach:** only copies on 0.6.1 or later get the fix; a stuck 0.6.0 copy downloads the exe by
+  hand once -- put that link in the 0.6.1 notes and the README.
 - [ ] **K3. Keep `latest` a signed release** (`release.yml`)
   - What breaks it is a release made *outside* the workflow (the workflow itself always uploads
     `latest.json`, the exe and the `.sig`, and verifies the signature first): a hand-made
@@ -52,12 +44,13 @@ K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
 - [ ] **K3b. Key custody (Kade, offline)** -- keep `primary` and `backup` key files and their
   passwords in two places each. Losing both strands every 0.6.0 copy (a new key can only be
   introduced by a release signed with an old one). Nothing to commit.
-- [ ] **K20. Cap the stable release notes** -- no code planned (checked 2026-10-03). The notes are
-  the commits since the previous *stable* tag (`release.yml` "Publish"); 0.6.0 was the first
-  stable tag, so it had none to start from and listed a long history. `v0.6.0` now exists, and
-  `git log --no-merges v0.6.0..main` is 8 lines today. A cap would add CI code for a problem
-  that is gone. Tick it when the 0.6.1 notes are short; add a cap only if they are not.
-- [ ] **Cut 0.6.1:** bump `[workspace.package] version`, merge to `main`, push tag `v0.6.1`.
+- [x] **K20. Stable release notes** -- replaced by the two-layer notes (CLAUDE.md *Stable
+  releases*, `claude/release-notes-layers`). Why 0.6.0's were long: the commit list starts at the
+  nearest earlier *stable* tag, which for `v0.6.0` was `v0.5.0` -- 136 commits, 137 lines in the
+  in-app dialog, which had no height limit. (An earlier note here blamed "no previous stable
+  tag"; that was a shallow clone hiding the old tags.) Now the app shows only the Korean user
+  summary, the commit list is collapsed on the release page, and the dialog box scrolls.
+- [ ] **Cut 0.6.1** (Kade, 2026-10-03: **not yet -- it goes with UI fixes**, still to be listed): write `release-notes/v0.6.1.md`, bump `[workspace.package] version`, merge to `main`, push tag `v0.6.1`.
   The gist `app` entry is **not** touched.
 
 ### Windows session W1 (Kade at the keyboard, `cargo tauri dev` / installed exe as Administrator)

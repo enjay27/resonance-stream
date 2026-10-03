@@ -267,6 +267,14 @@ deletes a release); both run `.github/scripts/check-release-feed.sh`. A red run 
 users get no update: delete the hand-made release or mark it prerelease, then run the
 workflow again.
 
+**Release notes are short, a simple summary, and in Korean.** Users read them -- on the
+release page and in the app's update dialog (`latest.json`'s `notes`). Write a few plain
+lines (about 10 at most) on what changes for someone who uses the app, in everyday words:
+no commit subjects, PR numbers, file or function names, and no English. This is for every
+stable release; candidate (`rc`) notes are for the tester and keep their own format.
+`release.yml` does not enforce it yet (it still pastes the commits since the last stable
+tag), so read the notes before tagging and replace them if they are not this.
+
 ### Never commit
 - Secrets, `.env`.
 - Build output: `target/`, `dist/`, `style/output.css`, `*.exe`.

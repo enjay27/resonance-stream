@@ -52,8 +52,11 @@ K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
 - [ ] **K3b. Key custody (Kade, offline)** -- keep `primary` and `backup` key files and their
   passwords in two places each. Losing both strands every 0.6.0 copy (a new key can only be
   introduced by a release signed with an old one). Nothing to commit.
-- [ ] **K20. Cap the stable release notes** -- 0.6.0's were 138 lines (every commit since an old
-  tag). Cap in the `release.yml` "Publish" step. Done when the 0.6.1 notes are short.
+- [ ] **K20. Cap the stable release notes** -- no code planned (checked 2026-10-03). The notes are
+  the commits since the previous *stable* tag (`release.yml` "Publish"); 0.6.0 was the first
+  stable tag, so it had none to start from and listed a long history. `v0.6.0` now exists, and
+  `git log --no-merges v0.6.0..main` is 8 lines today. A cap would add CI code for a problem
+  that is gone. Tick it when the 0.6.1 notes are short; add a cap only if they are not.
 - [ ] **Cut 0.6.1:** bump `[workspace.package] version`, merge to `main`, push tag `v0.6.1`.
   The gist `app` entry is **not** touched.
 

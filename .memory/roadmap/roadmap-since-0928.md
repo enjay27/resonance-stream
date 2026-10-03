@@ -1,0 +1,146 @@
+# Roadmap -- known issues since 2026-09-28 (written 2026-10-03)
+
+Tick `[x]` when the item is done **and** verified the way its "Done when" says. A check that
+could not run (Windows-only, needs Kade) stays unticked -- CLAUDE.md: never report a gate as
+passed that did not run. `K1`..`K25` are this file's ids (not GitHub issue numbers). Each code
+item is its own `claude/*` branch and PR, test first. Sources: the `.memory/` notes,
+[`../active-issues/unverified-on-windows.md`](../active-issues/unverified-on-windows.md),
+[`../sessions/2026-10-02-0.6.0-windows-verification-handoff.md`](../sessions/2026-10-02-0.6.0-windows-verification-handoff.md),
+the git log since 09-28, and one user report (K1). The older GitHub issues (#1, #5, #12, #13)
+are deliberately not part of this list.
+
+**What 0.6.0 already contains.** Route-based interface pick, per-exe firewall rule, furigana
+(+ on'yomi fallback), the wizard scroll fix and the rest of `rc` were merged to `main`
+(#87-#91) before the `v0.6.0` tag (#93). So the next release is **fix-only**: its changes are
+K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
+
+---
+
+## Release 0.6.1 -- updates you can trust (P0)
+
+- [ ] **K1. Auto-update stuck at 0%** (GitHub #96; friend's report 2026-10-03)
+  - Cause candidates (read, not run): `reqwest::Client::new()` in `downloader/fetch.rs` has no
+    connect or stall timeout; step 1 of `update_modals.rs` has no cancel; no `Content-Length`
+    keeps the bar at 0% (`ProgressThrottle::update` returns `None` for total 0).
+  - Test first: a mock server that never answers / stalls mid-body / omits `Content-Length`;
+    the stall decision as a pure function in `crates/core/src/download.rs`.
+  - Do: connect + stall timeout -> error step ("다시 시도"); cancel / close in the download
+    step; indeterminate bar when the size is unknown; error step links the releases page.
+  - Ask the reporter first: app version, folder of the exe, is `update_temp.exe.part` there,
+    can the machine open github.com. It decides which cause is real.
+  - Done when: core + ui tests green, `just app-cross-check` green, and on Windows check A3
+    below (network cut mid-download) shows the error and retry works.
+  - **Reach:** the fix can only help copies that already run 0.6.1. A stuck 0.6.0 copy
+    downloads the exe by hand once -- put that link in the 0.6.1 release notes and the README.
+- [ ] **K3. Keep `latest` a signed release** (`release.yml`)
+  - Today a manual release without `latest.json`, or a non-prerelease candidate, makes updates
+    stop silently (404 = "no update"), and a hand-made release on a tag blocks `release.yml`.
+  - Do: a workflow step that fails the release when `latest.json` / `.sig` are missing, and a
+    note in CLAUDE.md *Stable releases*; `release-lib.sh` helper with a test (CI runs them).
+  - Done when: the shell tests cover it and a dry run of the check against the 0.6.0 release
+    passes.
+- [ ] **K3b. Key custody (Kade, offline)** -- keep `primary` and `backup` key files and their
+  passwords in two places each. Losing both strands every 0.6.0 copy (a new key can only be
+  introduced by a release signed with an old one). Nothing to commit.
+- [ ] **K20. Cap the stable release notes** -- 0.6.0's were 138 lines (every commit since an old
+  tag). Cap in the `release.yml` "Publish" step. Done when the 0.6.1 notes are short.
+- [ ] **Cut 0.6.1:** bump `[workspace.package] version`, merge to `main`, push tag `v0.6.1`.
+  The gist `app` entry is **not** touched.
+
+### Windows session W1 (Kade at the keyboard, `cargo tauri dev` / installed exe as Administrator)
+
+Run right after 0.6.1 is published, with 0.6.0 installed. One session covers K2, K4, K6, K7, K25.
+
+- [ ] **K2. Signed update path, end to end** (handoff checks A1-A5; never run)
+  - [ ] A1 installed 0.6.0 offers 0.6.1 -> bar -> "다운로드 완료" only after the check -> restart
+    lands on 0.6.1; `<exe>.old` stays, `update_temp.exe` is gone.
+  - [ ] A2 flip one byte of `update_temp.exe` before pressing 재시작 -> error step, old version
+    keeps running, no `.old` created.
+  - [ ] A3 cut the network mid-download -> error step with a reason, 다시 시도 works, no half
+    `update_temp.exe`.
+  - [ ] A4 offline start -> no dialog, "Check failed" in the system log.
+  - [ ] A5 backup key: sign a file with `backup.key`, run `examples/verify_update` -> `ok`.
+- [ ] **K25. The rest of `unverified-on-windows.md`**, top to bottom: main UI redesign, rc UI
+  fixes, favorite tabs, cheat sheet, chat row menus + add to dictionary, settings sidebar +
+  window grow, beginner tab, W8/W9, log dedup, study-mode hover + first-line latency. Delete
+  each bullet there as it is checked; a failure gets a test first, then its own branch.
+
+---
+
+## Release 0.6.2 -- capture just works (P1)
+
+Order: verify first (K4, K6, K7 in W1), then build on the answers.
+
+- [ ] **K4. Route-based interface pick on Windows** -- (1) two live adapters: the system tab says
+  `(default route)` and that is the adapter the game uses; (2) full-tunnel VPN on: the physical
+  adapter is picked and capture still works (**the open question** -- if packets are seen on the
+  VPN adapter, the virtual-adapter rule in `pick_interface` is wrong and gets a test + fix);
+  (3) offline: no crash, falls back to the list.
+- [ ] **K6. Per-exe firewall rule on Windows** -- the four steps in `unverified-on-windows.md`
+  (dev exe -> wizard -> captured; installed exe -> wizard once -> captured; back to dev: no
+  wizard; `netsh ... show rule` lists two rules; the old shared rule is gone).
+- [ ] **K7. Favorites paste into the game** -- the game or its anti-cheat may ignore `SendInput`.
+  If it does: keep the text on the clipboard and say so in the UI (decide with Kade). If the
+  game pastes the *old* text: raise `CLIPBOARD_RESTORE_DELAY` (500 ms, `shortcut.rs`).
+- [ ] **K5. Adapter-pick follow-ups** (roadmap A questions b, c; depends on K4)
+  - [ ] re-pick the adapter after the "no traffic" watchdog trips (pure decision in
+    `resonance_core::sniffer_net`, test first);
+  - [ ] the troubleshooter (`network_troubleshooter.rs`) tries the routed adapter first.
+  - Decision for Kade, optional: create the firewall rule automatically when it is missing (the
+    app already runs as Administrator). Not built.
+
+---
+
+## Release 0.7.0 -- decisions and gaps (P2)
+
+Small and independent first; the ones that wait on Kade last.
+
+- [ ] **K18. Settings open when the app closes leaves the window enlarged** -- the grown size is
+  what `tauri-plugin-window-state` saves. Restore before exit. App glue; Windows check.
+- [ ] **K13. Hydration drops a translation event** that lands during the `get_chat_history`
+  fetch for a row that existed before listening (`ChatStore::merge_history`, UI pure module,
+  test first).
+- [ ] **K19. Archive and tab quirks** -- a message archived untranslated and caught up later is in
+  `dataset_raw.jsonl` twice (decide: dedup on write or leave); old beginner lines stay WORLD;
+  favorite shortcuts are global across tabs (backend sees one flat list). Decide each, or close.
+- [ ] **K17. Build cost of the study-mode dictionary** -- measure the exe / installer growth and
+  Windows CI time (release exe is 59 MB); cache the Lindera dictionary in CI, since the build
+  needs Lindera.dev reachable.
+- [ ] **K14. Compact-mode hover** -- never looked at; the row may re-wrap on hover. Base it on
+  current `main` and screenshot with `ui-preview`.
+- [ ] **K16. Furigana misses** -- IPADIC reads 一人 as イチ ニン; CI's dictionary may differ from
+  the one the core tests ran on. Check CI's readings, add an override list if it matters.
+- [ ] **K15. Cheat-sheet data** -- check against the official JP/KO sites; add the remaining 6
+  classes and the dungeons; then clear `SOURCE_NOTE`. Kade adds in-game slang.
+- [ ] **K12. History from other channels** -- shown as WORLD and queued for translation (~30
+  lines per refresh) and may flood the translator. Decide which history to keep (Kade).
+- [ ] **K11. W8 gap** -- llama-server binds its port itself, so pick-then-bind cannot be closed;
+  a broken model retries 3 times before the error shows. Leave unless seen in the field.
+- [ ] **K10. `-t 4` threads** -- decide by measuring FPS with the game running (Kade).
+- [ ] **K9. `class_id` is always 0** (sender tag 24) -- needs a capture where the value can be
+  matched to a class (Kade; `raw_capture`).
+- [ ] **K8. A4: double `<bos>`** -- waits on Kade's answer: did training tokenize with BOS
+  added (keep the prompt) or not (drop `<bos>` from `translation_prompt`)? Question is in
+  [`review-2026-09-30-round2.md`](review-2026-09-30-round2.md).
+
+---
+
+## Housekeeping (P3, any time)
+
+- [ ] **K21. `rc` was merged into `main` wholesale (#91)**, against CLAUDE.md. Decide: record it
+  as accepted, or re-cut `rc` from `main` so the rule holds again.
+- [ ] **K22. Trim `MEMORY.md`** -- far over its ~40-line rule; move detail into `.memory/`.
+- [ ] **K23. Troubleshooting docs** -- the Sep 29 deletion left the README pointing at old
+  GitHub issues; write new `TROUBLE_SHOOTING*.md` (Kade) and fix the `index.html` `<title>`
+  ("Tauri + Leptos App"; check Tauri does not use it for the window / taskbar first).
+- [ ] **K24. Dropped by design, revisit only if asked:** gist host allow-list, reqwest 0.12.
+
+---
+
+## Order at a glance
+
+1. K1 -> K3 -> K20 -> **release 0.6.1**  (K3b alongside, offline)
+2. **W1 session:** K2, K4, K6, K7, K25
+3. K5 (+ any fix W1 finds) -> **release 0.6.2**
+4. K18, K13, K19, K17, K14, K16 -> K15, K12, K11, K10, K9, K8 (Kade's) -> **release 0.7.0**
+5. K21-K24 whenever

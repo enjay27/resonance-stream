@@ -36,6 +36,10 @@
 1. 최신 [Release] 섹션에서 `resonance-stream.exe` 파일을 다운로드합니다.
 2. `resonance-stream.exe`를 **관리자 권한**으로 실행합니다.
 
+### 업데이트가 0%에서 멈출 때 (0.6.0)
+
+0.6.0에서는 업데이트 창이 0%에서 멈추는 경우가 있었습니다. 0.6.1부터 고쳐졌지만, 멈춘 0.6.0은 스스로 업데이트하지 못합니다. [최신 릴리스](https://github.com/enjay27/resonance-stream/releases/latest)에서 프로그램 파일을 직접 받아 기존 파일 위에 덮어써 주세요. 설정과 채팅 기록은 그대로 남습니다.
+
 ---
 
 ## 🗑️ 삭제 안내 (Uninstall Guide)

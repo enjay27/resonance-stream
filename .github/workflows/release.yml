@@ -23,6 +23,8 @@ name: Release
 # Run workflow > "Use workflow from" the *tag*. A tag that already has a release
 # is refused, so delete the half-made release first.
 # Tag / feed logic: .github/scripts/release-lib.sh (tests: release-lib.test.sh).
+# After publishing, the live feed is read the way the app reads it
+# (.github/scripts/check-release-feed.sh); release-feed-check.yml keeps watching it.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
@@ -201,3 +203,13 @@ jobs:
 
           gh release create "$TAG" "$exe" "$exe.sig" latest.json SHA256SUMS.txt \
             --verify-tag --latest --title "$TAG" --notes-file notes.md
+
+      # A broken feed is silent for users -- the app just finds "no update" --
+      # so read it back as the app does: "latest" must be this release and its
+      # latest.json must hold up.
+      - name: Check the live update feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.check.outputs.tag }}
+        run: bash .github/scripts/check-release-feed.sh "$REPO" "$TAG"

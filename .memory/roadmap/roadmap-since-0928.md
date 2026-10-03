@@ -34,12 +34,21 @@ K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
   - **Reach:** the fix can only help copies that already run 0.6.1. A stuck 0.6.0 copy
     downloads the exe by hand once -- put that link in the 0.6.1 release notes and the README.
 - [ ] **K3. Keep `latest` a signed release** (`release.yml`)
-  - Today a manual release without `latest.json`, or a non-prerelease candidate, makes updates
-    stop silently (404 = "no update"), and a hand-made release on a tag blocks `release.yml`.
-  - Do: a workflow step that fails the release when `latest.json` / `.sig` are missing, and a
-    note in CLAUDE.md *Stable releases*; `release-lib.sh` helper with a test (CI runs them).
-  - Done when: the shell tests cover it and a dry run of the check against the 0.6.0 release
-    passes.
+  - What breaks it is a release made *outside* the workflow (the workflow itself always uploads
+    `latest.json`, the exe and the `.sig`, and verifies the signature first): a hand-made
+    release, a candidate that is not a prerelease, deleting the newest stable one. GitHub then
+    makes it "latest", the feed 404s and the app silently finds no update. Nothing can
+    *prevent* that, so K3 is a detector.
+  - Done in `claude/release-latest-guard` (2026-10-03): `release_feed_problem`
+    (`release-lib.sh`) + `check-release-feed.sh` (tested with gh and curl faked, in
+    `release-lib.test.sh`, 46 checks); `release.yml` reads the live feed back after publishing;
+    new `release-feed-check.yml` (daily 03:17 UTC, on release published / edited / deleted by a
+    person, manual); CLAUDE.md *Stable releases* says never to publish by hand. Alert = a red
+    Actions run (GitHub's email), no auto-issue; the daily job checks structure only (the
+    signature is verified by `release.yml` before publishing).
+  - Dry run against the real v0.6.0 release: healthy; a wrong expected tag fails.
+  - Stays unticked until the first real runs: `release.yml`'s new last step (at the 0.6.1
+    release) and `release-feed-check.yml` once (Actions > Release feed > Run workflow).
 - [ ] **K3b. Key custody (Kade, offline)** -- keep `primary` and `backup` key files and their
   passwords in two places each. Losing both strands every 0.6.0 copy (a new key can only be
   introduced by a release signed with an old one). Nothing to commit.

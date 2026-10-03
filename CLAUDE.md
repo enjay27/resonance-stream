@@ -258,6 +258,15 @@ signature the way the app will (`examples/verify_update.rs`) and publishes the e
 committed; the backup key stays offline. Tag / feed helpers:
 `.github/scripts/release-lib.sh` (tests in CI).
 
+**Never publish a stable release by hand.** Every installed app reads
+`releases/latest/download/latest.json`; a hand-made release (no `latest.json`, another
+exe) or a candidate that is not a prerelease becomes "latest" and updates silently stop
+-- the app just finds no update. `release.yml` reads the live feed back after publishing,
+and `release-feed-check.yml` watches it (daily, and when a person publishes, edits or
+deletes a release); both run `.github/scripts/check-release-feed.sh`. A red run means
+users get no update: delete the hand-made release or mark it prerelease, then run the
+workflow again.
+
 ### Never commit
 - Secrets, `.env`.
 - Build output: `target/`, `dist/`, `style/output.css`, `*.exe`.

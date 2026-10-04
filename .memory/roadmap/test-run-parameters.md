@@ -174,6 +174,19 @@ and left to the Windows CI job, as always.
   about the test options. `rc-lib.test.sh` pins it (runs in CI): the candidate build has the feature,
   `release.yml` never mentions `test-env`, the notes line is there. Not run: an actual candidate
   build -- check the first one's exe with `--print-env --status-file <file>`.
+- **Windows check by Kade (2026-10-05, local build `--features test-env`, PRs 3-5 code on `main`)**: built
+  locally with `npx --yes @tauri-apps/cli@2 build --no-bundle --features test-env`; "works well": `--data-dir
+  C:\w1\run1 ... --status-file C:\w1\run1.json` made `run1` and `run1.json` and left his real data alone.
+  **Open question to Kade:** he pressed the in-app "open app data folder" and the screenshot shows Explorer on
+  `C:\w1` (run1 selected) -- the code opens `data` = `C:\w1\run1\data`, so ask what the address bar said.
+- **PR 7 `test/w1-updater-mock` -- done, never merged into `main`**: a NEW notebook
+  `test-w1/notebooks/w1-updater-mock.ipynb` (the six existing notebooks are untouched). It serves a signed "new
+  version" (the exe under test + appended bytes, signed with the backup key) from a mock server on 127.0.0.1 and
+  runs a fresh copy per check with the flags; outcomes come from the status file and the copy's folder. Checks:
+  M0 flags understood, M1 signing, M8-M12 feed cases (no clicks), M3 good update, M4 tampered download refused,
+  M5-M7 bad signature / cut / silent download -> `update: error`, M-iso real config untouched. Helpers
+  `w1/mockfeed.py` (27 tests), stand-in `tests/fake_app.py`, dry run of every cell (4 tests); 138 pass from a fresh
+  clone. **Not run on Windows or with the real exe.** The old notebooks keep their config-file step (released exes).
 - Path call sites for PR 2 were **14**, not 12: `app_config_dir()` x2 (`config/app_config.rs:187`,
   `config/metadata.rs:31`) and `app_data_dir()` x12 (`io/data_factory.rs`, `io/fs.rs`,
   `downloader/{gist,model,server}.rs`, `sniffer/raw_capture.rs`, `translator/server_manager.rs`).

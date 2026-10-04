@@ -135,7 +135,11 @@ and left to the Windows CI job, as always.
   `resolve_dirs`, `AppDirs::reset` for `--fresh`, `is_test_url_allowed`; 22 tests). Safety rules
   pinned by tests: `--fresh` needs `--data-dir`; `reset` empties only `config/`, `data/`,
   `webview/` and refuses a root near the top of a drive or with `..`.
-- Path call sites for PR 2 are **14**, not 12: `app_config_dir()` x2 (`config/app_config.rs:187`,
+- **PR 2 `claude/test-env-appdirs` -- done, app gate left to Windows CI**: `src-tauri/src/app_dirs.rs`
+  (`config(app)`, `data(app)`, both still exactly Tauri's `app_config_dir` / `app_data_dir`); the 14
+  call sites use it; a test (`no_code_outside_this_module_asks_tauri_for_a_folder`) fails if any
+  other file calls Tauri for a folder again. Cross-checked on Linux, not run (no GTK here).
+- Path call sites for PR 2 were **14**, not 12: `app_config_dir()` x2 (`config/app_config.rs:187`,
   `config/metadata.rs:31`) and `app_data_dir()` x12 (`io/data_factory.rs`, `io/fs.rs`,
   `downloader/{gist,model,server}.rs`, `sniffer/raw_capture.rs`, `translator/server_manager.rs`).
 - Step 0 (Kade's probe) is still not answered; PR 2 can go ahead without it.

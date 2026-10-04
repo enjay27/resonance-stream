@@ -1,7 +1,6 @@
 use chrono::{Local, TimeZone};
 use std::fs;
 use std::io::Write;
-use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
 // Adjust this import path if ExportMessage is located elsewhere!
@@ -10,7 +9,7 @@ use crate::protocol::types::ExportMessage;
 #[tauri::command]
 pub async fn open_app_data_folder(app: tauri::AppHandle) -> Result<(), String> {
     // 1. Resolve the specific AppData/Roaming folder for this app
-    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_dir = crate::app_dirs::data(&app).map_err(|e| e.to_string())?;
 
     // 2. CRITICAL: Ensure the directory exists.
     // If Explorer is called on a non-existent path, it defaults to 'Documents'.
@@ -44,7 +43,7 @@ pub async fn export_chat_log(
     logs: Vec<ExportMessage>,
 ) -> Result<String, String> {
     // 1. Get the AppData directory
-    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_dir = crate::app_dirs::data(&app).map_err(|e| e.to_string())?;
 
     if !app_dir.exists() {
         fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;

@@ -19,10 +19,7 @@ pub struct DataFactoryJob {
 /// The archive lives in the app data folder -- the one "앱 데이터 폴더 열기"
 /// opens: one training-pair file per channel (tab), plus the daily chat logs.
 fn data_dir(app: &AppHandle) -> std::io::Result<PathBuf> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let dir = crate::app_dirs::data(app).map_err(|e| std::io::Error::other(e.to_string()))?;
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -70,8 +67,7 @@ pub fn archives_channel(app: &AppHandle, channel: Channel) -> bool {
 
 /// Daily chat logs (full messages), reloaded as history on the next start.
 pub fn chat_logs_dir(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_data_dir()
+    crate::app_dirs::data(app)
         .expect("Failed to resolve AppData directory")
         .join("chat_logs")
 }

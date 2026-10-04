@@ -104,12 +104,14 @@ Order: verify first (K4, K6, K7 in W1), then build on the answers.
   - Decision for Kade, optional: create the firewall rule automatically when it is missing (the
     app already runs as Administrator). Not built.
 
-- [ ] **K26. Favorites tabs by stable id** (Kade, 2026-10-03: stable ids, not position keys --
+- [x] **K26. Favorites tabs by stable id** (Kade, 2026-10-03: stable ids, not position keys --
   tab order may become movable later; no backup file; a blank tab name becomes "탭 N") --
   plan: [`favorites-stable-ids.md`](favorites-stable-ids.md). Duplicate tab names allowed.
-  Built (2026-10-03, `candidate/favorites-stable-ids`, PR into `rc` for Kade's Windows test; the same
-  branch goes to `main` in its own PR afterwards): ticks when Kade's checks in
-  `unverified-on-windows.md` pass on his real config. Not in it: renaming / moving a tab.
+  Built (2026-10-03, `candidate/favorites-stable-ids`, #118 into `rc`) and **verified on Windows by
+  Kade (2026-10-04)** with the candidate exe `v0.6.1-rc.favorites-stable-ids`: "works well". He did
+  not itemise the six checks, so a failure in one of them (e.g. the shortcut paste, K7) still goes
+  through K7 / K25. The same branch goes to `main` in its own PR, then ships in 0.6.2. Not in it:
+  renaming / moving a tab.
 
 ---
 

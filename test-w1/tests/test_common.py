@@ -90,3 +90,22 @@ def test_capture_runs_a_real_command_outside_a_dry_run(monkeypatch):
 def test_a_missing_program_is_code_127(monkeypatch):
     monkeypatch.delenv("W1_DRYRUN", raising=False)
     assert common.capture(["definitely-not-a-program-xyz"])[0] == 127
+
+
+def test_ask_text_reads_the_named_variable_in_a_dry_run(monkeypatch):
+    monkeypatch.setenv("W1_DRYRUN", "1")
+    monkeypatch.setenv("W1_TEXT_DEV_EXE", r"C:\dev\app.exe")
+    assert common.ask_text("DEV_EXE", "path? ") == r"C:\dev\app.exe"
+
+
+def test_ask_text_in_a_dry_run_without_the_variable_is_an_error(monkeypatch):
+    monkeypatch.setenv("W1_DRYRUN", "1")
+    monkeypatch.delenv("W1_TEXT_NOPE", raising=False)
+    with pytest.raises(RuntimeError):
+        common.ask_text("NOPE", "?")
+
+
+def test_ask_text_strips_quotes_and_spaces(monkeypatch):
+    monkeypatch.delenv("W1_DRYRUN", raising=False)
+    monkeypatch.setattr("builtins.input", lambda _prompt: '  "C:\\Program Files\\a.exe"  ')
+    assert common.ask_text("X", "?") == "C:\\Program Files\\a.exe"

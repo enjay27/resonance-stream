@@ -73,6 +73,18 @@ def _next_answer(prompt: str) -> str:
     return input(prompt)
 
 
+def ask_text(name: str, prompt: str) -> str:
+    """Free text from the person (a path, a pasted log line). Quotes and spaces around it
+    are dropped -- Explorer's "Copy as path" adds quotes. In a dry run the text comes from
+    the environment variable W1_TEXT_<name>."""
+    if dry_run():
+        value = os.environ.get(f"W1_TEXT_{name}")
+        if value is None:
+            raise RuntimeError(f"dry run: set W1_TEXT_{name}")
+        return value.strip()
+    return input(prompt).strip().strip('"').strip()
+
+
 @dataclass
 class Row:
     check: str

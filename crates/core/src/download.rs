@@ -2,6 +2,7 @@
 //! be tested on any OS: URL policy, integrity checks, progress throttling
 //! and version comparison.
 
+use crate::test_env::is_local_http_url;
 use sha2::{Digest, Sha256};
 use std::io;
 use std::path::Path;
@@ -11,10 +12,18 @@ use std::time::{Duration, Instant};
 /// downloads (the updater, the llama server), so a plain-HTTP URL could be
 /// swapped in transit.
 pub fn check_download_url(url: &str) -> Result<(), String> {
+    check_download_url_allowing(url, false)
+}
+
+/// [`check_download_url`], except that with `allow_local_http` a plain `http://`
+/// URL to this machine passes too. Only a test run that points the update feed
+/// at a local mock server asks for it; the downloaded exe must still carry a
+/// valid signature.
+pub fn check_download_url_allowing(url: &str, allow_local_http: bool) -> Result<(), String> {
     let is_https = url
         .get(..8)
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
-    if is_https && url.len() > 8 {
+    if (is_https && url.len() > 8) || (allow_local_http && is_local_http_url(url)) {
         Ok(())
     } else {
         Err(format!(
@@ -228,6 +237,25 @@ mod tests {
         assert!(check_download_url("http://example.com/a").is_err());
         assert!(check_download_url("file:///C:/evil.exe").is_err());
         assert!(check_download_url("").is_err());
+    }
+
+    #[test]
+    fn a_test_run_may_download_from_this_machine_over_http() {
+        let local = "http://127.0.0.1:8099/update.exe";
+        assert!(check_download_url(local).is_err());
+        assert!(check_download_url_allowing(local, false).is_err());
+        assert!(check_download_url_allowing(local, true).is_ok());
+        // https works either way; no other plain http does.
+        assert!(check_download_url_allowing("https://example.com/a", false).is_ok());
+        assert!(check_download_url_allowing("https://example.com/a", true).is_ok());
+        for url in [
+            "http://example.com/a",
+            "http://127.0.0.1.evil.example/a",
+            "http://127.0.0.1@evil.example/a",
+            "file:///C:/evil.exe",
+        ] {
+            assert!(check_download_url_allowing(url, true).is_err(), "{url}");
+        }
     }
 
     #[test]

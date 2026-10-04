@@ -110,8 +110,11 @@ jobs:
           tool: trunk
       # beforeBuildCommand runs `trunk build`; --no-bundle: the plain exe only.
       # Release builds embed src-tauri/app.manifest (asks for Administrator).
+      # --features test-env: the candidate understands the test flags
+      # (--data-dir, --status-file, ... see .memory/roadmap/test-run-parameters.md).
+      # release.yml never builds with it.
       - name: Build
-        run: npx --yes @tauri-apps/cli@2 build --no-bundle
+        run: npx --yes @tauri-apps/cli@2 build --no-bundle --features test-env
       - uses: actions/upload-artifact@v4
         with:
           name: exe
@@ -185,7 +188,8 @@ jobs:
             printf '1. `%s` 를 내려받습니다. 설치는 필요 없습니다.\n' "$exe"
             printf '2. 실행하면 관리자 권한을 요청합니다 (패킷 캡처에 필요) → **예**.\n'
             printf '3. "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행** (코드 서명이 없는 빌드입니다).\n'
-            printf '4. 설치된 앱과 같은 설정·번역 모델·채팅 기록 폴더를 함께 씁니다. 두 앱을 동시에 켜지 마세요.\n\n'
+            printf '4. 설치된 앱과 같은 설정·번역 모델·채팅 기록 폴더를 함께 씁니다. 두 앱을 동시에 켜지 마세요.\n'
+            printf '5. 시험용 옵션을 쓸 수 있는 빌드입니다: 예) `--data-dir C:\\w1\\run1` 로 실행하면 설치된 앱의 폴더 대신 그 폴더를 씁니다. 옵션 없이 실행하면 위 4번과 같습니다.\n\n'
             printf '### 빌드 정보\n'
             printf -- '- 커밋: `%s`\n' "$SHA"
             if [ -n "$BRANCH" ]; then printf -- '- 브랜치: `%s`\n' "$BRANCH"; fi

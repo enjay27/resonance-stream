@@ -169,6 +169,11 @@ and left to the Windows CI job, as always.
   feed must carry a valid signature, or test the "bad signature" path on purpose. **Not covered:**
   the dictionary (`DICT_URL`) and the llama-server zip (`AI_SERVER_ZIP_URL`) still come from their
   fixed URLs.
+- **PR 6 `claude/test-env-rc-build` -- done, first real build is the next candidate**:
+  `release-candidate.yml` builds with `--features test-env` and its Korean tester notes get a line 5
+  about the test options. `rc-lib.test.sh` pins it (runs in CI): the candidate build has the feature,
+  `release.yml` never mentions `test-env`, the notes line is there. Not run: an actual candidate
+  build -- check the first one's exe with `--print-env --status-file <file>`.
 - Path call sites for PR 2 were **14**, not 12: `app_config_dir()` x2 (`config/app_config.rs:187`,
   `config/metadata.rs:31`) and `app_data_dir()` x12 (`io/data_factory.rs`, `io/fs.rs`,
   `downloader/{gist,model,server}.rs`, `sniffer/raw_capture.rs`, `translator/server_manager.rs`).

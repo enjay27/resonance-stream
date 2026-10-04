@@ -65,6 +65,7 @@ K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
 ### Windows session W1 (Kade at the keyboard, `cargo tauri dev` / installed exe as Administrator)
 
 Run right after 0.6.1 is published, with 0.6.0 installed. One session covers K2, K4, K6, K7, K25.
+Each job has a notebook on its own `test/w1-*` branch (never merged to `main`; see `MEMORY.md`, CLAUDE.md *Test branches*): `git fetch && git checkout test/w1-<job>`, then `test-w1/README.md`.
 
 - [ ] **K2. Signed update path, end to end** (handoff checks A1-A5; never run)
   - [ ] A1 installed 0.6.0 offers 0.6.1 -> bar -> "다운로드 완료" only after the check -> restart

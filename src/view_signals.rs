@@ -122,10 +122,6 @@ pub struct UiSignals {
     pub set_show_dictionary: WriteSignal<bool>,
     pub show_troubleshooter: ReadSignal<bool>,
     pub set_show_troubleshooter: WriteSignal<bool>,
-    pub show_favorites: ReadSignal<bool>,
-    pub set_show_favorites: WriteSignal<bool>,
-    pub show_cheatsheet: ReadSignal<bool>,
-    pub set_show_cheatsheet: WriteSignal<bool>,
     /// The chat row menu that is open, if any (one at a time).
     pub active_menu: ReadSignal<Option<RowMenu>>,
     pub set_active_menu: WriteSignal<Option<RowMenu>>,
@@ -143,8 +139,6 @@ impl UiSignals {
             signal::<SettingsCategory>(SettingsCategory::default());
         let (show_dictionary, set_show_dictionary) = signal::<bool>(false);
         let (show_troubleshooter, set_show_troubleshooter) = signal::<bool>(false);
-        let (show_favorites, set_show_favorites) = signal::<bool>(false);
-        let (show_cheatsheet, set_show_cheatsheet) = signal::<bool>(false);
         let (active_menu, set_active_menu) = signal::<Option<RowMenu>>(None);
         let (dict_draft, set_dict_draft) = signal::<Option<DictDraft>>(None);
         let (click_through, set_click_through) = signal::<bool>(false);
@@ -157,10 +151,6 @@ impl UiSignals {
             set_show_dictionary,
             show_troubleshooter,
             set_show_troubleshooter,
-            show_favorites,
-            set_show_favorites,
-            show_cheatsheet,
-            set_show_cheatsheet,
             active_menu,
             set_active_menu,
             dict_draft,

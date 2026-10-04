@@ -1,9 +1,10 @@
 use crate::chat_view::{compact_original_class, translation_pending};
 use crate::dictionary_edit::draft;
 use crate::favorites::add_from_chat;
+use crate::favorites_sync;
 use crate::readability::{box_name, needs_backing, row_palette, ORIGINAL_TEXT, TEXT_BOX};
 use crate::ruby_view::{mark, RubyCache};
-use crate::store::{AppActions, AppSignals};
+use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
 use crate::translation_view::{effective, shows_translation, HOVER_ONLY};
 use crate::ui_types::{Channel, ChatMessage, RubySpan, TranslationView};
@@ -30,7 +31,6 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
     // what events update.
     let sig = RwSignal::from(sig);
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
-    let actions = use_context::<AppActions>().expect("AppActions missing");
 
     // Star: save this message (translation as the note) to the favorites.
     let save_favorite = move || {
@@ -41,7 +41,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
             .set_favorite_messages
             .update(|list| added = add_from_chat(list, &text, translated.as_deref()));
         if added {
-            actions.save_config.dispatch(());
+            favorites_sync::save(signals.config);
         }
     };
 

@@ -7,12 +7,35 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 /// The release whose exe is sitting in `update_temp.exe`, once it has passed
 /// the signature check. `restart_to_apply_update` checks the file again
 /// against it right before the swap.
 static DOWNLOADED: Mutex<Option<UpdateFeed>> = Mutex::new(None);
+
+/// Set by `cancel_app_update`; the running download looks at it every second.
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Is a `download_app_update` running? Only one may, so a retry started right
+/// after a cancel cannot share `update_temp.exe.part` with the one winding down.
+static RUNNING: AtomicBool = AtomicBool::new(false);
+
+struct RunningGuard;
+
+impl RunningGuard {
+    fn start() -> Option<Self> {
+        (!RUNNING.swap(true, Ordering::SeqCst)).then_some(RunningGuard)
+    }
+}
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        RUNNING.store(false, Ordering::SeqCst);
+    }
+}
 
 /// Is the exe at `exe` signed by one of the app's built-in keys, for the
 /// version `feed` announced? Reads the whole file: it is checked as it will
@@ -25,6 +48,8 @@ fn verify_file(exe: &Path, feed: &UpdateFeed) -> Result<(), String> {
 #[tauri::command]
 pub async fn download_app_update(app: AppHandle, download_url: String) -> Result<(), String> {
     info!("Downloading application update...");
+    let _running = RunningGuard::start().ok_or("An update download is already running")?;
+    CANCEL.store(false, Ordering::SeqCst);
 
     // 1. Only the release the last check announced.
     let feed = super::gist::announced_update()
@@ -42,12 +67,13 @@ pub async fn download_app_update(app: AppHandle, download_url: String) -> Result
     // 3. Download the new version (HTTPS only). The exe runs as
     // Administrator after restart, so it is only installed when one of the
     // app's built-in keys signed it for exactly the announced version.
-    super::fetch::download_file(
+    super::fetch::download_file_cancellable(
         &app,
         &feed.url,
         &temp_exe,
         "앱 업데이트", // Keep this exact string, we check it in the UI!
         None,
+        Some(&CANCEL),
     )
     .await?;
 
@@ -69,6 +95,20 @@ pub async fn download_app_update(app: AppHandle, download_url: String) -> Result
     );
 
     Ok(())
+}
+
+/// Stops the running update download and returns once it has let go of its
+/// files (a few seconds at most), so the caller may start another at once.
+/// A download that was cancelled is rejected with `UPDATE_CANCELLED`.
+#[tauri::command]
+pub async fn cancel_app_update() {
+    CANCEL.store(true, Ordering::SeqCst);
+    for _ in 0..100 {
+        if !RUNNING.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 #[tauri::command]

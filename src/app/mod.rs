@@ -5,8 +5,8 @@ mod setup_flow;
 use crate::components::settings::Settings;
 use crate::components::title_bar::TitleBar;
 use crate::components::{
-    AddToDictionaryModal, AppUpdateModal, ChatContainer, CheatSheetModal, DictionaryModal,
-    FavoritesModal, ModelUpdateModal, NavBar, SetupWizard, Troubleshooter,
+    AddToDictionaryModal, AppUpdateModal, ChatContainer, DictionaryModal, ModelUpdateModal, NavBar,
+    SetupWizard, Troubleshooter,
 };
 use crate::config_signals::ConfigSignals;
 use crate::hooks::use_tray::{setup_tray_listeners, sync_tray_menu};
@@ -34,6 +34,15 @@ pub fn App() -> impl IntoView {
     let set_current_time = signals.chat.set_current_time;
 
     provide_context(signals);
+
+    // A click anywhere else closes the open row menu. The sender / message
+    // triggers and the menus themselves stop their clicks (chat_row.rs), so
+    // only a click "somewhere else" gets here.
+    window_event_listener(leptos::ev::click, move |_| {
+        if active_menu.get_untracked().is_some() {
+            set_active_menu.set(None);
+        }
+    });
 
     // --- CONFIG ACTIONS ---
     let actions = actions::create_actions(signals);
@@ -104,9 +113,6 @@ pub fn App() -> impl IntoView {
             }
             // Note: Use `signals.config.overlay_opacity.get()` if your app.rs uses the signals struct instead of local signals.
         >
-            <Show when=move || active_menu.get().is_some()>
-                <div class="menu-overlay" on:click=move |_| set_active_menu.set(None)></div>
-            </Show>
             <Show when=move || !compact_mode.get()>
                 <TitleBar />
             </Show>
@@ -138,10 +144,8 @@ pub fn App() -> impl IntoView {
             <AddToDictionaryModal />
 
             // Favorite Messages Modal
-            <FavoritesModal />
 
             // Class / dungeon names, Japanese and Korean
-            <CheatSheetModal />
 
             // Settings Modal
             <Settings />

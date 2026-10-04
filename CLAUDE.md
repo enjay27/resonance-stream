@@ -111,6 +111,11 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
   name in a module shadows its glob re-export (rustc warns) — the item then silently
   stops being exported; call it by path instead.
 
+- **Favorites change only through `save_favorites`** (`FavoritesState`, then the
+  `favorites-changed` event reaches every window); `save_config` keeps the stored ones and
+  ignores the ones in its payload. A popup window (`open_popup`) saves only what it owns,
+  never the whole config -- its copy of the settings may be older than the main window's.
+
 ## Conventions (ui crate)
 
 - **State lives in `AppSignals` (context), not in component locals**, when more than one
@@ -147,6 +152,13 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
 - **Auto-correction restraint.** Self-correct at most **2** times, then stop and ask.
 - **Never report a gate as passed when it could not run.** A Linux session cannot
   build `src-tauri/`; say so, and leave it to the Windows CI job.
+- **A blocked host is asked for, not worked around.** A session can only reach the hosts
+  in its environment's trusted-host list. When a build, download or test needs a host
+  that is blocked (e.g. `Lindera.dev`, which the furigana dictionary's build script
+  downloads from), stop and ask Kade to add it -- name the host and what needs it. Do not
+  substitute a mirror, re-encode another copy, patch a dependency or stub the result to
+  get past it. Until it is added, the gate that needs it is reported as not run.
+  `Lindera.dev` is trusted since 2026-10-03.
 
 ---
 
@@ -243,13 +255,36 @@ installed app's data folder (same identifier): config, model, chat logs.
 An app update is installed only if one of the keys built into the app
 (`TRUSTED_UPDATE_KEYS`, `crates/core/src/update_signature.rs`) signed it for the
 announced version -- so a stable release is built and signed by
-`.github/workflows/release.yml`, never by hand: bump `[workspace.package] version`,
-merge to `main`, then push the tag `v<version>` on it. The workflow gates, builds
+`.github/workflows/release.yml`, never by hand: bump `[workspace.package] version`, write
+`release-notes/v<version>.md` (copy `release-notes/TEMPLATE.md`), merge to `main`, then
+push the tag `v<version>` on it. The workflow gates, builds
 the plain exe, signs it with the `TAURI_SIGNING_PRIVATE_KEY` secret, checks the
 signature the way the app will (`examples/verify_update.rs`) and publishes the exe,
 `<exe>.sig` and `latest.json` (the update feed). The private keys are never
 committed; the backup key stays offline. Tag / feed helpers:
 `.github/scripts/release-lib.sh` (tests in CI).
+
+**Never publish a stable release by hand.** Every installed app reads
+`releases/latest/download/latest.json`; a hand-made release (no `latest.json`, another
+exe) or a candidate that is not a prerelease becomes "latest" and updates silently stop
+-- the app just finds no update. `release.yml` reads the live feed back after publishing,
+and `release-feed-check.yml` watches it (daily, and when a person publishes, edits or
+deletes a release); both run `.github/scripts/check-release-feed.sh`. A red run means
+users get no update: delete the hand-made release or mark it prerelease, then run the
+workflow again.
+
+**Release notes: simple for users, detailed for maintainers.** `release-notes/v<version>.md`
+has two layers. Above the line `## 개발자용 상세` is the **user summary**: a few plain
+lines (about 10, at most 12) in Korean, in everyday words -- no commit subjects, PR
+numbers, file or function names, no English. It is what the app's update dialog shows
+(`latest.json`'s `notes`) and the top of the release page. Below that line is the
+**maintainer detail** (technical, any length, English is fine); the release page puts it,
+with the commit list since the previous stable tag, in one collapsed block, and the app
+never shows it. `release.yml` refuses to start without the file, or when the summary is
+empty, over 12 lines, has a line without Korean, or still has the `<<작성>>` placeholder
+(`release_notes_problem`, tested in `release-lib.test.sh`). The update dialog's notes box
+also scrolls past a fixed height, so a long note can never push its buttons off screen.
+Candidate (`rc`) notes are for the tester and keep their own format.
 
 ### Never commit
 - Secrets, `.env`.

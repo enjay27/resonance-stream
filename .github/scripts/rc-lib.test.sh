@@ -77,5 +77,11 @@ eq "past the end fails" "failed" "$(rc_nth_merge 4 <<<"$shas" 2>/dev/null || ech
 eq "empty history fails" "failed" "$(printf '' | rc_nth_merge 1 2>/dev/null || echo failed)"
 eq "past the end says so" "rc에 4번째 머지가 없습니다 (3개뿐)" "$(rc_nth_merge 4 <<<"$shas" 2>&1 >/dev/null || true)"
 
+# --- test flags (src-tauri `test-env` feature): candidates are built with them, stable releases never ---
+workflows=../workflows
+eq "candidate builds with test-env" "1" "$(grep -c 'tauri-apps/cli@2 build .*--features test-env' "$workflows/release-candidate.yml")"
+eq "stable release never mentions test-env" "0" "$(grep -c 'test-env' "$workflows/release.yml")"
+eq "candidate notes name the test flags" "1" "$(grep -c "printf '5\. .*--data-dir" "$workflows/release-candidate.yml")"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

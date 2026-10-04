@@ -109,3 +109,20 @@ def test_ask_text_strips_quotes_and_spaces(monkeypatch):
     monkeypatch.delenv("W1_DRYRUN", raising=False)
     monkeypatch.setattr("builtins.input", lambda _prompt: '  "C:\\Program Files\\a.exe"  ')
     assert common.ask_text("X", "?") == "C:\\Program Files\\a.exe"
+
+
+def test_capture_starts_the_program_shutil_which_finds(monkeypatch, tmp_path):
+    # On Windows `npx` is npx.cmd: only the resolved full path can be started without a shell.
+    monkeypatch.delenv("W1_DRYRUN", raising=False)
+    seen = []
+    real_run = common.subprocess.run
+
+    def spy(cmd, **kw):
+        seen.append(cmd[0])
+        return real_run([sys.executable, "-c", "print('x')"], **kw)
+
+    monkeypatch.setattr(common.subprocess, "run", spy)
+    monkeypatch.setattr(common.shutil, "which", lambda name: r"C:\tools\npx.CMD" if name == "npx" else None)
+    common.capture(["npx", "--version"])
+    common.capture(["unknown-tool"])
+    assert seen == [r"C:\tools\npx.CMD", "unknown-tool"]

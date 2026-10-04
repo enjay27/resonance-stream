@@ -12,6 +12,7 @@ import datetime
 import json
 import os
 import platform
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -161,6 +162,8 @@ def capture(command: list[str], fixture: str | None = None, timeout: int = 120) 
         if fixture is None:
             raise RuntimeError(f"dry run: no fixture for {command!r}")
         return 0, (FIXTURES / fixture).read_text(encoding="utf-8")
+    # `npx` is `npx.CMD` on Windows: without a shell only the resolved path starts.
+    command = [shutil.which(command[0]) or command[0], *command[1:]]
     try:
         done = subprocess.run(
             command, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace"

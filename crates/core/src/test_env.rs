@@ -378,6 +378,133 @@ impl AppDirs {
     }
 }
 
+/// The flags a restarted app (after an update) gets, so the new process runs
+/// in the same test environment. `--fresh` would empty the folders again and
+/// `--print-env` would exit at once, so neither is passed on.
+impl TestEnv {
+    pub fn restart_args(&self) -> Vec<String> {
+        let switch = |on: bool, name: &str| on.then(|| format!("--{name}"));
+        let value = |value: Option<String>, name: &str| value.map(|v| format!("--{name}={v}"));
+        let path = |path: &Option<PathBuf>| path.as_ref().map(|p| p.to_string_lossy().into_owned());
+        // The order of `FLAGS`, so the same settings always give the same line.
+        [
+            value(path(&self.data_dir), "data-dir"),
+            switch(self.assume_setup_done, "assume-setup-done"),
+            switch(self.no_capture, "no-capture"),
+            switch(self.no_translator, "no-translator"),
+            switch(self.no_update_check, "no-update-check"),
+            switch(self.no_popups, "no-popups"),
+            switch(self.no_window_state, "no-window-state"),
+            value(self.feed_url.clone(), "feed-url"),
+            value(self.metadata_url.clone(), "metadata-url"),
+            value(path(&self.status_file), "status-file"),
+            value(path(&self.log_file), "log-file"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+}
+
+/// How the app's own update stands, as a test script reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateState {
+    /// No check yet, or nothing newer.
+    None,
+    Available(String),
+    Downloading,
+    Downloaded,
+    Error(String),
+}
+
+impl UpdateState {
+    /// The state a finished update check leaves: the error that stopped it, else
+    /// the newer version it found, else nothing.
+    pub fn after_check(feed_error: Option<&str>, newer_version: Option<&str>) -> Self {
+        match (feed_error, newer_version) {
+            (Some(error), _) => Self::Error(error.to_string()),
+            (None, Some(version)) => Self::Available(version.to_string()),
+            (None, None) => Self::None,
+        }
+    }
+}
+
+impl fmt::Display for UpdateState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => write!(f, "none"),
+            Self::Available(version) => write!(f, "available:{version}"),
+            Self::Downloading => write!(f, "downloading"),
+            Self::Downloaded => write!(f, "downloaded"),
+            Self::Error(reason) => {
+                // One line, so a script can read it back from the file.
+                let reason: Vec<&str> = reason.split_whitespace().collect();
+                write!(f, "error:{}", reason.join(" "))
+            }
+        }
+    }
+}
+
+/// What `--status-file` and `--print-env` report. The keys are stable: a test
+/// script reads them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusReport {
+    pub version: String,
+    /// Full path of the running exe -- which copy is this?
+    pub exe: String,
+    pub pid: u32,
+    /// The app has finished starting.
+    pub ready: bool,
+    /// `None` while the folder is still Tauri's default and not yet resolved.
+    pub config_dir: Option<String>,
+    pub data_dir: Option<String>,
+    /// Names of the flags that are set (`TestEnv::set_flags`).
+    pub flags: Vec<String>,
+    pub update: UpdateState,
+}
+
+impl StatusReport {
+    pub fn to_json(&self) -> String {
+        let json = serde_json::json!({
+            "version": self.version,
+            "exe": self.exe,
+            "pid": self.pid,
+            "ready": self.ready,
+            "config_dir": self.config_dir,
+            "data_dir": self.data_dir,
+            "flags": self.flags,
+            "update": self.update.to_string(),
+        });
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    }
+
+    /// Writes the JSON to `path`, replacing the file in one step so a script
+    /// polling it never reads half of one.
+    pub fn write(&self, path: &Path) -> io::Result<()> {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::download::write_atomic(path, self.to_json().as_bytes())
+    }
+}
+
+/// Writes everything to both `A` and `B`. An error from `B` (a log file that
+/// cannot be written) is ignored: the log must never take the app down.
+pub struct Tee<A: io::Write, B: io::Write>(pub A, pub B);
+
+impl<A: io::Write, B: io::Write> io::Write for Tee<A, B> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.0.write(buf)?;
+        let _ = self.1.write_all(&buf[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let _ = self.1.flush();
+        self.0.flush()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,5 +860,154 @@ mod tests {
     fn reset_without_a_data_dir_is_an_error() {
         let dirs = resolve_dirs(Path::new("/def/config"), Path::new("/def/data"), &ok(&[]));
         assert!(dirs.reset().is_err());
+    }
+
+    // ---- status report, restart arguments, log tee ----
+
+    #[test]
+    fn update_states_have_stable_names() {
+        assert_eq!(UpdateState::None.to_string(), "none");
+        assert_eq!(
+            UpdateState::Available("0.6.2".into()).to_string(),
+            "available:0.6.2"
+        );
+        assert_eq!(UpdateState::Downloading.to_string(), "downloading");
+        assert_eq!(UpdateState::Downloaded.to_string(), "downloaded");
+        assert_eq!(
+            UpdateState::Error("Network error".into()).to_string(),
+            "error:Network error"
+        );
+    }
+
+    #[test]
+    fn an_update_check_ends_in_error_available_or_none() {
+        let after = UpdateState::after_check;
+        assert_eq!(
+            after(Some("Network error"), None),
+            UpdateState::Error("Network error".into())
+        );
+        // An error wins: the feed could not be read, whatever was known before.
+        assert_eq!(
+            after(Some("Network error"), Some("0.6.2")),
+            UpdateState::Error("Network error".into())
+        );
+        assert_eq!(
+            after(None, Some("0.6.2")),
+            UpdateState::Available("0.6.2".into())
+        );
+        assert_eq!(after(None, None), UpdateState::None);
+    }
+
+    #[test]
+    fn an_error_reason_stays_on_one_line() {
+        assert_eq!(
+            UpdateState::Error("bad\r\nfeed\n".into()).to_string(),
+            "error:bad feed"
+        );
+    }
+
+    fn report() -> StatusReport {
+        StatusReport {
+            version: "0.6.1".into(),
+            exe: "C:\\w1\\app.exe".into(),
+            pid: 4242,
+            ready: false,
+            config_dir: None,
+            data_dir: Some("/tmp/run1/data".into()),
+            flags: vec!["data-dir".into(), "no-capture".into()],
+            update: UpdateState::Available("0.6.2".into()),
+        }
+    }
+
+    #[test]
+    fn the_status_json_has_stable_keys() {
+        let json: serde_json::Value = serde_json::from_str(&report().to_json()).expect("json");
+        assert_eq!(json["version"], "0.6.1");
+        assert_eq!(json["exe"], "C:\\w1\\app.exe");
+        assert_eq!(json["pid"], 4242);
+        assert_eq!(json["ready"], false);
+        assert!(json["config_dir"].is_null());
+        assert_eq!(json["data_dir"], "/tmp/run1/data");
+        assert_eq!(json["flags"], serde_json::json!(["data-dir", "no-capture"]));
+        assert_eq!(json["update"], "available:0.6.2");
+        assert_eq!(json.as_object().expect("object").len(), 8);
+    }
+
+    #[test]
+    fn writing_a_status_file_replaces_the_old_one() {
+        let dir = scratch("status-file");
+        let path = dir.join("nested").join("status.json");
+        report().write(&path).expect("first write");
+        let mut ready = report();
+        ready.ready = true;
+        ready.write(&path).expect("second write");
+
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["ready"], true);
+        let files: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap().collect();
+        assert_eq!(files.len(), 1, "no temp file is left behind");
+    }
+
+    #[test]
+    fn a_restart_gets_the_same_flags_except_fresh_and_print_env() {
+        assert!(TestEnv::default().restart_args().is_empty());
+
+        let env = ok(&[
+            "--data-dir",
+            "/tmp/run1",
+            "--fresh",
+            "--print-env",
+            "--no-capture",
+            "--feed-url",
+            "http://127.0.0.1:8099/latest.json",
+        ]);
+        let args = env.restart_args();
+        assert_eq!(
+            args,
+            [
+                "--data-dir=/tmp/run1",
+                "--no-capture",
+                "--feed-url=http://127.0.0.1:8099/latest.json"
+            ]
+        );
+        // And they mean the same thing when read back.
+        let again = ok(&args.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(
+            again,
+            TestEnv {
+                fresh: false,
+                print_env: false,
+                ..env
+            }
+        );
+    }
+
+    /// A writer that always fails, as a full disk or a closed file would.
+    struct Broken;
+    impl io::Write for Broken {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("broken"))
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("broken"))
+        }
+    }
+
+    #[test]
+    fn a_tee_writes_to_both_sides() {
+        let mut tee = Tee(Vec::new(), Vec::new());
+        io::Write::write_all(&mut tee, b"hello").unwrap();
+        io::Write::flush(&mut tee).unwrap();
+        assert_eq!(tee.0, b"hello");
+        assert_eq!(tee.1, b"hello");
+    }
+
+    #[test]
+    fn a_broken_log_file_never_breaks_the_console_log() {
+        let mut tee = Tee(Vec::new(), Broken);
+        io::Write::write_all(&mut tee, b"hello").unwrap();
+        io::Write::flush(&mut tee).unwrap();
+        assert_eq!(tee.0, b"hello");
     }
 }

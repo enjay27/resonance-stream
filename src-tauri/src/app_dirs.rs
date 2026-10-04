@@ -2,19 +2,25 @@
 //! here and nowhere else, so a test run can later move all of them at once
 //! (`--data-dir`, see `.memory/roadmap/test-run-parameters.md`).
 //!
-//! Today both functions return exactly what Tauri resolves.
+//! Both return what Tauri resolves, unless a test run asked for `--data-dir`.
 
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 /// `config.json` and the metadata file (Tauri's `app_config_dir`).
 pub fn config(app: &AppHandle) -> tauri::Result<PathBuf> {
-    app.path().app_config_dir()
+    match crate::test_env::dirs() {
+        Some(dirs) => Ok(dirs.config.clone()),
+        None => app.path().app_config_dir(),
+    }
 }
 
 /// Model, server, chat logs, dictionary, raw captures (Tauri's `app_data_dir`).
 pub fn data(app: &AppHandle) -> tauri::Result<PathBuf> {
-    app.path().app_data_dir()
+    match crate::test_env::dirs() {
+        Some(dirs) => Ok(dirs.data.clone()),
+        None => app.path().app_data_dir(),
+    }
 }
 
 #[cfg(test)]

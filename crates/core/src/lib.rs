@@ -12,6 +12,7 @@ pub mod log_throttle;
 pub mod paste;
 pub mod protocol;
 pub mod sniffer_net;
+pub mod test_env;
 pub mod text;
 pub mod update_feed;
 pub mod update_signature;

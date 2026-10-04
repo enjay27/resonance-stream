@@ -19,7 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures"
-RUNS = ROOT / "runs"
+RUNS = Path(os.environ.get("W1_RUNS_DIR", ROOT / "runs"))
 
 STATUSES = ("pass", "fail", "skip")
 
@@ -173,6 +173,18 @@ def capture(command: list[str], fixture: str | None = None, timeout: int = 120) 
     except subprocess.TimeoutExpired:
         return 124, f"timed out after {timeout}s: {' '.join(command)}"
     return done.returncode, (done.stdout or "") + (done.stderr or "")
+
+
+def fetch_text(url: str, fixture: str | None = None, timeout: float = 30) -> str:
+    """GET a URL as the app would (redirects followed). A dry run reads the fixture instead."""
+    if dry_run():
+        if fixture is None:
+            raise RuntimeError(f"dry run: no fixture for {url}")
+        return (FIXTURES / fixture).read_text(encoding="utf-8")
+    import urllib.request
+
+    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 -- fixed https URL
+        return response.read().decode("utf-8")
 
 
 def require_windows_admin(rec: Recorder) -> bool:

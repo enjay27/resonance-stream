@@ -126,3 +126,24 @@ def test_capture_starts_the_program_shutil_which_finds(monkeypatch, tmp_path):
     common.capture(["npx", "--version"])
     common.capture(["unknown-tool"])
     assert seen == [r"C:\tools\npx.CMD", "unknown-tool"]
+
+
+def test_fetch_text_reads_the_fixture_in_a_dry_run(monkeypatch):
+    monkeypatch.setenv("W1_DRYRUN", "1")
+    assert common.fetch_text("https://example.invalid/x", fixture="hello.txt").strip() == "hello"
+
+
+def test_fetch_text_in_a_dry_run_needs_a_fixture(monkeypatch):
+    monkeypatch.setenv("W1_DRYRUN", "1")
+    with pytest.raises(RuntimeError):
+        common.fetch_text("https://example.invalid/x")
+
+
+def test_runs_dir_can_be_moved_by_the_environment():
+    import subprocess
+    out = subprocess.run(
+        [sys.executable, "-c", "from w1 import common; print(common.RUNS)"],
+        cwd=Path(__file__).resolve().parent.parent, env={**os.environ, "W1_RUNS_DIR": "/somewhere/else"},
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert out == "/somewhere/else"

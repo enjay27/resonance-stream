@@ -35,6 +35,13 @@ pub fn current_popup() -> Option<PopupKind> {
     popup_for(label.as_deref(), &query)
 }
 
+/// Whether a key press closes a popup window: Esc, unless something in the
+/// window used it already (`handled`: undoing an edit, cancelling a question)
+/// or an input method is composing text (Esc then cancels the composition).
+pub fn escape_closes_popup(key: &str, composing: bool, handled: bool) -> bool {
+    key == "Escape" && !composing && !handled
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,5 +99,28 @@ mod tests {
         assert_eq!(popup_for(None, "?popup=nothing"), None);
         assert_eq!(popup_for(None, "?popup="), None);
         assert_eq!(popup_for(None, "?other=cheatsheet"), None);
+    }
+
+    #[test]
+    fn escape_closes_a_popup() {
+        assert!(escape_closes_popup("Escape", false, false));
+    }
+
+    #[test]
+    fn other_keys_do_not_close_a_popup() {
+        for key in ["Enter", "a", "Backspace", "Tab", "F4", " "] {
+            assert!(!escape_closes_popup(key, false, false), "{key}");
+        }
+    }
+
+    #[test]
+    fn an_escape_the_window_already_used_does_not_close_it() {
+        // An edit undone, a shortcut recording cancelled, a question closed.
+        assert!(!escape_closes_popup("Escape", false, true));
+    }
+
+    #[test]
+    fn an_escape_that_cancels_an_ime_composition_does_not_close_it() {
+        assert!(!escape_closes_popup("Escape", true, false));
     }
 }

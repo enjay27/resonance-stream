@@ -68,6 +68,10 @@ pub fn emit_sniffer_state(app: &tauri::AppHandle, state: SnifferState, message: 
 
 #[tauri::command]
 pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
+    if crate::test_env::no_capture() {
+        emit_sniffer_state(&app, SnifferState::Off, "Capture disabled (--no-capture)");
+        return;
+    }
     if !check_firewall_rule() {
         inject_system_message(
             &app,
@@ -109,6 +113,9 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
         alive: alive.clone(),
     };
 
+    if crate::test_env::no_capture() {
+        return handle;
+    }
     if !check_firewall_rule() {
         inject_system_message(
             &app,

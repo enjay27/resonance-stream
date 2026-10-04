@@ -103,6 +103,55 @@ fn write_status(active: &Active) {
     }
 }
 
+/// Is this flag set? Always false in a normal run.
+fn flag(set: impl Fn(&TestEnv) -> bool) -> bool {
+    ACTIVE.get().is_some_and(|active| set(&active.env))
+}
+
+/// `--no-capture`: no sniffer, no firewall check.
+pub fn no_capture() -> bool {
+    flag(|env| env.no_capture)
+}
+
+/// `--no-translator`: no llama-server.
+pub fn no_translator() -> bool {
+    flag(|env| env.no_translator)
+}
+
+/// `--no-update-check`: the update check finds nothing, without asking the network.
+pub fn no_update_check() -> bool {
+    flag(|env| env.no_update_check)
+}
+
+/// `--no-popups`: the popup windows are not made ahead of time.
+pub fn no_popups() -> bool {
+    flag(|env| env.no_popups)
+}
+
+/// `--no-window-state`: the window size and place are neither restored nor saved.
+pub fn no_window_state() -> bool {
+    flag(|env| env.no_window_state)
+}
+
+/// What `config.json` held as `init_done` when the app started.
+static STORED_INIT_DONE: OnceLock<bool> = OnceLock::new();
+
+/// `init_done` for this run, given what the file says (see `--assume-setup-done`).
+pub fn init_done_for_run(stored: bool) -> bool {
+    let _ = STORED_INIT_DONE.set(stored);
+    ACTIVE
+        .get()
+        .map_or(stored, |active| active.env.init_done_for_run(stored))
+}
+
+/// The `init_done` to write to `config.json`, given the one the app holds.
+pub fn init_done_for_disk(current: bool) -> bool {
+    match (ACTIVE.get(), STORED_INIT_DONE.get()) {
+        (Some(active), Some(&stored)) => active.env.init_done_for_disk(current, stored),
+        _ => current,
+    }
+}
+
 /// The folders under `--data-dir`, or `None` for Tauri's own.
 pub fn dirs() -> Option<&'static AppDirs> {
     ACTIVE.get().and_then(|active| active.dirs.as_ref())

@@ -48,6 +48,21 @@ pub fn retire_translator_workers() {
 
 pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<TranslationJob> {
     let (tx, rx) = unbounded::<TranslationJob>();
+    if crate::test_env::no_translator() {
+        // As if the translator were off: no server, and each chat is archived
+        // as it is.
+        emit_translator_state(
+            &app,
+            TranslatorState::Off,
+            "Translator disabled (--no-translator)",
+        );
+        thread::spawn(move || {
+            for job in rx {
+                archive_chat(&app, &job.chat);
+            }
+        });
+        return tx;
+    }
     let generation = WORKER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let is_current = move || WORKER_GENERATION.load(Ordering::SeqCst) == generation;
     let config = crate::config::current_config(&app);

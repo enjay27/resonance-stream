@@ -220,6 +220,9 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
 
 #[tauri::command]
 pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, String> {
+    if crate::test_env::no_capture() {
+        return Ok("Skipped (--no-capture)".to_string());
+    }
     if let Ok(exe_path) = env::current_exe() {
         if let Some(path_str) = exe_path.to_str() {
             // The rule is per exe (the dev and the installed exe each get

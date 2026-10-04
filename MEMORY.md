@@ -4,6 +4,8 @@
 
 ## Now — 2026-10-04
 
+**Test-run parameters: PR 4, the behaviour flags (2026-10-04, `claude/test-env-behaviour`; PR 3 merged as #128):** `--assume-setup-done` (never written to `config.json`), `--no-capture`, `--no-translator`, `--no-update-check`, `--no-popups`, `--no-window-state` act in debug / `test-env` builds. **Next:** PR 5 (`--feed-url`, `--metadata-url`, with the localhost-HTTP exception behind the gate), then PR 6 (`release-candidate.yml` builds with `--features test-env`). **Needs Kade:** a Windows run of PRs 3-4 (`--data-dir`, `--status-file`, `--print-env`, `--assume-setup-done`). Details in [`roadmap/test-run-parameters.md`](.memory/roadmap/test-run-parameters.md).
+
 **Test-run parameters: PR 3, the gate and the first flags (2026-10-04, `claude/test-env-flags`; PR 2 `app_dirs` merged as #127):** `--data-dir`, `--fresh`, `--print-env`, `--status-file` (with the update state), `--log-file` work in debug builds and builds with the `test-env` cargo feature; a normal release never reads them. The other flags parse but do nothing yet. **Next:** PR 4 (`--assume-setup-done`, `--no-capture`, `--no-translator`, `--no-update-check`, `--no-popups`, `--no-window-state`). Details in [`roadmap/test-run-parameters.md`](.memory/roadmap/test-run-parameters.md).
 
 **Test-run parameters: PR 2, `app_dirs` choke point (2026-10-04, `claude/test-env-appdirs`; PR 1 `core::test_env` merged as #126):** every folder the app writes to is asked for in `src-tauri/src/app_dirs.rs` (14 call sites moved, no behaviour change; a source-scan test keeps it that way). **Next:** PR 3 (gate + `--data-dir`, `--fresh`, `--print-env`, `--status-file`, `--log-file`). Older entry below.

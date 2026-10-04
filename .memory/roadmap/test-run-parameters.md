@@ -146,11 +146,20 @@ and left to the Windows CI job, as always.
   `download_app_update`), `--log-file` (tee with the console, no colours). Core side:
   `StatusReport`, `UpdateState` (+ `after_check`), `TestEnv::restart_args`, `Tee`; 8 new tests.
   `restart_to_apply_update` passes the flags on (never `--fresh` / `--print-env`).
-  **Known gaps:** the other flags (`--assume-setup-done`, `--no-*`, `--feed-url`, `--metadata-url`)
-  parse but do nothing until PR 4 / 5. A release exe with `test-env` is a GUI-subsystem exe, so
+  **Known gap (PR 3):** the other flags parsed but did nothing until PR 4 / 5. A release exe with `test-env` is a GUI-subsystem exe, so
   `--print-env`'s stdout may not reach a console -- use `--status-file` with it (it writes the same
   JSON). `config_dir` / `data_dir` are `null` in `--print-env` without `--data-dir` (Tauri's
   defaults are not known before the app exists); the status file fills them in at ready.
+- **PR 4 `claude/test-env-behaviour` -- done, app gate left to Windows CI**: the six switches act.
+  `--assume-setup-done`: `init_done` is true for the run (`run()` reads it through
+  `test_env::init_done_for_run`) and `apply_config` writes the *stored* value back, so the flag never
+  reaches `config.json` (rules in `TestEnv::init_done_for_run` / `_for_disk`, tested). `--no-capture`:
+  `start_sniffer_command`, `start_sniffer_worker` and `ensure_firewall_rule_command` do nothing (sniffer
+  state Off). `--no-translator`: `start_translator_worker` starts no server; a pass-through thread
+  archives each chat as translator-off does. `--no-update-check`: `check_all_updates` answers "nothing"
+  without the network (the settings button too). `--no-popups`: no `prewarm_popups`. `--no-window-state`:
+  the window-state plugin is not registered, and `show_popup` skips `restore_state` (it would panic
+  without the plugin). `--feed-url` / `--metadata-url` still parse and do nothing (PR 5).
 - Path call sites for PR 2 were **14**, not 12: `app_config_dir()` x2 (`config/app_config.rs:187`,
   `config/metadata.rs:31`) and `app_data_dir()` x12 (`io/data_factory.rs`, `io/fs.rs`,
   `downloader/{gist,model,server}.rs`, `sniffer/raw_capture.rs`, `translator/server_manager.rs`).

@@ -27,7 +27,7 @@ Kade's PC. Four runs showed what is missing:
 
 - No command-line or environment parameters at all: `env::args` is read only by the
   `verify_update` example.
-- The app's folders come from Tauri's resolver at **12 call sites**:
+- The app's folders come from Tauri's resolver at **14 call sites**:
   `app_config_dir()` -- `config/app_config.rs:186` (config.json), `config/metadata.rs:30`;
   `app_data_dir()` -- `io/data_factory.rs:23,73`, `io/fs.rs:13,47`,
   `services/downloader/{gist.rs:128, model.rs:14,38, server.rs:16,32}`,
@@ -90,7 +90,7 @@ passes flags and `cargo tauri dev -- -- --data-dir ...` works for development.
 1. **Pure parsing in `crates/core`** (`test_env`): `parse(args, env) -> TestEnv` -- unknown flag =
    error, every flag tested on every OS. `resolve_dirs(default_config, default_data, &TestEnv) ->
    AppDirs`, same.
-2. **One choke point in the app**: `AppDirs` in `AppState` (or a `OnceLock`), and the 12 call sites
+2. **One choke point in the app**: `AppDirs` in `AppState` (or a `OnceLock`), and the 14 call sites
    call it instead of `app.path()`. With no flags it returns exactly what Tauri returns today --
    **a refactor, no behaviour change** (CLAUDE.md), its own PR, `app-check` on Windows CI.
 3. **Compile-time gate**: the flags are honoured only when `cfg(any(debug_assertions, feature =
@@ -107,27 +107,38 @@ passes flags and `cargo tauri dev -- -- --data-dir ...` works for development.
 |---|---|---|---|
 | 0 | **probe** (above) | -- | Kade; answer recorded here |
 | 1 | `core::test_env`: `parse`, `resolve_dirs` (+ tests) | core | `just core-check` |
-| 2 | app: `AppDirs` choke point, 12 call sites, **no behaviour change** | app | CI Windows job; a run on Windows |
+| 2 | app: `AppDirs` choke point, 14 call sites, **no behaviour change** | app | CI Windows job; a run on Windows |
 | 3 | app: gate + `--data-dir`, `--fresh`, `--print-env`, `--status-file`, `--log-file` | app | CI; `--print-env` from a notebook |
 | 4 | app: `--assume-setup-done`, `--no-capture`, `--no-translator`, `--no-update-check`, `--no-popups`, `--no-window-state` | app | CI; a run |
 | 5 | app: `--feed-url`, `--metadata-url` (HTTPS only; `http://127.0.0.1` only under the gate) | app | mock-server notebook |
 | 6 | `release-candidate.yml`: build with `--features test-env` | CI | the next candidate's `--print-env` |
 | 7 | notebooks (`test/w1-*`) use the flags; the config-editing step stays only for released exes | -- | a Windows run |
-| 8 | optional: `--replay-chat` | core + app | fixture replay |
+| 8 | `--replay-chat` (wanted, decision 4) | core + app | fixture replay |
 
 Gates that cannot run in a Linux session (anything in `src-tauri/`) are named in the commit body
 and left to the Windows CI job, as always.
 
-## Decisions for Kade
+## Decisions (Kade, 2026-10-04 -- answered, recommended options except the last)
 
-1. **Gate**: debug builds + `test-env` feature only (recommended), or always on? (Always-on lets a
-   local user redirect a *released* app's data folder and update feed -- the update still must be
-   signed by a built-in key, but there is no reason to ship the lever.)
-2. **Release candidates get `test-env`** (recommended) -- they are already unsigned test builds.
-3. **Flags and env vars** (recommended), or flags only?
-4. Is **`--replay-chat`** wanted now, or later? (It is the only part that is real design work.)
-5. **`--feed-url` with a local HTTP mock** (needs the localhost exception in the downloader), or
-   only HTTPS URLs? Without it, "bad feed" tests need a real HTTPS host.
+1. **Gate**: debug builds + `test-env` feature only. A stable release ignores every flag.
+2. **Release candidates get `test-env`** (PR 6); `release.yml` never does.
+3. **Flags and env vars**: `RESONANCE_TEST_<FLAG>`, flag wins (built in `core::test_env`).
+4. **`--replay-chat` is wanted now** (PR 8). The line format is still open -- proposed one JSON
+   object per line, `{"delay_ms": 500, "text": "...", ...}`; confirm the fields before building.
+5. **`--feed-url` / `--metadata-url`**: `https://`, or `http://` to 127.0.0.1 / localhost / [::1]
+   only (`core::test_env::is_test_url_allowed`). PR 5 adds the matching exception to the
+   downloader's `check_download_url`, behind the gate.
+
+## Progress
+
+- **PR 1 `claude/test-env-core` -- done**: `resonance_core::test_env` (`parse`, `TestEnv`,
+  `resolve_dirs`, `AppDirs::reset` for `--fresh`, `is_test_url_allowed`; 22 tests). Safety rules
+  pinned by tests: `--fresh` needs `--data-dir`; `reset` empties only `config/`, `data/`,
+  `webview/` and refuses a root near the top of a drive or with `..`.
+- Path call sites for PR 2 are **14**, not 12: `app_config_dir()` x2 (`config/app_config.rs:187`,
+  `config/metadata.rs:31`) and `app_data_dir()` x12 (`io/data_factory.rs`, `io/fs.rs`,
+  `downloader/{gist,model,server}.rs`, `sniffer/raw_capture.rs`, `translator/server_manager.rs`).
+- Step 0 (Kade's probe) is still not answered; PR 2 can go ahead without it.
 
 ## Not in this plan
 

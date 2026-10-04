@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use tauri::Manager;
 
+pub mod app_dirs;
 pub mod commands;
 pub mod config;
 pub mod events;

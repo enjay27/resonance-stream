@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -18,9 +18,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 static SERVER_PID: AtomicU32 = AtomicU32::new(0);
 
 fn pid_file(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app
-        .path()
-        .app_data_dir()
+    let dir = crate::app_dirs::data(app)
         .ok()?
         .join("bin")
         .join(AI_SERVER_FOLDER);
@@ -100,7 +98,7 @@ pub fn launch_ai_server(
     model_path: &PathBuf,
     config: &crate::config::AppConfig,
 ) -> Option<ServerGuard> {
-    let Ok(data_dir) = app.path().app_data_dir() else {
+    let Ok(data_dir) = crate::app_dirs::data(app) else {
         let msg = "Failed to start llama-server.exe. (no app data folder)";
         inject_system_message(app, SystemLogLevel::Error, "Translator", msg);
         super::emit_translator_state(app, TranslatorState::Error, msg);

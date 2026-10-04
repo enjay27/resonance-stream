@@ -1,6 +1,6 @@
 use crate::{FolderStatus, ProgressPayload};
 use std::fs;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 pub const AI_SERVER_FOLDER: &str = "ai-server";
 pub const AI_SERVER_ZIP_URL: &str = "https://github.com/enjay27/resonance-stream/releases/download/v0.2.0/llama-b8157-bin-win-vulkan-x64.zip";
@@ -12,9 +12,7 @@ pub const AI_SERVER_FILENAME: &str = "llama-server.exe";
 #[tauri::command]
 pub async fn check_ai_server_status(app: tauri::AppHandle) -> Result<FolderStatus, String> {
     // Check exactly one path for the .gguf file
-    let model_path = app
-        .path()
-        .app_data_dir()
+    let model_path = crate::app_dirs::data(&app)
         .map_err(|e| e.to_string())?
         .join("bin")
         .join(AI_SERVER_FOLDER)
@@ -28,9 +26,7 @@ pub async fn check_ai_server_status(app: tauri::AppHandle) -> Result<FolderStatu
 
 #[tauri::command]
 pub async fn download_ai_server(app: AppHandle) -> Result<(), String> {
-    let ai_server_dir = app
-        .path()
-        .app_data_dir()
+    let ai_server_dir = crate::app_dirs::data(&app)
         .unwrap()
         .join("bin")
         .join(AI_SERVER_FOLDER);

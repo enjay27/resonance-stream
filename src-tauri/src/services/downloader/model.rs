@@ -10,9 +10,7 @@ pub const MODEL_FOLDER: &str = "translation-model";
 pub const MODEL_FILENAME: &str = "model.gguf";
 
 fn get_model_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let base_models_dir = app
-        .path()
-        .app_data_dir()
+    let base_models_dir = crate::app_dirs::data(app)
         .map_err(|e| e.to_string())?
         .join("models");
 
@@ -35,8 +33,7 @@ fn get_model_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 pub fn get_model_path(app: &tauri::AppHandle) -> PathBuf {
-    app.path()
-        .app_data_dir()
+    crate::app_dirs::data(app)
         .expect("Failed to resolve AppData directory")
         .join("models")
         .join(MODEL_FOLDER)

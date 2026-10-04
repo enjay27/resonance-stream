@@ -125,8 +125,7 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
 
 /// %APPDATA%/<bundle id>/custom_dict.json
 pub fn dictionary_path(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_data_dir()
+    crate::app_dirs::data(app)
         .expect("Failed to resolve AppData directory")
         .join("custom_dict.json")
 }

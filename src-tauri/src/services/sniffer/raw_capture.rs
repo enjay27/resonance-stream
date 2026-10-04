@@ -9,7 +9,7 @@ use std::fs::{self, File};
 use std::io::BufWriter;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const FLUSH_EVERY: Duration = Duration::from_secs(1);
 
@@ -22,9 +22,7 @@ pub fn set_raw_capture(on: bool) {
 
 /// `<app data>/captures`, created if missing.
 fn captures_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
+    let dir = crate::app_dirs::data(app)
         .map_err(|e| e.to_string())?
         .join("captures");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

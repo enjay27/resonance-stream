@@ -182,10 +182,7 @@ impl AppConfig {
 }
 
 fn get_config_path(app: &AppHandle) -> PathBuf {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .expect("Could not resolve app config dir");
+    let config_dir = crate::app_dirs::config(app).expect("Could not resolve app config dir");
 
     // Ensure the directory exists (e.g., create 'com.bpsr.translator' folder)
     if !config_dir.exists() {

@@ -2,7 +2,7 @@ use crate::{inject_system_message, SystemLogLevel};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppMetadata {
@@ -26,10 +26,7 @@ impl Default for AppMetadata {
 }
 
 fn get_metadata_path(app: &AppHandle) -> PathBuf {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .expect("Could not resolve app config dir");
+    let config_dir = crate::app_dirs::config(app).expect("Could not resolve app config dir");
     if !config_dir.exists() {
         let _ = fs::create_dir_all(&config_dir);
     }

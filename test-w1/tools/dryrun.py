@@ -21,7 +21,7 @@ def execute(path: str | Path, answers: str = "") -> str:
     os.environ["W1_ANSWERS"] = answers
     nb = nbformat.read(str(path), as_version=4)
     NotebookClient(nb, timeout=120, kernel_name="python3",
-                   resources={"metadata": {"path": str(Path(path).resolve().parent.parent)}}).execute()
+                   resources={"metadata": {"path": str(Path(path).resolve().parent)}}).execute()  # as Jupyter: the notebook's folder
     last = ""
     for cell in nb.cells:
         for out in cell.get("outputs", []):

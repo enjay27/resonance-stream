@@ -46,13 +46,14 @@ pub fn run() {
         )
         .build();
 
-    let app = tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .on_window_event(window::on_window_event)
         .setup(|app| {
             let handle = app.handle().clone();
             window::prewarm_popups(handle.clone());
             // --- STATE FIRST: everything below logs through it and reads its config ---
-            let config = read_config_file(&handle);
+            let mut config = read_config_file(&handle);
+            config.init_done = test_env::init_done_for_run(config.init_done);
             let dictionary = resonance_core::text::Dictionary::load(&dictionary_path(&handle));
             app.manage(AppState {
                 config: RwLock::new(config.clone()),
@@ -141,7 +142,6 @@ pub fn run() {
             test_env::mark_ready(&handle);
             Ok(())
         })
-        .plugin(window_state_plugin)
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
@@ -191,7 +191,12 @@ pub fn run() {
             update_global_tab_shortcut,
             ensure_firewall_rule_command,
             restart_sniffer_command,
-        ])
+        ]);
+    // `--no-window-state`: neither restore nor save the windows' size and place.
+    if !test_env::no_window_state() {
+        builder = builder.plugin(window_state_plugin);
+    }
+    let app = builder
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
 

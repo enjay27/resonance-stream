@@ -378,6 +378,25 @@ impl AppDirs {
     }
 }
 
+impl TestEnv {
+    /// Is setup finished for this run? `stored` is what `config.json` says;
+    /// `--assume-setup-done` makes it true either way.
+    pub fn init_done_for_run(&self, stored: bool) -> bool {
+        stored || self.assume_setup_done
+    }
+
+    /// What to write to `config.json` as `init_done`: `current` normally; with
+    /// `--assume-setup-done`, what the file held (`stored`), so the flag is
+    /// never written down.
+    pub fn init_done_for_disk(&self, current: bool, stored: bool) -> bool {
+        if self.assume_setup_done {
+            stored
+        } else {
+            current
+        }
+    }
+}
+
 /// The flags a restarted app (after an update) gets, so the new process runs
 /// in the same test environment. `--fresh` would empty the folders again and
 /// `--print-env` would exit at once, so neither is passed on.
@@ -877,6 +896,25 @@ mod tests {
             UpdateState::Error("Network error".into()).to_string(),
             "error:Network error"
         );
+    }
+
+    #[test]
+    fn assume_setup_done_counts_for_the_run_but_is_never_written() {
+        let normal = TestEnv::default();
+        let assume = ok(&["--assume-setup-done"]);
+
+        // For the run: set up if the file says so, or the flag does.
+        assert!(!normal.init_done_for_run(false));
+        assert!(normal.init_done_for_run(true));
+        assert!(assume.init_done_for_run(false));
+        assert!(assume.init_done_for_run(true));
+
+        // On disk: a normal run writes what it has; an assuming run writes back
+        // what was stored, so the flag leaves no trace in the file.
+        assert!(normal.init_done_for_disk(true, false));
+        assert!(!normal.init_done_for_disk(false, true));
+        assert!(!assume.init_done_for_disk(true, false));
+        assert!(assume.init_done_for_disk(false, true));
     }
 
     #[test]

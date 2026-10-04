@@ -64,7 +64,8 @@ fn show_popup(app: &AppHandle, kind: PopupKind) -> Result<(), String> {
         Some(window) => window,
         None => create_popup(app, kind)?,
     };
-    if !window.is_visible().unwrap_or(false) {
+    // Without the plugin (`--no-window-state`) there is nothing to restore from.
+    if !crate::test_env::no_window_state() && !window.is_visible().unwrap_or(false) {
         // Size and place only: with `VISIBLE` the plugin would show it itself,
         // before we are ready.
         let _ = window.restore_state(StateFlags::SIZE | StateFlags::POSITION);
@@ -90,6 +91,9 @@ pub async fn open_popup(app: AppHandle, kind: PopupKind) -> Result<(), String> {
 /// one is instant (the cost is the idle web view of each). Later, off the main
 /// thread: building a window there can deadlock on Windows.
 pub fn prewarm_popups(app: AppHandle) {
+    if crate::test_env::no_popups() {
+        return;
+    }
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(2)).await;
         for kind in PopupKind::ALL {

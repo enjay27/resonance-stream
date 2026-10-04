@@ -59,6 +59,22 @@ async fn fetch_update_feed() -> Result<Option<UpdateFeed>, String> {
 // --- 2. The Single Unified Fetch Command ---
 #[tauri::command]
 pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, String> {
+    if crate::test_env::no_update_check() {
+        // Nothing is asked of the network and nothing is announced.
+        return Ok(UpdateCheckResult {
+            app_update_available: false,
+            model_update_available: false,
+            dict_update_available: false,
+            remote_data: GistMetadata {
+                app: VersionInfo::default(),
+                model: VersionInfo::default(),
+                dictionary: RemoteDictionary {
+                    version: String::new(),
+                    updated_at: String::new(),
+                },
+            },
+        });
+    }
     let client = reqwest::Client::new();
     let mut remote_data: GistMetadata = client
         .get(METADATA_URL)

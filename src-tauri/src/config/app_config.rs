@@ -293,7 +293,9 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
     let old_config = state.config.read().clone();
 
     let path = get_config_path(&app);
-    if let Ok(json) = serde_json::to_string_pretty(&config) {
+    let mut on_disk = config.clone();
+    on_disk.init_done = crate::test_env::init_done_for_disk(config.init_done);
+    if let Ok(json) = serde_json::to_string_pretty(&on_disk) {
         if let Err(e) = write_atomic(&path, json.as_bytes()) {
             log::error!("config.json not saved: {e}");
         }

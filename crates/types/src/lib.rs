@@ -461,21 +461,35 @@ pub struct FavoriteMessage {
     pub note: String,
     #[serde(default)]
     pub shortcut: String,
-    /// Name of the favorites tab it is filed under; empty is the default tab.
+    /// Id of the favorites tab it is filed under (`FavoriteTab::id`);
+    /// `DEFAULT_FAVORITE_TAB` is the default tab.
     #[serde(default)]
-    pub tab: String,
+    pub tab: u32,
+}
+
+/// The id of the default favorites tab: always there, first, not in
+/// `FavoritesState::tabs`, and not removable.
+pub const DEFAULT_FAVORITE_TAB: u32 = 0;
+
+/// A user's favorites tab. The id never changes while the tab lives (a message
+/// refers to its tab by it), so tabs may share a name, be renamed and be
+/// reordered; the order of `FavoritesState::tabs` is the order on screen.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct FavoriteTab {
+    pub id: u32,
+    pub name: String,
 }
 
 /// The favorites as the favorites popup and the main window exchange them
 /// (`get_favorites`, `save_favorites`, the `favorites-changed` event): the
-/// messages and the tab names. The backend is the one source of truth, so two
+/// messages and the tabs. The backend is the one source of truth, so two
 /// windows never overwrite each other's settings.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FavoritesState {
     pub messages: Vec<FavoriteMessage>,
     #[serde(default)]
-    pub tabs: Vec<String>,
+    pub tabs: Vec<FavoriteTab>,
 }
 
 /// Missed Japanese messages a translator start translates when the config
@@ -844,13 +858,18 @@ mod tests {
                 text: "hi".into(),
                 note: "안녕".into(),
                 shortcut: "Alt+F1".into(),
-                tab: "raid".into(),
+                tab: 3,
             }],
-            tabs: vec!["raid".into()],
+            tabs: vec![FavoriteTab {
+                id: 3,
+                name: "raid".into(),
+            }],
         };
         let json = serde_json::to_value(&state).unwrap();
         assert_eq!(json["messages"][0]["text"], "hi");
-        assert_eq!(json["tabs"][0], "raid");
+        assert_eq!(json["messages"][0]["tab"], 3);
+        assert_eq!(json["tabs"][0]["id"], 3);
+        assert_eq!(json["tabs"][0]["name"], "raid");
         let back: FavoritesState = serde_json::from_value(json).unwrap();
         assert_eq!(back, state);
     }
@@ -874,24 +893,30 @@ mod tests {
         assert_eq!(fav.text, "hi");
         assert!(fav.note.is_empty());
         assert!(fav.shortcut.is_empty());
-        // ... and lands in the default tab (an empty name).
-        assert!(fav.tab.is_empty());
-        assert!(defaults.iter().all(|f| f.tab.is_empty()));
+        // ... and lands in the default tab.
+        assert_eq!(fav.tab, DEFAULT_FAVORITE_TAB);
+        assert!(defaults.iter().all(|f| f.tab == DEFAULT_FAVORITE_TAB));
     }
 
     #[test]
-    fn a_favorites_tab_is_stored_under_its_name() {
+    fn a_favorites_tab_is_stored_under_its_id() {
         let fav = FavoriteMessage {
             text: "hi".into(),
-            tab: "레이드".into(),
+            tab: 2,
             ..Default::default()
         };
         let json = serde_json::to_value(&fav).unwrap();
-        assert_eq!(json["tab"], "레이드");
+        assert_eq!(json["tab"], 2);
         assert_eq!(
             serde_json::from_value::<FavoriteMessage>(json).unwrap(),
             fav
         );
+    }
+
+    #[test]
+    fn the_default_favorites_tab_is_id_zero() {
+        assert_eq!(DEFAULT_FAVORITE_TAB, 0);
+        assert_eq!(FavoriteMessage::default().tab, DEFAULT_FAVORITE_TAB);
     }
 
     #[test]

@@ -7,6 +7,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+# Honour the test flags (--data-dir, --status-file, ...; see
+# `.memory/roadmap/test-run-parameters.md`) in a release build. Debug builds
+# always do. Only release candidates are built with it; stable releases never.
+test-env = []
+
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.

@@ -139,6 +139,18 @@ and left to the Windows CI job, as always.
   (`config(app)`, `data(app)`, both still exactly Tauri's `app_config_dir` / `app_data_dir`); the 14
   call sites use it; a test (`no_code_outside_this_module_asks_tauri_for_a_folder`) fails if any
   other file calls Tauri for a folder again. Cross-checked on Linux, not run (no GTK here).
+- **PR 3 `claude/test-env-flags` -- done, app gate left to Windows CI**: Cargo feature `test-env`;
+  `src-tauri/src/test_env.rs` (`GATE_OPEN = debug_assertions | feature`; `init()` first in `run()`);
+  `--data-dir` (via `app_dirs`, plus `WEBVIEW2_USER_DATA_FOLDER`), `--fresh`, `--print-env`,
+  `--status-file` (written at start, at ready, and on each update step: `check_all_updates`,
+  `download_app_update`), `--log-file` (tee with the console, no colours). Core side:
+  `StatusReport`, `UpdateState` (+ `after_check`), `TestEnv::restart_args`, `Tee`; 8 new tests.
+  `restart_to_apply_update` passes the flags on (never `--fresh` / `--print-env`).
+  **Known gaps:** the other flags (`--assume-setup-done`, `--no-*`, `--feed-url`, `--metadata-url`)
+  parse but do nothing until PR 4 / 5. A release exe with `test-env` is a GUI-subsystem exe, so
+  `--print-env`'s stdout may not reach a console -- use `--status-file` with it (it writes the same
+  JSON). `config_dir` / `data_dir` are `null` in `--print-env` without `--data-dir` (Tauri's
+  defaults are not known before the app exists); the status file fills them in at ready.
 - Path call sites for PR 2 were **14**, not 12: `app_config_dir()` x2 (`config/app_config.rs:187`,
   `config/metadata.rs:31`) and `app_data_dir()` x12 (`io/data_factory.rs`, `io/fs.rs`,
   `downloader/{gist,model,server}.rs`, `sniffer/raw_capture.rs`, `translator/server_manager.rs`).

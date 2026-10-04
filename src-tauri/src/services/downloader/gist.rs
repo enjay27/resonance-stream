@@ -2,6 +2,7 @@ use crate::inject_system_message;
 use crate::protocol::types::SystemLogLevel;
 use parking_lot::Mutex;
 use resonance_core::download::is_newer_version;
+use resonance_core::test_env::UpdateState;
 use resonance_core::text::Dictionary;
 use resonance_core::update_feed::{parse_feed, UpdateFeed};
 use std::fs;
@@ -74,10 +75,12 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
     // App Check: from the release feed, not the gist (whose `app` entry only
     // serves copies that predate this). A feed that cannot be read is no
     // update -- never a reason to fail the model / dictionary check.
+    let mut feed_error = None;
     let feed = match fetch_update_feed().await {
         Ok(feed) => feed,
         Err(e) => {
             log::warn!("[Updater] No app update info: {}", e);
+            feed_error = Some(e);
             None
         }
     };
@@ -102,6 +105,13 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
             app_update_available = false;
         }
     }
+
+    crate::test_env::report_update(UpdateState::after_check(
+        feed_error.as_deref(),
+        feed.as_ref()
+            .filter(|_| app_update_available)
+            .map(|feed| feed.version.as_str()),
+    ));
 
     // Model Check
     let mut model_update_available =

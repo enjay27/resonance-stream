@@ -14,6 +14,7 @@ pub mod logging;
 pub mod protocol;
 pub mod services;
 pub mod shortcut;
+pub mod test_env;
 pub mod tray;
 pub mod window;
 
@@ -31,7 +32,9 @@ pub use window::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    logging::init_logger();
+    // The test flags first: they may move the data folders and name the log file.
+    test_env::init();
+    logging::init_logger(test_env::log_file());
 
     // A popup is placed by `show_popup`, hidden, just before it is shown: the
     // plugin restoring it at creation would show it first at the default place.
@@ -135,6 +138,7 @@ pub fn run() {
 
             crate::tray::setup_tray(app)?;
 
+            test_env::mark_ready(&handle);
             Ok(())
         })
         .plugin(window_state_plugin)

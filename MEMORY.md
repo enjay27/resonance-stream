@@ -4,6 +4,8 @@
 
 ## Now — 2026-10-04
 
+**Test-run parameters: PR 3, the gate and the first flags (2026-10-04, `claude/test-env-flags`; PR 2 `app_dirs` merged as #127):** `--data-dir`, `--fresh`, `--print-env`, `--status-file` (with the update state), `--log-file` work in debug builds and builds with the `test-env` cargo feature; a normal release never reads them. The other flags parse but do nothing yet. **Next:** PR 4 (`--assume-setup-done`, `--no-capture`, `--no-translator`, `--no-update-check`, `--no-popups`, `--no-window-state`). Details in [`roadmap/test-run-parameters.md`](.memory/roadmap/test-run-parameters.md).
+
 **Test-run parameters: PR 2, `app_dirs` choke point (2026-10-04, `claude/test-env-appdirs`; PR 1 `core::test_env` merged as #126):** every folder the app writes to is asked for in `src-tauri/src/app_dirs.rs` (14 call sites moved, no behaviour change; a source-scan test keeps it that way). **Next:** PR 3 (gate + `--data-dir`, `--fresh`, `--print-env`, `--status-file`, `--log-file`). Older entry below.
 
 **Test-run parameters: PR 1, `core::test_env` (2026-10-04, `claude/test-env-core`; Kade answered the five decisions -- gate = debug + `test-env` feature, flags + env vars, localhost-HTTP feed under the gate, `--replay-chat` now):** `resonance_core::test_env` parses the flags / `RESONANCE_TEST_*` variables, resolves `--data-dir` into config / data / webview folders, and `AppDirs::reset` implements `--fresh` safely; nothing in the app uses it yet. Plan, decisions and progress: [`roadmap/test-run-parameters.md`](.memory/roadmap/test-run-parameters.md). **Next:** PR 2 (`AppDirs` choke point, 14 call sites, no behaviour change; needs the Windows CI job). Step 0 probe still Kade's.

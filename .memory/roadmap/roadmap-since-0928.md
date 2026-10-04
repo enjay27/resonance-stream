@@ -65,6 +65,8 @@ K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
 ### Windows session W1 (Kade at the keyboard, `cargo tauri dev` / installed exe as Administrator)
 
 Run right after 0.6.1 is published, with 0.6.0 installed. One session covers K2, K4, K6, K7, K25.
+Handoff: [`../sessions/2026-10-04-w1-notebooks-handoff.md`](../sessions/2026-10-04-w1-notebooks-handoff.md); plan for
+test-run parameters (data dir etc., not started): [`test-run-parameters.md`](test-run-parameters.md).
 Each job has a notebook on its own `test/w1-*` branch (never merged to `main`; see `MEMORY.md`, CLAUDE.md *Test branches*): `git fetch && git checkout test/w1-<job>`, then `test-w1/README.md`.
 
 - [ ] **K2. Signed update path, end to end** (handoff checks A1-A5; never run)
@@ -75,7 +77,9 @@ Each job has a notebook on its own `test/w1-*` branch (never merged to `main`; s
   - [ ] A3 cut the network mid-download -> error step with a reason, 다시 시도 works, no half
     `update_temp.exe`.
   - [ ] A4 offline start -> no dialog, "Check failed" in the system log.
-  - [ ] A5 backup key: sign a file with `backup.key`, run `examples/verify_update` -> `ok`.
+  - [x] A5 backup key: sign a file with `backup.key`, run `examples/verify_update` -> `ok`. **Verified on Kade's PC
+    (2026-10-04, `test/w1-updater` notebook):** key id `0099CF719FD83012` (the backup), accepted for 0.6.0,
+    refused for 0.6.9.
 - [ ] **K25. The rest of `unverified-on-windows.md`**, top to bottom: main UI redesign, rc UI
   fixes, favorite tabs, cheat sheet, chat row menus + add to dictionary, settings sidebar +
   window grow, beginner tab, W8/W9, log dedup, study-mode hover + first-line latency. Delete

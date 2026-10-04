@@ -230,6 +230,16 @@ git add -A && git commit
 - Merges made by the workflow use `GITHUB_TOKEN`, which does not start a `push` run on
   `main`; the PR's own run is the gate.
 
+### Test branches (`test/*`)
+
+A `test/<job>` branch holds throw-away test tooling for a job Kade runs by hand on his
+Windows PC -- Jupyter notebooks and their helpers (`test/w1-updater`, `test/w1-firewall`, ...).
+**It is never merged into `main` and never opens a release**: cut it from `main`, push it,
+and Kade checks it out. No PR is needed; if one is opened into `main`,
+`.github/workflows/test-branch-guard.yml` fails it (helper `branch-guard.sh`, tested in CI).
+Notebooks are committed without outputs. A finding from a run becomes a normal task on a
+`claude/*` branch, test first; the `test/*` branch itself stays out of `main`'s history.
+
 ### Release candidates (`rc`)
 
 A change that needs a run on Kade's Windows PC before `main` goes through `rc`:

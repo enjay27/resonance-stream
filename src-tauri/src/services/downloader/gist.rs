@@ -4,7 +4,7 @@ use parking_lot::Mutex;
 use resonance_core::download::is_newer_version;
 use resonance_core::test_env::UpdateState;
 use resonance_core::text::Dictionary;
-use resonance_core::update_feed::{parse_feed, UpdateFeed};
+use resonance_core::update_feed::{parse_feed_allowing, UpdateFeed};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,7 +35,7 @@ pub fn announced_update() -> Option<UpdateFeed> {
 /// Reads the release feed. `Ok(None)`: no stable release exists yet (404).
 async fn fetch_update_feed() -> Result<Option<UpdateFeed>, String> {
     let mut res = reqwest::Client::new()
-        .get(FEED_URL)
+        .get(crate::test_env::feed_url().unwrap_or(FEED_URL))
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
@@ -53,7 +53,7 @@ async fn fetch_update_feed() -> Result<Option<UpdateFeed>, String> {
         }
     }
     let text = String::from_utf8(body).map_err(|_| "The update feed is not text".to_string())?;
-    parse_feed(&text).map(Some)
+    parse_feed_allowing(&text, crate::test_env::allow_local_http()).map(Some)
 }
 
 // --- 2. The Single Unified Fetch Command ---
@@ -77,7 +77,7 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
     }
     let client = reqwest::Client::new();
     let mut remote_data: GistMetadata = client
-        .get(METADATA_URL)
+        .get(crate::test_env::metadata_url().unwrap_or(METADATA_URL))
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?

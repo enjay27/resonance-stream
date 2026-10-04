@@ -160,6 +160,15 @@ and left to the Windows CI job, as always.
   without the network (the settings button too). `--no-popups`: no `prewarm_popups`. `--no-window-state`:
   the window-state plugin is not registered, and `show_popup` skips `restore_state` (it would panic
   without the plugin). `--feed-url` / `--metadata-url` still parse and do nothing (PR 5).
+- **PR 5 `claude/test-env-feed-urls` -- done, app gate left to Windows CI**: `--feed-url` and
+  `--metadata-url` are used by `check_all_updates` (`fetch_update_feed`, the gist metadata read). A
+  test run that sets either may also download from `http://127.0.0.1` / `localhost` / `[::1]`:
+  `download::check_download_url_allowing(url, allow_local_http)`, `update_feed::parse_feed_allowing`,
+  `test_env::is_local_http_url` (core, tested; the plain `check_download_url` / `parse_feed` are
+  unchanged and still HTTPS only). The signature check on a downloaded exe is not relaxed -- a mock
+  feed must carry a valid signature, or test the "bad signature" path on purpose. **Not covered:**
+  the dictionary (`DICT_URL`) and the llama-server zip (`AI_SERVER_ZIP_URL`) still come from their
+  fixed URLs.
 - Path call sites for PR 2 were **14**, not 12: `app_config_dir()` x2 (`config/app_config.rs:187`,
   `config/metadata.rs:31`) and `app_data_dir()` x12 (`io/data_factory.rs`, `io/fs.rs`,
   `downloader/{gist,model,server}.rs`, `sniffer/raw_capture.rs`, `translator/server_manager.rs`).

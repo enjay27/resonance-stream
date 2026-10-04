@@ -133,6 +133,26 @@ pub fn no_window_state() -> bool {
     flag(|env| env.no_window_state)
 }
 
+/// `--feed-url`: where the app's own update feed is read from.
+pub fn feed_url() -> Option<&'static str> {
+    ACTIVE
+        .get()
+        .and_then(|active| active.env.feed_url.as_deref())
+}
+
+/// `--metadata-url`: where the gist metadata (model, dictionary versions) is read from.
+pub fn metadata_url() -> Option<&'static str> {
+    ACTIVE
+        .get()
+        .and_then(|active| active.env.metadata_url.as_deref())
+}
+
+/// May a download come from `http://127.0.0.1` (and the like)? Only when a test
+/// run points the feed or the metadata at a mock server of its own.
+pub fn allow_local_http() -> bool {
+    flag(|env| env.feed_url.is_some() || env.metadata_url.is_some())
+}
+
 /// What `config.json` held as `init_done` when the app started.
 static STORED_INIT_DONE: OnceLock<bool> = OnceLock::new();
 

@@ -264,32 +264,43 @@ where
 }
 
 /// Whether `url` may be a test feed / metadata source: `https://host...`, or
-/// plain `http` to this machine only (`127.0.0.1`, `localhost`, `[::1]`), so a
-/// test can run against a local mock server without ever sending an update
-/// check over the network unencrypted.
+/// plain `http` to this machine only (see [`is_local_http_url`]), so a test can
+/// run against a local mock server without ever sending an update check over
+/// the network unencrypted.
 pub fn is_test_url_allowed(url: &str) -> bool {
-    let Some((scheme, rest)) = url.split_once("://") else {
-        return false;
-    };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    // `http://127.0.0.1@evil.example/` is a request to evil.example.
-    if authority.contains('@') {
-        return false;
+    match split_url(url) {
+        Some((scheme, _)) if scheme == "https" => true,
+        Some(_) => is_local_http_url(url),
+        None => false,
     }
-    let Some((host, port)) = host_and_port(authority) else {
-        return false;
-    };
-    if !port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) {
-        return false;
-    }
-    match scheme.to_ascii_lowercase().as_str() {
-        "https" => true,
-        "http" => {
-            let host = host.to_ascii_lowercase();
+}
+
+/// `http://` to this machine: `127.0.0.1`, `localhost` or `[::1]`, with an
+/// optional numeric port. Nothing else counts -- not `https`, not another host,
+/// not a host that merely starts like one (`127.0.0.1.example.com`), not a URL
+/// with a user name (`http://127.0.0.1@example.com/` is a request to example.com).
+pub fn is_local_http_url(url: &str) -> bool {
+    match split_url(url) {
+        Some((scheme, host)) if scheme == "http" => {
             matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]")
         }
         _ => false,
     }
+}
+
+/// (lowercase scheme, lowercase host) of a URL whose authority is well formed
+/// (no user name, a host, a numeric port if any); `None` otherwise.
+fn split_url(url: &str) -> Option<(String, String)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.contains('@') {
+        return None;
+    }
+    let (host, port) = host_and_port(authority)?;
+    if !port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase()))
 }
 
 /// `host`, `host:port`, `[v6]` or `[v6]:port` -> (host, port). `None` when the
@@ -760,6 +771,31 @@ mod tests {
             "http://[::1]/feed",
         ] {
             assert!(is_test_url_allowed(url), "{url} should be allowed");
+        }
+    }
+
+    #[test]
+    fn local_http_is_http_to_this_machine_only() {
+        for url in [
+            "http://127.0.0.1/feed",
+            "http://127.0.0.1:8099/feed.json",
+            "http://localhost:8099",
+            "HTTP://LOCALHOST/feed",
+            "http://[::1]:8099/feed",
+        ] {
+            assert!(is_local_http_url(url), "{url} should be local http");
+        }
+        for url in [
+            "",
+            "https://127.0.0.1/feed",
+            "https://example.com/feed",
+            "http://example.com/feed",
+            "http://127.0.0.1.evil.example/feed",
+            "http://127.0.0.1@evil.example/feed",
+            "http://127.0.0.1:/feed",
+            "ftp://127.0.0.1/feed",
+        ] {
+            assert!(!is_local_http_url(url), "{url} should not be local http");
         }
     }
 

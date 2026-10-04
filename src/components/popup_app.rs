@@ -4,10 +4,12 @@
 use crate::components::icons::{self, icon};
 use crate::components::{CheatSheetWindow, FavoritesWindow};
 use crate::favorites_sync;
+use crate::popup_view::escape_closes_popup;
 use crate::readability::{WINDOW_BUTTON, WINDOW_BUTTON_CLOSE};
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
 use crate::ui_types::{AppConfig, Theme};
+use leptos::ev::keydown;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use resonance_types::PopupKind;
@@ -77,7 +79,7 @@ pub fn PopupApp(kind: PopupKind) -> impl IntoView {
         shown.forget();
     });
 
-    view! {
+    let page = view! {
         <div class="h-screen flex flex-col bg-base-100 text-base-content overflow-hidden">
             <PopupTitleBar title=kind.title() />
             // `relative`: the favorites window lays its questions over itself.
@@ -88,5 +90,20 @@ pub fn PopupApp(kind: PopupKind) -> impl IntoView {
                 }}
             </div>
         </div>
-    }
+    };
+
+    // Esc closes the window -- as the close button does -- unless the page
+    // used it (it calls `prevent_default`). Registered after the page is built
+    // on purpose: listeners of one target run in the order they were added, so
+    // the page's own Esc handling goes first and this one sees what it did.
+    window_event_listener(keydown, move |ev| {
+        if escape_closes_popup(&ev.key(), ev.is_composing(), ev.default_prevented()) {
+            ev.prevent_default();
+            spawn_local(async {
+                let _ = invoke("close_window", JsValue::NULL).await;
+            });
+        }
+    });
+
+    page
 }

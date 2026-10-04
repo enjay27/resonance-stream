@@ -2,7 +2,9 @@
 
 **Index, not the record.** Only what would be *false* the moment it goes stale lives here.
 
-## Now — 2026-10-03
+## Now — 2026-10-04
+
+**Esc closes a popup window (2026-10-04, `claude/popup-escape-closes`; Kade: "ESC would close focused popup-windows"):** in the favorites and cheat-sheet windows a bare Esc does what the close button does (`close_window`, which hides the popup). Esc the page used does not close it: a table box undoes its edit, the shortcut recorder cancels, the add-tab / delete-tab question closes (a window listener in `FavoritesWindow`) -- the next Esc closes the window. An IME composition's Esc is ignored. Rule `popup_view::escape_closes_popup` (4 tests); `PopupApp` registers its listener *after* the page is built, so the page's own Esc handling runs first and `prevent_default` is what it reads. Driven in `ui-preview` (cheat sheet, favorites: bare Esc, table box, recorder, add-tab question; the delete-tab question uses the same listener, not driven). **NOT VERIFIED:** `cargo tauri dev` on Windows (real hidden popup, Korean IME) -- checks in `unverified-on-windows.md`. **Next:** the K26 branch to `main` (it touches `favorites_window.rs` too -- merge `main` into it first).
 
 **Favorites tabs by stable id, K26 -- verified (2026-10-04, `candidate/favorites-stable-ids`, #118 merged into `rc`):** Kade ran the candidate exe `v0.6.1-rc.favorites-stable-ids` on Windows: "works well" (the six checks were not itemised). A tab is `{id, name}`, a message's `tab` is an id (0 = 기본), tabs may share a name; a 0.6.1 `config.json` is converted on load (`resonance_core::favorites_migration`), and 0.6.1 cannot read the new shape back. Roadmap K26 ticked; the unverified-on-windows bullet is gone. **Next: this branch goes to `main` in its own PR (never `rc` -> `main`), ships in 0.6.2.** Plan + as-built: [`roadmap/favorites-stable-ids.md`](.memory/roadmap/favorites-stable-ids.md). **v0.6.1 is published** (tag run green, feed read-back included).
 

@@ -1,0 +1,106 @@
+name: Bridge smoke test
+
+# Builds the candidate exe (the same command as release-candidate.yml, test flags on)
+# on a Windows runner and drives it over the test bridge, with nobody at the keyboard:
+# `replay-chat` (the whole pipeline from replayed lines to `packet-event`) and
+# `window-restore` (K18, real window geometry). It answers one question first: does the
+# hosted runner give the app an elevated, interactive session with a WebView2 window?
+# The "session" step prints what it finds, and the logs of both runs are uploaded.
+#
+# Not part of the CI workflow, so auto-merge never waits for it. While the runner's
+# behaviour is unproven `window-restore` is allowed to fail (continue-on-error); once
+# a run shows it passes, remove that line. A pull request runs it only when it touches
+# the bridge, its runner, this file or the test flags; `workflow_call` lets
+# release-candidate.yml use it on the exe it has just built.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/bridge-smoke.yml'
+      - 'runbook/bridge/**'
+      - 'runbook/runbook/**'
+      - 'src-tauri/src/bridge/**'
+      - 'src-tauri/src/test_env.rs'
+      - 'crates/core/src/bridge.rs'
+      - 'crates/core/src/test_env.rs'
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: bridge-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  smoke:
+    name: bridge smoke (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      # Release builds share the candidate's cache, but only rc saves it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-candidate
+          save-if: false
+          cache-bin: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Build the test exe
+        run: npx --yes @tauri-apps/cli@2 build --no-bundle --features test-env
+
+      - name: Session (what the runner gives the app)
+        shell: pwsh
+        run: |
+          $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $admin = (New-Object Security.Principal.WindowsPrincipal $id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          "user: $($id.Name)  elevated: $admin  session id: $([Diagnostics.Process]::GetCurrentProcess().SessionId)"
+          $wv = Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue
+          "WebView2 runtime: $($wv.pv)"
+          Add-Type -AssemblyName System.Windows.Forms
+          "screen: $([Windows.Forms.Screen]::PrimaryScreen.WorkingArea)"
+
+      - name: Bridge unit tests
+        working-directory: runbook/bridge
+        run: |
+          npm ci
+          npm test
+
+      - name: replay-chat over the bridge
+        run: >
+          node runbook/bridge/cli.mjs run replay-chat
+          --exe target/release/resonance-stream.exe
+          --work "$env:RUNNER_TEMP/bridge-replay"
+
+      - name: window-restore over the bridge
+        # Unproven on a hosted runner (a window may not get a real work area): see the header.
+        continue-on-error: true
+        working-directory: runbook
+        run: python -m runbook.run window-restore --exe ../target/release/resonance-stream.exe
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-smoke-logs
+          path: |
+            ${{ runner.temp }}/bridge-replay/**
+            runbook/runs/**
+          if-no-files-found: warn
+          retention-days: 7

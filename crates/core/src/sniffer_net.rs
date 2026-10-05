@@ -106,6 +106,21 @@ pub fn pick_interface(
         })
 }
 
+/// The virtual adapter (a VPN) the OS routes through, if it does. With a full
+/// tunnel the game's chat is on neither that adapter nor the physical one, so
+/// the app names it when no traffic arrives (issue #142).
+pub fn route_through_virtual_adapter(
+    candidates: &[(String, Ipv4Addr)],
+    route_ip: Option<Ipv4Addr>,
+) -> Option<String> {
+    let route = route_ip.filter(|ip| !ip.is_loopback() && !ip.is_link_local())?;
+    candidates
+        .iter()
+        .find(|(_, ip)| *ip == route)
+        .filter(|(name, _)| is_virtual_adapter(name))
+        .map(|(name, _)| name.clone())
+}
+
 fn is_virtual_adapter(name: &str) -> bool {
     let name = name.to_lowercase();
     VIRTUAL_ADAPTER_KEYWORDS
@@ -231,6 +246,35 @@ mod tests {
                 "{vpn}"
             );
         }
+    }
+
+    fn vpn_name(list: &[(&str, [u8; 4])], route: Option<[u8; 4]>) -> Option<String> {
+        route_through_virtual_adapter(&adapters(list), route.map(Ipv4Addr::from))
+    }
+
+    #[test]
+    fn a_route_through_a_vpn_adapter_is_named() {
+        let list = [
+            ("NordLynx", [10, 5, 0, 2]),
+            ("Ethernet", [192, 168, 50, 220]),
+        ];
+        assert_eq!(
+            vpn_name(&list, Some([10, 5, 0, 2])),
+            Some("NordLynx".to_string())
+        );
+    }
+
+    #[test]
+    fn no_vpn_is_named_for_a_physical_route_no_route_or_an_unusable_one() {
+        let list = [
+            ("NordLynx", [10, 5, 0, 2]),
+            ("Ethernet", [192, 168, 50, 220]),
+        ];
+        assert_eq!(vpn_name(&list, Some([192, 168, 50, 220])), None);
+        assert_eq!(vpn_name(&list, None), None);
+        assert_eq!(vpn_name(&list, Some([203, 0, 113, 9])), None);
+        let local = [("Loopback Pseudo-Interface 1", [127, 0, 0, 1])];
+        assert_eq!(vpn_name(&local, Some([127, 0, 0, 1])), None);
     }
 
     #[test]

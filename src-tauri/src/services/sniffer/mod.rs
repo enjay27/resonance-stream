@@ -296,18 +296,31 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
 
             if now.saturating_sub(last) > 15 {
                 // If it was previously active, throw the error state
+                // A full-tunnel VPN hides the chat from every adapter: say so.
+                let vpn = network::vpn_in_the_way();
                 inject_system_message_throttled(
                     &app,
                     SystemLogLevel::Warning,
                     "Sniffer",
-                    "Watchdog: No game traffic for 15s.",
+                    match &vpn {
+                        Some(name) => format!(
+                            "Watchdog: No game traffic for 15s. The default route runs through a VPN adapter ({name}); \
+                             turn the VPN off or exclude the game from it."
+                        ),
+                        None => "Watchdog: No game traffic for 15s.".to_string(),
+                    },
                 );
 
                 // Emitting "Error" changes the TitleBar badge to Red so the user can click it!
                 emit_sniffer_state(
                     &app,
                     SnifferState::Error,
-                    "게임 트래픽 감지 안됨 (클릭하여 어댑터 복구)",
+                    &match &vpn {
+                        Some(name) => format!(
+                            "게임 트래픽 감지 안됨 (VPN 사용 중: {name} - VPN을 끄거나 게임을 터널에서 제외하세요)"
+                        ),
+                        None => "게임 트래픽 감지 안됨 (클릭하여 어댑터 복구)".to_string(),
+                    },
                 );
                 IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
 

@@ -185,8 +185,7 @@ and left to the Windows CI job, as always.
   runs a fresh copy per check with the flags; outcomes come from the status file and the copy's folder. Checks:
   M0 flags understood, M1 signing, M8-M12 feed cases (no clicks), M3 good update, M4 tampered download refused,
   M5-M7 bad signature / cut / silent download -> `update: error`, M-iso real config untouched. Helpers
-  `w1/mockfeed.py` (27 tests), stand-in `tests/fake_app.py`, dry run of every cell (4 tests); 138 pass from a fresh
-  clone. **Not run on Windows or with the real exe.** The old notebooks keep their config-file step (released exes).
+  `w1/mockfeed.py`, stand-in `tests/fake_app.py`, dry run of every cell (counts: see the auto-close entry below). **Not run on Windows or with the real exe.** The old notebooks keep their config-file step (released exes).
 - **PR 8 `claude/test-env-replay-chat` -- done, app gate left to Windows CI; Kade's go on the format 2026-10-05**:
   `--replay-chat <file>` feeds chat lines in as if captured. File = JSON Lines, `text` required, optional
   `delay_ms` `channel` `nickname` `uid` `class_id` `level` `timestamp` `sequence_id` (full table and defaults in
@@ -196,6 +195,18 @@ and left to the Windows CI job, as always.
   (history, UI event, translator job or archive). The thread starts at the end of setup, waits 2 s for the window, and
   says "Replaying N chat lines" / "Replay finished" in the system log (errors there too). Not passed on after an update
   restart. Try: `--replay-chat crates\core\testdata\replay-sample.jsonl` with the other flags. **Not run on Windows.**
+- **Kade's `w1-updater` run (2026-10-05, released 0.6.0 copies; 14 pass / 3 fail)**: A1 (exe still the old hash, no
+  `.old`), A1's `.old` row and A2-flip (no `update_temp.exe` in the A2 copy's folder) failed although he answered
+  `pass` in the UI; A2-which listed **two** running copies (`A2-6` and `A1-9`): the A1 app had been left open, so the
+  windows could not be told apart. **Not diagnosed** -- the old notebook cannot say where the update files went (0.6.0
+  swaps inside its own exe's folder, same as today's code). A3, A4, A5 passed. **Next:** the mock-feed notebook, whose
+  status file names the exe path and pid of each run.
+- **Auto-close (Kade: "each test step should exit app automatically, try / catch / finally")**, on `test/w1-updater`
+  (7722bcb) and `test/w1-updater-mock` (d70b45e): every step that starts an app runs in `updater.step` -- try (app +
+  checks), catch (an exception is a failed row `<step>-error`, notebook goes on), finally (every app whose exe is in the
+  step's folder is closed and waited for); copies an earlier step left running are closed first. Test counts from fresh
+  clones: updater 120, mock 157. **Two commit messages are wrong** (pushed, not rewritten): 7722bcb says 119 (it is
+  120); d70b45e says "9 new tests" (it is 6; 157 - 138 = 19 includes the 13 inherited from updater).
 - Path call sites for PR 2 were **14**, not 12: `app_config_dir()` x2 (`config/app_config.rs:187`,
   `config/metadata.rs:31`) and `app_data_dir()` x12 (`io/data_factory.rs`, `io/fs.rs`,
   `downloader/{gist,model,server}.rs`, `sniffer/raw_capture.rs`, `translator/server_manager.rs`).

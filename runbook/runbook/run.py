@@ -12,7 +12,7 @@ import argparse
 import os
 import sys
 
-from runbook import common
+from runbook import bridge, common
 from runbook.common import Recorder
 from runbook.pipelines.interface import InterfacePick
 from runbook.pipelines.updater_mock import UpdaterMock
@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     if not os.path.isfile(exe):
         parser.error(f"the exe {exe} is not a file (build it: cargo tauri build --no-bundle --features test-env)")
     rec = Recorder(args.pipeline)
+    bridge.ensure_installed()  # npm ci in runbook/bridge, the first time
     if not common.require_windows_admin(rec):
         print(rec.report())
         return 1

@@ -69,13 +69,10 @@ class InterfacePick:
             args = mockfeed.flag_args(exe.parent / "data", exe.parent / "status.json", log_file=exe.parent / "app.log",
                                       capture=True, extra=("--no-update-check", "--bridge-url", events.url))
             mockfeed.start_app(exe, args)
-            try:
-                started = events.expect("app-started", timeout=120)["payload"]
-                self.rec.auto("K4-start", "the copy started with the sniffer on and connected to the bridge", True,
-                              f"pid {started['pid']}")
-            except RuntimeError:
-                self.rec.auto("K4-start", "the copy started with the sniffer on and connected to the bridge", False,
-                              "no app-started event in 120 s")
+            started = bridge.wait_started(events, exe.parent / "app.log", label="the app")
+            self.rec.auto("K4-start", "the copy started with the sniffer on and connected to the bridge", started is not None,
+                          f"pid {started['pid']}" if started else "no app-started event in 120 s")
+            if started is None:
                 return
             line = self.sniffer_line(events)
             alive = self.alive(events)

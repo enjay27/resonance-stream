@@ -118,3 +118,36 @@ def test_events_reads_what_was_recorded(tmp_path):
         b.expect("sniffer-state", timeout=3)
         recorded = b.events()
         assert [(r["topic"], r["message"]["payload"]) for r in recorded] == [("rs/app/event/sniffer-state", {"running": True})]
+
+
+@needs_node
+def test_wait_started_gives_the_event_when_the_app_connects(tmp_path, capsys):
+    with bridge.Serve(tmp_path / "events.jsonl") as b:
+        _publish(b.port, [("app-started", {"pid": 7, "version": "0.6.1", "exe": "x"})])
+        got = bridge.wait_started(b, tmp_path / "app.log", timeout=10, label="copy")
+        assert got["pid"] == 7
+    assert "waiting" in capsys.readouterr().out
+
+
+@needs_node
+def test_wait_started_says_what_it_waits_for_and_shows_the_log_when_nothing_comes(tmp_path, capsys):
+    log = tmp_path / "app.log"
+    log.write_text("starting\nsomething went wrong\n", encoding="utf-8")
+    with bridge.Serve(tmp_path / "events.jsonl") as b:
+        assert bridge.wait_started(b, log, timeout=2, label="copy", beat=1) is None
+    out = capsys.readouterr().out
+    assert "waiting for copy" in out and "still waiting" in out
+    assert "something went wrong" in out, "the app's own log is shown"
+
+
+def test_the_bridge_packages_are_installed_before_a_pipeline_starts(monkeypatch):
+    from runbook import run
+
+    calls = []
+    monkeypatch.setattr(bridge, "ensure_installed", lambda *a, **k: calls.append("npm ci"))
+    monkeypatch.setattr(run.common, "require_windows_admin", lambda rec: False)  # stop right after the set-up
+    import tempfile
+    exe = Path(tempfile.mkdtemp()) / "x.exe"
+    exe.write_text("x")
+    run.main(["window-restore", "--exe", str(exe)])
+    assert calls == ["npm ci"]

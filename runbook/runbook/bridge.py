@@ -20,6 +20,7 @@ def ensure_installed(timeout: int = 300) -> None:
     """`npm ci` in the bridge folder when its packages are not there yet."""
     if (BRIDGE_DIR / "node_modules" / "aedes").is_dir():
         return
+    print("installing the bridge's packages (npm ci, once; about a minute) ...", flush=True)
     npm = shutil.which("npm")
     if npm is None:
         raise RuntimeError("npm was not found: install Node 20+ from nodejs.org")
@@ -113,3 +114,30 @@ def verify(scenario: str, log: Path, sample: Path) -> dict:
     if done.returncode not in (0, 1):
         raise RuntimeError(done.stderr.strip() or "verify failed")
     return json.loads(done.stdout)
+
+
+def wait_started(events: "Serve", app_log: Path, timeout: float = 120, label: str = "the app", beat: float = 15) -> dict | None:
+    """The `app-started` payload once the app has connected to `events`, else None after `timeout` seconds. Says what it waits
+    for and that it still does (a pipeline that is silent for two minutes looks stuck), and when nothing comes shows the
+    app's own log -- the first place to look."""
+    import time
+
+    print(f"  waiting for {label} to start and connect to the bridge (up to {timeout:.0f} s) ...", flush=True)
+    began = time.monotonic()
+    while True:
+        left = timeout - (time.monotonic() - began)
+        if left <= 0:
+            break
+        try:
+            return events.expect("app-started", timeout=min(beat, left))["payload"]
+        except RuntimeError:
+            waited = time.monotonic() - began
+            if waited < timeout:
+                print(f"  ... still waiting for {label} ({waited:.0f} s)", flush=True)
+    try:
+        tail = Path(app_log).read_text(encoding="utf-8", errors="replace").splitlines()[-15:]
+    except OSError:
+        tail = []
+    print(f"  {label} never said app-started. Its log ({app_log}):\n" + ("\n".join("    " + t for t in tail) or "    (no log: it did not start, or ignores --log-file)"),
+          flush=True)
+    return None

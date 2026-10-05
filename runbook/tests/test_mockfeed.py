@@ -352,3 +352,12 @@ def test_a_server_can_be_stopped_twice():
     server = mockfeed.MockServer(exe_bytes=b"x").start()
     server.stop()
     server.stop()
+
+
+def test_flag_args_leave_capture_off_unless_asked():
+    base = mockfeed.flag_args("D", "S.json")
+    assert "--no-capture" in base
+    capture = mockfeed.flag_args("D", "S.json", capture=True)
+    assert "--no-capture" not in capture
+    # everything else is the same
+    assert [a for a in base if a != "--no-capture"] == capture

@@ -13,10 +13,10 @@ K25); later sessions add notebooks here, so the folder is not named after one se
 
 | notebook | job |
 |---|---|
-| `notebooks/updater-mock.ipynb` | K2 against a mock feed, in a data folder of its own, **driven over the bridge, no clicks** (needs a `test-env` exe and Node). The steps are Python: `runbook/pipelines/updater_mock.py`; without Jupyter: `python -m runbook.run updater-mock --exe <exe> --key <backup key>`. (The notebook for the released 0.6.0 exe, `updater.ipynb`, was retired 2026-10-05: that exe cannot use the bridge.) |
+| `notebooks/updater-mock.ipynb` | K2 against a mock feed, in a data folder of its own, **driven over the bridge, no clicks** (needs a `test-env` exe and Node). The steps are Python: `runbook/pipelines/updater_mock.py`; without Jupyter: `python -m runbook.run updater-mock --key <backup key file>` (the exe defaults to `target\release\resonance-stream.exe` of this checkout; `--exe` or `RUNBOOK_TEXT_LOCAL_EXE` overrides it). (The notebook for the released 0.6.0 exe, `updater.ipynb`, was retired 2026-10-05: that exe cannot use the bridge.) |
 | `notebooks/feed.ipynb` | K3: the release feed check |
 | `notebooks/firewall.ipynb` | K6: the firewall rule per exe |
-| `notebooks/interface.ipynb` | K4: the route-based interface pick |
+| `notebooks/interface.ipynb` | K4: the route-based interface pick, read from the bridge (no pasting): the app starts with the sniffer on and says which adapter it took; the pipeline looks at this machine (two adapters / full-tunnel VPN / offline) and runs the check that fits, the others are `skip`. Switching the VPN or the network is physical: do it, run again. `python -m runbook.run interface`. "Chat is captured" needs game traffic (`skip`) |
 | `notebooks/replay-chat.ipynb` | the `--replay-chat` test flag: start a copy, read its log and what it published on the bridge, ask what the window showed (needs a `test-env` exe; Node for the bridge rows) |
 | `notebooks/checklists.ipynb` | K7, Esc, K25 (read from `.memory/active-issues/unverified-on-windows.md` at run time) |
 

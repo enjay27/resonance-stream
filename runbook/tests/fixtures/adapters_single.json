@@ -1,0 +1,4 @@
+[
+  {"Alias": "이더넷", "IP": "192.168.0.23", "Description": "Realtek PCIe GbE Family Controller", "Status": "Up", "Virtual": false},
+  {"Alias": "Loopback Pseudo-Interface 1", "IP": "127.0.0.1", "Description": "Software Loopback Interface 1", "Status": "", "Virtual": false}
+]

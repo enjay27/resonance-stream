@@ -141,3 +141,39 @@ def test_vpn_adapter_the_app_does_not_know_is_flagged():
     checks = vpn_checks(("10.8.0.2", "default route"), adapters_file="adapters_unknown_vpn.json")
     flagged = [t for t, s, _ in checks if s == "fail" and "keyword" in t]
     assert flagged, checks
+
+
+# --- which K4 situation this machine is in right now (the pipeline runs the check that fits) ---------
+def _situation(route_fixture, adapters_fixture):
+    from pathlib import Path
+
+    fixtures = Path(__file__).resolve().parent / "fixtures"
+    routes = interface.parse_default_routes((fixtures / route_fixture).read_text(encoding="utf-8"))
+    adapters = interface.parse_adapters((fixtures / adapters_fixture).read_text(encoding="utf-8"))
+    return interface.classify(routes, adapters, ["tap-windows", "openvpn", "nordlynx"])
+
+
+def test_two_live_physical_adapters_are_k4_1():
+    assert _situation("route_print_two_adapters.txt", "adapters_two.json") == "two"
+
+
+def test_a_default_route_through_a_vpn_adapter_is_k4_2():
+    assert _situation("route_print_vpn.txt", "adapters_vpn.json") == "vpn"
+
+
+def test_no_default_route_and_no_live_adapter_is_k4_3_offline():
+    assert _situation("route_print_offline.txt", "adapters_offline.json") == "offline"
+
+
+def test_one_live_adapter_is_none_of_them():
+    assert _situation("route_print_single.txt", "adapters_single.json") == "single"
+
+
+def test_the_loopback_and_down_adapters_do_not_count_as_live():
+    adapters = [
+        interface.Adapter("lo", "127.0.0.1", "Loopback", "", False),
+        interface.Adapter("eth", "192.168.0.23", "Realtek", "Disconnected", False),
+        interface.Adapter("wifi", "192.168.0.57", "Intel", "Up", False),
+    ]
+    routes = [interface.Route("192.168.0.1", "192.168.0.57", 25)]
+    assert interface.classify(routes, adapters, []) == "single"

@@ -92,6 +92,20 @@ def ask_text(name: str, prompt: str) -> str:
     return input(prompt).strip().strip('"').strip()
 
 
+def default_exe() -> Path:
+    """Where `cargo tauri build --no-bundle --features test-env` leaves the exe, in this checkout."""
+    return ROOT.parent / "target" / "release" / "resonance-stream.exe"
+
+
+def ask_exe() -> Path:
+    """The exe under test: RUNBOOK_TEXT_LOCAL_EXE, else the build in this checkout (`default_exe`) when it is
+    there, else ask."""
+    if os.environ.get("RUNBOOK_TEXT_LOCAL_EXE") is None and default_exe().is_file():
+        print("exe under test (the default build):", default_exe())
+        return default_exe()
+    return Path(ask_text("LOCAL_EXE", "Full path of the test-env exe (e.g. C:/.../target/release/resonance-stream.exe), then Enter: "))
+
+
 @dataclass
 class Row:
     check: str

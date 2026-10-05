@@ -174,3 +174,26 @@ def test_a_queued_empty_answer_is_still_a_skip(monkeypatch):
     rec = common.Recorder("j")
     assert rec.manual("A", "t", "s", "e").status == "skip"
     assert rec.manual("B", "t", "s", "e").status == "pass"
+
+
+def test_the_default_exe_is_the_release_build_in_the_repo():
+    exe = common.default_exe()
+    assert exe.parts[-3:] == ("target", "release", "resonance-stream.exe")
+    assert exe == common.ROOT.parent / "target" / "release" / "resonance-stream.exe"
+
+
+def test_exe_choice_prefers_the_variable_then_the_default_when_it_exists(monkeypatch, tmp_path):
+    built = tmp_path / "resonance-stream.exe"
+    built.write_text("x")
+    monkeypatch.setattr(common, "default_exe", lambda: built)
+    monkeypatch.delenv("RUNBOOK_TEXT_LOCAL_EXE", raising=False)
+    assert common.ask_exe() == built  # nothing asked
+    monkeypatch.setenv("RUNBOOK_TEXT_LOCAL_EXE", r"C:\other\app.exe")
+    assert str(common.ask_exe()) == r"C:\other\app.exe"
+
+
+def test_exe_choice_asks_when_there_is_no_default_build(monkeypatch, tmp_path):
+    monkeypatch.setattr(common, "default_exe", lambda: tmp_path / "missing.exe")
+    monkeypatch.delenv("RUNBOOK_TEXT_LOCAL_EXE", raising=False)
+    monkeypatch.setattr("builtins.input", lambda prompt="": r'"C:\typed\app.exe"')
+    assert str(common.ask_exe()) == r"C:\typed\app.exe"

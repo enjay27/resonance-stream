@@ -85,10 +85,7 @@ class UpdaterMock:
     def begin(self, label: str, server: mockfeed.MockServer):
         """A fresh copy, started with the test flags, connected to its own bridge. Returns `(app, started)`."""
         app = self.start_app(label, server)
-        try:
-            started = app.bridge.expect("app-started", timeout=120)["payload"]
-        except RuntimeError:
-            started = None
+        started = bridge.wait_started(app.bridge, app.log, label=f"the app ({label})")
         self.rec.auto(label, "the copy started with the test flags and connected to the bridge", started is not None,
                       f"pid {started['pid']}, version {started['version']}" if started else "no app-started event in 120 s")
         if started is None:

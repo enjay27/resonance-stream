@@ -43,11 +43,7 @@ class WindowRestore:
         args = mockfeed.flag_args(exe.parent / "data", exe.parent / f"{label}-status.json", log_file=exe.parent / f"{label}.log",
                                   fresh=fresh, window_state=True, extra=("--no-update-check", "--bridge-url", events.url))
         mockfeed.start_app(exe, args)
-        try:
-            events.expect("app-started", timeout=120)
-        except RuntimeError:
-            return None
-        return events
+        return events if bridge.wait_started(events, exe.parent / f"{label}.log", label=f"the app ({label})") else None
 
     @staticmethod
     def rect(events: bridge.Serve) -> dict:

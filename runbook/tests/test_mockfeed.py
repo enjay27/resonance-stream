@@ -361,3 +361,11 @@ def test_flag_args_leave_capture_off_unless_asked():
     assert "--no-capture" not in capture
     # everything else is the same
     assert [a for a in base if a != "--no-capture"] == capture
+
+
+def test_flag_args_keep_window_state_off_unless_asked():
+    base = mockfeed.flag_args("D", "S.json")
+    assert "--no-window-state" in base
+    kept = mockfeed.flag_args("D", "S.json", window_state=True)
+    assert "--no-window-state" not in kept
+    assert [a for a in base if a != "--no-window-state"] == kept

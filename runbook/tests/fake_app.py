@@ -18,6 +18,10 @@ notebook does for the new version, are never parsed). Environment:
   FAKE_APP_TOUCH_REAL=1   a bug to catch: also writes to the real %APPDATA% config
   FAKE_APP_IFACE_LINE     what the sniffer says when it is on (no --no-capture): the text of its system-event,
                           e.g. "Auto-Targeting Network Interface: 192.168.0.23 (default route)"
+  FAKE_APP_RECT           the main window's first rect, "WxH" (default 800x600; also x,y = 100,100)
+  FAKE_APP_SCREEN         the work area, "WxH" (default 1920x1040): a grow never goes beyond it
+  FAKE_APP_K18_BUG        a bug to catch: "quit", "close" or "both" -- that way out saves the GROWN window
+                          (what window-state would do if settings were still open at exit)
   FAKE_APP_BAD_STATUS=1   a bug to catch: a status file without pid and data_dir
 """
 from __future__ import annotations
@@ -150,6 +154,9 @@ class App:
             "flags": [n for n in [*sorted(SWITCHES), *sorted(VALUES)] if n in flags],
             "update": "none",
         }
+        w, _, h = os.environ.get("FAKE_APP_RECT", "800x600").partition("x")
+        self.rect = {"x": 100, "y": 100, "width": int(w), "height": int(h)}
+        self.grown_from: dict | None = None
         self.bridge: Mqtt | None = None
         self.seq = 0
         self.announced_url: str | None = None
@@ -197,12 +204,35 @@ class App:
         self.event("app-started", {"pid": os.getpid(), "version": self.version, "exe": str(self.exe)})
         self.bridge.publish("rs/app/status", "online", retain=True)
 
+    # -- the main window (window.rs and the window-state plugin, as understood)
+    def state_file(self) -> Path | None:
+        data = self.flags.get("data-dir")
+        return Path(data) / "config" / "window-state.json" if data and "no-window-state" not in self.flags else None
+
+    def load_window_state(self) -> None:
+        path = self.state_file()
+        if path and path.exists():
+            self.rect = json.loads(path.read_text(encoding="utf-8"))
+
+    def leave(self, way: str) -> None:
+        """The app is closing by `way` ("quit": the tray's Quit, "close": the X): put a grown window back, save its state."""
+        buggy = os.environ.get("FAKE_APP_K18_BUG") in (way, "both")
+        if self.grown_from is not None and not buggy:
+            self.rect, self.grown_from = self.grown_from, None
+        path = self.state_file()
+        if path:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(self.rect), encoding="utf-8")
+        self.stop = True
+
     def handle(self, topic: str, payload: bytes) -> None:
         request = json.loads(payload)
         command, id_ = topic.rsplit("/", 1)[-1], request.get("id", "")
 
-        def ack(error: str | None = None) -> None:
+        def ack(error: str | None = None, data=None) -> None:
             body = {"id": id_, "ok": True} if error is None else {"id": id_, "ok": False, "error": error}
+            if error is None and data is not None:
+                body["data"] = data
             self.bridge.publish(f"rs/app/ack/{id_}", json.dumps(body))
 
         if command == "ping":
@@ -216,10 +246,29 @@ class App:
         elif command == "restart-update":
             error = self.restart()  # a success ends this process
             ack(error or "restart returned without error")
+        elif command == "snapshot":
+            body = {"id": id_, "ok": True, "data": dict(self.rect)}
+            self.bridge.publish(f"rs/app/ack/{id_}", json.dumps(body))
+        elif command == "grow-window":
+            screen_w, _, screen_h = os.environ.get("FAKE_APP_SCREEN", "1920x1040").partition("x")
+            # like grow_to_fit: at least what was asked, but never more than the work area has
+            want_w = min(int(request["min_width"]), int(screen_w))
+            want_h = min(int(request["min_height"]), int(screen_h))
+            old = dict(self.rect)
+            if want_w > old["width"] or want_h > old["height"]:
+                self.grown_from = self.grown_from or old
+                self.rect["width"], self.rect["height"] = max(want_w, old["width"]), max(want_h, old["height"])
+                self.bridge.publish(f"rs/app/ack/{id_}", json.dumps({"id": id_, "ok": True, "data": old}))
+            else:  # already big enough: nothing changed (data null)
+                self.bridge.publish(f"rs/app/ack/{id_}", json.dumps({"id": id_, "ok": True, "data": None}))
+        elif command == "close-window":
+            ack()
+            time.sleep(0.2)
+            self.leave("close")
         elif command == "quit":
             ack()
             time.sleep(0.2)
-            self.stop = True
+            self.leave("quit")
         else:
             ack(f"unknown command {command}")
 
@@ -316,6 +365,7 @@ def main() -> int:
             (Path(data) / sub).mkdir(parents=True, exist_ok=True)
     app.status["ready"] = True
     app.write_status()
+    app.load_window_state()
     app.connect_bridge()
     line = os.environ.get("FAKE_APP_IFACE_LINE")
     if line and "no-capture" not in flags:

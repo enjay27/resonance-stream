@@ -82,6 +82,13 @@ pub enum Command {
     /// Download the release the last update check announced (what the update dialog's button does). The
     /// outcome comes as `update-state` events.
     StartUpdate,
+    /// What the settings view does when it opens: grow the main window to at least this many logical pixels
+    /// (`grow_window`). The ack's `data` is the rect it replaced, or null when nothing changed.
+    GrowWindow { min_width: u32, min_height: u32 },
+    /// Read the main window's rect (physical pixels: `{x, y, width, height}`) into the ack's `data`.
+    Snapshot,
+    /// Close the main window the way its X does (the close request, then the app ends).
+    CloseWindow,
     /// Install the downloaded update and restart (the dialog's 재시작). A refusal is the ack's error; a success
     /// ends this process and a new one announces itself with `app-started`.
     RestartUpdate,
@@ -145,27 +152,51 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
         Some(id) if !id.is_empty() && !id.contains(['/', '+', '#']) => id.to_string(),
         _ => return Err(CommandError::BadId),
     };
-    let command = match name {
-        "ping" => Command::Ping,
-        "quit" => Command::Quit,
-        "start-update" => Command::StartUpdate,
-        "restart-update" => Command::RestartUpdate,
-        "replay-chat" => match args.get("path").and_then(Value::as_str) {
-            Some(path) if !path.is_empty() => Command::ReplayChat { path: path.into() },
+    let command =
+        match name {
+            "ping" => Command::Ping,
+            "quit" => Command::Quit,
+            "snapshot" => Command::Snapshot,
+            "close-window" => Command::CloseWindow,
+            "grow-window" => {
+                // Whole logical pixels, at least 1: a size that is missing, negative, fractional or absurd is the test's mistake.
+                let size = |key: &str| {
+                    args.get(key)
+                        .and_then(Value::as_u64)
+                        .and_then(|n| u32::try_from(n).ok())
+                        .filter(|&n| n > 0 && n <= 100_000)
+                };
+                match (size("min_width"), size("min_height")) {
+                    (Some(min_width), Some(min_height)) => Command::GrowWindow {
+                        min_width,
+                        min_height,
+                    },
+                    _ => return Err(CommandError::BadArgument {
+                        id,
+                        reason:
+                            "grow-window needs whole \"min_width\" and \"min_height\" (1-100000)"
+                                .into(),
+                    }),
+                }
+            }
+            "start-update" => Command::StartUpdate,
+            "restart-update" => Command::RestartUpdate,
+            "replay-chat" => match args.get("path").and_then(Value::as_str) {
+                Some(path) if !path.is_empty() => Command::ReplayChat { path: path.into() },
+                _ => {
+                    return Err(CommandError::BadArgument {
+                        id,
+                        reason: "replay-chat needs a string \"path\"".into(),
+                    })
+                }
+            },
             _ => {
-                return Err(CommandError::BadArgument {
+                return Err(CommandError::Unknown {
                     id,
-                    reason: "replay-chat needs a string \"path\"".into(),
+                    name: name.to_string(),
                 })
             }
-        },
-        _ => {
-            return Err(CommandError::Unknown {
-                id,
-                name: name.to_string(),
-            })
-        }
-    };
+        };
     Ok(Request { id, command })
 }
 
@@ -176,6 +207,11 @@ pub fn ack(id: &str, result: Result<(), &str>) -> String {
         Err(error) => json!({ "id": id, "ok": false, "error": error }),
     }
     .to_string()
+}
+
+/// An ok ack that carries an answer (`snapshot`, `grow-window`).
+pub fn ack_data(id: &str, data: Value) -> String {
+    json!({ "id": id, "ok": true, "data": data }).to_string()
 }
 
 /// The payload for [`ERROR_TOPIC`].
@@ -279,6 +315,58 @@ mod tests {
                 id: "u2".into(),
                 command: Command::RestartUpdate
             })
+        );
+    }
+
+    #[test]
+    fn the_window_commands_parse() {
+        assert_eq!(
+            parse(
+                "grow-window",
+                r#"{"id":"g","min_width":1200,"min_height":900}"#
+            )
+            .map(|r| r.command),
+            Ok(Command::GrowWindow {
+                min_width: 1200,
+                min_height: 900
+            })
+        );
+        assert_eq!(
+            parse("snapshot", r#"{"id":"s"}"#).map(|r| r.command),
+            Ok(Command::Snapshot)
+        );
+        assert_eq!(
+            parse("close-window", r#"{"id":"c"}"#).map(|r| r.command),
+            Ok(Command::CloseWindow)
+        );
+    }
+
+    #[test]
+    fn grow_window_needs_two_whole_sizes() {
+        for payload in [
+            r#"{"id":"g"}"#,
+            r#"{"id":"g","min_width":1200}"#,
+            r#"{"id":"g","min_width":"1200","min_height":900}"#,
+            r#"{"id":"g","min_width":-1,"min_height":900}"#,
+            r#"{"id":"g","min_width":12.5,"min_height":900}"#,
+            r#"{"id":"g","min_width":0,"min_height":900}"#,
+            r#"{"id":"g","min_width":99999999999,"min_height":900}"#,
+        ] {
+            let err = parse("grow-window", payload).unwrap_err();
+            assert!(
+                matches!(&err, CommandError::BadArgument { id, .. } if id == "g"),
+                "{payload}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ack_can_carry_an_answer() {
+        let v: Value =
+            serde_json::from_str(&ack_data("s", json!({"x": 1, "width": 900}))).expect("json");
+        assert_eq!(
+            v,
+            json!({"id": "s", "ok": true, "data": {"x": 1, "width": 900}})
         );
     }
 

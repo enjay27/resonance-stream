@@ -4,12 +4,20 @@
 //       Starts the broker and records what the app publishes. Prints {"ready":true,"port":N} on stdout, then
 //       reads one JSON command per stdin line: {"send":"replay-chat","args":{"path":"..."}} and answers
 //       {"ack":{...}} or {"error":"..."}. Stops when stdin closes or on SIGINT / SIGTERM.
+//   node cli.mjs run replay-chat --exe APP.exe [--sample FILE] [--work DIR] [--exe-arg ARG]
+//       The whole test with no one at the keyboard: starts the broker and the app, drives it with commands over the
+//       bridge (ping, replay-chat, quit), checks what it published and prints the same JSON as `verify`.
+//       Progress goes to stderr. Exit 0 when every check passes, 1 when one fails, 2 for a bad command line.
 //   node cli.mjs verify replay-chat --log events.jsonl --sample sample.jsonl
 //       Checks the recording; prints {"scenario","ok","checks":[{id,title,ok,detail}]}; exit 1 when a check fails.
 import { createInterface } from "node:readline";
 import { readFileSync } from "node:fs";
 import { Bridge, readRecording } from "./bridge.mjs";
 import { parseSample, verifyReplayChat } from "./scenarios.mjs";
+import { runReplayChat } from "./runner.mjs";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 function options(argv) {
   const out = {};
@@ -56,11 +64,28 @@ function verify(argv) {
   process.exit(ok ? 0 : 1);
 }
 
+async function run(argv) {
+  const [scenario, ...rest] = argv;
+  if (scenario !== "replay-chat") throw new Error(`unknown scenario ${scenario}`);
+  const opts = options(rest);
+  if (!opts.exe) throw new Error("run replay-chat needs --exe <path of a test-env build>");
+  const sample = opts.sample ?? fileURLToPath(new URL("../../crates/core/testdata/replay-sample.jsonl", import.meta.url));
+  const result = await runReplayChat({
+    command: { file: opts.exe, args: opts["exe-arg"] ? [opts["exe-arg"]] : [] },
+    sample,
+    workDir: opts.work ?? join(tmpdir(), "resonance-bridge-replay"),
+    log: (line) => console.error(line),
+  });
+  console.log(JSON.stringify({ scenario, ...result }));
+  process.exit(result.ok ? 0 : 1);
+}
+
 const [command, ...argv] = process.argv.slice(2);
 try {
   if (command === "serve") await serve(argv);
   else if (command === "verify") verify(argv);
-  else throw new Error("usage: cli.mjs serve --out FILE | verify replay-chat --log FILE --sample FILE");
+  else if (command === "run") await run(argv);
+  else throw new Error("usage: cli.mjs serve --out FILE | run replay-chat --exe APP | verify replay-chat --log FILE --sample FILE");
 } catch (e) {
   console.error(e.message);
   process.exit(2);

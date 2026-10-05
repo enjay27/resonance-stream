@@ -2,6 +2,18 @@
 
 use resonance_types::WindowRect;
 
+/// The INNER size to ask a window for so that its OUTER size becomes `outer`:
+/// `set_size` sets the inner (client) size, while the rects this app keeps are
+/// outer ones (`outer_position` / `outer_size`). Setting an outer size as the
+/// inner one makes the window one frame bigger every time (K18's runbook run:
+/// +22 x +13 px per restore). The frame is `outer - inner` of the live window.
+pub fn inner_size_for(outer: WindowRect, frame_width: u32, frame_height: u32) -> (u32, u32) {
+    (
+        outer.width.saturating_sub(frame_width).max(1),
+        outer.height.saturating_sub(frame_height).max(1),
+    )
+}
+
 /// The rect a window should take to be at least `min_width` x `min_height`
 /// (physical pixels) without leaving `work_area`, the monitor minus the taskbar.
 /// It grows around its current centre and is pushed back inside the work area;
@@ -98,6 +110,22 @@ mod tests {
         assert_eq!(memory.take(), None);
         memory.remember(r(5, 6, 7, 8)); // and it remembers again afterwards
         assert_eq!(memory.take(), Some(r(5, 6, 7, 8)));
+    }
+
+    #[test]
+    fn the_inner_size_leaves_room_for_the_frame() {
+        // Kade's window: 923x815 outer, a frame of 22x13 around the client area.
+        assert_eq!(inner_size_for(r(-958, 141, 923, 815), 22, 13), (901, 802));
+    }
+
+    #[test]
+    fn without_a_frame_the_size_is_unchanged() {
+        assert_eq!(inner_size_for(r(0, 0, 900, 640), 0, 0), (900, 640));
+    }
+
+    #[test]
+    fn a_frame_bigger_than_the_window_never_gives_zero() {
+        assert_eq!(inner_size_for(r(0, 0, 10, 10), 30, 30), (1, 1));
     }
 
     fn r(x: i32, y: i32, width: u32, height: u32) -> WindowRect {

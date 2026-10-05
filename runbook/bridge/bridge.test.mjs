@@ -135,6 +135,9 @@ test("a matcher is a JSON spec: dotted paths that must equal, contain or match a
   assert.equal(matcher({ "payload.state": { regex: "^available:\\d+\\.\\d+\\.\\d+$" } })(m), true);
   assert.equal(matcher({ "payload.state": { regex: "^error" } })(m), false);
   assert.equal(matcher({ "payload.state": { regex: "(" } })(m), false, "a bad pattern matches nothing");
+  assert.equal(matcher({ "payload.n": { not: 4 } })(m), true);
+  assert.equal(matcher({ "payload.n": { not: 3 } })(m), false);
+  assert.equal(matcher({ "payload.missing": { not: 3 } })(m), true, "a missing value is not that value");
   assert.equal(matcher(undefined)(m), true);
   // a plain-text message (the status topic) is compared as it is
   assert.equal(matcher("online")("online"), true);

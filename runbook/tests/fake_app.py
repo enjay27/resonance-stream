@@ -1,17 +1,17 @@
 """A stand-in for a test-env build of Resonance Stream -- only for the dry run of updater-mock.ipynb.
 
 It reads the same flags, writes the same status file and follows the same update steps (check the
-feed, download, verify, swap + restart), so the notebook's cells, waits and checks can be exercised
-on any OS. It is NOT the app: what it does is this author's reading of src-tauri, and proves
-nothing about Windows or the real exe. The "user" presses Start update by itself after a second,
-and 재시작 after FAKE_APP_RESTART_AFTER seconds.
+feed, download, verify, swap + restart), so the pipeline's steps, waits and checks can be exercised
+on any OS. With --bridge-url it also talks to the bridge's MQTT broker the way src-tauri/src/bridge.rs
+does (a minimal MQTT 3.1.1 client): it publishes `app-started` and `update-state` events and obeys the
+`ping`, `start-update`, `restart-update` and `quit` commands -- nobody "clicks" any more. It is NOT the
+app: what it does is this author's reading of src-tauri, and proves nothing about Windows or the real exe.
 
 The notebook's "exe" is a shell script that runs this file (so bytes appended to it, as the
 notebook does for the new version, are never parsed). Environment:
   FAKE_APP_EXE            path of the "exe" (set by the script)
   FAKE_APP_SIGNED_FILE    the file the "signature" is valid for: a download must equal it
   FAKE_APP_VERSION        the version it reports (default 0.5.0)
-  FAKE_APP_RESTART_AFTER  seconds before it presses 재시작 (default 3)
   FAKE_APP_LIFETIME       seconds until it exits by itself (default 40)
   FAKE_APP_STALL_AFTER    seconds of silence it takes for a stalled download (default 3)
   FAKE_APP_SKIP_VERIFY=1  a bug to catch: accepts any download
@@ -24,17 +24,21 @@ import http.client
 import json
 import os
 import shutil
+import queue
 import socket
+import struct
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 SWITCHES = {"fresh", "assume-setup-done", "no-capture", "no-translator", "no-update-check", "no-popups",
             "no-window-state", "print-env"}
-VALUES = {"data-dir", "feed-url", "metadata-url", "status-file", "log-file"}
+VALUES = {"data-dir", "feed-url", "metadata-url", "status-file", "log-file", "bridge-url"}
 
 
 def parse(argv: list[str]) -> dict:
@@ -56,6 +60,78 @@ def version_tuple(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in text.split("."))
 
 
+class Mqtt:
+    """The least MQTT 3.1.1 a stand-in needs: connect (with a will), publish at QoS 0, subscribe, and hand every
+    PUBLISH it receives to `inbox`. Not a library -- it only talks to the bridge's local broker."""
+
+    def __init__(self, url: str, client_id: str, will_topic: str, will_payload: bytes) -> None:
+        parts = urllib.parse.urlparse(url)
+        self.sock = socket.create_connection((parts.hostname, parts.port), timeout=10)
+        self.inbox: queue.Queue = queue.Queue()
+        body = self._string("MQTT") + bytes([4, 0x2E]) + struct.pack(">H", 0) + self._string(client_id)
+        body += self._string(will_topic) + struct.pack(">H", len(will_payload)) + will_payload
+        self._send(0x10, body)
+        if self._read_packet()[0] >> 4 != 2:
+            raise OSError("no CONNACK from the broker")
+        self.sock.settimeout(None)
+        threading.Thread(target=self._reader, daemon=True).start()
+
+    @staticmethod
+    def _string(text: str) -> bytes:
+        raw = text.encode("utf-8")
+        return struct.pack(">H", len(raw)) + raw
+
+    def _send(self, first: int, body: bytes) -> None:
+        length, out = len(body), bytearray()
+        while True:
+            digit, length = length % 128, length // 128
+            out.append(digit | (0x80 if length else 0))
+            if not length:
+                break
+        self.sock.sendall(bytes([first]) + bytes(out) + body)
+
+    def _recv(self, n: int) -> bytes:
+        data = b""
+        while len(data) < n:
+            chunk = self.sock.recv(n - len(data))
+            if not chunk:
+                raise OSError("the broker closed the connection")
+            data += chunk
+        return data
+
+    def _read_packet(self) -> tuple[int, bytes]:
+        first = self._recv(1)[0]
+        length, shift = 0, 0
+        while True:
+            digit = self._recv(1)[0]
+            length |= (digit & 0x7F) << shift
+            shift += 7
+            if not digit & 0x80:
+                break
+        return first, self._recv(length)
+
+    def _reader(self) -> None:
+        try:
+            while True:
+                first, body = self._read_packet()
+                if first >> 4 == 3:  # PUBLISH
+                    (n,) = struct.unpack(">H", body[:2])
+                    topic = body[2:2 + n].decode("utf-8")
+                    rest = body[2 + n:]
+                    if (first >> 1) & 3:
+                        rest = rest[2:]  # a packet id: we subscribe at QoS 0, so the broker sends none
+                    self.inbox.put((topic, rest))
+        except OSError:
+            pass
+
+    def publish(self, topic: str, payload: bytes | str, retain: bool = False) -> None:
+        data = payload.encode("utf-8") if isinstance(payload, str) else payload
+        self._send(0x30 | (1 if retain else 0), self._string(topic) + data)
+
+    def subscribe(self, topic_filter: str) -> None:
+        self._send(0x82, struct.pack(">H", 1) + self._string(topic_filter) + bytes([0]))
+
+
 class App:
     def __init__(self, flags: dict) -> None:
         self.flags = flags
@@ -72,6 +148,10 @@ class App:
             "flags": [n for n in [*sorted(SWITCHES), *sorted(VALUES)] if n in flags],
             "update": "none",
         }
+        self.bridge: Mqtt | None = None
+        self.seq = 0
+        self.announced_url: str | None = None
+        self.stop = False
 
     def write_status(self) -> None:
         path = self.flags.get("status-file")
@@ -96,6 +176,50 @@ class App:
         self.status["update"] = state
         self.write_status()
         self.log(f"update -> {state}")
+        self.event("update-state", {"state": state})
+
+    # -- the bridge (src-tauri/src/bridge.rs, as understood)
+    def event(self, name: str, payload: dict) -> None:
+        if self.bridge is None:
+            return
+        body = {"seq": self.seq, "t_ms": int(time.time() * 1000), "name": name, "payload": payload}
+        self.seq += 1
+        self.bridge.publish(f"rs/app/event/{name}", json.dumps(body))
+
+    def connect_bridge(self) -> None:
+        url = self.flags.get("bridge-url")
+        if not url:
+            return
+        self.bridge = Mqtt(url, "resonance-stream-app", "rs/app/status", b"offline")
+        self.bridge.subscribe("rs/test/command/+")
+        self.event("app-started", {"pid": os.getpid(), "version": self.version, "exe": str(self.exe)})
+        self.bridge.publish("rs/app/status", "online", retain=True)
+
+    def handle(self, topic: str, payload: bytes) -> None:
+        request = json.loads(payload)
+        command, id_ = topic.rsplit("/", 1)[-1], request.get("id", "")
+
+        def ack(error: str | None = None) -> None:
+            body = {"id": id_, "ok": True} if error is None else {"id": id_, "ok": False, "error": error}
+            self.bridge.publish(f"rs/app/ack/{id_}", json.dumps(body))
+
+        if command == "ping":
+            ack()
+        elif command == "start-update":
+            if self.announced_url is None:
+                ack("No update has been announced; check for updates first")
+            else:
+                ack()
+                threading.Thread(target=self.download, args=(self.announced_url,), daemon=True).start()
+        elif command == "restart-update":
+            error = self.restart()  # a success ends this process
+            ack(error or "restart returned without error")
+        elif command == "quit":
+            ack()
+            time.sleep(0.2)
+            self.stop = True
+        else:
+            ack(f"unknown command {command}")
 
     # -- the update path (app_updater.rs / gist.rs, as understood)
     def check(self) -> str | None:
@@ -108,6 +232,7 @@ class App:
         try:
             body = urllib.request.urlopen(self.flags["feed-url"], timeout=5).read()  # noqa: S310
         except urllib.error.HTTPError:
+            self.set_update("none")  # the real app reports the finished check, whatever it found
             return None
         except (OSError, KeyError, ValueError) as e:
             self.set_update(f"error:Network error: {e}")
@@ -121,6 +246,7 @@ class App:
         if version_tuple(version) > version_tuple(self.version):
             self.set_update(f"available:{version}")
             return url
+        self.set_update("none")
         return None
 
     def download(self, url: str) -> bool:
@@ -149,11 +275,14 @@ class App:
         signed = os.environ.get("FAKE_APP_SIGNED_FILE")
         return bool(signed) and Path(signed).read_bytes() == data
 
-    def restart(self) -> None:
+    def restart(self) -> str:
+        """Installs the downloaded update and restarts (this process ends); returns why it refused."""
         temp = self.exe.with_name("update_temp.exe")
+        if not temp.exists():
+            return "No verified update has been downloaded"
         if not self.verified(temp.read_bytes()):
             self.log("restart refused: update_temp.exe fails the check")
-            return
+            return "the update is not signed by a trusted key"
         old = self.exe.with_name(self.exe.name + ".old")
         old.unlink(missing_ok=True)
         self.exe.rename(old)
@@ -161,7 +290,7 @@ class App:
         self.exe.chmod(0o755)  # a downloaded file is not executable on POSIX; the real exe is
         args = [a for a in sys.argv[1:] if a not in ("--fresh", "--print-env")]
         subprocess.Popen([str(self.exe), *args], cwd=str(self.exe.parent), close_fds=True, env=os.environ.copy())
-        sys.exit(0)
+        os._exit(0)
 
 
 def main() -> int:
@@ -185,15 +314,17 @@ def main() -> int:
             (Path(data) / sub).mkdir(parents=True, exist_ok=True)
     app.status["ready"] = True
     app.write_status()
-    first_run = not app.exe.with_name(app.exe.name + ".old").exists()  # a copy that was just updated does not click
-    url = None if "no-update-check" in flags else app.check()
-    if url and first_run:
-        time.sleep(1)  # the user presses Start update
-        if app.download(url):
-            time.sleep(float(os.environ.get("FAKE_APP_RESTART_AFTER", "3")))  # ...and later 재시작
-            app.restart()
-    while time.monotonic() < deadline:
-        time.sleep(0.5)
+    app.connect_bridge()
+    app.announced_url = None if "no-update-check" in flags else app.check()
+    while time.monotonic() < deadline and not app.stop:
+        if app.bridge is None:
+            time.sleep(0.5)
+            continue
+        try:
+            topic, payload = app.bridge.inbox.get(timeout=0.5)
+        except queue.Empty:
+            continue
+        app.handle(topic, payload)
     return 0
 
 

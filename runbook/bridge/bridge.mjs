@@ -30,7 +30,7 @@ function parsePayload(buffer) {
 /**
  * A message test from a JSON spec, so a script in another language can say what it waits for.
  * `{"payload.state": "downloaded"}`: every dotted path must equal the value; a path may instead hold
- * `{"contains": text}` or `{"regex": pattern}` (a bad pattern matches nothing). `undefined` / `{}` match anything;
+ * `{"contains": text}`, `{"regex": pattern}` (a bad pattern matches nothing) or `{"not": value}`. `undefined` / `{}` match anything;
  * a plain string (the `rs/app/status` text) is compared as it is.
  */
 export function matcher(spec) {
@@ -38,6 +38,7 @@ export function matcher(spec) {
   if (typeof spec !== "object") return (message) => message === spec;
   const test = (want, got) => {
     if (want !== null && typeof want === "object" && !Array.isArray(want)) {
+      if ("not" in want) return JSON.stringify(got) !== JSON.stringify(want.not);
       if ("contains" in want) return typeof got === "string" && got.includes(want.contains);
       if ("regex" in want) {
         try {

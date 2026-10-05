@@ -218,7 +218,18 @@ pub fn restore_window(window: tauri::Window, rect: resonance_types::WindowRect) 
     apply_rect(&window, rect);
 }
 
+/// Puts the window at `rect`, an OUTER rect (what `outer_position` / `outer_size` report and what is
+/// remembered): `set_size` takes the inner size, so the frame is taken off first -- otherwise every
+/// restore made the window one frame bigger (the K18 runbook run: +22 x +13 px each time).
 fn apply_rect(window: &tauri::Window, rect: resonance_types::WindowRect) {
-    let _ = window.set_size(tauri::PhysicalSize::new(rect.width, rect.height));
+    let (frame_width, frame_height) = match (window.outer_size(), window.inner_size()) {
+        (Ok(outer), Ok(inner)) => (
+            outer.width.saturating_sub(inner.width),
+            outer.height.saturating_sub(inner.height),
+        ),
+        _ => (0, 0),
+    };
+    let (width, height) = resonance_core::window::inner_size_for(rect, frame_width, frame_height);
+    let _ = window.set_size(tauri::PhysicalSize::new(width, height));
     let _ = window.set_position(tauri::PhysicalPosition::new(rect.x, rect.y));
 }

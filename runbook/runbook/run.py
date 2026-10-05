@@ -21,6 +21,12 @@ from runbook.pipelines.window_restore import WindowRestore
 PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick, "window-restore": WindowRestore}
 
 
+def build(name: str, rec: Recorder, exe, args):
+    """The pipeline `name`, with only the options it takes (`--version` and `--ui` are the update pipeline's)."""
+    options = {"new_version": args.version, "ui_checks": args.ui} if name == "updater-mock" else {}
+    return PIPELINES[name](rec, exe, **options)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m runbook.run")
     parser.add_argument("pipeline", choices=sorted(PIPELINES))
@@ -34,11 +40,13 @@ def main(argv: list[str] | None = None) -> int:
         str(common.default_exe()) if common.default_exe().is_file() else None)
     if not exe:
         parser.error(f"--exe is needed: there is no build at {common.default_exe()}")
+    if not os.path.isfile(exe):
+        parser.error(f"the exe {exe} is not a file (build it: cargo tauri build --no-bundle --features test-env)")
     rec = Recorder(args.pipeline)
     if not common.require_windows_admin(rec):
         print(rec.report())
         return 1
-    pipeline = PIPELINES[args.pipeline](rec, exe, new_version=args.version, ui_checks=args.ui)
+    pipeline = build(args.pipeline, rec, exe, args)
     pipeline.run(key_path=args.key, password=os.environ.get("RUNBOOK_TEXT_BACKUP_PW"))
     print()
     print(rec.report())

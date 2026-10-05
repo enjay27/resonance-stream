@@ -227,6 +227,10 @@ pub fn mark_ready(app: &AppHandle) {
 /// Records where the app's own update stands (`--status-file`'s `update`).
 pub fn report_update(state: UpdateState) {
     let Some(active) = ACTIVE.get() else { return };
+    crate::bridge::publish_event(
+        resonance_core::bridge::UPDATE_STATE_EVENT,
+        serde_json::json!({ "state": state.to_string() }),
+    );
     active.status.lock().update = state;
     write_status(active);
 }

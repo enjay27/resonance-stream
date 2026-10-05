@@ -51,6 +51,15 @@ pub fn start(app: &AppHandle) {
     let (client, mut connection) = Client::new(options, QUEUE);
 
     let _ = CLIENT.set(client.clone());
+    // Queued until the connection is up. A second one with another pid is a restart (after an update).
+    publish_event(
+        wire::APP_STARTED_EVENT,
+        serde_json::json!({
+            "pid": std::process::id(),
+            "version": env!("CARGO_PKG_VERSION"),
+            "exe": std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+        }),
+    );
 
     // Events: heard on any target, published in the order they arrive.
     for name in EVENT_NAMES {
@@ -83,6 +92,12 @@ pub fn start(app: &AppHandle) {
             }
         }
     });
+}
+
+/// Publishes an event the app raises itself (`update-state`, `app-started`), as it would a UI event.
+/// Does nothing unless the bridge is on.
+pub fn publish_event(name: &str, payload: Value) {
+    publish_envelope(wire::event_topic(name), name, payload);
 }
 
 /// Wraps the app's command handler: every UI -> backend `invoke` is published
@@ -134,21 +149,46 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
         }
     };
     log::info!("[Bridge] Command {:?}", request.command);
+    let answer = |result: Result<(), String>| {
+        let text = match &result {
+            Ok(()) => wire::ack(&request.id, Ok(())),
+            Err(e) => wire::ack(&request.id, Err(e)),
+        };
+        publish(wire::ack_topic(&request.id), text);
+    };
     match &request.command {
-        Command::Ping => {}
+        Command::Ping => answer(Ok(())),
         Command::ReplayChat { path } => {
             // Reports its own problems as system messages (what `--replay-chat` does).
             crate::services::sniffer::replay::start_file(app.clone(), path);
+            answer(Ok(()));
+        }
+        Command::StartUpdate => match crate::services::downloader::announced_update() {
+            None => answer(Err(
+                "No update has been announced; check for updates first".into()
+            )),
+            Some(feed) => {
+                // The outcome is the `update-state` events (downloading, then downloaded or error).
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = crate::services::downloader::download_app_update(app, feed.url).await;
+                });
+                answer(Ok(()));
+            }
+        },
+        Command::RestartUpdate => {
+            // On success this process ends (a new one says `app-started`); only a refusal comes back.
+            if let Err(e) = crate::services::downloader::restart_to_apply_update(app.clone()) {
+                answer(Err(e));
+            }
         }
         Command::Quit => {
-            publish(wire::ack_topic(&request.id), wire::ack(&request.id, Ok(())));
+            answer(Ok(()));
             // Let the ack leave before the process does.
             std::thread::sleep(Duration::from_millis(200));
             app.exit(0);
-            return;
         }
     }
-    publish(wire::ack_topic(&request.id), wire::ack(&request.id, Ok(())));
 }
 
 fn now_ms() -> u64 {

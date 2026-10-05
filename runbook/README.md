@@ -18,6 +18,7 @@ K25); later sessions add notebooks here, so the folder is not named after one se
 | `notebooks/feed.ipynb` | K3: the release feed check |
 | `notebooks/firewall.ipynb` | K6: the firewall rule per exe |
 | `notebooks/interface.ipynb` | K4: the route-based interface pick |
+| `notebooks/replay-chat.ipynb` | the `--replay-chat` test flag: start a copy, read its log, ask what the window showed (needs a `test-env` exe) |
 | `notebooks/checklists.ipynb` | K7, Esc, K25 (read from `.memory/active-issues/unverified-on-windows.md` at run time) |
 
 Code: the Python package `runbook/runbook/` -- `common.py` (result recorder, prompts, command capture) and

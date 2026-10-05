@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::ipc::{Invoke, InvokeBody};
-use tauri::{AppHandle, Listener, Runtime};
+use tauri::{AppHandle, Listener, Manager, Runtime};
 
 /// The connection, once the bridge is on; the events and the command tap share it.
 static CLIENT: OnceLock<Client> = OnceLock::new();
@@ -156,8 +156,42 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
         };
         publish(wire::ack_topic(&request.id), text);
     };
+    let answer_data = |data: Value| {
+        publish(
+            wire::ack_topic(&request.id),
+            wire::ack_data(&request.id, data),
+        );
+    };
+    let rect_json = |rect: Option<resonance_types::WindowRect>| {
+        rect.and_then(|r| serde_json::to_value(r).ok())
+            .unwrap_or(Value::Null)
+    };
     match &request.command {
         Command::Ping => answer(Ok(())),
+        Command::Snapshot => match app.get_window("main") {
+            Some(window) => answer_data(rect_json(crate::window::window_rect(&window))),
+            None => answer(Err("There is no main window".into())),
+        },
+        Command::GrowWindow {
+            min_width,
+            min_height,
+        } => match app.get_window("main") {
+            // What the settings view does: the ack's data is the rect it replaced (null: nothing changed).
+            Some(window) => answer_data(rect_json(crate::window::grow_window(
+                window,
+                f64::from(*min_width),
+                f64::from(*min_height),
+            ))),
+            None => answer(Err("There is no main window".into())),
+        },
+        Command::CloseWindow => match app.get_window("main") {
+            Some(window) => {
+                answer(Ok(()));
+                // The X: a close request (the app's handler restores a grown window), then the app ends.
+                let _ = window.close();
+            }
+            None => answer(Err("There is no main window".into())),
+        },
         Command::ReplayChat { path } => {
             // Reports its own problems as system messages (what `--replay-chat` does).
             crate::services::sniffer::replay::start_file(app.clone(), path);

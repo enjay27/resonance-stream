@@ -178,6 +178,18 @@ pub fn grow_window(
     Some(current)
 }
 
+/// The window's outer rect in physical pixels (the bridge's `snapshot`).
+pub fn window_rect(window: &tauri::Window) -> Option<resonance_types::WindowRect> {
+    let pos = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+    Some(resonance_types::WindowRect {
+        x: pos.x,
+        y: pos.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
 /// What `grow_window` replaced and `restore_window` has not put back yet.
 static GROWN_FROM: Mutex<GrowMemory> = Mutex::new(GrowMemory::new());
 

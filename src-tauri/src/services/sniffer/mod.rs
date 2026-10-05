@@ -1,5 +1,6 @@
 mod network;
 mod raw_capture;
+pub(crate) mod replay;
 
 pub use self::network::*;
 use self::raw_capture::RawCapture;

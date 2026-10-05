@@ -1,0 +1,11 @@
+# A sample for --replay-chat: one JSON object per line, "text" is required.
+# delay_ms: wait this long after the previous line (default 0). channel: WORLD, GUILD, PARTY, LOCAL, BEGINNER (default WORLD).
+# nickname, uid, class_id, level, timestamp, sequence_id are optional. Blank lines and lines starting with # are skipped.
+{"delay_ms": 0, "channel": "WORLD", "nickname": "ミナト", "text": "こんにちは、よろしくお願いします！"}
+{"delay_ms": 1500, "channel": "WORLD", "nickname": "Kenji", "text": "ボス戦のメンバー募集中です"}
+{"delay_ms": 1000, "channel": "GUILD", "nickname": "さくら", "text": "今日のギルドレイドは20時からです"}
+{"delay_ms": 800, "channel": "PARTY", "nickname": "ミナト", "text": "回復お願いします！<sprite=3>"}
+{"delay_ms": 1200, "channel": "LOCAL", "nickname": "Kenji", "text": "ありがとうございました、また今度！"}
+{"delay_ms": 600, "channel": "WORLD", "nickname": "ミナト", "text": "emojiPic=9"}
+{"delay_ms": 2000, "channel": "BEGINNER", "nickname": "ゆう", "text": "初心者です。どこでレベル上げすればいいですか？"}
+{"delay_ms": 1000, "channel": "WORLD", "nickname": "Kenji", "text": "Hello from an English speaker"}

@@ -187,6 +187,15 @@ and left to the Windows CI job, as always.
   M5-M7 bad signature / cut / silent download -> `update: error`, M-iso real config untouched. Helpers
   `w1/mockfeed.py` (27 tests), stand-in `tests/fake_app.py`, dry run of every cell (4 tests); 138 pass from a fresh
   clone. **Not run on Windows or with the real exe.** The old notebooks keep their config-file step (released exes).
+- **PR 8 `claude/test-env-replay-chat` -- done, app gate left to Windows CI; Kade's go on the format 2026-10-05**:
+  `--replay-chat <file>` feeds chat lines in as if captured. File = JSON Lines, `text` required, optional
+  `delay_ms` `channel` `nickname` `uid` `class_id` `level` `timestamp` `sequence_id` (full table and defaults in
+  `crates/core/src/replay.rs`; a typo is an error with its line number). Sample: `crates/core/testdata/replay-sample.jsonl`.
+  Each line goes through `ChatPipeline::feed_chat` (new; extracted from `feed_network_packet`, no behaviour change --
+  same dedup / block / emote rules as a captured message) and then the sniffer's `dispatch_pipeline_actions`
+  (history, UI event, translator job or archive). The thread starts at the end of setup, waits 2 s for the window, and
+  says "Replaying N chat lines" / "Replay finished" in the system log (errors there too). Not passed on after an update
+  restart. Try: `--replay-chat crates\core\testdata\replay-sample.jsonl` with the other flags. **Not run on Windows.**
 - Path call sites for PR 2 were **14**, not 12: `app_config_dir()` x2 (`config/app_config.rs:187`,
   `config/metadata.rs:31`) and `app_data_dir()` x12 (`io/data_factory.rs`, `io/fs.rs`,
   `downloader/{gist,model,server}.rs`, `sniffer/raw_capture.rs`, `translator/server_manager.rs`).

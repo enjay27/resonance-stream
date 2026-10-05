@@ -13,8 +13,8 @@ const SAMPLE = [
 // What the app publishes for those three lines, as the bridge records them.
 function recording(overrides = {}) {
   const chat = (seq, t_ms, channel, nickname, message, level = 60) => ({
-    topic: "rs/app/event/chat-message-update",
-    message: { seq, t_ms, name: "chat-message-update", payload: { pid: seq, channel, nickname, message, level } },
+    topic: "rs/app/event/packet-event",
+    message: { seq, t_ms, name: "packet-event", payload: { pid: seq, channel, nickname, message, level } },
   });
   const system = (seq, t_ms, message, level = "info") => ({
     topic: "rs/app/event/system-event",
@@ -74,9 +74,16 @@ test("a wrong channel, name, level or text fails the content check and says whic
   }
 });
 
-test("a translation update re-sending a chat message is not a second line", () => {
+test("a block-state update (chat-message-update) is not a second line", () => {
+  // The app publishes a new chat line as packet-event; chat-message-update only re-sends one whose blocked flag changed.
   const rec = recording();
-  rec.splice(3, 0, { ...rec[1], message: { ...rec[1].message, seq: 9, payload: { ...rec[1].message.payload, translated: "안녕" } } });
+  rec.splice(3, 0, { topic: "rs/app/event/chat-message-update", message: { ...rec[1].message, name: "chat-message-update", seq: 9 } });
+  assert.deepEqual(verifyReplayChat(rec, parseSample(SAMPLE)).filter((c) => !c.ok), []);
+});
+
+test("the same line seen twice (same pid) counts once", () => {
+  const rec = recording();
+  rec.splice(3, 0, { ...rec[1], message: { ...rec[1].message, seq: 9 } });
   assert.deepEqual(verifyReplayChat(rec, parseSample(SAMPLE)).filter((c) => !c.ok), []);
 });
 

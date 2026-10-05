@@ -31,15 +31,16 @@ export function verifyReplayChat(recording, entries) {
   const checks = [];
   const add = (id, title, ok, detail = "") => checks.push({ id, title, ok, detail });
 
-  // A translation update re-sends a message under the same pid: that is one line.
+  // The app publishes a new chat line as `packet-event` (src-tauri/src/events.rs `store_and_emit`); `chat-message-update`
+  // only re-sends a line whose blocked flag changed, so it is not read here. The same pid twice is one line.
   const seen = new Set();
-  const chat = events(recording, "chat-message-update").filter((m) => {
+  const chat = events(recording, "packet-event").filter((m) => {
     const key = m.payload.pid ?? `seq${m.seq}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
-  add("B1", `${entries.length} chat messages were published`, chat.length === entries.length, `${chat.length} of ${entries.length}`);
+  add("B1", `${entries.length} chat messages were published`, chat.length === entries.length, `${chat.length} of ${entries.length} packet-event messages`);
 
   const wrong = [];
   entries.forEach((entry, i) => {

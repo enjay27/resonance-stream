@@ -23,7 +23,7 @@ def _recording(path: Path, messages: list[str], levels=None) -> None:
     for i, e in enumerate(entries):
         t += e.get("delay_ms", 0)
         payload = {"pid": i, "channel": e["channel"], "nickname": e["nickname"], "level": e["level"], "message": messages[i]}
-        lines.append({"topic": "rs/app/event/chat-message-update", "message": {"seq": seq, "t_ms": t, "name": "chat-message-update", "payload": payload}})
+        lines.append({"topic": "rs/app/event/packet-event", "message": {"seq": seq, "t_ms": t, "name": "packet-event", "payload": payload}})
         seq += 1
     lines.append({"topic": "rs/app/event/system-event", "message": {"seq": seq, "t_ms": t, "name": "system-event",
                   "payload": {"level": "info", "source": "Replay", "message": "Replay finished"}}})

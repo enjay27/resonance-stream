@@ -48,7 +48,7 @@ test("serve records the app's events, forwards commands and stops when stdin clo
 
   const t0 = Date.now();
   const chat = (seq, message) =>
-    app.publishAsync("rs/app/event/chat-message-update", JSON.stringify({ seq, t_ms: t0, name: "chat-message-update", payload: { pid: seq, channel: "WORLD", nickname: "a", message, level: 1 } }));
+    app.publishAsync("rs/app/event/packet-event", JSON.stringify({ seq, t_ms: t0, name: "packet-event", payload: { pid: seq, channel: "WORLD", nickname: "a", message, level: 1 } }));
   await chat(1, "x");
   await app.publishAsync("rs/app/event/system-event", JSON.stringify({ seq: 2, t_ms: t0, name: "system-event", payload: { level: "info", source: "Replay", message: "Replay finished" } }));
   await new Promise((r) => setTimeout(r, 200));
@@ -74,4 +74,25 @@ test("a bad command line exits 2 with a reason", () => {
   const r = spawnSync(process.execPath, [CLI, "verify", "nope"], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /unknown scenario nope/);
+});
+
+test("run replay-chat does the whole test by itself and exits 0 (a stand-in app)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bridge-run-"));
+  const sample = join(dir, "sample.jsonl");
+  writeFileSync(sample, '{"delay_ms":0,"channel":"WORLD","nickname":"a","level":1,"text":"x"}\n{"delay_ms":200,"channel":"GUILD","nickname":"b","level":1,"text":"y<sprite=1>"}\n');
+  const fake = new URL("./fake_app.mjs", import.meta.url).pathname;
+  const args = [CLI, "run", "replay-chat", "--exe", process.execPath, "--exe-arg", fake, "--sample", sample, "--work", join(dir, "work")];
+  const ok = spawnSync(process.execPath, args, { encoding: "utf8", env: { ...process.env, FAKE_APP_LEAD_IN_MS: "20" }, timeout: 60000 });
+  assert.equal(ok.status, 0, ok.stderr);
+  const report = JSON.parse(ok.stdout);
+  assert.equal(report.ok, true);
+  assert.match(ok.stderr, /\[PASS\] Q1/);
+  const bad = spawnSync(process.execPath, args, { encoding: "utf8", env: { ...process.env, FAKE_APP_LEAD_IN_MS: "20", FAKE_APP_DROP_CHAT: "1" }, timeout: 60000 });
+  assert.equal(bad.status, 1);
+});
+
+test("run without --exe is a bad command line", () => {
+  const r = spawnSync(process.execPath, [CLI, "run", "replay-chat"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /needs --exe/);
 });

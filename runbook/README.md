@@ -42,7 +42,7 @@ sends the window, every command the window sends it) and obeys commands publishe
 topics are in `crates/core/src/bridge.rs`). `bridge/` is the other end: `bridge.mjs` (broker + recorder + `expect` /
 `expectSequence` / `send`), `scenarios.mjs` (what a scenario must have published) and `cli.mjs` (for the notebooks, through
 `runbook/bridge.py`). `replay-chat.ipynb` uses it for its B0-B5 rows. Once, in `runbook/bridge/`: `npm ci`
-(the notebook does it for you). Tests: `cd bridge && npm test` (about 3 s; the app is stood in for by a small MQTT client, so it
+(the notebook does it for you). **No notebook, no prompts:** `node runbook/bridge/cli.mjs run replay-chat --exe C:\path\to\resonance-stream.exe` starts the broker and the exe, sends `ping`, `replay-chat` and `quit` over the bridge, checks what the app published (A1-A3, B0-B5, Q1) and prints the report as JSON (progress on stderr; exit 0 = all passed). The window still opens, and the manual rows (what the window drew) stay in the notebook. Tests: `cd bridge && npm test` (about 3 s; the app is stood in for by a small MQTT client, so it
 proves the bridge, not the app).
 
 ## Run (Windows)

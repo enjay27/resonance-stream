@@ -31,7 +31,7 @@ enum Kind {
 }
 
 /// Every flag, in the order `TestEnv::set_flags` lists them.
-const FLAGS: [(&str, Kind); 14] = [
+const FLAGS: [(&str, Kind); 15] = [
     ("data-dir", Kind::Value),
     ("fresh", Kind::Switch),
     ("assume-setup-done", Kind::Switch),
@@ -45,6 +45,7 @@ const FLAGS: [(&str, Kind); 14] = [
     ("status-file", Kind::Value),
     ("log-file", Kind::Value),
     ("replay-chat", Kind::Value),
+    ("bridge-url", Kind::Value),
     ("print-env", Kind::Switch),
 ];
 
@@ -73,6 +74,9 @@ pub struct TestEnv {
     /// Feed the chat lines of this JSON Lines file in as if captured (see
     /// [`crate::replay`]). Not passed on after an update restart.
     pub replay_chat: Option<PathBuf>,
+    /// Connect to this local MQTT broker (`mqtt://127.0.0.1:1883`) and publish
+    /// what the app does / obey what the test publishes (see [`bridge_addr`]).
+    pub bridge_url: Option<String>,
     /// Print the resolved settings as JSON and exit.
     pub print_env: bool,
 }
@@ -95,6 +99,7 @@ impl TestEnv {
             self.status_file.is_some(),
             self.log_file.is_some(),
             self.replay_chat.is_some(),
+            self.bridge_url.is_some(),
             self.print_env,
         ];
         FLAGS
@@ -124,6 +129,12 @@ impl TestEnv {
             "status-file" => self.status_file = Some(PathBuf::from(value)),
             "log-file" => self.log_file = Some(PathBuf::from(value)),
             "replay-chat" => self.replay_chat = Some(PathBuf::from(value)),
+            "bridge-url" => {
+                if bridge_addr(&value).is_none() {
+                    return Err(TestEnvError::BadBridgeUrl { url: value });
+                }
+                self.bridge_url = Some(value);
+            }
             "feed-url" | "metadata-url" => {
                 if !is_test_url_allowed(&value) {
                     return Err(TestEnvError::BadUrl {
@@ -159,6 +170,8 @@ pub enum TestEnvError {
     BadSwitchEnv { var: String, value: String },
     /// `--fresh` without `--data-dir` would empty the real data folders.
     FreshNeedsDataDir,
+    /// A bridge URL that is not `mqtt://` to this machine.
+    BadBridgeUrl { url: String },
     /// A feed / metadata URL that is neither `https` nor local `http`.
     BadUrl { flag: String, url: String },
 }
@@ -182,6 +195,10 @@ impl fmt::Display for TestEnvError {
                     "--fresh needs --data-dir (it would empty the real data folders)"
                 )
             }
+            Self::BadBridgeUrl { url } => write!(
+                f,
+                "--bridge-url {url:?}: only mqtt://127.0.0.1 / localhost / [::1], with an optional port"
+            ),
             Self::BadUrl { flag, url } => write!(
                 f,
                 "--{flag} {url:?}: only https:// or http://127.0.0.1 / localhost / [::1]"
@@ -297,6 +314,11 @@ pub fn is_local_http_url(url: &str) -> bool {
 /// (lowercase scheme, lowercase host) of a URL whose authority is well formed
 /// (no user name, a host, a numeric port if any); `None` otherwise.
 fn split_url(url: &str) -> Option<(String, String)> {
+    split_authority(url).map(|(scheme, host, _)| (scheme, host))
+}
+
+/// Like [`split_url`], and the port as written (`None` when there is none).
+fn split_authority(url: &str) -> Option<(String, String, Option<String>)> {
     let (scheme, rest) = url.split_once("://")?;
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     if authority.contains('@') {
@@ -306,7 +328,29 @@ fn split_url(url: &str) -> Option<(String, String)> {
     if !port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) {
         return None;
     }
-    Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase()))
+    Some((
+        scheme.to_ascii_lowercase(),
+        host.to_ascii_lowercase(),
+        port.map(String::from),
+    ))
+}
+
+/// Default port of an MQTT broker.
+pub const BRIDGE_DEFAULT_PORT: u16 = 1883;
+
+/// (host, port) of a `--bridge-url`: `mqtt://` to this machine only
+/// (`127.0.0.1`, `localhost` or `[::1]`), port 1-65535, 1883 when left out. The
+/// bridge carries chat text, so it never leaves the machine.
+pub fn bridge_addr(url: &str) -> Option<(String, u16)> {
+    let (scheme, host, port) = split_authority(url)?;
+    if scheme != "mqtt" || !matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]") {
+        return None;
+    }
+    let port = match port {
+        None => BRIDGE_DEFAULT_PORT,
+        Some(p) => p.parse::<u16>().ok().filter(|&p| p != 0)?,
+    };
+    Some((host, port))
 }
 
 /// `host`, `host:port`, `[v6]` or `[v6]:port` -> (host, port). `None` when the
@@ -435,6 +479,7 @@ impl TestEnv {
             value(self.metadata_url.clone(), "metadata-url"),
             value(path(&self.status_file), "status-file"),
             value(path(&self.log_file), "log-file"),
+            value(self.bridge_url.clone(), "bridge-url"),
         ]
         .into_iter()
         .flatten()
@@ -778,6 +823,69 @@ mod tests {
         ] {
             assert!(is_test_url_allowed(url), "{url} should be allowed");
         }
+    }
+
+    #[test]
+    fn bridge_url_is_a_local_mqtt_broker_from_the_flag_or_the_variable() {
+        let env = ok(&["--bridge-url", "mqtt://127.0.0.1:1884"]);
+        assert_eq!(env.bridge_url.as_deref(), Some("mqtt://127.0.0.1:1884"));
+        assert!(env.set_flags().contains(&"bridge-url"));
+        let env = run(&[], &[("RESONANCE_TEST_BRIDGE_URL", "mqtt://localhost")]).expect("parses");
+        assert_eq!(env.bridge_url.as_deref(), Some("mqtt://localhost"));
+        assert_eq!(
+            run(&["--bridge-url"], &[]),
+            Err(TestEnvError::MissingValue("bridge-url".into()))
+        );
+    }
+
+    #[test]
+    fn bridge_url_refuses_anything_but_mqtt_to_this_machine() {
+        for url in [
+            "mqtt://broker.example.com:1883",
+            "mqtt://127.0.0.1.example.com",
+            "mqtt://user@127.0.0.1:1883",
+            "mqtts://127.0.0.1:8883",
+            "http://127.0.0.1:1883",
+            "mqtt://127.0.0.1:0",
+            "mqtt://127.0.0.1:70000",
+            "mqtt://127.0.0.1:abc",
+            "127.0.0.1:1883",
+        ] {
+            assert_eq!(
+                run(&["--bridge-url", url], &[]),
+                Err(TestEnvError::BadBridgeUrl { url: url.into() }),
+                "{url}"
+            );
+        }
+        assert_eq!(
+            run(&[], &[("RESONANCE_TEST_BRIDGE_URL", "mqtt://example.com")]),
+            Err(TestEnvError::BadBridgeUrl {
+                url: "mqtt://example.com".into()
+            })
+        );
+    }
+
+    #[test]
+    fn a_bridge_address_has_a_host_and_a_port_that_defaults_to_1883() {
+        assert_eq!(
+            bridge_addr("mqtt://127.0.0.1:1884"),
+            Some(("127.0.0.1".to_string(), 1884))
+        );
+        assert_eq!(
+            bridge_addr("mqtt://LOCALHOST"),
+            Some(("localhost".to_string(), 1883))
+        );
+        assert_eq!(
+            bridge_addr("mqtt://[::1]:9/"),
+            Some(("[::1]".to_string(), 9))
+        );
+        assert_eq!(bridge_addr("mqtt://example.com"), None);
+    }
+
+    #[test]
+    fn a_restart_keeps_the_bridge() {
+        let env = ok(&["--bridge-url", "mqtt://127.0.0.1:1884"]);
+        assert_eq!(env.restart_args(), ["--bridge-url=mqtt://127.0.0.1:1884"]);
     }
 
     #[test]

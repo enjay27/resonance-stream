@@ -74,3 +74,10 @@ Existing pieces to build on: `crates/core/src/test_env.rs` + `src-tauri/src/test
 > Read `CLAUDE.md`, `MEMORY.md` and `.memory/sessions/2026-10-05-bridge-handoff.md`. I am Kade. We plan the test bridge
 > (the app POSTs JSON for each action to a local Python server that verifies it). Start by confirming the four questions in
 > the handoff with me; then present the PR 1 plan (the `--bridge-url` flag) and wait for my go.
+
+## Decisions (Kade, later the same day) -- these replace the proposal above where they differ
+
+- **MQTT, two-way, Node.** Not HTTP POST, not Python. Node `aedes` broker + `mqtt` client in `runbook/bridge/`; the app is an MQTT client (`rumqttc`, only with debug / `test-env`). Broker address must be loopback.
+- **Topics**, namespace `rs/<runId>/`: `app/event/<name>` (backend -> UI events), `app/command/<name>` (UI -> backend commands), `test/command/<name>` (test -> app, allowlisted: emit a chat message, invoke a command, replay-chat, quit), `app/ack/<id>`, `app/error`.
+- **First scenario:** `replay-chat`.
+- **PR order:** (1) `--bridge-url` flag [done on this branch], (2) `bridge.rs` + event tap + command receiver, (3) `invoke_handler` tap, (4) Node bridge + `replay-chat`, (5) other scenarios (sniffer, updater, K18). One PR at a time.

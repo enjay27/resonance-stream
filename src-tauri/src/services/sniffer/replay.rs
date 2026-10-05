@@ -18,9 +18,14 @@ const LEAD_IN: Duration = Duration::from_secs(2);
 
 /// Starts the replay when `--replay-chat` was given; does nothing otherwise.
 pub fn start(app: AppHandle) {
-    let Some(path) = crate::test_env::replay_chat() else {
-        return;
-    };
+    if let Some(path) = crate::test_env::replay_chat() {
+        start_file(app, path);
+    }
+}
+
+/// Replays the chat lines of `path` (`--replay-chat`, or the bridge's
+/// `replay-chat` command).
+pub fn start_file(app: AppHandle, path: &std::path::Path) {
     let say = |level: SystemLogLevel, text: String| {
         inject_system_message(&app, level, "Replay", text);
     };

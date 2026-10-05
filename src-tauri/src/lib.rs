@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tauri::Manager;
 
 pub mod app_dirs;
+pub mod bridge;
 pub mod commands;
 pub mod config;
 pub mod events;
@@ -139,6 +140,8 @@ pub fn run() {
 
             crate::tray::setup_tray(app)?;
 
+            // Before anything that emits, so the bridge hears it (it queues until connected).
+            bridge::start(&handle);
             test_env::mark_ready(&handle);
             crate::services::sniffer::replay::start(handle.clone());
             Ok(())

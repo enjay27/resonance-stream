@@ -1,5 +1,7 @@
 # Handoff: the W1 verification notebooks, and where the run stands (2026-10-04)
 
+> **Superseded 2026-10-05:** the notebooks moved to `main` (`test-w1/`) and the `test/w1-*` branches are an archive -- read [`2026-10-05-runbooks-on-main-handoff.md`](2026-10-05-runbooks-on-main-handoff.md) first. Below is the history of the earlier runs.
+
 For a **new session** with no context. Kade runs the checks on his Windows PC; this session's job
 is to keep the notebooks right and to turn what they find into test-first fixes. Read `CLAUDE.md`
 first (plan first, TDD, one `claude/*` PR at a time, `test/*` never merged into `main`).

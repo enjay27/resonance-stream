@@ -246,13 +246,20 @@ impl TabViews {
 pub struct ChatStore<T> {
     messages: HashMap<u64, T>,
     views: TabViews,
+    /// Translations that arrived before their row did (the history fetch had
+    /// not delivered it yet): `pid -> text`, handed back after the merge.
+    held: HashMap<u64, String>,
 }
+
+/// How many such translations are kept; the oldest pid goes first.
+pub const HELD_TRANSLATIONS_MAX: usize = 256;
 
 impl<T> Default for ChatStore<T> {
     fn default() -> Self {
         Self {
             messages: HashMap::new(),
             views: TabViews::default(),
+            held: HashMap::new(),
         }
     }
 }
@@ -276,6 +283,32 @@ impl<T: Clone> ChatStore<T> {
         self.messages.get(&pid)
     }
 
+    /// Keeps a translation aside whose row is not in the store (yet). A row
+    /// already held needs no help: the caller updates it directly.
+    pub fn hold_translation(&mut self, pid: u64, text: String) {
+        if self.messages.contains_key(&pid) {
+            return;
+        }
+        self.held.insert(pid, text);
+        while self.held.len() > HELD_TRANSLATIONS_MAX {
+            let Some(oldest) = self.held.keys().min().copied() else {
+                break;
+            };
+            self.held.remove(&oldest);
+        }
+    }
+
+    /// The held translations whose row has arrived since, to apply; the rest
+    /// are dropped (their row was evicted or never came).
+    pub fn take_held_translations(&mut self) -> Vec<(u64, String)> {
+        let mut held: Vec<_> = std::mem::take(&mut self.held)
+            .into_iter()
+            .filter(|(pid, _)| self.messages.contains_key(pid))
+            .collect();
+        held.sort_unstable_by_key(|(pid, _)| *pid);
+        held
+    }
+
     /// Merges the backend's history (`(pid, channel, message)`) under the
     /// messages that arrived live while it was being fetched, instead of
     /// replacing them. Pids give the order (the backend hands them out in
@@ -288,7 +321,8 @@ impl<T: Clone> ChatStore<T> {
         custom_filters: &[String],
         limits: &HashMap<String, usize>,
     ) {
-        let live = std::mem::take(self);
+        let mut live = std::mem::take(self);
+        self.held = std::mem::take(&mut live.held);
         let mut rows: Vec<(u64, Channel, T)> = history
             .into_iter()
             .filter(|(pid, _, _)| !live.messages.contains_key(pid))
@@ -325,6 +359,7 @@ impl<T: Clone> ChatStore<T> {
     pub fn clear(&mut self) {
         self.messages.clear();
         self.views.clear();
+        self.held.clear();
     }
 }
 
@@ -807,6 +842,45 @@ mod tests {
         store.merge_history(history, channel_of, &filters, &limits);
         let pids: Vec<_> = store.views.pids("WORLD").collect();
         assert_eq!(pids, [4, 9]);
+    }
+
+    #[test]
+    fn a_translation_that_beat_its_history_row_is_handed_back_after_the_merge() {
+        // K13: a translation event for a row the history fetch had not delivered
+        // yet found no row and was lost.
+        let (filters, limits) = (vec![], HashMap::new());
+        let mut store = ChatStore::default();
+        store.hold_translation(5, "번역".to_string());
+        store.hold_translation(99, "never arrives".to_string());
+        let history = vec![(5, Channel::World, row(Channel::World, "old"))];
+        store.merge_history(history, channel_of, &filters, &limits);
+        assert_eq!(store.take_held_translations(), [(5, "번역".to_string())]);
+        assert!(store.take_held_translations().is_empty());
+    }
+
+    #[test]
+    fn a_translation_for_a_row_already_held_is_not_kept_aside() {
+        let (filters, limits) = (vec![], HashMap::new());
+        let mut store = ChatStore::default();
+        store.add(
+            5,
+            Channel::World,
+            row(Channel::World, "live"),
+            &filters,
+            &limits,
+        );
+        store.hold_translation(5, "x".to_string());
+        assert!(store.take_held_translations().is_empty());
+    }
+
+    #[test]
+    fn translations_held_aside_are_bounded() {
+        let mut store = ChatStore::<Row>::default();
+        for pid in 1..=(HELD_TRANSLATIONS_MAX as u64 + 50) {
+            store.hold_translation(pid, "t".to_string());
+        }
+        assert_eq!(store.held.len(), HELD_TRANSLATIONS_MAX);
+        assert!(!store.held.contains_key(&1), "the oldest goes first");
     }
 
     /// Counts drops of the value a row signal holds.

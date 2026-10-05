@@ -126,7 +126,7 @@ Small and independent first; the ones that wait on Kade last.
 
 - [ ] **K18. Settings open when the app closes leaves the window enlarged** -- the grown size is
   what `tauri-plugin-window-state` saves. Restore before exit. App glue; Windows check.
-- [ ] **K13. Hydration drops a translation event** that lands during the `get_chat_history`
+- [x] **K13. Hydration drops a translation event** (done 2026-10-05, `claude/hydration-translation-race`: `ChatStore::hold_translation` / `take_held_translations`, 3 tests; the race itself was never observed on Windows) that lands during the `get_chat_history`
   fetch for a row that existed before listening (`ChatStore::merge_history`, UI pure module,
   test first).
 - [ ] **K19. Archive and tab quirks** -- a message archived untranslated and caught up later is in

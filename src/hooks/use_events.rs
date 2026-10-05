@@ -167,13 +167,19 @@ fn create_translation_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)
         if let Some(payload) = payload::<TranslationResult>(event_obj) {
             // Find the existing message by PID and update its signal.
             // Only this row re-renders; the list itself is untouched.
-            signals.chat.chat.with_untracked(|store| {
-                if let Some(chat_rw) = store.get(payload.pid) {
-                    chat_rw.update(|c| {
-                        c.translated = Some(payload.translated);
-                    });
-                }
-            });
+            let row = signals
+                .chat
+                .chat
+                .with_untracked(|store| store.get(payload.pid).cloned());
+            match row {
+                Some(chat_rw) => chat_rw.update(|c| c.translated = Some(payload.translated)),
+                // The row is not here yet: its history is still being fetched.
+                // Keep the text; hydration applies it after the merge.
+                None => signals
+                    .chat
+                    .set_chat
+                    .update(|store| store.hold_translation(payload.pid, payload.translated)),
+            }
         }
     }) as Box<dyn FnMut(JsValue)>)
 }

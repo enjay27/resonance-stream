@@ -54,14 +54,14 @@ def make_new_exe(src: str | Path, dest: str | Path) -> Path:
 # --- the command line -----------------------------------------------------------------------------
 def flag_args(data_dir: str | Path, status_file: str | Path, *, feed_url: str | None = None,
               metadata_url: str | None = None, log_file: str | Path | None = None, fresh: bool = True,
-              capture: bool = False, extra: tuple[str, ...] = ()) -> list[str]:
+              capture: bool = False, window_state: bool = False, extra: tuple[str, ...] = ()) -> list[str]:
     """An isolated run: its own data folder, no wizard, no sniffer, no translator, no popups, no saved
-    window place. The update check is left ON -- it is what is being tested. `capture=True` leaves the sniffer on."""
+    window place. The update check is left ON -- it is what is being tested. `capture=True` leaves the sniffer on, `window_state=True` lets the app restore and save the window's size and place."""
     args = ["--data-dir", str(data_dir)]
     if fresh:
         args.append("--fresh")
     args += ["--assume-setup-done", *([] if capture else ["--no-capture"]), "--no-translator", "--no-popups",
-             "--no-window-state", "--status-file", str(status_file)]
+             *([] if window_state else ["--no-window-state"]), "--status-file", str(status_file)]
     if log_file is not None:
         args += ["--log-file", str(log_file)]
     if feed_url is not None:

@@ -16,8 +16,9 @@ from runbook import common
 from runbook.common import Recorder
 from runbook.pipelines.interface import InterfacePick
 from runbook.pipelines.updater_mock import UpdaterMock
+from runbook.pipelines.window_restore import WindowRestore
 
-PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick}
+PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick, "window-restore": WindowRestore}
 
 
 def main(argv: list[str] | None = None) -> int:

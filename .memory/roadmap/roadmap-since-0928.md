@@ -124,7 +124,7 @@ Order: verify first (K4, K6, K7 in W1), then build on the answers.
 
 Small and independent first; the ones that wait on Kade last.
 
-- [ ] **K18. Settings open when the app closes leaves the window enlarged** (built 2026-10-05, `claude/restore-window-size-on-exit`: unticked until Kade checks it on Windows -- open Settings, quit from the tray / close the window, start again: the window must come back at its old size) -- the grown size is
+- [ ] **K18. Settings open when the app closes leaves the window enlarged** (built 2026-10-05, `claude/restore-window-size-on-exit`: unticked until Kade checks it on Windows -- by hand: open Settings, quit from the tray / close the window, start again: the window must come back at its old size; **automatic since 2026-10-05: `python -m runbook.run window-restore`**, the bridge pipeline does both ways out, no clicks) -- the grown size is
   what `tauri-plugin-window-state` saves. Restore before exit. App glue; Windows check.
 - [x] **K13. Hydration drops a translation event** (done 2026-10-05, `claude/hydration-translation-race`: `ChatStore::hold_translation` / `take_held_translations`, 3 tests; the race itself was never observed on Windows) that lands during the `get_chat_history`
   fetch for a row that existed before listening (`ChatStore::merge_history`, UI pure module,

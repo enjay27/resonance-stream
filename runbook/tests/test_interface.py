@@ -57,8 +57,8 @@ def test_adapter_garbage_is_an_error():
 # --- the app's keyword list, read from the Rust source so it cannot drift ---------------------
 def test_the_keywords_come_from_the_rust_source():
     words = interface.virtual_keywords(RUST.read_text(encoding="utf-8"))
-    assert "TAP" in words and "WireGuard" in words and "vEthernet" in words
-    assert len(words) == 13
+    assert "TAP" in words and "WireGuard" in words and "vEthernet" in words and "NordLynx" in words
+    assert len(words) == 15
 
 
 def test_a_name_with_a_keyword_is_virtual_whatever_the_case():

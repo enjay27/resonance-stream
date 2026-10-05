@@ -118,3 +118,8 @@ def test_not_json_is_one_failed_check_not_a_crash():
 def test_the_real_published_feed_passes_every_check():
     checks = check(text("real_latest_json_v0.6.1.json"), expected_version="0.6.1")
     assert all(ok for _, ok, _ in checks), checks
+
+
+def test_colour_codes_in_gh_output_are_ignored():
+    coloured = "\x1b[1;37m[\x1b[m\n" + text("gh_runs_success.json").strip()[1:-1].replace('"', '\x1b[1;34m"\x1b[m') + "\n\x1b[1;37m]\x1b[m"
+    assert feed.pick_dispatched_run(coloured, SINCE) is not None

@@ -17,7 +17,7 @@ def pick_dispatched_run(runs_json: str, since: str) -> dict | None:
     Scheduled runs and older runs are somebody else's; a run list that is not JSON is an error
     (gh printed a login problem), not 'no runs'.
     """
-    runs_json = runs_json.strip()
+    runs_json = re.sub(r"\x1b\[[0-9;]*m", "", runs_json).strip()  # colour codes gh may still print
     if not runs_json:
         return None
     try:

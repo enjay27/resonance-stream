@@ -1,6 +1,8 @@
 use crate::chat_view::Tab;
 use crate::components::icons::{self, icon};
-use crate::readability::{nav_bar_bg, WINDOW_BUTTON, WINDOW_BUTTON_ACTIVE, WINDOW_BUTTON_CLOSE};
+use crate::readability::{
+    nav_bar_bg, tab_label_class, WINDOW_BUTTON, WINDOW_BUTTON_ACTIVE, WINDOW_BUTTON_CLOSE,
+};
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
 use crate::ui_types::{Channel, SystemLogLevel};
@@ -176,7 +178,7 @@ pub fn NavBar() -> impl IntoView {
 
     view! {
         <nav
-            class=move || format!("relative z-50 flex flex-nowrap items-center justify-between gap-x-2 px-2 py-1.5 border-b border-base-content/5 min-h-[44px] select-none transition-all duration-300 overflow-visible {}", if signals.config.compact_mode.get() { "!absolute top-0 inset-x-0 !h-8 !min-h-0 !py-0 !pr-0 opacity-0 hover:opacity-100 focus-within:opacity-100 bg-base-300/95 backdrop-blur-md shadow-lg transition-opacity duration-200" } else { nav_bar_bg(signals.config.overlay_opacity.get()) })
+            class=move || format!("@container relative z-50 flex flex-nowrap items-center justify-between gap-x-2 px-2 py-1.5 border-b border-base-content/5 min-h-[44px] select-none transition-all duration-300 overflow-visible {}", if signals.config.compact_mode.get() { "!absolute top-0 inset-x-0 !h-8 !min-h-0 !py-0 !pr-0 opacity-0 hover:opacity-100 focus-within:opacity-100 bg-base-300/95 backdrop-blur-md shadow-lg transition-opacity duration-200" } else { nav_bar_bg(signals.config.overlay_opacity.get()) })
             data-tauri-drag-region
         >
             // --- LEFT: DaisyUI Tabs ---
@@ -227,7 +229,7 @@ pub fn NavBar() -> impl IntoView {
                                     }
                                 >
                                     <span class=format!("size-2 rounded-full shrink-0 {dot}")></span>
-                                    <span class=move || if is_active() { "" } else if signals.config.compact_mode.get() { "hidden" } else { "hidden min-[600px]:inline" }>{full}</span>
+                                    <span class=move || tab_label_class(is_active(), signals.config.compact_mode.get())>{full}</span>
                                     <Show when={move || unread.get() > 0}>
                                         <span class="min-w-4 h-4 px-1 rounded-full bg-error text-error-content text-[10px] font-bold leading-4 text-center">
                                             {move || if unread.get() > 99 { "99+".to_string() } else { unread.get().to_string() }}

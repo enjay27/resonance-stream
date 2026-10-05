@@ -67,7 +67,7 @@ K1/K3/K20, and it is also the "release newer than 0.6.0" that K2 needs.
 Run right after 0.6.1 is published, with 0.6.0 installed. One session covers K2, K4, K6, K7, K25.
 Handoff: [`../sessions/2026-10-04-w1-notebooks-handoff.md`](../sessions/2026-10-04-w1-notebooks-handoff.md); plan for
 test-run parameters (data dir etc., not started): [`test-run-parameters.md`](test-run-parameters.md).
-Each job has a notebook on its own `test/w1-*` branch (never merged to `main`; see `MEMORY.md`, CLAUDE.md *Test branches*): `git fetch && git checkout test/w1-<job>`, then `test-w1/README.md`.
+Each job has a notebook in `runbook/notebooks/` on `main` (until 2026-10-05: its own `test/w1-*` branch, now an archive; the folder was `test-w1/`): `git checkout main && git pull`, then `runbook/README.md`.
 
 - [ ] **K2. Signed update path, end to end** (handoff checks A1-A5; never run)
   - [ ] A1 installed 0.6.0 offers 0.6.1 -> bar -> "다운로드 완료" only after the check -> restart

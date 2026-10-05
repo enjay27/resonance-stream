@@ -180,12 +180,12 @@ and left to the Windows CI job, as always.
   **Open question to Kade:** he pressed the in-app "open app data folder" and the screenshot shows Explorer on
   `C:\w1` (run1 selected) -- the code opens `data` = `C:\w1\run1\data`, so ask what the address bar said.
 - **PR 7 `test/w1-updater-mock` -- done, never merged into `main`**: a NEW notebook
-  `test-w1/notebooks/w1-updater-mock.ipynb` (the six existing notebooks are untouched). It serves a signed "new
+  `runbook/notebooks/updater-mock.ipynb` (named `test-w1/.../w1-updater-mock.ipynb` until 2026-10-05) (the six existing notebooks are untouched). It serves a signed "new
   version" (the exe under test + appended bytes, signed with the backup key) from a mock server on 127.0.0.1 and
   runs a fresh copy per check with the flags; outcomes come from the status file and the copy's folder. Checks:
   M0 flags understood, M1 signing, M8-M12 feed cases (no clicks), M3 good update, M4 tampered download refused,
   M5-M7 bad signature / cut / silent download -> `update: error`, M-iso real config untouched. Helpers
-  `w1/mockfeed.py`, stand-in `tests/fake_app.py`, dry run of every cell (counts: see the auto-close entry below). **Not run on Windows or with the real exe.** The old notebooks keep their config-file step (released exes).
+  `runbook/runbook/mockfeed.py`, stand-in `tests/fake_app.py`, dry run of every cell (counts: see the auto-close entry below). **Not run on Windows or with the real exe.** The old notebooks keep their config-file step (released exes).
 - **PR 8 `claude/test-env-replay-chat` -- done, app gate left to Windows CI; Kade's go on the format 2026-10-05**:
   `--replay-chat <file>` feeds chat lines in as if captured. File = JSON Lines, `text` required, optional
   `delay_ms` `channel` `nickname` `uid` `class_id` `level` `timestamp` `sequence_id` (full table and defaults in

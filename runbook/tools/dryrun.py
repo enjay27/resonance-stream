@@ -1,6 +1,6 @@
 """Run a runbook notebook headless, the way CI-less Linux sessions prove it executes.
 
-    python tools/dryrun.py notebooks/updater.ipynb "pass,pass,fail:why"
+    python tools/dryrun.py notebooks/replay-chat.ipynb "pass,pass,fail:why"
 
 RUNBOOK_DRYRUN=1 swaps commands for recorded fixtures; the answers feed the manual prompts.
 This proves the cells run and the checks read their fixtures -- it is not a Windows run.

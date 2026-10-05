@@ -82,13 +82,13 @@ def _next_answer(prompt: str) -> str:
 
 def ask_text(name: str, prompt: str) -> str:
     """Free text from the person (a path, a pasted log line). Quotes and spaces around it
-    are dropped -- Explorer's "Copy as path" adds quotes. In a dry run the text comes from
-    the environment variable RUNBOOK_TEXT_<name>."""
+    are dropped -- Explorer's "Copy as path" adds quotes. The environment variable RUNBOOK_TEXT_<name>
+    answers it without asking (a run with no one at the keyboard); in a dry run it is the only source."""
+    value = os.environ.get(f"RUNBOOK_TEXT_{name}")
+    if value is not None:
+        return value.strip().strip('"').strip()
     if dry_run():
-        value = os.environ.get(f"RUNBOOK_TEXT_{name}")
-        if value is None:
-            raise RuntimeError(f"dry run: set RUNBOOK_TEXT_{name}")
-        return value.strip()
+        raise RuntimeError(f"dry run: set RUNBOOK_TEXT_{name}")
     return input(prompt).strip().strip('"').strip()
 
 

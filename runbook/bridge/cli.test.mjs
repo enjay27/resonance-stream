@@ -129,3 +129,20 @@ test("serve answers expect and expect_sequence from stdin", async () => {
   await app.endAsync();
   child.stdin.end();
 });
+
+test("serve publishes a command without waiting for an ack", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bridge-cli-"));
+  const { child, next } = serve(join(dir, "events.jsonl"));
+  const { port } = await next();
+  const app = await mqtt.connectAsync(`mqtt://127.0.0.1:${port}`);
+  await app.subscribeAsync("rs/test/command/+");
+  const got = new Promise((resolve) => app.on("message", (topic, payload) => resolve({ topic, body: JSON.parse(payload.toString()) })));
+  child.stdin.write(JSON.stringify({ publish: "restart-update", args: { x: 1 } }) + "\n");
+  const sent = await next();
+  const received = await got;
+  assert.equal(received.topic, "rs/test/command/restart-update");
+  assert.equal(received.body.id, sent.sent);
+  assert.equal(received.body.x, 1);
+  await app.endAsync();
+  child.stdin.end();
+});

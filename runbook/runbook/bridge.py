@@ -67,6 +67,11 @@ class Serve:
         """A command for the app; returns its ack. Raises when the app does not answer or refuses."""
         return self._ask({"send": name, "args": args or {}, "timeout": int(timeout * 1000)})["ack"]
 
+    def publish(self, name: str, args: dict | None = None) -> str:
+        """A command whose ack may never come (`restart-update` ends the app when it works): sent, not awaited.
+        Returns the command id."""
+        return self._ask({"publish": name, "args": args or {}})["sent"]
+
     def expect(self, event: str, match: dict | str | None = None, timeout: float = 10) -> dict:
         """The first message of `event` (a name like "update-state", or a full topic) that satisfies `match`, looking at
         what was already recorded first. `match` maps dotted paths to what they must equal -- or to `{"contains": text}`

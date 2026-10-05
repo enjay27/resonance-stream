@@ -4,6 +4,7 @@
 //       Starts the broker and records what the app publishes. Prints {"ready":true,"port":N} on stdout, then
 //       reads one JSON command per stdin line and answers each with one line:
 //         {"send":"replay-chat","args":{"path":"..."}}                      -> {"ack":{...}} | {"error":"..."}
+//         {"publish":"restart-update","args":{}}                          -> {"sent":"<id>"} (no ack awaited)
 //         {"expect":{"topic":"rs/app/event/x","match":{"payload.k":"v"},"timeout":5000}}   -> {"found":<message>} | {"error"}
 //         {"expect_sequence":{"steps":[{"topic":..,"match":..},..],"timeout":5000}}        -> {"found":[<message>,..]} | {"error"}
 //       (`match`: see matcher() in bridge.mjs). Stops when stdin closes or on SIGINT / SIGTERM.
@@ -14,6 +15,7 @@
 //   node cli.mjs verify replay-chat --log events.jsonl --sample sample.jsonl
 //       Checks the recording; prints {"scenario","ok","checks":[{id,title,ok,detail}]}; exit 1 when a check fails.
 import { createInterface } from "node:readline";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Bridge, matcher, readRecording } from "./bridge.mjs";
 import { parseSample, verifyReplayChat } from "./scenarios.mjs";
@@ -50,6 +52,11 @@ async function serve(argv) {
       const command = JSON.parse(line);
       if (command.send) {
         say({ ack: await bridge.send(command.send, command.args ?? {}, { timeout: command.timeout ?? 10000 }) });
+      } else if (command.publish) {
+        // A command whose ack may never come (restart-update succeeding ends the app): sent, not awaited.
+        const id = randomUUID();
+        await bridge.client.publishAsync(`rs/test/command/${command.publish}`, JSON.stringify({ ...(command.args ?? {}), id }), { qos: 1 });
+        say({ sent: id });
       } else if (command.expect) {
         const { topic, match, timeout } = command.expect;
         say({ found: await bridge.expect(topic, { where: matcher(match), timeout: timeout ?? 10000 }) });

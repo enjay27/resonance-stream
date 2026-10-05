@@ -13,8 +13,7 @@ K25); later sessions add notebooks here, so the folder is not named after one se
 
 | notebook | job |
 |---|---|
-| `notebooks/updater.ipynb` | K2 with the released 0.6.0 exe: A1, A2, A3 (a note), A4, A5 |
-| `notebooks/updater-mock.ipynb` | K2 against a mock feed, in a data folder of its own (needs a `test-env` exe) |
+| `notebooks/updater-mock.ipynb` | K2 against a mock feed, in a data folder of its own, **driven over the bridge, no clicks** (needs a `test-env` exe and Node). The steps are Python: `runbook/pipelines/updater_mock.py`; without Jupyter: `python -m runbook.run updater-mock --exe <exe> --key <backup key>`. (The notebook for the released 0.6.0 exe, `updater.ipynb`, was retired 2026-10-05: that exe cannot use the bridge.) |
 | `notebooks/feed.ipynb` | K3: the release feed check |
 | `notebooks/firewall.ipynb` | K6: the firewall rule per exe |
 | `notebooks/interface.ipynb` | K4: the route-based interface pick |
@@ -76,7 +75,7 @@ python tools/dryrun.py notebooks/<job>.ipynb "pass,pass,fail: why"   # headless 
 `RUNBOOK_DRYRUN=1` (set by `dryrun.py`) swaps every command for a recorded fixture in
 `tests/fixtures/`, and the answers feed the prompts. That proves the cells run and the checks
 read what they should. It does **not** prove anything about Windows, the game, or the app. The
-mock-feed notebook's dry run drives `tests/fake_app.py`, a stand-in that follows the app's flags
-and status file.
+mock-feed pipeline's dry run drives `tests/fake_app.py`, a stand-in that follows the app's flags
+and status file and speaks to the bridge's MQTT broker (a minimal client of its own).
 
 Run `pytest` from this folder (`runbook/`); the full suite takes about three minutes.

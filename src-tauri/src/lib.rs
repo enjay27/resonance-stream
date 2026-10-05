@@ -151,7 +151,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(bridge::tap_commands(tauri::generate_handler![
             check_model_status,
             download_model,
             check_ai_server_status,
@@ -195,7 +195,7 @@ pub fn run() {
             update_global_tab_shortcut,
             ensure_firewall_rule_command,
             restart_sniffer_command,
-        ]);
+        ]));
     // `--no-window-state`: neither restore nor save the windows' size and place.
     if !test_env::no_window_state() {
         builder = builder.plugin(window_state_plugin);

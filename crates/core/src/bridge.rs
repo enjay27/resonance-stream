@@ -9,6 +9,7 @@
 //! |---|---|---|
 //! | `rs/app/status` (retained) | app | `online` / `offline` (last will) |
 //! | `rs/app/event/<name>` | app | [`envelope`] of a backend -> UI event |
+//! | `rs/app/command/<name>` | app | [`envelope`] of a UI -> backend command (its arguments) |
 //! | `rs/test/command/<name>` | test | `{"id": "...", ...arguments}` ([`parse_command`]) |
 //! | `rs/app/ack/<id>` | app | `{"id","ok":true}` or `{"id","ok":false,"error"}` |
 //! | `rs/app/error` | app | `{"error"}` for a message that had no usable id |
@@ -45,6 +46,12 @@ const COMMAND_PREFIX: &str = "rs/test/command/";
 
 pub fn event_topic(name: &str) -> String {
     format!("rs/app/event/{name}")
+}
+
+/// Where a UI -> backend command (a Tauri `invoke`) is published; `None` when
+/// the name could not be one topic level (a plugin's `plugin:x|y` is fine).
+pub fn command_topic(name: &str) -> Option<String> {
+    (!name.is_empty() && !name.contains(['/', '+', '#'])).then(|| format!("rs/app/command/{name}"))
 }
 
 pub fn ack_topic(id: &str) -> String {
@@ -180,6 +187,21 @@ mod tests {
             "rs/app/event/chat-message-update"
         );
         assert_eq!(ack_topic("a1"), "rs/app/ack/a1");
+    }
+
+    #[test]
+    fn a_ui_command_is_published_under_rs_app_command() {
+        assert_eq!(
+            command_topic("grow_window").as_deref(),
+            Some("rs/app/command/grow_window")
+        );
+        assert_eq!(
+            command_topic("plugin:window|set_size").as_deref(),
+            Some("rs/app/command/plugin:window|set_size")
+        );
+        for bad in ["", "a/b", "a+", "#", "a#b"] {
+            assert_eq!(command_topic(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

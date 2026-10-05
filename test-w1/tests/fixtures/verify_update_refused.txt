@@ -1,0 +1,1 @@
+verify_update: signature is for version 0.6.0, not 0.6.9

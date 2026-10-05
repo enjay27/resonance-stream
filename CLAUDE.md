@@ -4,7 +4,7 @@ Resonance Stream is a Windows desktop app: it sniffs Blue Protocol: Star Resonan
 chat packets (raw socket, no client hooking), translates Japanese chat to Korean
 through a local llama.cpp server, and shows it in a Tauri overlay.
 
-It is one Cargo workspace in five crates, three parts, plus the runbook (`test-w1/`, treated as
+It is one Cargo workspace in five crates, three parts, plus the runbook (`runbook/`, treated as
 docs). **Which part you touch decides which gate applies.** That is the most important thing
 on this page.
 
@@ -13,7 +13,7 @@ on this page.
 | `crates/core/` `crates/llama/` `crates/types/` | **core** — packet → chat pipeline, protocol decoding, translation text processing; llama-server HTTP client; DTOs shared by app and ui | any OS | `just core-check` |
 | `src/` | **ui** — Leptos 0.8 CSR frontend (wasm); pure modules unit-tested on the host | any OS | `just ui-check` |
 | `src-tauri/` | **app** — Tauri 2 backend: sockets, translator server, downloader, windows, tray | **Windows only** | `just app-check` (Windows) · `just app-cross-check` (Linux, compile only) |
-| `test-w1/` | **runbook** — Jupyter notebooks + Python helpers that Kade runs by hand on Windows (`test-w1/README.md`) | any OS (dry runs) | **none — treated as docs** (see *The runbook is docs*) |
+| `runbook/` | **runbook** — Jupyter notebooks + Python helpers that Kade runs by hand on Windows (`runbook/README.md`) | any OS (dry runs) | **none — treated as docs** (see *The runbook is docs*) |
 
 `just check` runs `fmt-check`, then every gate the current OS can run (`pip install
 rust-just` or `cargo install just`). On Linux the app gate is a **compile-only**
@@ -91,7 +91,7 @@ src-tauri/            app crate (resonance-stream, lib resonance_stream_lib)
   src/config/ src/io/   config + metadata persistence, archive writer
 graft/                graft's generated cards — GITIGNORED, regenerable (`graft build`)
 style/ public/        CSS source, static assets
-test-w1/              the W1 runbook: notebooks, helpers, dry-run tests -- docs, see Guardrails
+runbook/              the runbook: notebooks, helpers, dry-run tests -- docs, see Guardrails
 ```
 
 ---
@@ -152,13 +152,13 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
   test that reproduces the bug. Pure logic is tested in `crates/core` (or the ui's pure
   modules), so it runs on every OS. If a change cannot be unit-tested (Tauri/Windows
   glue), say so in the commit body. `just coverage` shows what the tests do not reach.
-- **The runbook is docs.** `test-w1/` -- the W1 Jupyter notebooks Kade runs by hand on his
+- **The runbook is docs.** `runbook/` -- the Jupyter notebooks Kade runs by hand on his
   Windows PC, their helpers, dry-run tests and fixtures -- changes no app logic, so it is
   treated like a doc: **no CI job checks it** (do not add one), **no gate** for it in the
   table, no test-first requirement, no `NOT VERIFIED` line for it. A PR that only touches
-  `test-w1/` (and memory) is an ordinary `claude/*` PR; CI still runs on it, because
+  `runbook/` (and memory) is an ordinary `claude/*` PR; CI still runs on it, because
   auto-merge needs a green run, but nothing in CI tests the runbook. A courtesy, not a gate:
-  after changing its helpers run `cd test-w1 && python -m pytest -q` (about 3 minutes).
+  after changing its helpers run `cd runbook && python -m pytest -q` (about 3 minutes).
   The runbook's real proof is Kade's run on Windows, and the report he pastes back says
   what is broken. Fix a notebook in the same PR as the code change it follows.
 - **Auto-correction restraint.** Self-correct at most **2** times, then stop and ask.
@@ -244,7 +244,7 @@ git add -A && git commit
 
 ### Test branches (`test/*`)
 
-The W1 runbook lives on `main`, in `test-w1/` (see *The runbook is docs*); the old
+The runbook lives on `main`, in `runbook/` (see *The runbook is docs*); the old
 `test/w1-*` branches are an archive and get no updates. A `test/<job>` branch is now only
 for a **throw-away** experiment on Kade's Windows PC that does not belong in `main`.
 **It is never merged into `main` and never opens a release**: cut it from `main`, push it,

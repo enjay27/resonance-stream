@@ -1,0 +1,1 @@
+{"Name": "Resonance Stream (Packet Sniffing) [8835dbcf]", "Enabled": "True", "Direction": "Inbound", "Action": "Allow", "Program": "C:\\Program Files\\Resonance Stream\\resonance-stream.exe"}

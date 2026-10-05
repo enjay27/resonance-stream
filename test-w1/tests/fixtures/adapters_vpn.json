@@ -1,0 +1,4 @@
+[
+  {"Alias": "이더넷", "IP": "192.168.0.23", "Description": "Realtek PCIe GbE Family Controller", "Status": "Up", "Virtual": false},
+  {"Alias": "OpenVPN", "IP": "10.8.0.2", "Description": "TAP-Windows Adapter V9", "Status": "Up", "Virtual": true}
+]

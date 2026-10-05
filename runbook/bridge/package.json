@@ -1,0 +1,17 @@
+{
+  "name": "resonance-bridge",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Test bridge for Resonance Stream: an MQTT broker the app publishes to, and checks over what it said",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "aedes": "^1.2.0",
+    "mqtt": "^5.16.0"
+  }
+}

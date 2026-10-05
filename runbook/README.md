@@ -18,7 +18,7 @@ K25); later sessions add notebooks here, so the folder is not named after one se
 | `notebooks/feed.ipynb` | K3: the release feed check |
 | `notebooks/firewall.ipynb` | K6: the firewall rule per exe |
 | `notebooks/interface.ipynb` | K4: the route-based interface pick |
-| `notebooks/replay-chat.ipynb` | the `--replay-chat` test flag: start a copy, read its log, ask what the window showed (needs a `test-env` exe) |
+| `notebooks/replay-chat.ipynb` | the `--replay-chat` test flag: start a copy, read its log and what it published on the bridge, ask what the window showed (needs a `test-env` exe; Node for the bridge rows) |
 | `notebooks/checklists.ipynb` | K7, Esc, K25 (read from `.memory/active-issues/unverified-on-windows.md` at run time) |
 
 Code: the Python package `runbook/runbook/` -- `common.py` (result recorder, prompts, command capture) and
@@ -34,6 +34,16 @@ wasm32-unknown-unknown`, `cargo install trunk --locked` (once), then
 `npx --yes @tauri-apps/cli@2 build --no-bundle --features test-env` -- the exe is
 `target\release\resonance-stream.exe` (or take a release candidate built after PR #131). The
 notebook asks for its path and checks that it understands the flags.
+
+## The bridge (`bridge/`, Node 20+)
+
+A test exe started with `--bridge-url mqtt://127.0.0.1:PORT` publishes what it does to a local MQTT broker (every event it
+sends the window, every command the window sends it) and obeys commands published there (`ping`, `quit`, `replay-chat`; the
+topics are in `crates/core/src/bridge.rs`). `bridge/` is the other end: `bridge.mjs` (broker + recorder + `expect` /
+`expectSequence` / `send`), `scenarios.mjs` (what a scenario must have published) and `cli.mjs` (for the notebooks, through
+`runbook/bridge.py`). `replay-chat.ipynb` uses it for its B0-B5 rows. Once, in `runbook/bridge/`: `npm ci`
+(the notebook does it for you). Tests: `cd bridge && npm test` (about 3 s; the app is stood in for by a small MQTT client, so it
+proves the bridge, not the app).
 
 ## Run (Windows)
 

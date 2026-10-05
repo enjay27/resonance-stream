@@ -28,6 +28,10 @@ def ensure_installed(timeout: int = 300) -> None:
         raise RuntimeError("npm ci failed:\n" + (done.stdout + done.stderr)[-500:])
 
 
+def _topic(event: str) -> str:
+    return event if "/" in event else f"rs/app/event/{event}"
+
+
 class Serve:
     """The broker + recorder, as a child process: `with Serve(out) as bridge:` ... `bridge.url` for the app."""
 
@@ -51,14 +55,33 @@ class Serve:
     def url(self) -> str:
         return f"mqtt://127.0.0.1:{self.port}"
 
-    def send(self, name: str, args: dict | None = None, timeout: float = 10) -> dict:
-        """A command for the app; returns its ack. Raises when the app does not answer or refuses."""
-        self._proc.stdin.write(json.dumps({"send": name, "args": args or {}, "timeout": int(timeout * 1000)}) + "\n")
+    def _ask(self, command: dict) -> dict:
+        self._proc.stdin.write(json.dumps(command) + "\n")
         self._proc.stdin.flush()
         answer = json.loads(self._proc.stdout.readline())
         if "error" in answer:
             raise RuntimeError(answer["error"])
-        return answer["ack"]
+        return answer
+
+    def send(self, name: str, args: dict | None = None, timeout: float = 10) -> dict:
+        """A command for the app; returns its ack. Raises when the app does not answer or refuses."""
+        return self._ask({"send": name, "args": args or {}, "timeout": int(timeout * 1000)})["ack"]
+
+    def expect(self, event: str, match: dict | str | None = None, timeout: float = 10) -> dict:
+        """The first message of `event` (a name like "update-state", or a full topic) that satisfies `match`, looking at
+        what was already recorded first. `match` maps dotted paths to what they must equal -- or to `{"contains": text}`
+        / `{"regex": pattern}`: `{"payload.state": {"regex": "^error"}}`. Raises when none comes within `timeout` s."""
+        return self._ask({"expect": {"topic": _topic(event), "match": match, "timeout": int(timeout * 1000)}})["found"]
+
+    def expect_sequence(self, steps: list[tuple[str, dict | str | None]], timeout: float = 10) -> list[dict]:
+        """`(event, match)` steps, each seen after the one before it (other messages in between are fine)."""
+        body = [{"topic": _topic(event), "match": match} for event, match in steps]
+        return self._ask({"expect_sequence": {"steps": body, "timeout": int(timeout * 1000)}})["found"]
+
+    def events(self) -> list[dict]:
+        """Everything recorded so far: `{"topic", "received_at", "message"}` per message, oldest first."""
+        text = self.out.read_text(encoding="utf-8") if self.out.exists() else ""
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
 
     def stop(self) -> None:
         if self._proc.poll() is None:

@@ -2,8 +2,11 @@
 // Command line of the bridge, for the notebooks (which are Python):
 //   node cli.mjs serve [--port N] --out events.jsonl
 //       Starts the broker and records what the app publishes. Prints {"ready":true,"port":N} on stdout, then
-//       reads one JSON command per stdin line: {"send":"replay-chat","args":{"path":"..."}} and answers
-//       {"ack":{...}} or {"error":"..."}. Stops when stdin closes or on SIGINT / SIGTERM.
+//       reads one JSON command per stdin line and answers each with one line:
+//         {"send":"replay-chat","args":{"path":"..."}}                      -> {"ack":{...}} | {"error":"..."}
+//         {"expect":{"topic":"rs/app/event/x","match":{"payload.k":"v"},"timeout":5000}}   -> {"found":<message>} | {"error"}
+//         {"expect_sequence":{"steps":[{"topic":..,"match":..},..],"timeout":5000}}        -> {"found":[<message>,..]} | {"error"}
+//       (`match`: see matcher() in bridge.mjs). Stops when stdin closes or on SIGINT / SIGTERM.
 //   node cli.mjs run replay-chat --exe APP.exe [--sample FILE] [--work DIR] [--exe-arg ARG]
 //       The whole test with no one at the keyboard: starts the broker and the app, drives it with commands over the
 //       bridge (ping, replay-chat, quit), checks what it published and prints the same JSON as `verify`.
@@ -12,7 +15,7 @@
 //       Checks the recording; prints {"scenario","ok","checks":[{id,title,ok,detail}]}; exit 1 when a check fails.
 import { createInterface } from "node:readline";
 import { readFileSync } from "node:fs";
-import { Bridge, readRecording } from "./bridge.mjs";
+import { Bridge, matcher, readRecording } from "./bridge.mjs";
 import { parseSample, verifyReplayChat } from "./scenarios.mjs";
 import { runReplayChat } from "./runner.mjs";
 import { tmpdir } from "node:os";
@@ -44,8 +47,19 @@ async function serve(argv) {
   lines.on("line", async (line) => {
     if (!line.trim()) return;
     try {
-      const { send, args, timeout } = JSON.parse(line);
-      say({ ack: await bridge.send(send, args ?? {}, { timeout: timeout ?? 10000 }) });
+      const command = JSON.parse(line);
+      if (command.send) {
+        say({ ack: await bridge.send(command.send, command.args ?? {}, { timeout: command.timeout ?? 10000 }) });
+      } else if (command.expect) {
+        const { topic, match, timeout } = command.expect;
+        say({ found: await bridge.expect(topic, { where: matcher(match), timeout: timeout ?? 10000 }) });
+      } else if (command.expect_sequence) {
+        const { steps, timeout } = command.expect_sequence;
+        const found = await bridge.expectSequence(steps.map((s) => ({ topic: s.topic, where: matcher(s.match) })), { timeout: timeout ?? 10000 });
+        say({ found });
+      } else {
+        say({ error: "unknown command: expected send, expect or expect_sequence" });
+      }
     } catch (e) {
       say({ error: e.message });
     }

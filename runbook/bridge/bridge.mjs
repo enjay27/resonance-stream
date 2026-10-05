@@ -27,6 +27,32 @@ function parsePayload(buffer) {
   }
 }
 
+/**
+ * A message test from a JSON spec, so a script in another language can say what it waits for.
+ * `{"payload.state": "downloaded"}`: every dotted path must equal the value; a path may instead hold
+ * `{"contains": text}` or `{"regex": pattern}` (a bad pattern matches nothing). `undefined` / `{}` match anything;
+ * a plain string (the `rs/app/status` text) is compared as it is.
+ */
+export function matcher(spec) {
+  if (spec === undefined || spec === null) return () => true;
+  if (typeof spec !== "object") return (message) => message === spec;
+  const test = (want, got) => {
+    if (want !== null && typeof want === "object" && !Array.isArray(want)) {
+      if ("contains" in want) return typeof got === "string" && got.includes(want.contains);
+      if ("regex" in want) {
+        try {
+          return typeof got === "string" && new RegExp(want.regex).test(got);
+        } catch {
+          return false;
+        }
+      }
+    }
+    return JSON.stringify(got) === JSON.stringify(want);
+  };
+  const at = (message, path) => path.split(".").reduce((value, key) => (value === null || value === undefined ? undefined : value[key]), message);
+  return (message) => Object.entries(spec).every(([path, want]) => test(want, at(message, path)));
+}
+
 export class Bridge {
   /** Starts the broker (on `port`, or a free one) and a client that records `rs/app/#`. */
   static async start({ port = 0, logFile = null } = {}) {

@@ -96,3 +96,36 @@ test("run without --exe is a bad command line", () => {
   assert.equal(r.status, 2);
   assert.match(r.stderr, /needs --exe/);
 });
+
+test("serve answers expect and expect_sequence from stdin", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bridge-cli-"));
+  const { child, next } = serve(join(dir, "events.jsonl"));
+  const { port } = await next();
+  const app = await mqtt.connectAsync(`mqtt://127.0.0.1:${port}`);
+  const emit = (seq, name, payload) =>
+    app.publishAsync(`rs/app/event/${name}`, JSON.stringify({ seq, t_ms: Date.now(), name, payload }));
+  await emit(0, "update-state", { state: "available:0.6.9" });
+  await emit(1, "update-state", { state: "downloading" });
+  await emit(2, "update-state", { state: "downloaded" });
+  const ask = async (command) => {
+    child.stdin.write(JSON.stringify(command) + "\n");
+    return next();
+  };
+  const one = await ask({ expect: { topic: "rs/app/event/update-state", match: { "payload.state": "downloading" }, timeout: 2000 } });
+  assert.equal(one.found.seq, 1);
+  const none = await ask({ expect: { topic: "rs/app/event/update-state", match: { "payload.state": "error" }, timeout: 150 } });
+  assert.match(none.error, /timed out/);
+  const seq = await ask({
+    expect_sequence: {
+      steps: ["available", "downloading", "downloaded"].map((p) => ({ topic: "rs/app/event/update-state", match: { "payload.state": { regex: "^" + p } } })),
+      timeout: 2000,
+    },
+  });
+  assert.deepEqual(seq.found.map((m) => m.seq), [0, 1, 2]);
+  const wrong = await ask({
+    expect_sequence: { steps: [{ topic: "rs/app/event/update-state", match: { "payload.state": "downloaded" } }, { topic: "rs/app/event/update-state", match: { "payload.state": "downloading" } }], timeout: 150 },
+  });
+  assert.match(wrong.error, /step 2/);
+  await app.endAsync();
+  child.stdin.end();
+});

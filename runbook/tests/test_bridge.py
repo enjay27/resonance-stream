@@ -75,3 +75,46 @@ def test_an_unknown_scenario_is_an_error(tmp_path):
         pytest.skip("needs node")
     with pytest.raises(RuntimeError, match="unknown scenario"):
         bridge.verify("nope", tmp_path / "x", SAMPLE)
+
+
+def _publish(port: int, events: list[tuple[str, dict]]) -> None:
+    """A stand-in app for the test: publishes `events` ((name, payload) pairs) to the broker from Node."""
+    import subprocess
+    script = (
+        "import mqtt from 'mqtt';"
+        f"const c = await mqtt.connectAsync('mqtt://127.0.0.1:{port}');"
+        f"const evs = {json.dumps(events)};"
+        "for (const [i, [name, payload]] of evs.entries())"
+        "  await c.publishAsync(`rs/app/event/${name}`, JSON.stringify({seq: i, t_ms: Date.now(), name, payload}), {qos: 1});"
+        "await c.endAsync();"
+    )
+    subprocess.run(["node", "--input-type=module", "-e", script], cwd=bridge.BRIDGE_DIR, check=True, timeout=30)
+
+
+@needs_node
+def test_expect_waits_for_an_event_that_matches(tmp_path):
+    with bridge.Serve(tmp_path / "events.jsonl") as b:
+        _publish(b.port, [("update-state", {"state": "available:0.6.9"}), ("update-state", {"state": "downloading"})])
+        found = b.expect("update-state", {"payload.state": "downloading"}, timeout=3)
+        assert found["seq"] == 1 and found["payload"]["state"] == "downloading"
+        with pytest.raises(RuntimeError, match="timed out"):
+            b.expect("update-state", {"payload.state": {"regex": "^error"}}, timeout=0.3)
+
+
+@needs_node
+def test_expect_sequence_wants_the_order(tmp_path):
+    with bridge.Serve(tmp_path / "events.jsonl") as b:
+        _publish(b.port, [("update-state", {"state": s}) for s in ("available:0.6.9", "downloading", "downloaded")])
+        steps = [("update-state", {"payload.state": {"regex": "^" + s}}) for s in ("available", "downloading", "downloaded")]
+        assert [m["seq"] for m in b.expect_sequence(steps, timeout=3)] == [0, 1, 2]
+        with pytest.raises(RuntimeError, match="step 2"):
+            b.expect_sequence([steps[2], steps[1]], timeout=0.3)
+
+
+@needs_node
+def test_events_reads_what_was_recorded(tmp_path):
+    with bridge.Serve(tmp_path / "events.jsonl") as b:
+        _publish(b.port, [("sniffer-state", {"running": True})])
+        b.expect("sniffer-state", timeout=3)
+        recorded = b.events()
+        assert [(r["topic"], r["message"]["payload"]) for r in recorded] == [("rs/app/event/sniffer-state", {"running": True})]

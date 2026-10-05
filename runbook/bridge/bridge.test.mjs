@@ -120,3 +120,23 @@ test("the broker only listens on this machine", async () => {
   assert.ok(bridge.port > 0);
   await bridge.close();
 });
+
+import { matcher } from "./bridge.mjs";
+
+test("a matcher is a JSON spec: dotted paths that must equal, contain or match a value", () => {
+  const m = { name: "update-state", payload: { state: "available:0.6.9", n: 3, nested: { ok: true } } };
+  assert.equal(matcher({})(m), true);
+  assert.equal(matcher({ name: "update-state" })(m), true);
+  assert.equal(matcher({ "payload.state": "available:0.6.9", "payload.nested.ok": true })(m), true);
+  assert.equal(matcher({ "payload.n": 4 })(m), false);
+  assert.equal(matcher({ "payload.missing": "x" })(m), false);
+  assert.equal(matcher({ "payload.state": { contains: "0.6.9" } })(m), true);
+  assert.equal(matcher({ "payload.state": { contains: "0.7" } })(m), false);
+  assert.equal(matcher({ "payload.state": { regex: "^available:\\d+\\.\\d+\\.\\d+$" } })(m), true);
+  assert.equal(matcher({ "payload.state": { regex: "^error" } })(m), false);
+  assert.equal(matcher({ "payload.state": { regex: "(" } })(m), false, "a bad pattern matches nothing");
+  assert.equal(matcher(undefined)(m), true);
+  // a plain-text message (the status topic) is compared as it is
+  assert.equal(matcher("online")("online"), true);
+  assert.equal(matcher("online")("offline"), false);
+});

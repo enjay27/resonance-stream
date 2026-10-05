@@ -140,6 +140,7 @@ pub fn run() {
             crate::tray::setup_tray(app)?;
 
             test_env::mark_ready(&handle);
+            crate::services::sniffer::replay::start(handle.clone());
             Ok(())
         })
         .plugin(tauri_plugin_shell::init())

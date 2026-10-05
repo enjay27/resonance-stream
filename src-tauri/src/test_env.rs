@@ -153,6 +153,13 @@ pub fn allow_local_http() -> bool {
     flag(|env| env.feed_url.is_some() || env.metadata_url.is_some())
 }
 
+/// `--replay-chat`: the file whose chat lines are fed in as if captured.
+pub fn replay_chat() -> Option<&'static Path> {
+    ACTIVE
+        .get()
+        .and_then(|active| active.env.replay_chat.as_deref())
+}
+
 /// What `config.json` held as `init_done` when the app started.
 static STORED_INIT_DONE: OnceLock<bool> = OnceLock::new();
 

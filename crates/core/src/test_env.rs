@@ -31,7 +31,7 @@ enum Kind {
 }
 
 /// Every flag, in the order `TestEnv::set_flags` lists them.
-const FLAGS: [(&str, Kind); 13] = [
+const FLAGS: [(&str, Kind); 14] = [
     ("data-dir", Kind::Value),
     ("fresh", Kind::Switch),
     ("assume-setup-done", Kind::Switch),
@@ -44,6 +44,7 @@ const FLAGS: [(&str, Kind); 13] = [
     ("metadata-url", Kind::Value),
     ("status-file", Kind::Value),
     ("log-file", Kind::Value),
+    ("replay-chat", Kind::Value),
     ("print-env", Kind::Switch),
 ];
 
@@ -69,6 +70,9 @@ pub struct TestEnv {
     pub status_file: Option<PathBuf>,
     /// Also write the log here (a release exe has no console).
     pub log_file: Option<PathBuf>,
+    /// Feed the chat lines of this JSON Lines file in as if captured (see
+    /// [`crate::replay`]). Not passed on after an update restart.
+    pub replay_chat: Option<PathBuf>,
     /// Print the resolved settings as JSON and exit.
     pub print_env: bool,
 }
@@ -90,6 +94,7 @@ impl TestEnv {
             self.metadata_url.is_some(),
             self.status_file.is_some(),
             self.log_file.is_some(),
+            self.replay_chat.is_some(),
             self.print_env,
         ];
         FLAGS
@@ -118,6 +123,7 @@ impl TestEnv {
             "data-dir" => self.data_dir = Some(PathBuf::from(value)),
             "status-file" => self.status_file = Some(PathBuf::from(value)),
             "log-file" => self.log_file = Some(PathBuf::from(value)),
+            "replay-chat" => self.replay_chat = Some(PathBuf::from(value)),
             "feed-url" | "metadata-url" => {
                 if !is_test_url_allowed(&value) {
                     return Err(TestEnvError::BadUrl {
@@ -772,6 +778,34 @@ mod tests {
         ] {
             assert!(is_test_url_allowed(url), "{url} should be allowed");
         }
+    }
+
+    #[test]
+    fn replay_chat_takes_a_file_from_the_flag_or_the_variable() {
+        assert_eq!(
+            ok(&["--replay-chat", "C:\\w1\\chat.jsonl"]).replay_chat,
+            Some("C:\\w1\\chat.jsonl".into())
+        );
+        let env = run(&[], &[("RESONANCE_TEST_REPLAY_CHAT", "/tmp/chat.jsonl")]).expect("parses");
+        assert_eq!(env.replay_chat, Some("/tmp/chat.jsonl".into()));
+        assert_eq!(
+            run(&["--replay-chat"], &[]),
+            Err(TestEnvError::MissingValue("replay-chat".into()))
+        );
+        assert!(ok(&["--replay-chat", "x.jsonl", "--no-capture"])
+            .set_flags()
+            .contains(&"replay-chat"));
+    }
+
+    #[test]
+    fn a_restart_does_not_replay_the_chat_again() {
+        let env = ok(&[
+            "--data-dir",
+            "/tmp/run1",
+            "--replay-chat",
+            "/tmp/chat.jsonl",
+        ]);
+        assert_eq!(env.restart_args(), ["--data-dir=/tmp/run1"]);
     }
 
     #[test]

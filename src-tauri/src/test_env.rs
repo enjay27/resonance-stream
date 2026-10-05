@@ -160,6 +160,14 @@ pub fn replay_chat() -> Option<&'static Path> {
         .and_then(|active| active.env.replay_chat.as_deref())
 }
 
+/// `--bridge-url`: host and port of the local MQTT broker the test bridge uses.
+pub fn bridge_addr() -> Option<(String, u16)> {
+    ACTIVE
+        .get()
+        .and_then(|active| active.env.bridge_url.as_deref())
+        .and_then(core_env::bridge_addr)
+}
+
 /// What `config.json` held as `init_done` when the app started.
 static STORED_INIT_DONE: OnceLock<bool> = OnceLock::new();
 

@@ -2,6 +2,7 @@
 //! payloads into chat messages, and preparing text for / cleaning text from
 //! the translation model. No Tauri, no Windows APIs — builds and tests on any OS.
 
+pub mod bridge;
 pub mod capture;
 pub mod download;
 pub mod favorites_migration;

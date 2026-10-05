@@ -378,4 +378,22 @@ mod tests {
         assert!(entries.iter().any(|e| e.text.contains("<sprite=")));
         assert!(entries.iter().all(|e| e.delay_ms <= MAX_DELAY_MS));
     }
+
+    /// The app hides WORLD chat from senders below its minimum level (default 1,
+    /// `min_sender_level`), so a sample whose WORLD lines say level 0 shows no
+    /// world chat at all -- what a first Windows run saw.
+    #[test]
+    fn the_shipped_samples_world_lines_get_past_the_default_level_filter() {
+        let sample = include_str!("../testdata/replay-sample.jsonl");
+        let entries = parse_replay(sample).expect("the sample is valid");
+        let world: Vec<_> = entries
+            .iter()
+            .filter(|e| e.channel == Channel::World)
+            .collect();
+        assert!(!world.is_empty());
+        assert!(
+            world.iter().all(|e| e.level >= 1),
+            "a WORLD line with level 0"
+        );
+    }
 }

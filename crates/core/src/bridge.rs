@@ -15,7 +15,8 @@
 //! | `rs/app/error` | app | `{"error"}` for a message that had no usable id |
 //!
 //! A command is on an allowlist ([`Command`]): a test can ask for what the
-//! flags already do (`replay-chat`), not run arbitrary code.
+//! flags already do (`replay-chat`) or press a button the window has (`start-update`,
+//! `restart-update`), not run arbitrary code.
 
 use serde_json::{json, Value};
 use std::fmt;
@@ -37,6 +38,12 @@ pub const EVENT_NAMES: [&str; 13] = [
     "tray-toggle-always-on-top",
     "tray-toggle-click-through",
 ];
+
+/// Published by the app itself, not heard from the window: the update's state after every change
+/// (`{"state": "none" | "available:<version>" | "downloading" | "downloaded" | "error:<reason>"}`).
+pub const UPDATE_STATE_EVENT: &str = "update-state";
+/// Published once when the bridge starts (`{"pid","version","exe"}`): a second one with another pid means the app restarted.
+pub const APP_STARTED_EVENT: &str = "app-started";
 
 pub const STATUS_TOPIC: &str = "rs/app/status";
 pub const ERROR_TOPIC: &str = "rs/app/error";
@@ -72,6 +79,12 @@ pub enum Command {
     Quit,
     /// Feed the chat lines of this file in, as `--replay-chat` does.
     ReplayChat { path: PathBuf },
+    /// Download the release the last update check announced (what the update dialog's button does). The
+    /// outcome comes as `update-state` events.
+    StartUpdate,
+    /// Install the downloaded update and restart (the dialog's 재시작). A refusal is the ack's error; a success
+    /// ends this process and a new one announces itself with `app-started`.
+    RestartUpdate,
 }
 
 /// A command and the id its ack carries.
@@ -135,6 +148,8 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
     let command = match name {
         "ping" => Command::Ping,
         "quit" => Command::Quit,
+        "start-update" => Command::StartUpdate,
+        "restart-update" => Command::RestartUpdate,
         "replay-chat" => match args.get("path").and_then(Value::as_str) {
             Some(path) if !path.is_empty() => Command::ReplayChat { path: path.into() },
             _ => {
@@ -250,6 +265,30 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn the_update_commands_parse() {
+        assert_eq!(
+            parse("start-update", r#"{"id":"u1"}"#).map(|r| r.command),
+            Ok(Command::StartUpdate)
+        );
+        assert_eq!(
+            parse("restart-update", r#"{"id":"u2"}"#),
+            Ok(Request {
+                id: "u2".into(),
+                command: Command::RestartUpdate
+            })
+        );
+    }
+
+    #[test]
+    fn the_events_the_app_publishes_itself_are_not_ui_events() {
+        // They are not emitted to the window, so `listen_any` would never hear them.
+        for name in [UPDATE_STATE_EVENT, APP_STARTED_EVENT] {
+            assert!(!EVENT_NAMES.contains(&name), "{name}");
+            assert!(!name.contains(['/', '+', '#']), "{name}");
+        }
     }
 
     #[test]

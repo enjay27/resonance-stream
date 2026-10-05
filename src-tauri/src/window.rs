@@ -1,12 +1,14 @@
 //! Tauri commands that act on the overlay window itself, and the popup
 //! windows that open beside it.
 
+use parking_lot::Mutex;
+use resonance_core::window::GrowMemory;
 use resonance_types::{is_popup_label, PopupKind};
 use std::time::Duration;
 use tauri::{
     AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
-use tauri_plugin_window_state::{StateFlags, WindowExt};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags, WindowExt};
 
 #[tauri::command]
 pub fn set_always_on_top(window: tauri::Window, on_top: bool) {
@@ -110,6 +112,7 @@ pub fn prewarm_popups(app: AppHandle) {
 /// alive as windows) go with it.
 pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
     if window.label() == "main" && matches!(event, WindowEvent::CloseRequested { .. }) {
+        restore_grown_window(window.app_handle());
         for (label, popup) in window.app_handle().webview_windows() {
             if is_popup_label(&label) {
                 let _ = popup.destroy();
@@ -171,12 +174,35 @@ pub fn grow_window(
         work_area,
     )?;
     apply_rect(&window, grown);
+    GROWN_FROM.lock().remember(current);
     Some(current)
+}
+
+/// What `grow_window` replaced and `restore_window` has not put back yet.
+static GROWN_FROM: Mutex<GrowMemory> = Mutex::new(GrowMemory::new());
+
+/// Puts the main window back to its size from before settings grew it, when the
+/// app is closing with settings still open: the window-state plugin saves what
+/// the window has at that moment, and the next start would open enlarged.
+pub fn restore_grown_window(app: &tauri::AppHandle) {
+    let Some(rect) = GROWN_FROM.lock().take() else {
+        return;
+    };
+    let Some(window) = app.get_window("main") else {
+        return;
+    };
+    apply_rect(&window, rect);
+    // The plugin's own save at close may already have run; save again, now
+    // that the window is back (it re-reads the live size).
+    if !crate::test_env::no_window_state() {
+        let _ = app.save_window_state(StateFlags::all());
+    }
 }
 
 /// Puts the window back where `grow_window` found it.
 #[tauri::command]
 pub fn restore_window(window: tauri::Window, rect: resonance_types::WindowRect) {
+    GROWN_FROM.lock().forget();
     apply_rect(&window, rect);
 }
 

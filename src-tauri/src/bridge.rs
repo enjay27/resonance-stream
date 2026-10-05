@@ -14,9 +14,17 @@
 
 use resonance_core::bridge::{self as wire, Command, EVENT_NAMES};
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
+use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Listener};
+use tauri::ipc::{Invoke, InvokeBody};
+use tauri::{AppHandle, Listener, Runtime};
+
+/// The connection, once the bridge is on; the events and the command tap share it.
+static CLIENT: OnceLock<Client> = OnceLock::new();
+/// One counter for everything published, so a test sees the order of events and commands.
+static SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Messages that can wait for the connection thread before new ones are dropped.
 const QUEUE: usize = 1024;
@@ -42,23 +50,14 @@ pub fn start(app: &AppHandle) {
     ));
     let (client, mut connection) = Client::new(options, QUEUE);
 
+    let _ = CLIENT.set(client.clone());
+
     // Events: heard on any target, published in the order they arrive.
-    let seq = std::sync::Arc::new(AtomicU64::new(0));
     for name in EVENT_NAMES {
-        let client = client.clone();
-        let seq = seq.clone();
         app.listen_any(name, move |event| {
             let payload = serde_json::from_str(event.payload())
-                .unwrap_or_else(|_| serde_json::Value::String(event.payload().to_string()));
-            let text = wire::envelope(seq.fetch_add(1, Ordering::SeqCst), now_ms(), name, payload);
-            if let Err(e) = client.try_publish(
-                wire::event_topic(name),
-                QoS::AtLeastOnce,
-                false,
-                text.into_bytes(),
-            ) {
-                log::warn!("[Bridge] Dropped {name}: {e}");
-            }
+                .unwrap_or_else(|_| Value::String(event.payload().to_string()));
+            publish_envelope(wire::event_topic(name), name, payload);
         });
     }
 
@@ -84,6 +83,36 @@ pub fn start(app: &AppHandle) {
             }
         }
     });
+}
+
+/// Wraps the app's command handler: every UI -> backend `invoke` is published
+/// as `rs/app/command/<name>` (with its arguments) before it runs. Does nothing
+/// else, and nothing at all when the bridge is off.
+pub fn tap_commands<R: Runtime>(
+    inner: impl Fn(Invoke<R>) -> bool + Send + Sync + 'static,
+) -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        if CLIENT.get().is_some() {
+            let name = invoke.message.command();
+            if let Some(topic) = wire::command_topic(name) {
+                let payload = match invoke.message.payload() {
+                    InvokeBody::Json(json) => json.clone(),
+                    InvokeBody::Raw(bytes) => serde_json::json!({ "raw_bytes": bytes.len() }),
+                };
+                publish_envelope(topic, name, payload);
+            }
+        }
+        inner(invoke)
+    }
+}
+
+/// Queues one enveloped message; a full queue drops it, with a warning.
+fn publish_envelope(topic: String, name: &str, payload: Value) {
+    let Some(client) = CLIENT.get() else { return };
+    let text = wire::envelope(SEQ.fetch_add(1, Ordering::SeqCst), now_ms(), name, payload);
+    if let Err(e) = client.try_publish(topic, QoS::AtLeastOnce, false, text.into_bytes()) {
+        log::warn!("[Bridge] Dropped {name}: {e}");
+    }
 }
 
 /// Runs one command and answers it.

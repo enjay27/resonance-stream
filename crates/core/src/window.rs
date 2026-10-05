@@ -48,9 +48,57 @@ fn grow_axis(pos: i32, len: u32, min: u32, area_pos: i32, area_len: u32) -> (i32
     (centred.clamp(area_pos as i64, last) as i32, target)
 }
 
+/// The rect a window had before settings grew it, so the app can put it back
+/// when it closes with settings still open (the window-state plugin would save
+/// the grown size, and the next start would open enlarged -- K18). Only the
+/// first rect counts: a second grow starts from the already grown one.
+#[derive(Debug, Default)]
+pub struct GrowMemory(Option<WindowRect>);
+
+impl GrowMemory {
+    pub const fn new() -> Self {
+        Self(None)
+    }
+
+    pub fn remember(&mut self, rect: WindowRect) {
+        self.0.get_or_insert(rect);
+    }
+
+    pub fn forget(&mut self) {
+        self.0 = None;
+    }
+
+    /// The remembered rect, clearing the memory.
+    pub fn take(&mut self) -> Option<WindowRect> {
+        self.0.take()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_size_before_the_first_grow_is_the_one_remembered() {
+        let mut memory = GrowMemory::new();
+        assert_eq!(memory.take(), None);
+        memory.remember(r(10, 20, 400, 300));
+        memory.remember(r(0, 0, 900, 700)); // a second grow while the first is open
+        assert_eq!(memory.take(), Some(r(10, 20, 400, 300)));
+    }
+
+    #[test]
+    fn taking_or_forgetting_clears_the_memory() {
+        let mut memory = GrowMemory::new();
+        memory.remember(r(1, 2, 3, 4));
+        assert!(memory.take().is_some());
+        assert_eq!(memory.take(), None);
+        memory.remember(r(1, 2, 3, 4));
+        memory.forget();
+        assert_eq!(memory.take(), None);
+        memory.remember(r(5, 6, 7, 8)); // and it remembers again afterwards
+        assert_eq!(memory.take(), Some(r(5, 6, 7, 8)));
+    }
 
     fn r(x: i32, y: i32, width: u32, height: u32) -> WindowRect {
         WindowRect {

@@ -204,6 +204,8 @@ pub fn run() {
     app.run(|_app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
             log::info!("Application closing. Cleaning AI Server...");
+            // The tray's Quit ends the app without a close request.
+            window::restore_grown_window(_app_handle);
 
             // Explicitly kill the llama-server to prevent zombie processes
             #[cfg(target_os = "windows")]

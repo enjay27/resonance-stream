@@ -86,8 +86,35 @@ Each has: what it proves | design | new app surface | effort | risk.
 10. **UI clicks (phase 2, big)** -- the bridge cannot press buttons. Options: (a) `tauri-driver` + Edge WebDriver against the real WebView2 window (real clicks, real Korean text; Windows only,
     flaky setup), (b) keep using the `ui-preview` skill (Playwright against the wasm UI with a mocked Tauri, runs on Linux, already works). Decide only after 1-9; (b) may already be enough for most UI rules.
 
+## QA methods beyond the bridge (Kade asked, 2026-10-06; none built)
+
+Kade's concern: is the bridge a big change to the architecture? Answer given: no -- one module (`src-tauri/src/bridge.rs`, ~300 lines) + a pure one in `crates/core`, one wrapper
+around the command handler, one `publish_event` call in the updater; nothing changes in normal runs (starts only with `--bridge-url`, test/debug build, loopback, fixed command list).
+**One thing to tighten:** `rumqttc` and the bridge code are compiled into *stable* exes too (never started). Put the bridge entirely behind the `test-env` feature (optional dependency +
+`#[cfg(any(debug_assertions, feature = "test-env"))]`; debug builds then need `--features test-env`) so a stable release contains none of it.
+
+| method | catches | architecture impact | effort |
+|---|---|---|---|
+| bridge behind the `test-env` feature | test code and a dependency in stable exes | small build change | small |
+| fuzz / property tests (`proptest`, `cargo-fuzz`) for the protocol decoder and framing | panics / wrong output on malformed bytes from the network | none (tests) | small |
+| golden / snapshot tests (`insta`) for the text pipeline (dictionary, emotes, romaji, furigana) | accidental changes to pre/post-processing | none | small |
+| config parity test: app `AppConfig` vs ui `AppConfig` keys against one shared fixture | the silent "field added to one side only" break CLAUDE.md warns about | none | small |
+| wire-format golden test for `ChatMessage` / `SystemMessage` (camelCase JSON) | a renamed field = a protocol change | none | small |
+| `cargo audit` / `cargo deny` in CI | vulnerable or oddly licensed dependencies (the app downloads and runs exes) | none (CI) | small |
+| mutation testing (`cargo-mutants`) on `crates/core`, weekly | tests that would not notice a real bug | none | small |
+| sanitised capture corpus in the repo, replayed in CI (`crates/core/tests/capture_replay.rs` exists; real captures are kept out of git) | decoder regressions on real traffic | none | small-medium |
+| **bridge smoke test in CI** on the rc exe (`windows-latest`: `replay-chat`, `window-restore`) | every rc is checked before Kade opens it | CI only | small-medium; needs a spike: can the runner open the window and is it elevated? (unverified) |
+| visual regression: Playwright screenshots of the wasm UI (`ui-preview` skill) | layout breakage | none | medium |
+| fault injection over the bridge (network down, llama dies, disk full) | crashes and stuck states in failure paths | new named commands | medium |
+| soak test + a read-only `stats` command (memory, handles) | leaks, slow drift | one command | medium |
+| in-app "copy diagnostics" (version, config, recent log) | makes tester reports reproducible | small feature | medium |
+| real-window UI automation (`tauri-driver` + WebDriver) | actual clicks | heavy, flaky | large -- skip until the rest is done |
+
+My order of preference: bridge behind the feature; bridge smoke test in CI (spike first); fuzz + config-parity + wire-format tests; `cargo audit`; then the scenarios above.
+
 ## Suggested order
 
+-1. The bridge behind the `test-env` feature (see the QA table) -- before more app-side commands are added, so every new command lands behind it.
 0. Kade's pending Windows runs on the rc build (`window-restore` must now pass after #163; `interface`, `updater-mock`, `replay-chat` passed on 2026-10-06 with an older build). Fix what they show first.
 1. **Spike 5 (synthetic capture)** in parallel with the sure ones: it is a one-PR experiment whose answer decides items 5 and the "captured" rows -- ask Kade to run it early.
 2. Then 1 (firewall), 2 (chat rules), 3 (persistence), 4 (download integrity), in that order -- each is small and reuses existing commands.

@@ -8,7 +8,8 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use resonance_core::sniffer_net::{
-    pick_interface, rule_name_for, InterfacePick, PickRule, LEGACY_RULE_NAME,
+    pick_interface, route_through_virtual_adapter, rule_name_for, InterfacePick, PickRule,
+    LEGACY_RULE_NAME,
 };
 
 use super::emit_sniffer_state;
@@ -187,6 +188,21 @@ fn route_source_ip() -> Option<Ipv4Addr> {
     }
 }
 
+/// The VPN adapter the default route runs through, if it does: with a full
+/// tunnel no adapter shows the game's chat (issue #142), which the watchdog
+/// tells the user.
+pub fn vpn_in_the_way() -> Option<String> {
+    let candidates: Vec<(String, Ipv4Addr)> = list_afinet_netifas()
+        .ok()?
+        .into_iter()
+        .filter_map(|(name, ip)| match ip {
+            IpAddr::V4(ipv4) => Some((name, ipv4)),
+            IpAddr::V6(_) => None,
+        })
+        .collect();
+    route_through_virtual_adapter(&candidates, route_source_ip())
+}
+
 /// The adapter to sniff on, when the user has not chosen one: the routed adapter,
 /// else the first physical one (`resonance_core::sniffer_net::pick_interface`).
 pub fn find_game_interface() -> Option<InterfacePick> {
@@ -220,6 +236,9 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
 
 #[tauri::command]
 pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, String> {
+    if crate::test_env::no_capture() {
+        return Ok("Skipped (--no-capture)".to_string());
+    }
     if let Ok(exe_path) = env::current_exe() {
         if let Some(path_str) = exe_path.to_str() {
             // The rule is per exe (the dev and the installed exe each get

@@ -15,7 +15,7 @@ use crate::shortcut_keys::{
 use crate::store::AppSignals;
 use crate::ui_types::default_favorite_messages;
 use crate::utils::copy_to_clipboard;
-use leptos::ev::KeyboardEvent;
+use leptos::ev::{keydown, KeyboardEvent};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -86,6 +86,21 @@ pub fn FavoritesWindow() -> impl IntoView {
         set_error.set(None);
         set_pending_delete.set(None);
     };
+
+    // Esc answers an open question with "cancel" wherever the focus is; the
+    // popup's own Esc handler (closing the window) sees `prevent_default`.
+    window_event_listener(keydown, move |ev| {
+        if ev.key() != "Escape" || ev.default_prevented() {
+            return;
+        }
+        if adding_tab.get_untracked() {
+            set_adding_tab.set(false);
+            ev.prevent_default();
+        } else if deleting_tab.get_untracked().is_some() {
+            set_deleting_tab.set(None);
+            ev.prevent_default();
+        }
+    });
 
     // What a box holds now (tracked: a box follows the list).
     let value_of = move |index: usize, field: Field| {
@@ -319,6 +334,8 @@ pub fn FavoritesWindow() -> impl IntoView {
                     if key == "Enter" || key == "Escape" {
                         let input = event_target::<web_sys::HtmlInputElement>(&ev);
                         if key == "Escape" {
+                            // Undo only: the popup's Esc-closes-window must not see it.
+                            ev.prevent_default();
                             input.set_value(&value_of_untracked(favorite_messages, index, field));
                         }
                         let _ = input.blur();
@@ -472,11 +489,7 @@ pub fn FavoritesWindow() -> impl IntoView {
                             maxlength=MAX_TAB_NAME_CHARS.to_string()
                             prop:value=move || new_tab_name.get()
                             on:input=move |ev| { set_new_tab_name.set(event_target_value(&ev)); set_new_tab_error.set(None); }
-                            on:keydown=move |ev| match ev.key().as_str() {
-                                "Enter" => confirm_add_tab(false),
-                                "Escape" => set_adding_tab.set(false),
-                                _ => {}
-                            }
+                            on:keydown=move |ev| if ev.key() == "Enter" { confirm_add_tab(false) }
                         />
                         {move || new_tab_error.get().map(|e| view! {
                             <div class="text-[10px] text-error bg-error/10 p-1.5 rounded">{e}</div>

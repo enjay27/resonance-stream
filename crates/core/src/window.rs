@@ -2,6 +2,18 @@
 
 use resonance_types::WindowRect;
 
+/// The INNER size to ask a window for so that its OUTER size becomes `outer`:
+/// `set_size` sets the inner (client) size, while the rects this app keeps are
+/// outer ones (`outer_position` / `outer_size`). Setting an outer size as the
+/// inner one makes the window one frame bigger every time (K18's runbook run:
+/// +22 x +13 px per restore). The frame is `outer - inner` of the live window.
+pub fn inner_size_for(outer: WindowRect, frame_width: u32, frame_height: u32) -> (u32, u32) {
+    (
+        outer.width.saturating_sub(frame_width).max(1),
+        outer.height.saturating_sub(frame_height).max(1),
+    )
+}
+
 /// The rect a window should take to be at least `min_width` x `min_height`
 /// (physical pixels) without leaving `work_area`, the monitor minus the taskbar.
 /// It grows around its current centre and is pushed back inside the work area;
@@ -48,9 +60,73 @@ fn grow_axis(pos: i32, len: u32, min: u32, area_pos: i32, area_len: u32) -> (i32
     (centred.clamp(area_pos as i64, last) as i32, target)
 }
 
+/// The rect a window had before settings grew it, so the app can put it back
+/// when it closes with settings still open (the window-state plugin would save
+/// the grown size, and the next start would open enlarged -- K18). Only the
+/// first rect counts: a second grow starts from the already grown one.
+#[derive(Debug, Default)]
+pub struct GrowMemory(Option<WindowRect>);
+
+impl GrowMemory {
+    pub const fn new() -> Self {
+        Self(None)
+    }
+
+    pub fn remember(&mut self, rect: WindowRect) {
+        self.0.get_or_insert(rect);
+    }
+
+    pub fn forget(&mut self) {
+        self.0 = None;
+    }
+
+    /// The remembered rect, clearing the memory.
+    pub fn take(&mut self) -> Option<WindowRect> {
+        self.0.take()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_size_before_the_first_grow_is_the_one_remembered() {
+        let mut memory = GrowMemory::new();
+        assert_eq!(memory.take(), None);
+        memory.remember(r(10, 20, 400, 300));
+        memory.remember(r(0, 0, 900, 700)); // a second grow while the first is open
+        assert_eq!(memory.take(), Some(r(10, 20, 400, 300)));
+    }
+
+    #[test]
+    fn taking_or_forgetting_clears_the_memory() {
+        let mut memory = GrowMemory::new();
+        memory.remember(r(1, 2, 3, 4));
+        assert!(memory.take().is_some());
+        assert_eq!(memory.take(), None);
+        memory.remember(r(1, 2, 3, 4));
+        memory.forget();
+        assert_eq!(memory.take(), None);
+        memory.remember(r(5, 6, 7, 8)); // and it remembers again afterwards
+        assert_eq!(memory.take(), Some(r(5, 6, 7, 8)));
+    }
+
+    #[test]
+    fn the_inner_size_leaves_room_for_the_frame() {
+        // Kade's window: 923x815 outer, a frame of 22x13 around the client area.
+        assert_eq!(inner_size_for(r(-958, 141, 923, 815), 22, 13), (901, 802));
+    }
+
+    #[test]
+    fn without_a_frame_the_size_is_unchanged() {
+        assert_eq!(inner_size_for(r(0, 0, 900, 640), 0, 0), (900, 640));
+    }
+
+    #[test]
+    fn a_frame_bigger_than_the_window_never_gives_zero() {
+        assert_eq!(inner_size_for(r(0, 0, 10, 10), 30, 30), (1, 1));
+    }
 
     fn r(x: i32, y: i32, width: u32, height: u32) -> WindowRect {
         WindowRect {

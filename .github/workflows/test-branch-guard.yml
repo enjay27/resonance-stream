@@ -1,0 +1,33 @@
+name: Test branch guard
+
+# A `test/*` branch holds test tooling (Jupyter notebooks and their helpers,
+# run by hand on a Windows PC) and must never reach main. A pull request from
+# one into main fails this check. It does not stop a person who merges anyway:
+# make this check required in the branch protection of main to block that too.
+# Auto-merge only ever merges `claude/*`, so nothing merges a test/* branch by
+# itself. Limit: a pull request runs the workflow file of its own merge commit,
+# so a test/* branch that edits this file can switch the check off for itself --
+# only the branch protection of main (a required check, a review) really stops that.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: no test/* branch into main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refuse a test/* head branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          source .github/scripts/branch-guard.sh
+          if reason=$(never_merges_into_main "$HEAD_REF"); then
+            echo "::error::$reason ($HEAD_REF). Close this pull request."
+            exit 1
+          fi
+          echo "$HEAD_REF may be merged into main."

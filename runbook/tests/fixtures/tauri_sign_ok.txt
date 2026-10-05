@@ -1,0 +1,2 @@
+Your file was signed successfully, You can find the signature here:
+C:\x\sign-me.bin.sig

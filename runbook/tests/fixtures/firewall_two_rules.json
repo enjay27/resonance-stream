@@ -1,0 +1,4 @@
+[
+  {"Name": "Resonance Stream (Packet Sniffing) [d34dd972]", "Enabled": "True", "Direction": "Inbound", "Action": "Allow", "Program": "C:\\dev\\resonance-stream\\target\\debug\\resonance-stream.exe"},
+  {"Name": "Resonance Stream (Packet Sniffing) [8835dbcf]", "Enabled": "True", "Direction": "Inbound", "Action": "Allow", "Program": "C:\\Program Files\\Resonance Stream\\resonance-stream.exe"}
+]

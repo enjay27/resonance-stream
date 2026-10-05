@@ -1,5 +1,6 @@
 mod network;
 mod raw_capture;
+pub(crate) mod replay;
 
 pub use self::network::*;
 use self::raw_capture::RawCapture;
@@ -68,6 +69,10 @@ pub fn emit_sniffer_state(app: &tauri::AppHandle, state: SnifferState, message: 
 
 #[tauri::command]
 pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
+    if crate::test_env::no_capture() {
+        emit_sniffer_state(&app, SnifferState::Off, "Capture disabled (--no-capture)");
+        return;
+    }
     if !check_firewall_rule() {
         inject_system_message(
             &app,
@@ -109,6 +114,9 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
         alive: alive.clone(),
     };
 
+    if crate::test_env::no_capture() {
+        return handle;
+    }
     if !check_firewall_rule() {
         inject_system_message(
             &app,
@@ -288,18 +296,31 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
 
             if now.saturating_sub(last) > 15 {
                 // If it was previously active, throw the error state
+                // A full-tunnel VPN hides the chat from every adapter: say so.
+                let vpn = network::vpn_in_the_way();
                 inject_system_message_throttled(
                     &app,
                     SystemLogLevel::Warning,
                     "Sniffer",
-                    "Watchdog: No game traffic for 15s.",
+                    match &vpn {
+                        Some(name) => format!(
+                            "Watchdog: No game traffic for 15s. The default route runs through a VPN adapter ({name}); \
+                             turn the VPN off or exclude the game from it."
+                        ),
+                        None => "Watchdog: No game traffic for 15s.".to_string(),
+                    },
                 );
 
                 // Emitting "Error" changes the TitleBar badge to Red so the user can click it!
                 emit_sniffer_state(
                     &app,
                     SnifferState::Error,
-                    "게임 트래픽 감지 안됨 (클릭하여 어댑터 복구)",
+                    &match &vpn {
+                        Some(name) => format!(
+                            "게임 트래픽 감지 안됨 (VPN 사용 중: {name} - VPN을 끄거나 게임을 터널에서 제외하세요)"
+                        ),
+                        None => "게임 트래픽 감지 안됨 (클릭하여 어댑터 복구)".to_string(),
+                    },
                 );
                 IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
 

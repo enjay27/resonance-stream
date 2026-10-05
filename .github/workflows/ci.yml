@@ -51,6 +51,8 @@ jobs:
         run: bash .github/scripts/rc-lib.test.sh
       - name: stable-release helpers
         run: bash .github/scripts/release-lib.test.sh
+      - name: test-branch guard helper
+        run: bash .github/scripts/branch-guard.test.sh
 
   app:
     name: app gate (Windows)

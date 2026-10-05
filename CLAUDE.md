@@ -4,14 +4,16 @@ Resonance Stream is a Windows desktop app: it sniffs Blue Protocol: Star Resonan
 chat packets (raw socket, no client hooking), translates Japanese chat to Korean
 through a local llama.cpp server, and shows it in a Tauri overlay.
 
-It is one Cargo workspace in five crates, three parts. **Which part you touch decides which
-gate applies.** That is the most important thing on this page.
+It is one Cargo workspace in five crates, three parts, plus the runbook (`runbook/`, treated as
+docs). **Which part you touch decides which gate applies.** That is the most important thing
+on this page.
 
 | tree | part | builds on | gate |
 |---|---|---|---|
 | `crates/core/` `crates/llama/` `crates/types/` | **core** — packet → chat pipeline, protocol decoding, translation text processing; llama-server HTTP client; DTOs shared by app and ui | any OS | `just core-check` |
 | `src/` | **ui** — Leptos 0.8 CSR frontend (wasm); pure modules unit-tested on the host | any OS | `just ui-check` |
 | `src-tauri/` | **app** — Tauri 2 backend: sockets, translator server, downloader, windows, tray | **Windows only** | `just app-check` (Windows) · `just app-cross-check` (Linux, compile only) |
+| `runbook/` | **runbook** — Jupyter notebooks + Python helpers that Kade runs by hand on Windows (`runbook/README.md`) | any OS (dry runs) | **none — treated as docs** (see *The runbook is docs*) |
 
 `just check` runs `fmt-check`, then every gate the current OS can run (`pip install
 rust-just` or `cargo install just`). On Linux the app gate is a **compile-only**
@@ -89,6 +91,7 @@ src-tauri/            app crate (resonance-stream, lib resonance_stream_lib)
   src/config/ src/io/   config + metadata persistence, archive writer
 graft/                graft's generated cards — GITIGNORED, regenerable (`graft build`)
 style/ public/        CSS source, static assets
+runbook/              the runbook: notebooks, helpers, dry-run tests -- docs, see Guardrails
 ```
 
 ---
@@ -149,6 +152,15 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
   test that reproduces the bug. Pure logic is tested in `crates/core` (or the ui's pure
   modules), so it runs on every OS. If a change cannot be unit-tested (Tauri/Windows
   glue), say so in the commit body. `just coverage` shows what the tests do not reach.
+- **The runbook is docs.** `runbook/` -- the Jupyter notebooks Kade runs by hand on his
+  Windows PC, their helpers, dry-run tests and fixtures -- changes no app logic, so it is
+  treated like a doc: **no CI job checks it** (do not add one), **no gate** for it in the
+  table, no test-first requirement, no `NOT VERIFIED` line for it. A PR that only touches
+  `runbook/` (and memory) is an ordinary `claude/*` PR; CI still runs on it, because
+  auto-merge needs a green run, but nothing in CI tests the runbook. A courtesy, not a gate:
+  after changing its helpers run `cd runbook && python -m pytest -q` (about 3 minutes).
+  The runbook's real proof is Kade's run on Windows, and the report he pastes back says
+  what is broken. Fix a notebook in the same PR as the code change it follows.
 - **Auto-correction restraint.** Self-correct at most **2** times, then stop and ask.
 - **Never report a gate as passed when it could not run.** A Linux session cannot
   build `src-tauri/`; say so, and leave it to the Windows CI job.
@@ -229,6 +241,17 @@ git add -A && git commit
   change to `auto-merge.yml` itself takes effect after it has been merged once.
 - Merges made by the workflow use `GITHUB_TOKEN`, which does not start a `push` run on
   `main`; the PR's own run is the gate.
+
+### Test branches (`test/*`)
+
+The runbook lives on `main`, in `runbook/` (see *The runbook is docs*); the old
+`test/w1-*` branches are an archive and get no updates. A `test/<job>` branch is now only
+for a **throw-away** experiment on Kade's Windows PC that does not belong in `main`.
+**It is never merged into `main` and never opens a release**: cut it from `main`, push it,
+and Kade checks it out. No PR is needed; if one is opened into `main`,
+`.github/workflows/test-branch-guard.yml` fails it (helper `branch-guard.sh`, tested in CI).
+A finding from a run becomes a normal task on a `claude/*` branch, test first when it is
+app logic; the `test/*` branch itself stays out of `main`'s history.
 
 ### Release candidates (`rc`)
 

@@ -1,0 +1,388 @@
+"""A stand-in for a test-env build of Resonance Stream -- only for the dry run of updater-mock.ipynb.
+
+It reads the same flags, writes the same status file and follows the same update steps (check the
+feed, download, verify, swap + restart), so the pipeline's steps, waits and checks can be exercised
+on any OS. With --bridge-url it also talks to the bridge's MQTT broker the way src-tauri/src/bridge.rs
+does (a minimal MQTT 3.1.1 client): it publishes `app-started` and `update-state` events and obeys the
+`ping`, `start-update`, `restart-update` and `quit` commands -- nobody "clicks" any more. It is NOT the
+app: what it does is this author's reading of src-tauri, and proves nothing about Windows or the real exe.
+
+The notebook's "exe" is a shell script that runs this file (so bytes appended to it, as the
+notebook does for the new version, are never parsed). Environment:
+  FAKE_APP_EXE            path of the "exe" (set by the script)
+  FAKE_APP_SIGNED_FILE    the file the "signature" is valid for: a download must equal it
+  FAKE_APP_VERSION        the version it reports (default 0.5.0)
+  FAKE_APP_LIFETIME       seconds until it exits by itself (default 40)
+  FAKE_APP_STALL_AFTER    seconds of silence it takes for a stalled download (default 3)
+  FAKE_APP_SKIP_VERIFY=1  a bug to catch: accepts any download
+  FAKE_APP_TOUCH_REAL=1   a bug to catch: also writes to the real %APPDATA% config
+  FAKE_APP_IFACE_LINE     what the sniffer says when it is on (no --no-capture): the text of its system-event,
+                          e.g. "Auto-Targeting Network Interface: 192.168.0.23 (default route)"
+  FAKE_APP_RECT           the main window's first rect, "WxH" (default 800x600; also x,y = 100,100)
+  FAKE_APP_SCREEN         the work area, "WxH" (default 1920x1040): a grow never goes beyond it
+  FAKE_APP_K18_BUG        a bug to catch: "quit", "close" or "both" -- that way out saves the GROWN window
+                          (what window-state would do if settings were still open at exit)
+  FAKE_APP_BAD_STATUS=1   a bug to catch: a status file without pid and data_dir
+"""
+from __future__ import annotations
+
+import http.client
+import json
+import os
+import shutil
+import queue
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+SWITCHES = {"fresh", "assume-setup-done", "no-capture", "no-translator", "no-update-check", "no-popups",
+            "no-window-state", "print-env"}
+VALUES = {"data-dir", "feed-url", "metadata-url", "status-file", "log-file", "bridge-url"}
+
+
+def parse(argv: list[str]) -> dict:
+    flags: dict = {}
+    it = iter(argv)
+    for arg in it:
+        name = arg[2:] if arg.startswith("--") else None
+        if name in SWITCHES:
+            flags[name] = True
+        elif name in VALUES:
+            flags[name] = next(it, "")
+        else:
+            print(f"resonance-stream: unknown test flag {arg}", file=sys.stderr)
+            sys.exit(2)
+    return flags
+
+
+def version_tuple(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
+
+
+class Mqtt:
+    """The least MQTT 3.1.1 a stand-in needs: connect (with a will), publish at QoS 0, subscribe, and hand every
+    PUBLISH it receives to `inbox`. Not a library -- it only talks to the bridge's local broker."""
+
+    def __init__(self, url: str, client_id: str, will_topic: str, will_payload: bytes) -> None:
+        parts = urllib.parse.urlparse(url)
+        self.sock = socket.create_connection((parts.hostname, parts.port), timeout=10)
+        self.inbox: queue.Queue = queue.Queue()
+        body = self._string("MQTT") + bytes([4, 0x2E]) + struct.pack(">H", 0) + self._string(client_id)
+        body += self._string(will_topic) + struct.pack(">H", len(will_payload)) + will_payload
+        self._send(0x10, body)
+        if self._read_packet()[0] >> 4 != 2:
+            raise OSError("no CONNACK from the broker")
+        self.sock.settimeout(None)
+        threading.Thread(target=self._reader, daemon=True).start()
+
+    @staticmethod
+    def _string(text: str) -> bytes:
+        raw = text.encode("utf-8")
+        return struct.pack(">H", len(raw)) + raw
+
+    def _send(self, first: int, body: bytes) -> None:
+        length, out = len(body), bytearray()
+        while True:
+            digit, length = length % 128, length // 128
+            out.append(digit | (0x80 if length else 0))
+            if not length:
+                break
+        self.sock.sendall(bytes([first]) + bytes(out) + body)
+
+    def _recv(self, n: int) -> bytes:
+        data = b""
+        while len(data) < n:
+            chunk = self.sock.recv(n - len(data))
+            if not chunk:
+                raise OSError("the broker closed the connection")
+            data += chunk
+        return data
+
+    def _read_packet(self) -> tuple[int, bytes]:
+        first = self._recv(1)[0]
+        length, shift = 0, 0
+        while True:
+            digit = self._recv(1)[0]
+            length |= (digit & 0x7F) << shift
+            shift += 7
+            if not digit & 0x80:
+                break
+        return first, self._recv(length)
+
+    def _reader(self) -> None:
+        try:
+            while True:
+                first, body = self._read_packet()
+                if first >> 4 == 3:  # PUBLISH
+                    (n,) = struct.unpack(">H", body[:2])
+                    topic = body[2:2 + n].decode("utf-8")
+                    rest = body[2 + n:]
+                    if (first >> 1) & 3:
+                        rest = rest[2:]  # a packet id: we subscribe at QoS 0, so the broker sends none
+                    self.inbox.put((topic, rest))
+        except OSError:
+            pass
+
+    def publish(self, topic: str, payload: bytes | str, retain: bool = False) -> None:
+        data = payload.encode("utf-8") if isinstance(payload, str) else payload
+        self._send(0x30 | (1 if retain else 0), self._string(topic) + data)
+
+    def subscribe(self, topic_filter: str) -> None:
+        self._send(0x82, struct.pack(">H", 1) + self._string(topic_filter) + bytes([0]))
+
+
+class App:
+    def __init__(self, flags: dict) -> None:
+        self.flags = flags
+        self.exe = Path(os.environ.get("FAKE_APP_EXE", sys.argv[0])).resolve()
+        self.version = os.environ.get("FAKE_APP_VERSION", "0.5.0")
+        data = flags.get("data-dir")
+        self.status = {
+            "version": self.version,
+            "exe": str(self.exe),
+            "pid": os.getpid(),
+            "ready": False,
+            "config_dir": str(Path(data) / "config") if data else None,
+            "data_dir": str(Path(data) / "data") if data else None,
+            "flags": [n for n in [*sorted(SWITCHES), *sorted(VALUES)] if n in flags],
+            "update": "none",
+        }
+        w, _, h = os.environ.get("FAKE_APP_RECT", "800x600").partition("x")
+        self.rect = {"x": 100, "y": 100, "width": int(w), "height": int(h)}
+        self.grown_from: dict | None = None
+        self.bridge: Mqtt | None = None
+        self.seq = 0
+        self.announced_url: str | None = None
+        self.stop = False
+
+    def write_status(self) -> None:
+        path = self.flags.get("status-file")
+        if path:
+            tmp = Path(path + ".tmp")
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            status = dict(self.status)
+            if os.environ.get("FAKE_APP_BAD_STATUS") == "1" and "print-env" not in self.flags:  # a bug to catch: a status file missing keys
+                status.pop("pid", None)
+                status.pop("data_dir", None)
+            tmp.write_text(json.dumps(status), encoding="utf-8")
+            tmp.replace(path)
+
+    def log(self, text: str) -> None:
+        path = self.flags.get("log-file")
+        if path:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(text + "\n")
+
+    def set_update(self, state: str) -> None:
+        self.status["update"] = state
+        self.write_status()
+        self.log(f"update -> {state}")
+        self.event("update-state", {"state": state})
+
+    # -- the bridge (src-tauri/src/bridge.rs, as understood)
+    def event(self, name: str, payload: dict) -> None:
+        if self.bridge is None:
+            return
+        body = {"seq": self.seq, "t_ms": int(time.time() * 1000), "name": name, "payload": payload}
+        self.seq += 1
+        self.bridge.publish(f"rs/app/event/{name}", json.dumps(body))
+
+    def connect_bridge(self) -> None:
+        url = self.flags.get("bridge-url")
+        if not url:
+            return
+        self.bridge = Mqtt(url, "resonance-stream-app", "rs/app/status", b"offline")
+        self.bridge.subscribe("rs/test/command/+")
+        self.event("app-started", {"pid": os.getpid(), "version": self.version, "exe": str(self.exe)})
+        self.bridge.publish("rs/app/status", "online", retain=True)
+
+    # -- the main window (window.rs and the window-state plugin, as understood)
+    def state_file(self) -> Path | None:
+        data = self.flags.get("data-dir")
+        return Path(data) / "config" / "window-state.json" if data and "no-window-state" not in self.flags else None
+
+    def load_window_state(self) -> None:
+        path = self.state_file()
+        if path and path.exists():
+            self.rect = json.loads(path.read_text(encoding="utf-8"))
+
+    def leave(self, way: str) -> None:
+        """The app is closing by `way` ("quit": the tray's Quit, "close": the X): put a grown window back, save its state."""
+        buggy = os.environ.get("FAKE_APP_K18_BUG") in (way, "both")
+        if self.grown_from is not None and not buggy:
+            self.rect, self.grown_from = self.grown_from, None
+        path = self.state_file()
+        if path:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(self.rect), encoding="utf-8")
+        self.stop = True
+
+    def handle(self, topic: str, payload: bytes) -> None:
+        request = json.loads(payload)
+        command, id_ = topic.rsplit("/", 1)[-1], request.get("id", "")
+
+        def ack(error: str | None = None, data=None) -> None:
+            body = {"id": id_, "ok": True} if error is None else {"id": id_, "ok": False, "error": error}
+            if error is None and data is not None:
+                body["data"] = data
+            self.bridge.publish(f"rs/app/ack/{id_}", json.dumps(body))
+
+        if command == "ping":
+            ack()
+        elif command == "start-update":
+            if self.announced_url is None:
+                ack("No update has been announced; check for updates first")
+            else:
+                ack()
+                threading.Thread(target=self.download, args=(self.announced_url,), daemon=True).start()
+        elif command == "restart-update":
+            error = self.restart()  # a success ends this process
+            ack(error or "restart returned without error")
+        elif command == "snapshot":
+            body = {"id": id_, "ok": True, "data": dict(self.rect)}
+            self.bridge.publish(f"rs/app/ack/{id_}", json.dumps(body))
+        elif command == "grow-window":
+            screen_w, _, screen_h = os.environ.get("FAKE_APP_SCREEN", "1920x1040").partition("x")
+            # like grow_to_fit: at least what was asked, but never more than the work area has
+            want_w = min(int(request["min_width"]), int(screen_w))
+            want_h = min(int(request["min_height"]), int(screen_h))
+            old = dict(self.rect)
+            if want_w > old["width"] or want_h > old["height"]:
+                self.grown_from = self.grown_from or old
+                self.rect["width"], self.rect["height"] = max(want_w, old["width"]), max(want_h, old["height"])
+                self.bridge.publish(f"rs/app/ack/{id_}", json.dumps({"id": id_, "ok": True, "data": old}))
+            else:  # already big enough: nothing changed (data null)
+                self.bridge.publish(f"rs/app/ack/{id_}", json.dumps({"id": id_, "ok": True, "data": None}))
+        elif command == "close-window":
+            ack()
+            time.sleep(0.2)
+            self.leave("close")
+        elif command == "quit":
+            ack()
+            time.sleep(0.2)
+            self.leave("quit")
+        else:
+            ack(f"unknown command {command}")
+
+    # -- the update path (app_updater.rs / gist.rs, as understood)
+    def check(self) -> str | None:
+        """Returns the announced download url when a newer version is on offer."""
+        try:
+            urllib.request.urlopen(self.flags["metadata-url"], timeout=5).read()  # noqa: S310 -- local
+        except (OSError, KeyError, ValueError):
+            self.log("check failed: metadata")
+            return None
+        try:
+            body = urllib.request.urlopen(self.flags["feed-url"], timeout=5).read()  # noqa: S310
+        except urllib.error.HTTPError:
+            self.set_update("none")  # the real app reports the finished check, whatever it found
+            return None
+        except (OSError, KeyError, ValueError) as e:
+            self.set_update(f"error:Network error: {e}")
+            return None
+        try:
+            feed = json.loads(body)
+            version, url, signature = feed["version"], feed["url"], feed["signature"]
+        except (ValueError, KeyError, TypeError):
+            self.set_update("error:the update feed is not JSON")
+            return None
+        if version_tuple(version) > version_tuple(self.version):
+            self.set_update(f"available:{version}")
+            return url
+        self.set_update("none")
+        return None
+
+    def download(self, url: str) -> bool:
+        temp = self.exe.with_name("update_temp.exe")
+        part = self.exe.with_name("update_temp.exe.part")
+        self.set_update("downloading")
+        try:
+            with urllib.request.urlopen(url, timeout=float(os.environ.get("FAKE_APP_STALL_AFTER", "3"))) as r:  # noqa: S310
+                data = r.read()
+        except (http.client.IncompleteRead, socket.timeout, TimeoutError, OSError) as e:
+            part.unlink(missing_ok=True)
+            reason = "no data for the stall limit" if isinstance(e, (socket.timeout, TimeoutError)) else str(e)
+            self.set_update(f"error:{reason}")
+            return False
+        if not self.verified(data):
+            self.set_update("error:the update is not signed by a trusted key")
+            return False
+        temp.write_bytes(data)
+        self.set_update("downloaded")
+        return True
+
+    @staticmethod
+    def verified(data: bytes) -> bool:
+        if os.environ.get("FAKE_APP_SKIP_VERIFY") == "1":
+            return True
+        signed = os.environ.get("FAKE_APP_SIGNED_FILE")
+        return bool(signed) and Path(signed).read_bytes() == data
+
+    def restart(self) -> str:
+        """Installs the downloaded update and restarts (this process ends); returns why it refused."""
+        temp = self.exe.with_name("update_temp.exe")
+        if not temp.exists():
+            return "No verified update has been downloaded"
+        if not self.verified(temp.read_bytes()):
+            self.log("restart refused: update_temp.exe fails the check")
+            return "the update is not signed by a trusted key"
+        old = self.exe.with_name(self.exe.name + ".old")
+        old.unlink(missing_ok=True)
+        self.exe.rename(old)
+        temp.rename(self.exe)
+        self.exe.chmod(0o755)  # a downloaded file is not executable on POSIX; the real exe is
+        args = [a for a in sys.argv[1:] if a not in ("--fresh", "--print-env")]
+        subprocess.Popen([str(self.exe), *args], cwd=str(self.exe.parent), close_fds=True, env=os.environ.copy())
+        os._exit(0)
+
+
+def main() -> int:
+    flags = parse(sys.argv[1:])
+    app = App(flags)
+    deadline = time.monotonic() + float(os.environ.get("FAKE_APP_LIFETIME", "40"))
+    app.write_status()
+    if "print-env" in flags:
+        print(json.dumps(app.status))
+        return 0
+    if os.environ.get("FAKE_APP_TOUCH_REAL") == "1" and os.environ.get("APPDATA"):
+        real = Path(os.environ["APPDATA"]) / "com.enjay.bpsr.resonance-stream" / "config.json"
+        real.parent.mkdir(parents=True, exist_ok=True)
+        real.write_text(json.dumps({"touched": time.time()}), encoding="utf-8")
+    data = flags.get("data-dir")
+    if data:
+        if "fresh" in flags:
+            for sub in ("config", "data", "webview"):
+                shutil.rmtree(Path(data) / sub, ignore_errors=True)
+        for sub in ("config", "data", "webview"):
+            (Path(data) / sub).mkdir(parents=True, exist_ok=True)
+    app.status["ready"] = True
+    app.write_status()
+    app.load_window_state()
+    app.connect_bridge()
+    line = os.environ.get("FAKE_APP_IFACE_LINE")
+    if line and "no-capture" not in flags:
+        level = "error" if line.startswith("NETWORK_ERROR") else "info"
+        app.event("system-event", {"pid": 1, "level": level, "source": "Sniffer", "message": line})
+    app.announced_url = None if "no-update-check" in flags else app.check()
+    while time.monotonic() < deadline and not app.stop:
+        if app.bridge is None:
+            time.sleep(0.5)
+            continue
+        try:
+            topic, payload = app.bridge.inbox.get(timeout=0.5)
+        except queue.Empty:
+            continue
+        app.handle(topic, payload)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

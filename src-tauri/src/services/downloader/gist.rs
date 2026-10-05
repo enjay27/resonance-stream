@@ -2,8 +2,9 @@ use crate::inject_system_message;
 use crate::protocol::types::SystemLogLevel;
 use parking_lot::Mutex;
 use resonance_core::download::is_newer_version;
+use resonance_core::test_env::UpdateState;
 use resonance_core::text::Dictionary;
-use resonance_core::update_feed::{parse_feed, UpdateFeed};
+use resonance_core::update_feed::{parse_feed_allowing, UpdateFeed};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,7 +35,7 @@ pub fn announced_update() -> Option<UpdateFeed> {
 /// Reads the release feed. `Ok(None)`: no stable release exists yet (404).
 async fn fetch_update_feed() -> Result<Option<UpdateFeed>, String> {
     let mut res = reqwest::Client::new()
-        .get(FEED_URL)
+        .get(crate::test_env::feed_url().unwrap_or(FEED_URL))
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
@@ -52,15 +53,31 @@ async fn fetch_update_feed() -> Result<Option<UpdateFeed>, String> {
         }
     }
     let text = String::from_utf8(body).map_err(|_| "The update feed is not text".to_string())?;
-    parse_feed(&text).map(Some)
+    parse_feed_allowing(&text, crate::test_env::allow_local_http()).map(Some)
 }
 
 // --- 2. The Single Unified Fetch Command ---
 #[tauri::command]
 pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, String> {
+    if crate::test_env::no_update_check() {
+        // Nothing is asked of the network and nothing is announced.
+        return Ok(UpdateCheckResult {
+            app_update_available: false,
+            model_update_available: false,
+            dict_update_available: false,
+            remote_data: GistMetadata {
+                app: VersionInfo::default(),
+                model: VersionInfo::default(),
+                dictionary: RemoteDictionary {
+                    version: String::new(),
+                    updated_at: String::new(),
+                },
+            },
+        });
+    }
     let client = reqwest::Client::new();
     let mut remote_data: GistMetadata = client
-        .get(METADATA_URL)
+        .get(crate::test_env::metadata_url().unwrap_or(METADATA_URL))
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?
@@ -74,10 +91,12 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
     // App Check: from the release feed, not the gist (whose `app` entry only
     // serves copies that predate this). A feed that cannot be read is no
     // update -- never a reason to fail the model / dictionary check.
+    let mut feed_error = None;
     let feed = match fetch_update_feed().await {
         Ok(feed) => feed,
         Err(e) => {
             log::warn!("[Updater] No app update info: {}", e);
+            feed_error = Some(e);
             None
         }
     };
@@ -103,6 +122,13 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
         }
     }
 
+    crate::test_env::report_update(UpdateState::after_check(
+        feed_error.as_deref(),
+        feed.as_ref()
+            .filter(|_| app_update_available)
+            .map(|feed| feed.version.as_str()),
+    ));
+
     // Model Check
     let mut model_update_available =
         remote_data.model.latest_version != metadata.current_model_version;
@@ -125,8 +151,7 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
 
 /// %APPDATA%/<bundle id>/custom_dict.json
 pub fn dictionary_path(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_data_dir()
+    crate::app_dirs::data(app)
         .expect("Failed to resolve AppData directory")
         .join("custom_dict.json")
 }

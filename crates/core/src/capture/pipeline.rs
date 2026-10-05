@@ -98,30 +98,42 @@ impl ChatPipeline {
             };
             for event in events {
                 // Guard clause for the event loop using let-else
-                let Port5003Event::Chat(mut chat) = event;
-                if !self.keep_unknown_fields {
-                    chat.unknown_fields = HashMap::new();
-                }
-                // Display form of stickers/emotes, before anything (the
-                // translator included) sees the text.
-                chat.message = normalize_emotes(&chat.message);
-
-                // 5. Apply duplicate and blocking rules
-                match self.processor.process(&mut chat, &is_blocked) {
-                    ProcessAction::IgnoreDuplicate => continue,
-                    ProcessAction::UpdateBlockedMessage => {
-                        actions.push(PipelineAction::UpdateBlockedMessage(chat));
-                    }
-                    ProcessAction::EmitNewMessage => {
-                        chat.pid = assign_pid();
-                        self.processor.commit_new_message(&chat);
-                        actions.push(PipelineAction::EmitNewMessage(chat));
-                    }
-                }
+                let Port5003Event::Chat(chat) = event;
+                actions.extend(self.feed_chat(chat, &is_blocked, &mut assign_pid));
             }
         }
 
         actions
+    }
+
+    /// One decoded chat message through the rules every message gets: unknown
+    /// fields dropped (unless asked for), stickers/emotes in their display form,
+    /// then the duplicate and block rules. `None`: a duplicate, nothing to do.
+    /// Also how a replayed message (`--replay-chat`) enters, so it is treated
+    /// exactly like a captured one.
+    pub fn feed_chat(
+        &mut self,
+        mut chat: ChatMessage,
+        is_blocked: impl Fn(u64) -> bool,
+        mut assign_pid: impl FnMut() -> u64,
+    ) -> Option<PipelineAction> {
+        if !self.keep_unknown_fields {
+            chat.unknown_fields = HashMap::new();
+        }
+        // Display form of stickers/emotes, before anything (the
+        // translator included) sees the text.
+        chat.message = normalize_emotes(&chat.message);
+
+        // 5. Apply duplicate and blocking rules
+        match self.processor.process(&mut chat, &is_blocked) {
+            ProcessAction::IgnoreDuplicate => None,
+            ProcessAction::UpdateBlockedMessage => Some(PipelineAction::UpdateBlockedMessage(chat)),
+            ProcessAction::EmitNewMessage => {
+                chat.pid = assign_pid();
+                self.processor.commit_new_message(&chat);
+                Some(PipelineAction::EmitNewMessage(chat))
+            }
+        }
     }
 }
 
@@ -547,6 +559,103 @@ mod tests {
         );
         let texts: Vec<_> = got.iter().map(|c| c.message.as_str()).collect();
         assert_eq!(texts, ["seen live", "missed", "also missed"]);
+    }
+
+    // ---- feed_chat: one decoded message through the same rules as a captured one ----
+
+    fn chat_from(uid: u64, timestamp: u64, sequence_id: u64, text: &str) -> ChatMessage {
+        ChatMessage {
+            uid,
+            timestamp,
+            sequence_id,
+            message: text.to_string(),
+            nickname: "tester".to_string(),
+            ..ChatMessage::default()
+        }
+    }
+
+    fn emitted_chat(action: Option<PipelineAction>) -> ChatMessage {
+        match action {
+            Some(PipelineAction::EmitNewMessage(chat)) => chat,
+            Some(PipelineAction::UpdateBlockedMessage(_)) => {
+                panic!("expected a new message, got a block update")
+            }
+            None => panic!("expected a new message, got nothing"),
+        }
+    }
+
+    #[test]
+    fn a_fed_chat_is_emitted_with_the_next_pid() {
+        let mut pipeline = ChatPipeline::new();
+        let mut next = 40;
+        let chat = emitted_chat(pipeline.feed_chat(
+            chat_from(7, 1000, 1, "hello"),
+            |_| false,
+            || {
+                next += 1;
+                next
+            },
+        ));
+        assert_eq!(
+            (chat.pid, chat.message.as_str(), chat.is_blocked),
+            (41, "hello", false)
+        );
+    }
+
+    #[test]
+    fn a_fed_chat_seen_before_is_ignored() {
+        let mut pipeline = ChatPipeline::new();
+        let first = pipeline.feed_chat(chat_from(7, 1000, 1, "hello"), |_| false, || 1);
+        assert!(first.is_some());
+        let again = pipeline.feed_chat(chat_from(7, 1000, 1, "hello"), |_| false, || 2);
+        assert!(again.is_none());
+        // a different sequence id is a different message
+        assert!(pipeline
+            .feed_chat(chat_from(7, 1000, 2, "hello"), |_| false, || 3)
+            .is_some());
+    }
+
+    #[test]
+    fn a_fed_chat_from_a_blocked_user_is_emitted_blocked() {
+        let mut pipeline = ChatPipeline::new();
+        let chat =
+            emitted_chat(pipeline.feed_chat(chat_from(7, 1000, 1, "hi"), |uid| uid == 7, || 1));
+        assert!(chat.is_blocked);
+    }
+
+    #[test]
+    fn blocking_a_user_after_the_fact_updates_the_row_it_already_has() {
+        let mut pipeline = ChatPipeline::new();
+        let first = emitted_chat(pipeline.feed_chat(chat_from(7, 1000, 1, "hi"), |_| false, || 5));
+        assert_eq!(first.pid, 5);
+        match pipeline.feed_chat(chat_from(7, 1000, 1, "hi"), |uid| uid == 7, || 6) {
+            Some(PipelineAction::UpdateBlockedMessage(chat)) => {
+                assert_eq!((chat.pid, chat.is_blocked), (5, true));
+            }
+            _ => panic!("expected a block update for pid 5"),
+        }
+    }
+
+    #[test]
+    fn a_fed_chat_gets_emotes_normalized_and_unknown_fields_dropped() {
+        let mut pipeline = ChatPipeline::new();
+        let mut chat = chat_from(7, 1000, 1, "hi<sprite=3>");
+        chat.unknown_fields.insert("9".to_string(), vec![1, 2]);
+        let got = emitted_chat(pipeline.feed_chat(chat, |_| false, || 1));
+        assert_eq!(got.message, "hi[이모지]");
+        assert!(got.unknown_fields.is_empty());
+    }
+
+    #[test]
+    fn messages_without_identity_are_never_duplicates() {
+        // timestamp 0 and sequence id 0: the game's own "me" lines
+        let mut pipeline = ChatPipeline::new();
+        assert!(pipeline
+            .feed_chat(chat_from(7, 0, 0, "a"), |_| false, || 1)
+            .is_some());
+        assert!(pipeline
+            .feed_chat(chat_from(7, 0, 0, "a"), |_| false, || 2)
+            .is_some());
     }
 
     #[test]

@@ -4,8 +4,8 @@
 use super::ProgressPayload;
 use futures_util::StreamExt;
 use resonance_core::download::{
-    check_download_url, stall_error, DownloadCheck, ProgressThrottle, StallWatch, CONNECT_TIMEOUT,
-    STALL_TIMEOUT,
+    check_download_url_allowing, stall_error, DownloadCheck, ProgressThrottle, StallWatch,
+    CONNECT_TIMEOUT, STALL_TIMEOUT,
 };
 use resonance_types::UPDATE_CANCELLED;
 use std::fs;
@@ -49,7 +49,7 @@ pub async fn download_file_cancellable(
     expected_sha256: Option<&str>,
     cancel: Option<&AtomicBool>,
 ) -> Result<(), String> {
-    check_download_url(url)?;
+    check_download_url_allowing(url, crate::test_env::allow_local_http())?;
     if expected_sha256.is_none() {
         log::warn!(
             "[Download] No SHA-256 published for {}; integrity not verified",

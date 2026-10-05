@@ -1,12 +1,14 @@
 //! Tauri commands that act on the overlay window itself, and the popup
 //! windows that open beside it.
 
+use parking_lot::Mutex;
+use resonance_core::window::GrowMemory;
 use resonance_types::{is_popup_label, PopupKind};
 use std::time::Duration;
 use tauri::{
     AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
-use tauri_plugin_window_state::{StateFlags, WindowExt};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags, WindowExt};
 
 #[tauri::command]
 pub fn set_always_on_top(window: tauri::Window, on_top: bool) {
@@ -64,7 +66,8 @@ fn show_popup(app: &AppHandle, kind: PopupKind) -> Result<(), String> {
         Some(window) => window,
         None => create_popup(app, kind)?,
     };
-    if !window.is_visible().unwrap_or(false) {
+    // Without the plugin (`--no-window-state`) there is nothing to restore from.
+    if !crate::test_env::no_window_state() && !window.is_visible().unwrap_or(false) {
         // Size and place only: with `VISIBLE` the plugin would show it itself,
         // before we are ready.
         let _ = window.restore_state(StateFlags::SIZE | StateFlags::POSITION);
@@ -90,6 +93,9 @@ pub async fn open_popup(app: AppHandle, kind: PopupKind) -> Result<(), String> {
 /// one is instant (the cost is the idle web view of each). Later, off the main
 /// thread: building a window there can deadlock on Windows.
 pub fn prewarm_popups(app: AppHandle) {
+    if crate::test_env::no_popups() {
+        return;
+    }
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(2)).await;
         for kind in PopupKind::ALL {
@@ -106,6 +112,7 @@ pub fn prewarm_popups(app: AppHandle) {
 /// alive as windows) go with it.
 pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
     if window.label() == "main" && matches!(event, WindowEvent::CloseRequested { .. }) {
+        restore_grown_window(window.app_handle());
         for (label, popup) in window.app_handle().webview_windows() {
             if is_popup_label(&label) {
                 let _ = popup.destroy();
@@ -167,16 +174,62 @@ pub fn grow_window(
         work_area,
     )?;
     apply_rect(&window, grown);
+    GROWN_FROM.lock().remember(current);
     Some(current)
+}
+
+/// The window's outer rect in physical pixels (the bridge's `snapshot`).
+pub fn window_rect(window: &tauri::Window) -> Option<resonance_types::WindowRect> {
+    let pos = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+    Some(resonance_types::WindowRect {
+        x: pos.x,
+        y: pos.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
+/// What `grow_window` replaced and `restore_window` has not put back yet.
+static GROWN_FROM: Mutex<GrowMemory> = Mutex::new(GrowMemory::new());
+
+/// Puts the main window back to its size from before settings grew it, when the
+/// app is closing with settings still open: the window-state plugin saves what
+/// the window has at that moment, and the next start would open enlarged.
+pub fn restore_grown_window(app: &tauri::AppHandle) {
+    let Some(rect) = GROWN_FROM.lock().take() else {
+        return;
+    };
+    let Some(window) = app.get_window("main") else {
+        return;
+    };
+    apply_rect(&window, rect);
+    // The plugin's own save at close may already have run; save again, now
+    // that the window is back (it re-reads the live size).
+    if !crate::test_env::no_window_state() {
+        let _ = app.save_window_state(StateFlags::all());
+    }
 }
 
 /// Puts the window back where `grow_window` found it.
 #[tauri::command]
 pub fn restore_window(window: tauri::Window, rect: resonance_types::WindowRect) {
+    GROWN_FROM.lock().forget();
     apply_rect(&window, rect);
 }
 
+/// Puts the window at `rect`, an OUTER rect (what `outer_position` / `outer_size` report and what is
+/// remembered): `set_size` takes the inner size, so the frame is taken off first -- otherwise every
+/// restore made the window one frame bigger (the K18 runbook run: +22 x +13 px each time).
 fn apply_rect(window: &tauri::Window, rect: resonance_types::WindowRect) {
-    let _ = window.set_size(tauri::PhysicalSize::new(rect.width, rect.height));
+    let (frame_width, frame_height) = match (window.outer_size(), window.inner_size()) {
+        (Ok(outer), Ok(inner)) => (
+            outer.width.saturating_sub(inner.width),
+            outer.height.saturating_sub(inner.height),
+        ),
+        _ => (0, 0),
+    };
+    let (width, height) = resonance_core::window::inner_size_for(rect, frame_width, frame_height);
+    let _ = window.set_size(tauri::PhysicalSize::new(width, height));
     let _ = window.set_position(tauri::PhysicalPosition::new(rect.x, rect.y));
 }

@@ -54,6 +54,20 @@ pub fn title_bar_bg(overlay_opacity: f32) -> &'static str {
     }
 }
 
+/// A tab's text label: always shown on the active tab, otherwise only when the
+/// nav bar itself is wide enough (it also holds the right-hand buttons) -- below
+/// that the tabs are dots, so the strip never runs under the buttons. Never in
+/// compact mode.
+pub fn tab_label_class(active: bool, compact: bool) -> &'static str {
+    if active {
+        ""
+    } else if compact {
+        "hidden"
+    } else {
+        "hidden @min-[760px]:inline"
+    }
+}
+
 /// Tab bar background at this window opacity (normal mode; none by default).
 pub fn nav_bar_bg(overlay_opacity: f32) -> &'static str {
     if needs_backing(overlay_opacity) {
@@ -153,6 +167,21 @@ fn pct(alpha: f64) -> u32 {
 mod tests {
     use super::*;
     use crate::ui_types::Channel;
+
+    #[test]
+    fn a_tab_label_shows_by_the_nav_bars_width_not_the_windows() {
+        // The labels share the bar with five 40 px buttons, so what matters is the
+        // bar's own width: a container query, wide enough for all of them.
+        let class = tab_label_class(false, false);
+        assert!(
+            class.starts_with("hidden @min-[") && class.ends_with("]:inline"),
+            "{class}"
+        );
+        assert!(!class.contains(" min-["), "viewport query: {class}");
+        assert_eq!(tab_label_class(true, false), "");
+        assert_eq!(tab_label_class(false, true), "hidden");
+        assert_eq!(tab_label_class(true, true), "");
+    }
 
     const WHITE: Rgb = [255, 255, 255];
 

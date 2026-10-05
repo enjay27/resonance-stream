@@ -1,0 +1,7 @@
+{
+  "version": "0.6.1",
+  "notes": "- 업데이트를 받다가 0%에서 멈추던 문제를 고쳤어요. 이제 중간에 취소할 수 있고, 안 될 때는 직접 받는 버튼이 나와요.\n- 0.6.0에서 업데이트가 멈추는 분은 릴리스 페이지에서 새 프로그램 파일을 직접 받아 덮어써 주세요.\n- 직업 · 던전 이름 창과 자주 쓰는 메시지가 따로 열리는 창이 되어서 채팅을 가리지 않아요.\n- 자주 쓰는 메시지를 표에서 바로 고칠 수 있어요. 단축키도 칸을 누르고 키를 눌러 정해요.\n- 직업 · 던전 이름 창에 직업 9개와 전문화 이름이 들어갔어요. 일본어 공식 이름과 팬들이 쓰는 이름이 따로 나오고, 누르면 복사돼요.\n- 던전은 시즌별로 묶였어요. 지난 시즌은 접어 둘 수 있어요.\n- 위쪽 버튼이 검색, 직업 · 던전 이름, 자주 쓰는 메시지, 항상 위, 더보기 순서가 되었고, 컴팩트 모드에서도 같은 버튼과 닫기 버튼이 보여요.\n- 번역 표시 방식 메뉴가 마우스를 떼도 열려 있고, 다른 곳을 누르면 닫혀요.\n- 채팅 메시지 메뉴도 다른 곳을 누르면 닫혀요.\n",
+  "pub_date": "2026-10-03T20:01:11Z",
+  "url": "https://github.com/enjay27/resonance-stream/releases/download/v0.6.1/Resonance-Stream-v0.6.1.exe",
+  "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSMU94T1JsUHNGa0xVSEdVclNlZkZQUVdlVzFXTlFNS0I4ZmJ1S1MzMVhWVzBsNFdJeXJsR0twMnhJL1BnWlUrZVY3ell6Zk82YzFjU0FNdlVhRGw2d3pZOXMvTWFWamdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMDU3NTgyCWZpbGU6cmVzb25hbmNlLXN0cmVhbS5leGUJdmVyc2lvbjowLjYuMQoxemdrUElDc0NNU1RRaEl4aDJyVlZPU0l4Tno2VVJsdmNZTktOai9kUVd3TkpBcUNVRVcvSzIyVGJSa0J1OFhObVJDcVFhRVE2Z3NGQ3AwV2Fjd2JDUT09Cg=="
+}

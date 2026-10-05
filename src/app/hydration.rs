@@ -65,7 +65,13 @@ pub async fn hydrate_from_backend(signals: AppSignals) {
                                     |m| m.with_untracked(|m| m.channel),
                                     &filters,
                                     &limits,
-                                )
+                                );
+                                // Translations that beat their row to the store.
+                                for (pid, text) in store.take_held_translations() {
+                                    if let Some(row) = store.get(pid) {
+                                        row.update(|c| c.translated = Some(text));
+                                    }
+                                }
                             });
                         }
                     }

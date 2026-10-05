@@ -176,9 +176,14 @@ def capture(command: list[str], fixture: str | None = None, timeout: int = 120) 
         return 0, (FIXTURES / fixture).read_text(encoding="utf-8")
     # `npx` is `npx.CMD` on Windows: without a shell only the resolved path starts.
     command = [shutil.which(command[0]) or command[0], *command[1:]]
+    # No colour codes: gh (and others) print them into a pipe when CLICOLOR_FORCE is set, and
+    # that breaks JSON parsing.
+    env = {k: v for k, v in os.environ.items() if k not in ("CLICOLOR_FORCE", "GH_FORCE_TTY")}
+    env.update(NO_COLOR="1", CLICOLOR="0")
     try:
         done = subprocess.run(
-            command, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace"
+            command, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace",
+            env=env,
         )
     except FileNotFoundError:
         return 127, f"not found: {command[0]}"

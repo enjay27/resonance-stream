@@ -16,6 +16,8 @@ notebook does for the new version, are never parsed). Environment:
   FAKE_APP_STALL_AFTER    seconds of silence it takes for a stalled download (default 3)
   FAKE_APP_SKIP_VERIFY=1  a bug to catch: accepts any download
   FAKE_APP_TOUCH_REAL=1   a bug to catch: also writes to the real %APPDATA% config
+  FAKE_APP_IFACE_LINE     what the sniffer says when it is on (no --no-capture): the text of its system-event,
+                          e.g. "Auto-Targeting Network Interface: 192.168.0.23 (default route)"
   FAKE_APP_BAD_STATUS=1   a bug to catch: a status file without pid and data_dir
 """
 from __future__ import annotations
@@ -315,6 +317,10 @@ def main() -> int:
     app.status["ready"] = True
     app.write_status()
     app.connect_bridge()
+    line = os.environ.get("FAKE_APP_IFACE_LINE")
+    if line and "no-capture" not in flags:
+        level = "error" if line.startswith("NETWORK_ERROR") else "info"
+        app.event("system-event", {"pid": 1, "level": level, "source": "Sniffer", "message": line})
     app.announced_url = None if "no-update-check" in flags else app.check()
     while time.monotonic() < deadline and not app.stop:
         if app.bridge is None:

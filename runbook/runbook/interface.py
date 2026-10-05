@@ -93,6 +93,32 @@ def _is_virtual(adapter: Adapter, keywords: list[str]) -> bool:
     return adapter.virtual or looks_virtual(adapter.alias, keywords) or looks_virtual(adapter.description, keywords)
 
 
+def is_virtual(adapter: Adapter, keywords: list[str]) -> bool:
+    """Is this adapter one the app does not trust (the OS says virtual, or its name has a known VPN keyword)?"""
+    return _is_virtual(adapter, keywords)
+
+
+def live_adapters(adapters: list[Adapter]) -> list[Adapter]:
+    """The adapters that are up and have a real address (not the loopback)."""
+    return [a for a in adapters if a.status == "Up" and a.ip and not a.ip.startswith("127.")]
+
+
+def classify(routes: list[Route], adapters: list[Adapter], keywords: list[str]) -> str:
+    """Which K4 situation this machine is in right now:
+    `offline` (no default route or no live adapter: K4-3), `vpn` (the default route runs through a virtual adapter:
+    K4-2), `two` (two or more live physical adapters: K4-1), `single` (none of those: nothing to conclude)."""
+    live = live_adapters(adapters)
+    route_ip = default_route_ip(routes)
+    if route_ip is None or not live:
+        return "offline"
+    route_adapter = _adapter_of(route_ip, adapters)
+    if route_adapter is not None and _is_virtual(route_adapter, keywords):
+        return "vpn"
+    if len([a for a in live if not _is_virtual(a, keywords)]) >= 2:
+        return "two"
+    return "single"
+
+
 Check = tuple[str, str, str]  # (title, "pass" | "fail" | "skip", evidence)
 
 

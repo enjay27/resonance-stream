@@ -40,6 +40,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(capture_spike, "MAX_GAP_S", 0.02)
     monkeypatch.setattr(capture_spike, "GRACE_S", 1.5)
     monkeypatch.setattr(capture_spike, "BURST_WAIT_S", 15)
+    monkeypatch.setattr(capture_spike, "RESTART_WAIT_S", 6)  # a dead restart is waited for this long, not 90 s
     monkeypatch.setattr(capture_spike, "IDLE_WAIT_S", 12)  # the stand-in watchdog trips every ~3.3 s and its log throttle holds 6 s
     monkeypatch.setenv("FAKE_APP_WATCHDOG", "0.3,3,6")
     monkeypatch.setenv("RUNBOOK_DRYRUN", "1")
@@ -100,7 +101,8 @@ def test_a_copy_without_its_firewall_rule_is_a_skip_that_says_how(env, tmp_path,
     assert got["CS-loopback"].status == "skip" and "--add-firewall-rule" in got["CS-loopback"].evidence, rec.report()
 
 
-DEEP = ("CS-loopback-burst", "CS-loopback-bytes", "CS-watchdog", "CS-log-dedup", "CS-vpn-hint", "CS-restart-nodup")
+DEEP = ("CS-loopback-burst", "CS-loopback-bytes", "CS-watchdog", "CS-log-dedup", "CS-vpn-hint", "CS-restart-nodup",
+        "CS-loopback-sniffer-restart", "CS-loopback-after-restart")
 
 
 def test_the_burst_idle_and_restart_rows_pass_on_a_capture_that_keeps_its_promises(env, tmp_path):
@@ -116,6 +118,7 @@ def test_the_burst_idle_and_restart_rows_pass_on_a_capture_that_keeps_its_promis
     ("no-throttle", {"CS-log-dedup"}),
     ("vpn-mismatch", {"CS-vpn-hint"}),
     ("no-remember", {"CS-restart-nodup"}),
+    ("restart-dead", {"CS-loopback-sniffer-restart"}),
 ])
 def test_each_broken_promise_of_the_deep_rows_is_caught(env, tmp_path, monkeypatch, bug, failing):
     monkeypatch.setenv("FAKE_APP_SNIFF_BUG", bug)

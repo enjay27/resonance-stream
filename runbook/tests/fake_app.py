@@ -47,7 +47,8 @@ notebook does for the new version, are never parsed). Environment:
   FAKE_APP_SNIFF_BUG      a bug to catch in the capture: "drop-after-2" publishes only the first two chats it reads,
                           "never" does not start the sniffer at all, "no-watchdog" never notices a silent game, "no-throttle" writes the
                           watchdog's line on every trip, "vpn-mismatch" names the VPN in the log but not on the badge, "no-remember" does
-                          not teach the capture the chat reloaded from the logs (a re-sent line is shown again)
+                          not teach the capture the chat reloaded from the logs (a re-sent line is shown again), "restart-dead" takes
+                          `restart-sniffer` and never starts the sniffer again
   FAKE_APP_READY_DELAY    seconds after start before the app takes a command (the real one holds a command until its start-up is done,
                           which takes ~20 s with the sniffer on); `quit` is taken at once
   FAKE_APP_WATCHDOG       "check,trip,window" seconds of the stand-in watchdog: how often it looks, how long a silence trips it, how long
@@ -265,6 +266,7 @@ class App:
         self.use_translation = False
         self.catch_up_limit = 100
         self.last_traffic = time.monotonic()
+        self.sniff_gen, self.sniff_sock, self.watchdog_started = 0, None, False  # restart-sniffer ends the old reader (a newer generation)
         self.started_at = time.monotonic()
         self.tr_seq = 0
         # the popup windows (window.rs, as understood)
@@ -323,9 +325,30 @@ class App:
             return
         self.event("sniffer-state", {"state": "Pending", "message": "Listening for game traffic...", "seq": 1})
         self.last_traffic = time.monotonic()
-        threading.Thread(target=self._sniff, args=(ip,), daemon=True).start()
-        if os.environ.get("FAKE_APP_SNIFF_BUG") != "no-watchdog":
+        self.sniff_gen += 1
+        threading.Thread(target=self._sniff, args=(ip, self.sniff_gen), daemon=True).start()
+        if os.environ.get("FAKE_APP_SNIFF_BUG") != "no-watchdog" and not self.watchdog_started:
+            self.watchdog_started = True
             threading.Thread(target=self._watchdog, daemon=True).start()
+
+    def restart_sniffer(self) -> None:
+        """`restart_sniffer_command`, as understood: the old worker ends, 0.5 s for the OS to release the socket, then a fresh one."""
+        self.sniff_gen += 1  # the old reader ends at its next read
+        old, self.sniff_sock = self.sniff_sock, None
+        for call in ("shutdown", "close"):
+            try:
+                getattr(old, call)(*((socket.SHUT_RDWR,) if call == "shutdown" else ()))
+            except (OSError, AttributeError, TypeError):
+                pass
+        if os.environ.get("FAKE_APP_SNIFF_BUG") == "restart-dead":  # a bug to catch: acked, never started again
+            return
+
+        def again() -> None:
+            time.sleep(0.5)
+            if not self.stop:
+                self.start_sniffer()
+
+        threading.Thread(target=again, daemon=True).start()
 
     def _watchdog(self) -> None:
         """sniffer/mod.rs spawn_watchdog + the throttled system log, as understood: a silence longer than `trip` says so (log + red badge),
@@ -353,21 +376,25 @@ class App:
             self.event("sniffer-state", {"state": "Error", "message": badge, "seq": 2})
             self.last_traffic = now
 
-    def _sniff(self, ip: str) -> None:
+    def _sniff(self, ip: str, gen: int) -> None:
         deadline = time.monotonic() + 60
         sock = None
-        while sock is None and time.monotonic() < deadline:
+        while sock is None and time.monotonic() < deadline and gen == self.sniff_gen:
             try:
                 sock = socket.create_connection((ip, 5003), timeout=2)
             except OSError:
                 time.sleep(0.3)
         if sock is None:
             return
+        self.sniff_sock = sock
         sock.settimeout(None)
         buf, count = b"", 0
         while True:
-            data = sock.recv(65536)
-            if not data:
+            try:
+                data = sock.recv(65536)
+            except OSError:
+                return
+            if not data or gen != self.sniff_gen:
                 return
             buf += data
             while len(buf) >= 6 and len(buf) >= int.from_bytes(buf[:4], "big"):
@@ -816,6 +843,9 @@ class App:
             ack()
         elif command == "get-chat-history":
             ack(data=[dict(m) for m in self.history])
+        elif command == "restart-sniffer":
+            self.restart_sniffer()
+            ack()
         elif command == "clear-history":
             if os.environ.get("FAKE_APP_CHAT_BUG") != "clear-keeps":
                 self.history.clear()

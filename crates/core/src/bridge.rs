@@ -107,6 +107,9 @@ pub enum Command {
     GetChatHistory,
     /// Empty the backend's chat and system logs (`clear_chat_history`, the clear button).
     ClearHistory,
+    /// Stop the sniffer and start a fresh one, as the network troubleshooter's buttons do (`restart_sniffer_command`). The ack
+    /// comes at once; the restart runs on a thread of its own and shows as `sniffer-state` events.
+    RestartSniffer,
     /// Start the translator as the UI does once the model and server are in place (`launch_translator`; idempotent). With
     /// `--llama-url` it uses the stand-in server and needs neither.
     StartTranslator,
@@ -228,6 +231,7 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
         }
         "get-chat-history" => Command::GetChatHistory,
         "clear-history" => Command::ClearHistory,
+        "restart-sniffer" => Command::RestartSniffer,
         "start-translator" => Command::StartTranslator,
         "block-user" | "unblock-user" => {
             // The game's sender ids are whole numbers, and 0 means "no sender".
@@ -486,6 +490,20 @@ mod tests {
         assert_eq!(
             parse("clear-history", r#"{"id":"c"}"#).map(|r| r.command),
             Ok(Command::ClearHistory)
+        );
+    }
+
+    #[test]
+    fn restart_sniffer_is_a_plain_command() {
+        // What the network troubleshooter's buttons invoke (`restart_sniffer_command`); it takes no argument.
+        assert_eq!(
+            parse("restart-sniffer", r#"{"id":"r"}"#).map(|r| r.command),
+            Ok(Command::RestartSniffer)
+        );
+        // An id is still required, as for every command.
+        assert_eq!(
+            parse("restart-sniffer", "{}").unwrap_err(),
+            CommandError::BadId
         );
     }
 

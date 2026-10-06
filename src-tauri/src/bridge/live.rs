@@ -244,6 +244,11 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             crate::commands::clear_chat_history(app.state());
             answer(Ok(()));
         }
+        Command::RestartSniffer => {
+            // Runs on a thread of its own (a pause for the OS to release the socket): ack now, the test waits for `sniffer-state`.
+            crate::services::sniffer::restart_sniffer_command(app.clone());
+            answer(Ok(()));
+        }
         Command::OpenPopup { kind } => {
             // `open_popup` is async on purpose (a window made from a synchronous command can deadlock on Windows):
             // run it on the async runtime and answer when the window is shown.

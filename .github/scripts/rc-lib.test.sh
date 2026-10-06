@@ -87,6 +87,16 @@ eq "smoke test has no pull_request trigger" "0" "$(grep -c '^  pull_request' "$w
 eq "smoke test has no push trigger" "0" "$(grep -c '^  push' "$workflows/bridge-smoke.yml")"
 eq "stable release calls the smoke test once" "1" "$(grep -c 'uses: \./\.github/workflows/bridge-smoke\.yml' "$workflows/release.yml")"
 eq "stable release waits for the smoke test" "1" "$(grep -c 'needs: \[check, build, smoke\]' "$workflows/release.yml")"
+# Decision D-3: the pipeline steps keep running after one fails (each has its own data folder), but the job still fails, so a release is blocked.
+smoke_steps() { # smoke_steps: "<name> <guarded|bare>" for every "over the bridge" step of bridge-smoke.yml
+  awk '/^      - name: /{ if (n) print n, (g ? "guarded" : "bare"); n=""; g=0 }
+       /^      - name: .*over the bridge/{ n=$0; sub(/^      - name: /, "", n); gsub(/ /, "_", n) }
+       n && /^        if: \$\{\{ !cancelled\(\) \}\}$/{ g=1 }
+       END{ if (n) print n, (g ? "guarded" : "bare") }' "$workflows/bridge-smoke.yml"
+}
+eq "smoke test has eight pipeline steps" "8" "$(smoke_steps | wc -l | tr -d ' ')"
+eq "every pipeline step runs even after another failed" "0" "$(smoke_steps | grep -c ' bare$')"
+eq "smoke test never swallows a failure" "0" "$(grep -c '^ *continue-on-error' "$workflows/bridge-smoke.yml")"
 eq "candidate notes name the test flags" "1" "$(grep -c "printf '5\. .*--data-dir" "$workflows/release-candidate.yml")"
 
 echo

@@ -4,7 +4,7 @@
 
 ## Now — 2026-10-06
 
-**Where things stand.** `main` has the test bridge's packet-limit fix (#203), reqwest 0.12 (#199), golden tests (#201), weekly mutation tests (#202) and the English review documents (#204-#206). Roadmap stages S0-S7 are in [`.memory/roadmap/refactor.md`](.memory/roadmap/refactor.md). S0a (this index) is done; **no other stage is started**, each waits for Kade's go. Roadmap and architecture work continues in a new session.
+**Where things stand.** `main` has the test bridge's packet-limit fix (#203), reqwest 0.12 (#199), golden tests (#201), weekly mutation tests (#202) and the English review documents (#204-#206). Roadmap stages S0-S7 are in [`.memory/roadmap/refactor.md`](.memory/roadmap/refactor.md). S0a (this index) and S0b (smoke steps independent, PR open) are done; order agreed with Kade: S0c, S1a-c, S3a, S2c, S2a, S2b, S2d, S3b, S3c, S4-S7, one PR at a time. Roadmap and architecture work continues in a new session.
 
 **Written but not verified**
 - The packet-limit fix and row `CP-big-ack` on the real app: a manual `bridge-smoke.yml` run on `main` reads them (S0c). Whether the Node broker (aedes) has a packet limit of its own is open.
@@ -14,7 +14,7 @@
 - Older things written but never run on Windows: [`active-issues/unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md), sorted by how to check them in [`checklist-triage.md`](.memory/active-issues/checklist-triage.md); the human-only ones are Kade's.
 
 **Open decisions (Kade).** K8 `<bos>` count; K16 how 一人 / 二人 / 一人前 are read; what a leaked `<start_of_turn>model` should become; the update-check result (O-1..O-5 in [`docs/decisions.md`](docs/decisions.md)).
-**Decided, not done.** Local and Beginner tab-limit default 1000 (S2c); smoke steps keep running after one fails but a release needs every step green (S0b).
+**Decided, not done.** Local and Beginner tab-limit default 1000 (S2c).
 **Known defects, not fixed.** A `[P0]` typed in chat collides with a real placeholder; a leaked `<start_of_turn>model` leaves the word "model"; six mutation gaps in `text.rs` (`TranslationCache` eviction order, `is_empty`, `Dictionary` accessors). Pinned by golden tests; see W-11, W-12, A-2.4 in the review.
 **Top risks (review).** The self-update has no rollback (W-1); the admin app runs an unchecked `llama-server.exe` (W-2); chat is not archived on some paths (W-4). Stages S1-S3.
 

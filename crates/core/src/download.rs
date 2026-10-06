@@ -213,6 +213,29 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     })
 }
 
+/// `<path>.part`: where something is built before it is moved to `path`.
+pub fn part_path(path: &Path) -> std::path::PathBuf {
+    let mut part = path.as_os_str().to_owned();
+    part.push(".part");
+    std::path::PathBuf::from(part)
+}
+
+/// Moves a finished staging folder to `dest`, so a folder that is there at all is a whole one.
+/// Whatever a broken earlier attempt left at `dest` is replaced; nothing is touched when
+/// `staged` is missing.
+pub fn publish_dir(staged: &Path, dest: &Path) -> io::Result<()> {
+    if !staged.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("nothing was staged at {}", staged.display()),
+        ));
+    }
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)?;
+    }
+    std::fs::rename(staged, dest)
+}
+
 /// The update's swap: the running exe moves to `old`, the downloaded one takes its place.
 /// A stale `old` from an earlier update is dropped first. If the second rename fails the
 /// first one is undone, so the app is never left without an exe at `current`; the error
@@ -456,6 +479,62 @@ mod tests {
             "the download is kept for another try"
         );
         assert!(!current.exists() && !old.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- staged folders: an install appears whole or not at all (W-3) -----
+
+    #[test]
+    fn a_staging_folder_sits_beside_the_real_one() {
+        let dest = std::path::Path::new("bin").join("ai-server");
+        assert_eq!(
+            part_path(&dest),
+            std::path::Path::new("bin").join("ai-server.part")
+        );
+    }
+
+    #[test]
+    fn publish_dir_moves_the_finished_folder_into_place() {
+        let dir = temp_dir("publish-ok");
+        let (staged, dest) = (dir.join("ai-server.part"), dir.join("ai-server"));
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(staged.join("llama-server.exe"), b"exe").unwrap();
+        std::fs::write(staged.join("ggml.dll"), b"dll").unwrap();
+        publish_dir(&staged, &dest).unwrap();
+        assert_eq!(
+            std::fs::read(dest.join("llama-server.exe")).unwrap(),
+            b"exe"
+        );
+        assert_eq!(std::fs::read(dest.join("ggml.dll")).unwrap(), b"dll");
+        assert!(!staged.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_dir_replaces_what_an_earlier_broken_install_left() {
+        let dir = temp_dir("publish-replace");
+        let (staged, dest) = (dir.join("ai-server.part"), dir.join("ai-server"));
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(staged.join("llama-server.exe"), b"new").unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("server_temp.zip"), b"leftover").unwrap();
+        publish_dir(&staged, &dest).unwrap();
+        assert_eq!(
+            std::fs::read(dest.join("llama-server.exe")).unwrap(),
+            b"new"
+        );
+        assert!(!dest.join("server_temp.zip").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_dir_leaves_the_destination_alone_when_nothing_was_staged() {
+        let dir = temp_dir("publish-missing");
+        let (staged, dest) = (dir.join("ai-server.part"), dir.join("ai-server"));
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("keep.txt"), b"keep").unwrap();
+        assert!(publish_dir(&staged, &dest).is_err());
+        assert_eq!(std::fs::read(dest.join("keep.txt")).unwrap(), b"keep");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

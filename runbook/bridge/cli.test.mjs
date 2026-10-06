@@ -4,9 +4,10 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import mqtt from "mqtt";
 
-const CLI = new URL("./cli.mjs", import.meta.url).pathname;
+const CLI = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 const SAMPLE = '{"delay_ms":0,"channel":"WORLD","nickname":"a","level":1,"text":"x"}\n';
 
 function serve(out) {
@@ -80,7 +81,7 @@ test("run replay-chat does the whole test by itself and exits 0 (a stand-in app)
   const dir = mkdtempSync(join(tmpdir(), "bridge-run-"));
   const sample = join(dir, "sample.jsonl");
   writeFileSync(sample, '{"delay_ms":0,"channel":"WORLD","nickname":"a","level":1,"text":"x"}\n{"delay_ms":200,"channel":"GUILD","nickname":"b","level":1,"text":"y<sprite=1>"}\n');
-  const fake = new URL("./fake_app.mjs", import.meta.url).pathname;
+  const fake = fileURLToPath(new URL("./fake_app.mjs", import.meta.url));
   const args = [CLI, "run", "replay-chat", "--exe", process.execPath, "--exe-arg", fake, "--sample", sample, "--work", join(dir, "work")];
   const ok = spawnSync(process.execPath, args, { encoding: "utf8", env: { ...process.env, FAKE_APP_LEAD_IN_MS: "20" }, timeout: 60000 });
   assert.equal(ok.status, 0, ok.stderr);

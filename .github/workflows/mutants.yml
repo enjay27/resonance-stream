@@ -1,0 +1,81 @@
+name: Mutation testing
+
+# `cargo mutants`: changes the code one small step at a time (`+` to `-`, a condition
+# flipped, a body replaced by a default) and runs the tests; a change the tests do not
+# notice ("missed") is a spot where a real bug would go unseen.
+#
+# Not part of ci.yml, like audit.yml: it takes long, and a list of missed spots must
+# never hold up auto-merge. It runs every Monday and on demand, and when this file
+# changes (so a change to the job is tried by the PR that makes it). The run is green
+# when the tool ran; the missed spots are in the run's summary and in the
+# `mutants-out` artifact -- reading them is the to-do, and each one is a test to
+# write (test first, as everywhere in this repo), not a failed change. The run is red
+# only when the tool itself broke: the unmutated tests fail (exit 4) or it was misused.
+#
+# Scope: one file of resonance-core at a time (default text.rs, the translation text
+# processing, 87 mutants, 4 minutes on a laptop with `-j 2`); a whole crate is far longer.
+# Run another file by hand with the `file` input.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/mutants.yml'
+  schedule:
+    - cron: '37 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      file:
+        description: 'File of resonance-core to mutate'
+        default: 'crates/core/src/text.rs'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  MUTATE_FILE: ${{ inputs.file || 'crates/core/src/text.rs' }}
+
+jobs:
+  mutants:
+    name: cargo mutants
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
+          cache-bin: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+      - name: cargo mutants
+        run: |
+          set +e
+          cargo mutants -p resonance-core --file "$MUTATE_FILE" --no-shuffle -j 2 --output mutants-run
+          status=$?
+          echo "cargo-mutants exit status: $status"
+          {
+            echo "### Mutation testing: \`$MUTATE_FILE\`"
+            echo
+            for kind in caught missed timeout unviable; do
+              f="mutants-run/mutants.out/$kind.txt"
+              echo "- $kind: $( [ -f "$f" ] && wc -l < "$f" || echo 0 )"
+            done
+            echo
+            echo "Missed (a change the tests did not notice):"
+            echo '```'
+            cat mutants-run/mutants.out/missed.txt 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 0 all caught, 2 some missed, 3 some timed out: the tool ran, the result is
+          # the report. Anything else (1 bad arguments, 4 the unmutated tests fail, ...)
+          # is a broken run.
+          case "$status" in 0|2|3) exit 0 ;; *) exit "$status" ;; esac
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-out
+          path: mutants-run/mutants.out
+          if-no-files-found: ignore

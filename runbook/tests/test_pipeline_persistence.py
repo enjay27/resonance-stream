@@ -31,6 +31,7 @@ def env(monkeypatch, tmp_path):
     exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("FAKE_APP_PY", str(HERE / "fake_app.py"))
     monkeypatch.setenv("FAKE_APP_LIFETIME", "90")
+    monkeypatch.setenv("FAKE_APP_VERSION", persistence.workspace_version() or "0.0.0")
     monkeypatch.setenv("FAKE_APP_LEAD_IN_MS", "50")
     yield exe
 
@@ -42,7 +43,8 @@ def run(exe, tmp_path):
     return rec, {r.check: r for r in rec.rows}
 
 
-CHECKS = ("CP-archive", "CP-config", "CP-reload", "CP-block-reload", "CP-pid")
+CHECKS = ("CP-archive", "CP-config", "CP-reload", "CP-block-reload", "CP-pid", "CP-version",
+          "CP-retention", "CP-retention-served", "CP-busy-world")
 
 
 def test_an_app_that_keeps_its_promises_passes_every_row(env, tmp_path):
@@ -59,9 +61,19 @@ def test_an_app_that_keeps_its_promises_passes_every_row(env, tmp_path):
     ("no-reload", {"CP-reload"}),
     ("pid-restart", {"CP-pid"}),
     ("unflagged-reload", {"CP-block-reload"}),
+    ("no-retention", {"CP-retention", "CP-retention-served"}),
+    ("retention-takes-all", {"CP-retention"}),
+    ("global-limit", {"CP-busy-world"}),
 ])
 def test_each_broken_promise_is_caught(env, tmp_path, monkeypatch, bug, failing):
     monkeypatch.setenv("FAKE_APP_PERSIST_BUG", bug)
     rec, got = run(env, tmp_path)
     caught = {c for c in CHECKS if c in got and got[c].status == "fail"}
     assert failing <= caught, f"{bug}: wanted {failing} among the failures, got {caught}\n{rec.report()}"
+
+
+def test_a_stale_exe_is_told_by_its_version(env, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_APP_VERSION", "0.0.1")
+    rec, got = run(env, tmp_path)
+    assert got["CP-version"].status == "fail", rec.report()
+    assert persistence.workspace_version() in got["CP-version"].evidence, got["CP-version"].evidence

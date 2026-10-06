@@ -42,6 +42,7 @@ def build(name: str, rec: Recorder, exe, args):
 
 
 def main(argv: list[str] | None = None) -> int:
+    common.utf8_output()
     parser = argparse.ArgumentParser(prog="python -m runbook.run")
     parser.add_argument("pipeline", choices=sorted(PIPELINES))
     parser.add_argument("--exe", default=None, help="a test-env build of the app (default: RUNBOOK_TEXT_LOCAL_EXE, "

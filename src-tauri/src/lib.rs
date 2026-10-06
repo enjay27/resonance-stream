@@ -78,6 +78,10 @@ pub fn run() {
             });
             let state = app.state::<AppState>();
 
+            // Before anything that emits, so the bridge hears all of it: the translator's first states, the first system
+            // messages (it queues until connected). Its commands wait for `mark_ready` below.
+            bridge::start(&handle);
+
             // Old daily logs past the retention setting go before the reload.
             crate::io::prune_chat_logs(&handle);
 
@@ -144,8 +148,6 @@ pub fn run() {
 
             crate::tray::setup_tray(app)?;
 
-            // Before anything that emits, so the bridge hears it (it queues until connected).
-            bridge::start(&handle);
             test_env::mark_ready(&handle);
             crate::services::sniffer::replay::start(handle.clone());
             Ok(())

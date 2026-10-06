@@ -4,7 +4,8 @@ The app is started with `--llama-url` at a stand-in llama-server (`runbook/llama
 the translator is started over the bridge (`start-translator`), Japanese chat is replayed, and what the app does is read from its events and
 from what the stand-in received. Rows:
 
-  TS-ready      the translator goes Starting -> Loading Model -> Active, and only once the server's /health says it is up
+  TS-ready      the translator goes Starting -> Loading Model -> Active, asking /health until it says it is up (the app starts the
+                translator itself at start-up when `use_translation` is on; `start-translator` is then a no-op)
   TS-translate  a Japanese line gets its translation (`translation-event`, and the row in the chat log); a line that is not Japanese is not sent
   TS-prompt     what the server was sent is one user turn holding the line, ends by opening the model's turn, and has the sampling settings
                 (stream off, stop tokens, an output limit). Also reported, not judged: how many literal `<bos>` the prompt text holds (K8)
@@ -88,8 +89,9 @@ class TranslatorStub:
                                     ("translator-state", {"payload.state": "Loading Model"}),
                                     ("translator-state", {"payload.state": "Active"})], timeout=90)
             took = time.monotonic() - began
-            ok = took >= LOADING_S - 0.5 and "GET /health" in stub.hits
-            detail = f"Active after {took:.1f} s (the server said 503 for {LOADING_S:.0f} s); states {self.states(events)}"
+            ok = stub.health_503 >= 1 and "GET /health" in stub.hits
+            detail = (f"Active; the app asked /health {stub.hits.count('GET /health')} times and was told 503 {stub.health_503} times "
+                      f"before the stand-in was up ({LOADING_S:.0f} s after the first ask); {took:.1f} s since the command; states {self.states(events)}")
         except RuntimeError as e:
             ok, detail = False, f"{e}; states {self.states(events)}"
         self.rec.auto("TS-ready", "the translator goes Starting -> Loading Model -> Active, and waits for the server's /health", ok, detail)

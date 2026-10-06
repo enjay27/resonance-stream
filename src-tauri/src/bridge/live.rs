@@ -17,7 +17,7 @@ use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::ipc::{Invoke, InvokeBody};
 use tauri::{AppHandle, Listener, Manager, Runtime};
 
@@ -148,6 +148,12 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             return publish(answer.0, answer.1);
         }
     };
+    // The bridge starts before the rest of start-up, so that it hears every event (the translator's first states,
+    // the first system messages). A command must not run on a half-started app: wait for `ready`.
+    let waited = Instant::now();
+    while !crate::test_env::is_ready() && waited.elapsed() < Duration::from_secs(60) {
+        std::thread::sleep(Duration::from_millis(25));
+    }
     log::info!("[Bridge] Command {:?}", request.command);
     let answer = |result: Result<(), String>| {
         let text = match &result {

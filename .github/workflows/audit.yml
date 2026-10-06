@@ -1,0 +1,34 @@
+name: Dependency audit
+
+# `cargo audit`: known vulnerabilities (RustSec advisories) in the locked dependencies.
+# The app downloads and starts executables, so a vulnerable dependency matters here.
+# Not part of ci.yml: a new advisory can turn this red on a day nobody touched the code,
+# and that must not hold up auto-merge. It runs when Cargo.lock changes, every Monday,
+# and on demand; a red run is a to-do (update the crate, or say in `audit.toml` why an
+# advisory does not apply, with the reason), not a failed change.
+on:
+  pull_request:
+    paths:
+      - 'Cargo.lock'
+      - '**/Cargo.toml'
+      - '.github/workflows/audit.yml'
+      - 'audit.toml'
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # Warnings (unmaintained, yanked crates) are printed but do not fail the run;
+      # a vulnerability does.
+      - run: cargo audit --file Cargo.lock

@@ -11,7 +11,10 @@ name: Bridge smoke test
 # it builds a test-env exe of the tagged commit; the shipped exe has no bridge, so it cannot be driven) when a release tag is pushed.
 # No pull request, no push to a branch and no release candidate starts it (`rc-lib.test.sh` pins that). `workflow_dispatch` is a
 # manual run on a branch, for looking into a red row. Every step is a gate: a failing row fails the job (nothing here is
-# continue-on-error; the eight pipelines passed on the hosted runner, 2026-10-06).
+# continue-on-error; the eight pipelines passed on the hosted runner, 2026-10-06). The eight pipeline steps are independent
+# (each has its own data folder), so one red step no longer hides the rest: they run unless the run is cancelled
+# (`if: ${{ !cancelled() }}`) and the job still ends red, which blocks `release.yml` (decision D-3). Setup and build steps
+# are not guarded: without an exe there is nothing to run.
 on:
   workflow_dispatch:
   workflow_call:
@@ -92,43 +95,51 @@ jobs:
           npm test
 
       - name: replay-chat over the bridge
+        if: ${{ !cancelled() }}
         run: >
           node runbook/bridge/cli.mjs run replay-chat
           --exe target/release/resonance-stream.exe
           --work "$env:RUNNER_TEMP/bridge-replay"
 
       - name: window-restore over the bridge
+        if: ${{ !cancelled() }}
         working-directory: runbook
         run: python -m runbook.run window-restore --exe ../target/release/resonance-stream.exe
 
       # Does the sniffer see chat that this same machine sends? Tried on the LAN address and on 127.0.0.1. The runner is
       # disposable, so it may make the firewall rule the app wants for the copy it starts.
       - name: capture-spike over the bridge
+        if: ${{ !cancelled() }}
         working-directory: runbook
         run: python -m runbook.run capture-spike --exe ../target/release/resonance-stream.exe --add-firewall-rule
 
       # What the backend does with chat lines: dedupe, block list, chat log (`replay-chat` + the chat commands).
       - name: chat-rules over the bridge
+        if: ${{ !cancelled() }}
         working-directory: runbook
         run: python -m runbook.run chat-rules --exe ../target/release/resonance-stream.exe
 
       # What survives a restart: chat log, block list, pids.
       - name: persistence over the bridge
+        if: ${{ !cancelled() }}
         working-directory: runbook
         run: python -m runbook.run persistence --exe ../target/release/resonance-stream.exe
 
       # The model download's rules against a local mock server.
       - name: download-integrity over the bridge
+        if: ${{ !cancelled() }}
         working-directory: runbook
         run: python -m runbook.run download-integrity --exe ../target/release/resonance-stream.exe
 
       # The translate path against a stand-in llama-server.
       - name: translator-stub over the bridge
+        if: ${{ !cancelled() }}
         working-directory: runbook
         run: python -m runbook.run translator-stub --exe ../target/release/resonance-stream.exe
 
       # The popup windows (real windows on the runner).
       - name: popups over the bridge
+        if: ${{ !cancelled() }}
         working-directory: runbook
         run: python -m runbook.run popups --exe ../target/release/resonance-stream.exe
 

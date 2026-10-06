@@ -44,7 +44,8 @@ class Serve:
         self.out.parent.mkdir(parents=True, exist_ok=True)
         self._proc = subprocess.Popen(
             [node, str(CLI), "serve", "--port", str(port), "--out", str(self.out)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=BRIDGE_DIR)
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+            cwd=BRIDGE_DIR)
         first = self._proc.stdout.readline()
         try:
             self.port = int(json.loads(first)["port"])
@@ -110,7 +111,8 @@ def verify(scenario: str, log: Path, sample: Path) -> dict:
     if node is None:
         raise RuntimeError("node was not found: install Node 20+ from nodejs.org")
     done = subprocess.run([node, str(CLI), "verify", scenario, "--log", str(log), "--sample", str(sample)],
-                          capture_output=True, text=True, cwd=BRIDGE_DIR, timeout=60)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=BRIDGE_DIR,
+                          timeout=60)
     if done.returncode not in (0, 1):
         raise RuntimeError(done.stderr.strip() or "verify failed")
     return json.loads(done.stdout)

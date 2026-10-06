@@ -41,7 +41,8 @@ def run(exe, tmp_path):
     return rec, {r.check: r for r in rec.rows}
 
 
-CHECKS = ("CR-dedupe", "CR-history", "CR-block", "CR-block-later", "CR-unblock", "CR-clear")
+CHECKS = ("CR-dedupe", "CR-history", "CR-block", "CR-block-later", "CR-unblock", "CR-clear",
+          "CR-ruby-answer", "CR-ruby-join", "CR-ruby-plain", "CR-ruby-reading", "CR-ruby-probe")
 
 
 def test_a_backend_that_follows_the_rules_passes_every_row(env, tmp_path):
@@ -56,6 +57,10 @@ def test_a_backend_that_follows_the_rules_passes_every_row(env, tmp_path):
     ("no-retro", {"CR-block"}),
     ("block-later", {"CR-block-later"}),
     ("clear-keeps", {"CR-clear"}),
+    ("ruby-merged", {"CR-ruby-answer"}),
+    ("ruby-lossy", {"CR-ruby-join"}),
+    ("ruby-marks-plain", {"CR-ruby-plain"}),
+    ("ruby-katakana", {"CR-ruby-reading"}),
 ])
 def test_each_broken_rule_is_caught_by_its_own_row(env, tmp_path, monkeypatch, bug, failing):
     monkeypatch.setenv("FAKE_APP_CHAT_BUG", bug)

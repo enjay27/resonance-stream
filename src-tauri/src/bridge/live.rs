@@ -244,6 +244,12 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             crate::commands::clear_chat_history(app.state());
             answer(Ok(()));
         }
+        Command::AnnotateFurigana { texts } => {
+            // The UI's own command, an async fn that only computes: run it to the end here (this thread is not the runtime's).
+            let spans =
+                tauri::async_runtime::block_on(crate::commands::annotate_furigana(texts.clone()));
+            answer_data(serde_json::to_value(spans).unwrap_or(Value::Null));
+        }
         Command::GetFavorites => {
             // What `save_favorites` tells the windows (`favorites-changed`); the UI reads the same from the config it loads.
             let favorites = app.state::<crate::AppState>().config.read().favorites();

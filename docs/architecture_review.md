@@ -1,650 +1,663 @@
-# 구조·아키텍처 점검 보고서
+# Structure and Architecture Review
 
-- 기준 커밋: `1478528` (`main`, PR #203 병합 직후), 측정일 2026-10-06
-- 범위: 저장소 구조, 계층 구조, 리팩터링 후보, 약점과 위험, 비효율 로직, 프로젝트 개념·기능별 권장 목록, 문서/프로세스
-- **이 문서는 제안만 한다.** 코드는 하나도 바꾸지 않았다.
-- 근거에는 출처를 붙였다.
-  - **측정**: 직접 돌려 얻은 값.
-  - **확인**: 이 세션에서 코드를 직접 열어 확인한 것(파일:줄).
-  - **보고**: 읽기 전용 검토 에이전트가 코드를 읽고 보고했고, 직접 확인하지 못한 것.
-  - **추정**: 코드를 읽고 판단한 것.
-  - 돌리지 못한 것은 9.2절 `NOT VERIFIED`.
+- Baseline commit: `1478528` (`main`, right after PR #203); measured 2026-10-06, decisions of the same day added in section 9.
+- Scope: repository structure, layers, refactoring candidates, weak points and risks, inefficient logic, recommendations by project concept and feature, documents and process.
+- **This document only proposes.** No code was changed.
+- Every claim carries its source:
+  - **measured**: a value obtained by running something.
+  - **confirmed**: the code was opened this session and the cited `file:line` says it.
+  - **reported**: a read-only review agent read the code and reported it; not checked by hand. Verify with a reproducing test before acting.
+  - **estimated**: a judgement from reading the code.
+  - Anything that could not be run is listed in section 10 (`NOT VERIFIED`).
 
-심각도는 **높음 / 중간 / 낮음**, 노력은 **작음 / 보통 / 큼**으로 쓴다.
+Severity is **High / Medium / Low**, effort is **Small / Medium / Large**.
 
-- 높음: 사용자 데이터를 잃거나, 앱이 아예 못 켜지거나, 관리자 권한으로 믿을 수 없는 코드가 돌 수 있다.
-- 중간: 기능이 조용히 빠지거나(채팅 미저장 등), 개발 속도를 떨어뜨리거나, 오류를 숨긴다.
-- 낮음: 정리 수준이거나 지금은 체감 문제가 아니다.
-- 노력: 작음 = 반나절 이내, 보통 = 1~2일, 큼 = 그 이상(여러 PR).
+- High: can lose user data, stop the app from starting, or run untrusted code with administrator rights.
+- Medium: silently drops a feature (for example chat that is never saved), slows development, or hides errors.
+- Low: tidying, or not a felt problem today.
+- Effort: Small = half a day or less, Medium = one to two days, Large = more (several PRs).
 
-## 목차
+## Contents
 
-1. 요약
-2. 구조와 아키텍처 스냅샷
-3. 비효율 로직 (P)
-4. 리팩터링 후보 (R)
-5. 약점과 위험 (W)
-6. 프로젝트 개념·기능별 권장 목록 (A)
-7. 문서·프로세스 어긋남 (M)
-8. 우선순위와 다음 로드맵
-9. 방법과 `NOT VERIFIED`
+1. Summary
+2. Structure and architecture snapshot
+3. Inefficient logic (P)
+4. Refactoring candidates (R)
+5. Weak points and risks (W)
+6. Recommendations by project concept and feature (A)
+7. Documents and process (M)
+8. Priorities and the next roadmap
+9. Decisions made
+10. Method and `NOT VERIFIED`
 
 ---
 
-## 1. 요약
+## 1. Summary
 
-### 지금 상태 (측정)
+### State today (measured)
 
-| 항목 | 값 |
+| Item | Value |
 |---|---|
-| 러스트 | core 13,843줄(그중 `kanji_on_table.rs` 2,982, `test_env.rs` 1,324, `bridge.rs` 1,102) · types 1,261 · llama 137 · ui(`src/`) 11,095 · app(`src-tauri/src`) 5,530 |
-| 파이썬(runbook) | 8,501줄, 파이프라인 11개 |
-| 테스트 | `cargo test -p resonance-core -p resonance-llama -p resonance-types` **495개 통과**(2026-10-06). `#[test]` 개수: core 385 · types 49 · llama 61 · ui 157 · app 21 |
-| 골든(snapshot) | 8개 (`crates/core/tests/snapshots/`, PR #201) |
-| 변이 테스트 | `text.rs` 87개 변이: 잡음 75 · **놓침 8** · 불가 4, 호스트 러너 6분(PR #202) |
-| 의존성 감사 | `cargo audit` 취약점 0(reqwest 0.12로 올린 뒤, PR #199) |
-| CI 워크플로 | 9개 (`ci`, `audit`, `mutants`, `bridge-smoke`, `release*`, `auto-merge` ...) |
-| 기억 문서 | `MEMORY.md` **287줄 / 103KB**(CLAUDE.md 규칙은 "약 40줄") |
+| Rust | core 13,843 lines (of which `kanji_on_table.rs` 2,982, `test_env.rs` 1,324, `bridge.rs` 1,102) · types 1,261 · llama 137 · ui (`src/`) 11,095 · app (`src-tauri/src`) 5,530 |
+| Python (runbook) | 8,501 lines, 11 pipelines |
+| Tests | `cargo test -p resonance-core -p resonance-llama -p resonance-types`: **495 pass** (2026-10-06). `#[test]` counts: core 385 · types 49 · llama 61 · ui 157 · app 21 |
+| Golden (snapshot) tests | 8 (`crates/core/tests/snapshots/`, PR #201) |
+| Mutation tests | `text.rs`, 87 mutants: 75 caught · **8 missed** · 4 unviable; 6 minutes on a hosted runner (PR #202) |
+| Dependency audit | `cargo audit`: 0 vulnerabilities after reqwest 0.12 (PR #199) |
+| CI workflows | 9 (`ci`, `audit`, `mutants`, `bridge-smoke`, `release*`, `auto-merge`, ...) |
+| Memory index | `MEMORY.md` **287 lines / 103 KB** (rule: 40 lines and 6 KB, see decision D-2) |
 
-계층 규칙(순수 로직은 `crates/core`, 경계를 넘는 DTO는 `crates/types`, 화면은 `src/`, Windows 전용은 `src-tauri/`)과 게이트(`just check`),
-브리지 기반 실앱 검증, 골든·속성·변이 테스트 체계가 잘 갖춰져 있다.
-아래 문제는 "구조가 무너졌다"가 아니라 **관리자 권한 앱이라서 생기는 신뢰 경계의 빈틈, 몇 군데의 조용한 데이터 누락, 서비스 시작/중지 로직이 흩어진 것**이다.
+The layering (pure logic in `crates/core`, boundary DTOs in `crates/types`, screens in `src/`, Windows-only code in `src-tauri/`), the gate (`just check`),
+real-app verification through the bridge, and the golden / property / mutation tests are in good shape.
+The problems below are not "the structure is collapsing". They are **gaps in the trust boundary of an administrator-rights app, a few places where data is silently dropped, and service start/stop logic that is spread out.**
 
-### 가장 중요한 5가지
+### The five most important points
 
-1. **[높음] W-1 자체 업데이트가 중간에 실패하면 앱이 사라진다.** 현재 exe를 `.old`로 바꾼 뒤 새 exe 이름 바꾸기가 실패하면 되돌리는 코드가 없다
-   (`app_updater.rs:151-153`, 확인). 백신이나 파일 잠금으로 실제로 일어날 수 있는 경로다.
-2. **[높음] W-2 관리자 권한(`requireAdministrator`, 확인)으로 뜨는 앱이 사용자 쓰기 가능 폴더의 `llama-server.exe`를 검증 없이 실행한다.** 압축 파일 해시는 내려받을 때 한 번만 확인한다(보고).
-3. **[중간] W-4 일본어 채팅이 아카이브에 안 남는 경로가 있다.** 번역 서버 실행 파일이 없으면 워커가 큐를 비우지 않고 끝난다
-   (`translator/mod.rs:99-103`, 확인). 저장이 "번역이 끝난 뒤"로 묶여 있는 것이 뿌리다.
-4. **[중간] W-3 AI 서버 압축 해제가 중간에 끊기면 "설치됨"으로 남는다.** `llama-server.exe`가 있으면 바로 성공으로 돌아간다(`server.rs:38-40`, 확인).
-5. **[중간] W-5 패닉이 곧 종료다.** `panic = "abort"`(`Cargo.toml:37`, 확인)에 패닉 훅이 없고, 내보내기 경로에 네트워크 값에서 온 타임스탬프의 `unwrap()`이 있다
-   (`io/fs.rs:72`, 확인). 로그 한 줄 없이 앱이 죽는다.
+1. **[High] W-1 A self-update that fails halfway leaves no app.** The current exe is renamed to `.old`; if the second rename fails nothing renames it back
+   (`app_updater.rs:150-153`, confirmed). Antivirus or a file lock makes this a real path.
+2. **[High] W-2 An app that asks for administrator rights (`requireAdministrator`, confirmed) runs a user-writable `llama-server.exe` without checking it.**
+   `Command::new(data_dir/bin/ai-server/llama-server.exe)` is spawned as is (`server_manager.rs:131-139`, confirmed). Only the zip is hash-pinned, once, at download (`server.rs:6-8`, confirmed).
+3. **[Medium] W-4 Japanese chat is not archived on some paths.** If the server exe cannot be launched, the worker returns without draining its queue
+   (`translator/mod.rs:99-103`, confirmed; the other failure paths at `:134` and `:180` do drain). The root is that archiving is tied to the translation step.
+4. **[Medium] W-3 A half-extracted AI server counts as installed.** If `llama-server.exe` exists the function returns success at once (`server.rs:38-40`, confirmed).
+5. **[Medium] W-5 A panic is a crash with no log.** `panic = "abort"` (`Cargo.toml:37`, confirmed), no panic hook, and an `unwrap()` on a timestamp that comes from the network
+   in the export path (`io/fs.rs:72`, confirmed).
 
-### 최근 세션에서 이미 끝낸 것 (참고)
+### Already done in this session (for reference)
 
-- PR #203 테스트 브리지의 MQTT 패킷 한도 10KiB가 `get-chat-history` 응답(108KB)을 막고 재연결시키던 문제 - 한도 16MiB + 초과 응답은 오류 ack로(`fit_ack`).
-  `CS-restart-nodup`의 원인이 이것이었다. 실앱 확인은 아직(다음 `bridge-smoke` 수동 실행).
-- PR #199 reqwest 0.11 -> 0.12, `cargo audit` 취약점 4건 해소.
-- PR #201 텍스트 파이프라인 골든 테스트, PR #202 주간 변이 테스트 워크플로.
+- PR #203: the test bridge's MQTT packet limit of 10 KiB blocked the `get-chat-history` answer (108 KB) and made the client reconnect. The limit is now 16 MiB and an over-limit answer becomes an error ack (`fit_ack`).
+  This was the cause of `CS-restart-nodup`. Real-app confirmation is still open (next manual `bridge-smoke` run).
+- PR #199: reqwest 0.11 -> 0.12, four `cargo audit` findings closed.
+- PR #201: golden tests for the text pipeline. PR #202: weekly mutation-testing workflow.
 
-### 의외로 문제가 아닌 것
+### Not problems
 
-- **캡처·텍스트 경로의 성능은 지금 문제가 아니다.** 정규식은 `lazy_static`으로 한 번만 컴파일된다(`text.rs:12-23`, 확인). 패킷 하나의 비용은 소켓 호출이 지배하고,
-  프레임 조립기는 스트림당 1MiB로 막혀 있다(보고). 번역 한 줄은 LLM 시간(100ms 이상)에 비하면 전처리가 수백 마이크로초 이하다(추정).
-- **두 `AppConfig`를 합치지 않는 결정은 맞다.** 기록된 아키텍처 결정이고, 왕복 픽스처 테스트(`app_config_full.json`)가 어긋남을 잡는다.
-- **브리지·테스트용 코드가 core에 있는 것은 큰 문제가 아니다.** 안정판 exe에는 `test-env` 기능이 꺼져 있어 들어가지 않는다(`cargo tree`로 `rumqttc` 부재 확인, 이전 세션 측정).
+- **Capture and text performance are not a problem today.** Regexes are compiled once with `lazy_static` (`text.rs:12-23`, confirmed). The frame assembler is capped at 1 MiB per stream (reported).
+  Preprocessing a line costs hundreds of microseconds at most against 100+ ms of LLM time (estimated).
+- **Keeping two `AppConfig` types is right.** It is a recorded architecture decision and the round-trip fixture (`app_config_full.json`) catches drift.
+- **Test-only code living in core is not a big problem.** Stable exes are built without the `test-env` feature, so the bridge and its MQTT client are not in them (`cargo tree` showed no `rumqttc`, measured in an earlier session).
 
 ---
 
-## 2. 구조와 아키텍처 스냅샷
+## 2. Structure and architecture snapshot
 
-### 2.1 디렉터리 (줄 수는 `.rs` 기준, 측정)
-
-```
-crates/core/        13,843줄  순수 로직: 프로토콜 디코딩, 캡처 파이프라인, 텍스트 처리, 히스토리, 워커 판단, 다운로드 검사, 테스트 브리지 규약
-crates/types/        1,261줄  Tauri 경계를 넘는 DTO (serde만, wasm 호환)
-crates/llama/          137줄  llama-server HTTP 클라이언트
-src/                11,095줄  Leptos 0.8 CSR 화면 (wasm) + 순수 모듈
-src-tauri/src/       5,530줄  Tauri 2 앱: 소켓, 번역 서버, 다운로더, 창, 트레이 (Windows 전용)
-runbook/             8,501줄  파이썬: 브리지 파이프라인 11개, 노트북, 스탠드인 앱
-.github/workflows/   9개      게이트, 감사, 변이, 스모크, 릴리스
-.memory/, MEMORY.md           작업 기억 (세션 17개, 로드맵 9개, 활성 이슈 4개)
-graft/                        생성된 코드 카드 (gitignore)
-```
-
-### 2.2 데이터 흐름과 계층
+### 2.1 Directories (lines are `.rs`, measured)
 
 ```
- 게임 서버 --TCP 5003--> [raw socket, SIO_RCVALL]   src-tauri/services/sniffer   (Windows, 관리자)
-                              |
-                              v
-                 [프레임 조립 -> 디코딩 -> 중복 제거]  crates/core/{protocol,capture}   (순수)
-                              |
-              +---------------+----------------+
-              v                                v
-   [히스토리 + 아카이브(일별 jsonl)]     [번역 워커: 전처리(마스킹) -> llama-server -> 후처리]
-   crates/core/history, io/archive          crates/core/text, crates/llama, src-tauri/services/translator
-              |                                |
-              +---------------+----------------+
-                              v
-                   Tauri 이벤트 (camelCase JSON)  ->  ui (Leptos) 오버레이
+crates/core/        13,843 lines  pure logic: protocol decoding, capture pipeline, text processing, history, worker decisions, download checks, test-bridge contract
+crates/types/        1,261 lines  DTOs that cross the Tauri boundary (serde only, wasm-compatible)
+crates/llama/          137 lines  llama-server HTTP client
+src/                11,095 lines  Leptos 0.8 CSR screens (wasm) and pure modules
+src-tauri/src/       5,530 lines  Tauri 2 app: sockets, translator server, downloader, windows, tray (Windows only)
+runbook/             8,501 lines  Python: 11 bridge pipelines, notebooks, stand-in app
+.github/workflows/   9 files      gate, audit, mutation, smoke, release
+.memory/, MEMORY.md               working memory (17 session notes, 9 roadmaps, 4 active-issue files)
+graft/                            generated code cards (gitignored)
 ```
 
-- 순수 로직은 `crates/core`에서 모든 OS로 테스트하고, 소켓·프로세스·창은 `src-tauri/`에만 둔다(CLAUDE.md 규칙).
-- 화면의 상태는 `AppSignals` 문맥에 모은다(`store.rs`, `config_signals.rs`, `status_signals.rs`, `view_signals.rs`).
-- 테스트용 MQTT 브리지(`test-env` 기능)가 앱을 바깥에서 조종·관찰한다: `crates/core/bridge.rs`(규약) + `src-tauri/src/bridge/live.rs`(적용).
+### 2.2 Data flow and layers
 
-### 2.3 모듈 크기 (측정)
+```
+ game server --TCP 5003--> [raw socket, SIO_RCVALL]   src-tauri/services/sniffer   (Windows, administrator)
+                               |
+                               v
+              [frame assembly -> decode -> de-duplicate]   crates/core/{protocol,capture}   (pure)
+                               |
+               +---------------+----------------+
+               v                                v
+   [history + archive (daily jsonl)]    [translator worker: preprocess (shield) -> llama-server -> postprocess]
+   crates/core/history, io/archive         crates/core/text, crates/llama, src-tauri/services/translator
+               |                                |
+               +---------------+----------------+
+                               v
+                 Tauri events (camelCase JSON)  ->  ui (Leptos) overlay
+```
 
-| 모듈 | 줄 | 비고 |
+- Pure logic is tested on every OS in `crates/core`; sockets, processes and windows live only in `src-tauri/` (CLAUDE.md rule).
+- Screen state lives in the `AppSignals` context (`store.rs`, `config_signals.rs`, `status_signals.rs`, `view_signals.rs`).
+- A test MQTT bridge (`test-env` feature) drives and observes the app from outside: `crates/core/bridge.rs` (contract) and `src-tauri/src/bridge/live.rs` (wiring).
+
+### 2.3 Module sizes (measured)
+
+| Module | Lines | Note |
 |---|---|---|
-| `crates/core/kanji_on_table.rs` | 2,982 | 데이터 표(생성물에 가까움) - 리팩터링 대상 아님 |
-| `crates/core/test_env.rs` | 1,324 | 테스트 플래그 해석 |
-| `crates/types/lib.rs` | 1,261 | 모든 DTO가 한 파일 |
-| `crates/core/bridge.rs` | 1,102 | 브리지 명령 규약 + 파서 + 테스트 |
-| `crates/core/text.rs` | 1,048 | 번역 전·후처리, 사전, 이모트, 로마자 |
-| `src/chat_view.rs` | 908 | 탭별 목록, 필터, 페이징 |
-| `crates/core/protocol/parser.rs` | 908 | 프로토콜 디코딩 |
-| `src/components/chat_row.rs` | 597 | 채팅 한 줄 컴포넌트(보고: 한 함수가 481줄) |
-| `src-tauri/config/app_config.rs` | 581 | 모델 + 파일 입출력 + 명령 + 적용(보고) |
-| `src-tauri/services/sniffer/mod.rs` | 450 | 시작/중지/재시작, 워커, 차단 명령 |
-| `src-tauri/services/translator/mod.rs` | 442 | 번역 워커(스레드 본문이 약 140줄, 보고) |
+| `crates/core/kanji_on_table.rs` | 2,982 | a data table, not a refactoring target |
+| `crates/core/test_env.rs` | 1,324 | test-flag parsing |
+| `crates/types/lib.rs` | 1,261 | every DTO in one file |
+| `crates/core/bridge.rs` | 1,102 | bridge command contract, parser, tests |
+| `crates/core/text.rs` | 1,048 | translation pre/post-processing, dictionary, emotes, romaji |
+| `src/chat_view.rs` | 908 | per-tab lists, filtering, paging |
+| `crates/core/protocol/parser.rs` | 908 | protocol decoding |
+| `src/components/chat_row.rs` | 597 | one chat row component (reported: one function of 481 lines) |
+| `src-tauri/config/app_config.rs` | 581 | model + file I/O + commands + apply (reported) |
+| `src-tauri/services/sniffer/mod.rs` | 450 | start / stop / restart, worker, block commands |
+| `src-tauri/services/translator/mod.rs` | 442 | translator worker (thread body about 140 lines, reported) |
 
-### 2.4 상태 소유 (확인/보고)
+### 2.4 State ownership
 
-| 상태 | 위치 | 쓰는 곳 |
+| State | Where | Written by |
 |---|---|---|
-| 설정 | `config.json` + 앱 `AppConfig`, ui `AppConfig`/`ConfigSignals` | `save_config`, 즐겨찾기는 `save_favorites`만 |
-| 차단 목록 | `AppState.blocked_users`, `config.blocked_users`, ui `ConfigSignals` (보고: 사본 3개) | 차단/해제 명령, `save_config` |
-| 채팅 히스토리 | `ChatHistory`(백엔드, 채널별 한도) + ui `ChatStore` | `store_and_emit`, 로드 시 `load_recent` |
-| 서비스 수명 | `lib.rs` + `sniffer/mod.rs` + `commands.rs` + `app_config.rs` + `model.rs`에 흩어짐(확인: 방화벽 확인 중복) | UI 호출과 시작 코드 양쪽 |
+| Settings | `config.json` + app `AppConfig`, ui `AppConfig` / `ConfigSignals` | `save_config`; favorites only through `save_favorites` |
+| Block list | `AppState.blocked_users`, `config.blocked_users`, ui `ConfigSignals` (reported: three copies) | block/unblock commands, `save_config` |
+| Chat history | `ChatHistory` (backend, per-channel limits) + ui `ChatStore` | `store_and_emit`; `load_recent` at start |
+| Service lifetime | scattered over `lib.rs`, `sniffer/mod.rs`, `commands.rs`, `app_config.rs`, `model.rs` | UI calls and start-up code (confirmed: the firewall check is duplicated) |
 
-### 2.5 잘 되어 있는 것
+### 2.5 What is done well
 
-- 게이트(`just check`)가 포맷, core 테스트, ui 컴파일 검사, app 교차 검사를 한 명령으로 묶고, CI가 같은 것을 OS별로 돌린다.
-- **실제 앱을 돌리는 검증 체계**: 호스트 Windows 러너에서 실앱을 띄워 브리지로 조종한다(`bridge-smoke.yml`, 릴리스 태그에서만). 이번에 이것이 패킷 한도 버그를 찾았다.
-- 속성 테스트(`proptest`), 와이어 형식·설정 동등성 픽스처, 골든, 변이 테스트가 순서대로 쌓였다.
-- 서명된 자체 업데이트(`TRUSTED_UPDATE_KEYS`, 서명 검증 예제)와 릴리스 피드 감시(`release-feed-check.yml`).
-- 한 번에 한 PR, 테스트 먼저, 병합은 CI가 자동으로 하는 흐름과 기억 체계(`MEMORY.md`, `.memory/`)로 맥락이 이어진다.
-
----
-
-## 3. 비효율 로직 (P)
-
-대부분 **보고**(검토 에이전트가 코드를 읽고 추정)이며 벤치마크는 하지 않았다. 플레이 체감 문제는 P-1 하나뿐이고 그것도 장시간 사용 때다.
-
-### P-1 채팅 목록이 위로 스크롤할수록 줄어들지 않는다
-
-- **위치:** `src/components/chat_container.rs:16`(`display_limit` 초기 50), `:26`(탭/검색을 바꿀 때만 50으로 복귀), `:160`(위쪽 50px 안에서 스크롤할 때마다 `+= 50`)
-- **근거(확인):** 한도는 올라가기만 하고 맨 아래로 돌아와도 줄지 않는다. 전체 탭의 한도는 채널 한도의 합이다(보고: 기본 3,200).
-  줄마다 메모/효과/클로저가 있는 큰 컴포넌트다(`chat_row.rs`).
-- **효과(추정):** CPU보다 DOM과 줄별 상태 메모리가 오래 켜 둘수록 커진다.
-- **제안:** 맨 아래로 돌아오면 한도를 50으로 되돌린다(작은 변경). 더 가려면 A-4.2의 창 단위 목록.
-- **심각도:** 낮음 · **노력:** 작음
-
-### P-2 줄마다 스크롤 보정 효과가 따로 돈다
-
-- **위치:** `chat_row.rs:48-62`(보고)
-- **근거:** 번역이 있는 줄마다 `request_animation_frame` + `get_element_by_id`를 만든다. 탭 전환이나 하이드레이션 때 N번 반복된다.
-- **제안:** 컨테이너 수준 신호 하나로 합친다.
-- **심각도:** 낮음 · **노력:** 작음
-
-### P-3 학습 뷰가 줄마다 후리가나 IPC를 부른다
-
-- **위치:** `chat_row.rs:332-357`, 명령 `annotate_furigana`(`commands.rs:66`, 보고)
-- **근거:** 명령은 `Vec<String>`을 받는데 줄마다 `[text]` 하나만 보낸다. 1,000줄 탭에서 학습 뷰를 켜면 최대 1,000번 왕복한다(이후 2,000줄 캐시가 도움).
-- **제안:** 보이는 줄을 모아 한 번에 보낸다.
-- **심각도:** 낮음 · **노력:** 작음
-
-### P-4 차단/해제가 락을 쥔 채 메시지마다 이벤트를 낸다
-
-- **위치:** `sniffer/mod.rs:404-410`, `:424-430`(보고)
-- **근거:** `chat_history` 락을 잡은 채 해당 사용자의 줄마다 이벤트를 낸다. 같은 락이 필요한 `store_and_emit`(캡처 경로)이 그동안 기다린다. 도배하는 사용자라면 수백 줄.
-- **제안:** 바뀐 것을 모아 락을 놓은 뒤 한 번에 낸다.
-- **심각도:** 낮음 · **노력:** 작음
-
-### P-5 파서가 버려질 `unknown_fields`를 만든다
-
-- **위치:** `crates/core/protocol/parser.rs:196,215,233,276,300`, 지우는 곳 `capture/pipeline.rs:120-122`(보고)
-- **근거:** 메시지마다 `format!` + `to_vec`가 5~10번. 디버그 모드가 아니면 곧 지워진다. 수백 줄/분 규모에서는 마이크로초 단위(추정).
-- **제안:** 플래그를 파서에 넘겨 만들지 않는다. **급하지 않다.**
-- **심각도:** 낮음 · **노력:** 작음
-
-### P-6 번역 전처리가 닉네임 캐시 락 안에서 사전·닉네임 전체를 훑는다
-
-- **위치:** `text.rs:266-290`, 락은 `translator/mod.rs:390-393`(보고)
-- **근거:** 사전 용어마다 `contains`, 닉네임 캐시 전체 스캔이 락 안에서 돈다. 같은 락을 캡처 경로가 일본어 닉네임마다 쓴다(`sniffer/mod.rs:353`).
-  항목이 수천 개여도 수백 마이크로초(추정)로 LLM 시간에 묻힌다.
-- **제안:** 락 범위만 줄인다(필요한 항목만 복사 후 락 해제).
-- **심각도:** 낮음 · **노력:** 작음
-
-### P-7 변이 테스트·테스트 시간
-
-- **근거(측정):** `text.rs` 변이 87개를 호스트 러너에서 6분(로컬 4분, `-j 2`)에 돌린다. 한 파일 단위라 부담이 없지만 크레이트 전체는 훨씬 길다.
-- **제안:** 파일을 바꿔 가며 주 단위로 돌린다(워크플로의 `file` 입력). 지금 구조로 충분하다.
-- **심각도:** 낮음 · **노력:** 작음
+- The gate (`just check`) bundles formatting, core tests, the ui compile check and the app cross-check; CI runs the same things per OS.
+- **Real-app verification:** a hosted Windows runner starts the real exe and drives it over the bridge (`bridge-smoke.yml`, release tags). It just found the packet-limit bug.
+- Property tests (`proptest`), wire-format and config-parity fixtures, golden tests and mutation tests were added in that order.
+- Signed self-update (`TRUSTED_UPDATE_KEYS`, a verification example) and a release-feed watcher (`release-feed-check.yml`).
+- One task, one branch, one PR, merged by CI, plus the memory tree keep context across sessions.
 
 ---
 
-## 4. 리팩터링 후보 (R)
+## 3. Inefficient logic (P)
 
-### R-1 서비스 시작/중지 로직이 여러 곳에 흩어져 있다
+Mostly **reported** (a review agent estimated from reading the code); nothing was benchmarked. Only P-1 can be felt, and only in long sessions.
 
-- **위치(확인/보고):**
-  - 방화벽 확인과 경고 블록이 `sniffer/mod.rs:76-90`과 `:120-138`에 **둘 다** 있다(확인). 시작 한 번에 `netsh`가 두 번 돈다(보고).
-  - 번역기 시작 지점 4곳: `lib.rs:136-143`, `commands.rs:51-60`, `app_config.rs:338-368`, `model.rs:129-144`(보고). 정리·세대 처리가 각각 다르다.
-- **영향:** 시작·재시작 규칙이 바뀔 때 4곳을 맞춰야 하고, 어긋나면 이중 시작이나 죽은 워커가 생긴다(W-10).
-- **제안:**
-  1. `crates/core/workers.rs`에 이미 있는 `translator_change`처럼 `sniffer_change(old, new, init_done, alive) -> WorkerChange` 표를 둔다(순수, 테이블 테스트).
-  2. 앱에는 `Services` 소유자 하나(`start/stop/restart`)를 두고 호출부를 모은다.
-  3. 방화벽 확인은 한 곳에서만.
-- **프로 테스트:** 코어 표 테스트 + 브리지 `restart-sniffer`/`start-translator` 행(이미 있음).
-- **심각도:** 중간 · **노력:** 보통
+### P-1 The chat list never shrinks after scrolling up
 
-### R-2 스레드 본문 함수가 길고 판단과 배선이 섞였다
+- **Where:** `src/components/chat_container.rs:16` (`display_limit`, starts at 50), `:26` (reset only on tab or search change), `:160` (`+= 50` on every scroll within 50 px of the top).
+- **Evidence (confirmed):** the limit only grows, and returning to the bottom does not shrink it. The "all" tab's limit is the sum of the channel limits (reported: 3,200 by default).
+  Each row is a large component with memos, effects and closures (`chat_row.rs`).
+- **Effect (estimated):** DOM size and per-row state grow the longer the overlay stays open; CPU is not the issue.
+- **Proposal:** reset the limit to 50 when the view returns to the bottom (small). To go further, see the windowed list in A-4.2.
+- **Severity:** Low · **Effort:** Small
 
-- **위치:** `sniffer/mod.rs:108-276`(168줄), `translator/mod.rs:49-188`(140줄, 보고)
-- **제안:** 감시 판단(`now - last > 15`), "Active" 상태 전환 같은 결정을 core의 순수 함수로 옮기고 시계를 주입한다(`download.rs`의 `StallWatch`가 선례).
-- **프로 테스트:** 가짜 시계를 쓰는 core 테스트.
-- **심각도:** 중간 · **노력:** 보통
+### P-2 Every row runs its own scroll-correction effect
 
-### R-3 2초 중복 창이 전역 상태 접착제이고 테스트가 없다
+- **Where:** `chat_row.rs:48-62` (reported).
+- **Evidence:** each translated row schedules a `request_animation_frame` and a `get_element_by_id`. A tab switch or hydration repeats this N times.
+- **Proposal:** one container-level signal.
+- **Severity:** Low · **Effort:** Small
 
-- **위치:** `events.rs:13-17`, `:79-100`(보고)
-- **근거:** `lazy_static` 큐에 `Instant::now()`로 `(uid, text, time)` 지문을 쌓는다. 파이프라인의 `(uid, time, sequence)` 캐시와 키가 달라 겹치는 두 번째 층이다.
-  (브리지의 `chat-rules` 행은 두 층 모두를 실앱에서 확인하지만, 단위 테스트는 없다.)
-- **제안:** `RecentFingerprints::check(fp, now)`를 `crates/core/capture`로 옮기고 가짜 시간으로 테스트한다. 두 번째 층이 정말 필요한지도 그 테스트로 결정한다.
-- **심각도:** 중간 · **노력:** 작음
+### P-3 Study view makes one furigana IPC call per row
 
-### R-4 채널별 한도 기본값이 세 곳에 따로 있고 값이 어긋난다
+- **Where:** `chat_row.rs:332-357`, command `annotate_furigana` (`commands.rs:66`, reported).
+- **Evidence:** the command takes a `Vec<String>` but each row sends one `[text]`. Turning the study view on in a 1,000-row tab means up to 1,000 round trips (the 2,000-line cache helps afterwards).
+- **Proposal:** batch the visible rows.
+- **Severity:** Low · **Effort:** Small
 
-- **위치(확인):**
-  - `crates/core/history.rs:92` - 미설정이면 WORLD 200, 나머지 1000
-  - `src/chat_view.rs:158-162` - 같은 규칙을 다시 씀
-  - `src-tauri/config/app_config.rs:92-102` `default_tab_limits` - WORLD 200, **Local 500**, Party/Guild 1000, **Beginner 500**
-- **영향:** 설정에 키가 없을 때 Local/Beginner는 한도 1000(core/ui)이고, 새 설정이 만들어질 때는 500이다. `history.rs:70`의 주석이 ui 파일을 가리키는 것도 같은 중복의 증상이다.
-- **제안:** `ChannelLimits`와 기본값 표를 `crates/types`(wasm 호환)로 옮겨 한 곳에서 정한다. 어느 값이 의도인지 먼저 정해야 한다(동작 변경이 될 수 있음).
-- **프로 테스트:** 표 하나를 검사하는 테스트 + 기존 `chat_view`/`history` 테스트.
-- **심각도:** 중간 · **노력:** 작음
+### P-4 Block / unblock emits one event per message while holding the history lock
 
-### R-5 UI 컴포넌트가 길다
+- **Where:** `sniffer/mod.rs:404-410`, `:424-430` (reported).
+- **Evidence:** the `chat_history` lock is held while an event is emitted for each of the user's rows; the capture path (`store_and_emit`) needs the same lock. For a spammer that is hundreds of rows.
+- **Proposal:** collect the changes, release the lock, emit once.
+- **Severity:** Low · **Effort:** Small
 
-- **위치(보고):** `ChatRow` `chat_row.rs:29-510`(481줄), `FavoritesWindow` 481줄, `DictionaryModal` 477줄, `NavBar` 375줄, `AppUpdateModal` 약 200줄. 상대 시간 계산(`chat_row.rs:88-129`)은 순수하다.
-- **제안:** 순수 보조 함수를 `utils.rs`/`readability.rs`로 빼 호스트에서 단위 테스트하고, 큰 뷰를 하위 컴포넌트로 나눈다. **동작을 바꾸지 않는다.**
-- **프로 테스트:** 호스트 단위 테스트 + `ui-preview` 스크린샷 비교(A-7.3).
-- **심각도:** 낮음 · **노력:** 보통
+### P-5 The parser builds `unknown_fields` that are then thrown away
 
-### R-6 업데이트 설치(교체/되돌리기)가 인라인이라 테스트할 수 없다
+- **Where:** `crates/core/protocol/parser.rs:196,215,233,276,300`; cleared in `capture/pipeline.rs:120-122` (reported).
+- **Evidence:** five to ten small allocations per message (`format!` + `to_vec`); they are cleared unless debug mode is on. Microseconds at hundreds of messages per minute (estimated).
+- **Proposal:** pass the flag into the parser so it does not build them. **Not urgent.**
+- **Severity:** Low · **Effort:** Small
 
-- **위치:** `app_updater.rs:127-168`(확인: 이름 바꾸기 2번 + 실행)
-- **제안:** `install_swap(current, temp, old, rename)`을 core로 옮기고 이름 바꾸기 함수를 주입한다. 두 번째 실패를 주입하는 임시 폴더 테스트가 W-1을 재현·방지한다.
-- **심각도:** 중간 · **노력:** 작음 (W-1과 한 묶음)
+### P-6 Translation preprocessing scans the whole dictionary and nickname cache inside a lock
 
-### R-7 차단 목록 사본이 여럿이다
+- **Where:** `text.rs:266-290`; the lock is taken at `translator/mod.rs:390-393`; the capture path takes the same lock at `sniffer/mod.rs:353` (confirmed for the latter; the rest reported).
+- **Evidence:** a `contains` per dictionary term and a scan of the nickname cache run under the `nickname_cache` lock. Hundreds of microseconds at thousands of entries (estimated), lost in LLM latency.
+- **Proposal:** shorten the lock scope only (copy what is needed, release).
+- **Severity:** Low · **Effort:** Small
 
-- **위치(보고):** `AppState.blocked_users`(`protocol/types.rs:40`), `config.blocked_users`, ui `ConfigSignals.blocked_users`. 쓰는 곳은 차단/해제 명령과 `save_config`.
-- **근거:** `apply_config`가 런타임 맵을 새로 고치지 않는다. 지금은 차단 명령만 쓰므로 살아 있는 버그는 아니고 구조의 냄새다.
-- **제안:** 런타임에서는 설정을 통해 읽고 추가 맵을 없앤다. 순수 `is_blocked` 함수를 core에서 테스트한다.
-- **심각도:** 낮음 · **노력:** 작음
+### P-7 Mutation-testing time
 
-### R-8 `app_config.rs` 분할
-
-- **위치:** `src-tauri/config/app_config.rs` 581줄(측정), 모델 + 기본값 + 파일 IO + `save_*` 명령 + 88줄짜리 `apply_config`(`:291-378`, 보고)
-- **제안:** `config/{model,store,apply}.rs`로 **논리 변경 없이** 나눈다. 두 `AppConfig` 왕복 픽스처가 안전망이다. W-7 수정 때 함께 하면 효율적이다.
-- **심각도:** 낮음 · **노력:** 작음
-
-### R-9 `crates/types/lib.rs` 한 파일 1,261줄
-
-- **근거(측정):** 모든 DTO가 한 파일. 와이어 형식 테스트(`tests/wire_format.rs`)가 지키고 있어 쪼개기는 안전하다.
-- **제안:** `chat`, `service`, `config`, `window` 같은 모듈로 나누고 `lib.rs`는 재수출한다(경로 변경 없음). **서둘 필요 없음**: R-4가 `types`를 건드릴 때 같이 한다.
-- **심각도:** 낮음 · **노력:** 작음
+- **Evidence (measured):** 87 mutants of `text.rs` take 6 minutes on a hosted runner (4 locally with `-j 2`). Fine per file; a whole crate would be much longer.
+- **Proposal:** rotate files (the workflow's `file` input) and keep it weekly. The present shape is enough.
+- **Severity:** Low · **Effort:** Small
 
 ---
 
-## 5. 약점과 위험 (W)
+## 4. Refactoring candidates (R)
 
-### W-1 자체 업데이트: 이름 바꾸기 2번 사이에 실패하면 되돌리지 않는다
+### R-1 Service start/stop logic is spread over several places
 
-- **위치(확인):** `app_updater.rs:150-153`
+- **Where:**
+  - The firewall check and its warning block exist **twice** in `sniffer/mod.rs:76-90` and `:120-138` (confirmed). One start runs `netsh` twice (reported).
+  - The sniffer is started by the UI only: `start_sniffer_command` is invoked from `src/app/hydration.rs:86` and `src/app/setup_flow.rs:42`; `lib.rs` merely registers the command (confirmed by grep). A restart-on-config-change path is in `app_config.rs:327`.
+  - Four translator start sites: `lib.rs:136-143`, `commands.rs:51-60`, `app_config.rs:338-368`, `model.rs:129-144` (reported). Kill, retire and generation are handled differently in each.
+- **Effect:** a change to start/restart rules must be made in several places, and a mismatch gives double starts or dead workers (W-10).
+- **Proposal:**
+  1. Add `sniffer_change(old, new, init_done, alive) -> WorkerChange` next to the existing `translator_change` in `crates/core/workers.rs` (pure, table tests).
+  2. Give the app one `Services` owner (`start / stop / restart`) and route the call sites through it.
+  3. Do the firewall check in one place only.
+- **Protected by:** core table tests plus the existing bridge rows (`restart-sniffer`, `start-translator`).
+- **Severity:** Medium · **Effort:** Medium
+
+### R-2 Thread-body functions are long and mix decisions with wiring
+
+- **Where:** `sniffer/mod.rs:108-276` (168 lines), `translator/mod.rs:49-188` (140 lines) (reported).
+- **Proposal:** move the decisions (watchdog `now - last > 15`, the "Active" state toggle) into pure core functions with an injected clock (`StallWatch` in `download.rs` is the precedent).
+- **Protected by:** core tests with a fake clock.
+- **Severity:** Medium · **Effort:** Medium
+
+### R-3 The 2-second duplicate window is global-state glue without tests
+
+- **Where:** `src-tauri/src/events.rs:13-17` and `:79-100` (confirmed).
+- **Evidence (confirmed):** a `lazy_static` deque of `(fingerprint, Instant)`; entries older than 2 s are pruned, and a repeat of a fingerprint inside the window is dropped. The fingerprint function is already in core (`resonance_core::capture::fingerprint`); only the window logic is in the app.
+  It is a second layer next to the pipeline's `(uid, time, sequence)` cache, with a different key. The bridge's `chat-rules` rows check both layers on the real app, but there is no unit test.
+- **Proposal:** move the window to `crates/core/capture` as `RecentFingerprints::check(fp, now)` and test it with fake time. That test also decides whether the second layer is needed.
+- **Severity:** Medium · **Effort:** Small
+
+### R-4 The per-channel limit defaults are written in three places and disagree (decided: 1000)
+
+- **Where (confirmed):**
+  - `crates/core/history.rs:92`: unset means WORLD 200, everything else 1000.
+  - `src/chat_view.rs:158-162`: the same rule written again.
+  - `src-tauri/config/app_config.rs:92-102` (`default_tab_limits`): WORLD 200, **Local 500**, Party / Guild 1000, **Beginner 500**.
+- **Effect:** when the key is missing, Local and Beginner get 1000 (core, ui); a newly created config gets 500. A comment at `history.rs:70` pointing at the ui file is a symptom of the duplication.
+- **Decision (D-1):** Local and Beginner are **1000**. So `default_tab_limits` changes from 500 to 1000 for those two (only new configs are affected; saved configs already hold the keys).
+- **Proposal:** move `ChannelLimits` and the default table to `crates/types` (wasm-compatible) so it is defined once.
+- **Protected by:** one table test plus the existing `chat_view` / `history` tests.
+- **Severity:** Medium · **Effort:** Small
+
+### R-5 UI components are long
+
+- **Where (reported):** `ChatRow` `chat_row.rs:29-510` (481 lines), `FavoritesWindow` 481, `DictionaryModal` 477, `NavBar` 375, `AppUpdateModal` about 200. The relative-time block (`chat_row.rs:88-129`) is pure.
+- **Proposal:** move the pure helpers into `utils.rs` / `readability.rs` and test them on the host; split the big views into sub-components. **No behaviour change.**
+- **Protected by:** host unit tests and `ui-preview` screenshot comparison (A-4.5).
+- **Severity:** Low · **Effort:** Medium
+
+### R-6 Update install (swap / rollback) is inline and cannot be tested
+
+- **Where:** `app_updater.rs:127-168` (confirmed: two renames, then spawn).
+- **Proposal:** move `install_swap(current, temp, old, rename)` to core with the rename function injected. A temp-directory test that injects a failure on the second rename reproduces and prevents W-1.
+- **Severity:** Medium · **Effort:** Small (one bundle with W-1)
+
+### R-7 The block list has several copies
+
+- **Where (reported):** `AppState.blocked_users` (`protocol/types.rs:40`), `config.blocked_users`, ui `ConfigSignals.blocked_users`; writers are the block / unblock commands and `save_config`.
+- **Evidence:** `apply_config` does not refresh the runtime map. Only the block commands write it today, so this is a smell, not a live bug.
+- **Proposal:** read through the config at runtime and drop the extra map; test a pure `is_blocked` in core.
+- **Severity:** Low · **Effort:** Small
+
+### R-8 Split `app_config.rs`
+
+- **Where:** `src-tauri/config/app_config.rs`, 581 lines (measured): model, defaults, file I/O, `save_*` commands and the 88-line `apply_config` (`:291-378`, reported).
+- **Proposal:** split into `config/{model,store,apply}.rs` with **no logic change**. The two-`AppConfig` round-trip fixture is the safety net. Do it together with W-7.
+- **Severity:** Low · **Effort:** Small
+
+### R-9 `crates/types/lib.rs` is one file of 1,261 lines
+
+- **Evidence (measured):** every DTO in one file. The wire-format test (`tests/wire_format.rs`) guards it, so splitting is safe.
+- **Proposal:** split into `chat`, `service`, `config`, `window` modules with `lib.rs` re-exporting (no path changes). **No hurry:** do it when R-4 touches `types`.
+- **Severity:** Low · **Effort:** Small
+
+---
+
+## 5. Weak points and risks (W)
+
+### W-1 Self-update: no rollback between the two renames
+
+- **Where (confirmed):** `app_updater.rs:150-153`
   ```rust
   fs::rename(&current_exe, &old_exe)...?;
   fs::rename(&temp_exe, &current_exe).map_err(...)?;
   ```
-- **재현 경로(추정):** 백신/파일 잠금으로 두 번째 이름 바꾸기가 실패 -> 현재 exe는 이미 `.old`가 되었고 오류만 반환 -> 다음 실행이나 바로가기가 exe를 못 찾는다.
-  (코드로 추적했고 실제로 재현하지는 않았다.)
-- **제안:** 두 번째 오류에서 `.old`를 원래 이름으로 되돌린다. R-6과 함께 임시 폴더 테스트(두 번째 실패 주입)로 재현·방지한다.
-- **심각도:** 높음 · **노력:** 작음
+- **Trigger (estimated, traced not reproduced):** antivirus or a file lock makes the second rename fail -> the current exe is already `.old` and only an error is returned -> the next launch or shortcut finds no exe.
+- **Fix:** on the second error rename `.old` back. With R-6, a temp-directory test (second rename fails) reproduces and prevents it.
+- **Severity:** High · **Effort:** Small
 
-### W-2 관리자 권한 앱이 사용자 쓰기 가능 폴더의 실행 파일을 검증 없이 띄운다
+### W-2 An administrator-rights app starts an unchecked executable from a user-writable folder
 
-- **위치:** 관리자 요청 `src-tauri/app.manifest:19`(`requireAdministrator`, 확인). 실행 `server_manager.rs:137,180`(보고) - `%APPDATA%\...\ai-server\llama-server.exe`와 같은 폴더의 DLL.
-  해시 고정은 압축 파일 하나뿐이고 내려받을 때 한 번만 본다(`server.rs:8`, 보고).
-- **재현 경로(추정):** 같은 사용자의 아무 프로세스가 exe나 DLL을 바꾸면 다음 번역기 시작 때 관리자 권한으로 실행된다.
-- **제안:** 파일별 SHA-256을 고정해 실행 직전에 검증한다(`sha256_file`은 이미 있음). 또는 폴더 ACL을 잠근다. A-6.2 참고.
-- **심각도:** 높음 · **노력:** 보통
+- **Where (confirmed):** the manifest asks for `requireAdministrator` (`src-tauri/app.manifest:19`). The server is started with `Command::new(<app data>/bin/ai-server/llama-server.exe)` and no check (`server_manager.rs:131-139`, `:179`). The same folder's DLLs are loaded by it.
+  The only pin is the SHA-256 of the **zip**, checked at download (`server.rs:6-8`).
+- **Trigger (estimated):** any process of the same user replaces the exe or a DLL; it then runs as administrator at the next translator start.
+- **Fix:** pin per-file SHA-256 values and verify them right before spawning (`sha256_file` already exists), or lock the folder's ACL. See A-6.2.
+- **Severity:** High · **Effort:** Medium
 
-### W-3 AI 서버 압축 해제가 끊기면 "설치됨"으로 굳는다
+### W-3 An interrupted AI-server extraction stays "installed"
 
-- **위치(확인):** `server.rs:38-40` - `llama-server.exe`가 있으면 즉시 `Ok`. 해제(`:64-80`, 보고)는 제자리에 쓰고 원자적이지 않다.
-- **재현 경로(추정):** 해제 중 강제 종료 -> exe는 있고 DLL이 없다 -> llama-server가 바로 죽고 감독 루프가 3번 뒤 포기(`workers.rs:88`). 사용자가 폴더를 지우기 전까지 번역이 안 된다.
-- **제안:** `.part` 폴더에 풀고 이름을 바꿔 완료를 알리거나, 완료 표지 파일을 둔다.
-- **심각도:** 중간 · **노력:** 작음
+- **Where (confirmed):** `server.rs:38-40`: if `llama-server.exe` exists, return `Ok` immediately. The extraction (`:64-80`, reported) writes in place and is not atomic.
+- **Trigger (estimated):** the app is killed mid-extract -> the exe exists but DLLs are missing -> llama-server dies at once and the supervisor gives up after three tries (`workers.rs:88`). Translation stays broken until the user deletes the folder.
+- **Fix:** extract into a `.part` folder and rename it, or write a completion marker.
+- **Severity:** Medium · **Effort:** Small
 
-### W-4 일본어 채팅이 아카이브에 안 남는 경로
+### W-4 Japanese chat that never reaches the archive
 
-- **(a) 서버 실행 실패 (확인):** `launch_ai_server`가 `None`이면 워커가 `return`한다(`translator/mod.rs:99-103`). 다른 실패 경로(`:134`, `:180`)는 `drain_untranslated`를 부르는데 여기는 안 부른다.
-  (보고) `translator_tx`가 `Some`으로 남아 `launch_translator`가 아무것도 안 하고, 이후 `tx.send`는 `let _ =`로 버려진다 -> 그 실행 동안 일본어 채팅이 저장되지 않는다.
-- **(b) 따라잡기 (보고):** `catch_up`이 큐를 비우며 저장하지 않는다(`translator/mod.rs:292`). 서버가 (재)시작될 때마다 일어난다.
-- **(c) 원장 한도 (보고):** 가장 새로운 100개보다 오래된 것은 버리고 저장하지 않는다(`workers.rs:213-221`).
-- **뿌리:** 저장이 "번역이 끝난 뒤" 단계에 묶여 있다.
-- **제안:** A-3.1(도착 즉시 저장, 번역이 생기면 두 번째 줄). `load_recent`가 이미 같은 줄을 합쳐서 읽는다.
-- **심각도:** 중간 · **노력:** 보통
+- **(a) Server launch fails (confirmed):** when `launch_ai_server` returns `None` the worker `return`s (`translator/mod.rs:99-103`). The other failure paths (`:134`, `:180`) call `drain_untranslated`, which archives the lines (`:272-276`); this one does not.
+  (Reported) `translator_tx` stays `Some`, so `launch_translator` is a no-op, and later `tx.send` errors are discarded with `let _ =`. Nothing is archived for the rest of the run.
+- **(b) Catch-up (confirmed mechanism):** `catch_up` empties the queue (`translator/mod.rs:292`). Its doc says those messages are "in the ledger", and the ledger then keeps only the newest `translation_catch_up_limit` (`workers.rs:211-219`). Whether the passed-over lines are archived another way was not checked.
+- **(c) Ledger (reported):** the default limit is 100 (`types/lib.rs:497`); older owed lines are dropped.
+- **Root:** archiving is tied to the translation step.
+- **Fix:** A-3.1: archive on arrival and add a second line when a translation exists; `load_recent` already merges the two.
+- **Severity:** Medium · **Effort:** Medium
 
-### W-5 패닉이 곧 종료이고 로그가 없다
+### W-5 A panic aborts the app and leaves no log
 
-- **위치(확인):** `Cargo.toml:37` `panic = "abort"`, `io/fs.rs:72` `Local.timestamp_opt(log.timestamp as i64, 0).unwrap()`.
-  타임스탬프는 네트워크의 varint 값이다(`parser.rs:192`, 보고). 범위를 벗어나면 `None`이라 내보내기에서 패닉 -> 앱이 로그 없이 죽는다.
-- **제안:** `.single().unwrap_or_default()`로 고치고, 패닉 훅이 파일에 쓰게 한다(A-8.1). 이 파일 안의 다른 `unwrap`/`expect`는 신뢰 값이다(보고).
-- **심각도:** 중간 · **노력:** 작음
+- **Where (confirmed):** `Cargo.toml:37` `panic = "abort"`; `io/fs.rs:72` `Local.timestamp_opt(log.timestamp as i64, 0).unwrap()`. The timestamp is a raw varint from the wire (`parser.rs:192`, reported); an out-of-range value gives `None`, so Export panics and the app dies without a log.
+- **Fix:** `.single().unwrap_or_default()` and a panic hook that writes to a file (A-8.1). The other `unwrap` / `expect` calls in this crate are on trusted values (reported).
+- **Severity:** Medium · **Effort:** Small
 
-### W-6 메인 스레드에서 `netsh`를 돌린다
+### W-6 `start_sniffer_command` runs `netsh` on the main thread
 
-- **위치(확인/보고):** `start_sniffer_command`(`sniffer/mod.rs:70-71`)와 `restart_sniffer_command`(`:433-434`)는 `#[tauri::command]`이고, 같은 파일의 차단 명령은 `#[tauri::command(async)]`다(확인).
-  앱 전체 명령 43개 중 `async`는 4개(측정). `netsh`를 두 번(시작) 돌리고(R-1) 화면은 매 시작 때 이것을 부른다(`hydration.rs:86`, 보고).
-- **영향(추정):** 창이 수백 ms~수 초 멈춘다.
-- **제안:** `#[tauri::command(async)]` + 중복 확인 제거.
-- **심각도:** 중간 · **노력:** 작음
+- **Where (confirmed):** `start_sniffer_command` is a plain `#[tauri::command]` (`sniffer/mod.rs:70-71`) and calls `check_firewall_rule` twice (`:76`, `:120`, R-1). The UI calls it at every start (`hydration.rs:86`). Of 43 commands in the app, 4 are `async` (measured).
+  `restart_sniffer_command` is also a plain command but already does its work on its own thread (`:433-450`, the comment says why), so it does not block the window.
+- **Effect (estimated):** the window freezes for hundreds of milliseconds up to seconds.
+- **Fix:** `#[tauri::command(async)]` and remove the duplicate check. `ensure_firewall_rule_command` (`network.rs:237-300`) runs `netsh` three times and is plain too (reported).
+- **Severity:** Medium · **Effort:** Small
 
-### W-7 설정이 조용히 초기화되거나 반쯤 써질 수 있다
+### W-7 Settings can be reset silently or written half
 
-- **위치(확인):** `app_config.rs:226` `Err(_) => AppConfig::default()` - 읽기 실패(백신 잠금, 권한)에 백업을 안 만든다(파싱 실패 분기는 `:219-225`에서 만든다).
-  첫 화면 저장이 진짜 파일을 덮어쓴다.
-- **위치(보고):** `apply_config`가 `write_atomic` 실패를 로그만 하고 메모리 상태는 바꾼다(`:299-301`). `metadata.rs:39-47`은 기본값으로 조용히 초기화(모델 버전 "0.0.0" -> 모델 재다운로드 안내). `metadata.rs:60`, `gist.rs:186,234`는 일반 `fs::write`.
-- **제안:** 모든 쓰기를 `write_atomic`으로, 읽기 오류에도 백업, `apply_config`가 `Result`를 돌려 화면에 알린다(A-5.2).
-- **심각도:** 중간 · **노력:** 작음
+- **Where (confirmed):** `app_config.rs:226` `Err(_) => AppConfig::default()`: a failed read (antivirus lock, permissions) makes no backup (the parse-error branch at `:219-225` does). The first save from the UI then overwrites the real file.
+- **Where (reported):** `apply_config` logs a failed `write_atomic` but still updates in-memory state (`:299-301`). `metadata.rs:39-47` resets to defaults silently, including model version "0.0.0", which prompts a model re-download. `metadata.rs:60` and `gist.rs:186,234` use plain `fs::write`.
+- **Fix:** `write_atomic` everywhere, a backup on any read error, and `apply_config` returns a `Result` that the UI shows (A-5.2).
+- **Severity:** Medium · **Effort:** Small
 
-### W-8 내려받기·메타데이터 신뢰 틈, 타임아웃 없음
+### W-8 Download and metadata trust gaps, no timeouts
 
-- **(보고)** `download_model`은 URL과 해시를 화면에서 받고, 화면은 바뀔 수 있는 gist에서 받는다. 호스트 허용 목록과 별도 서명이 없다(`model.rs:54-60`).
-- **(보고)** 다운그레이드 차단이 확인 시점에만 있고 설치 시점에는 없다(`app_updater.rs:65-97`). 서명이 버전을 묶으므로 공격은 어렵다.
-- **(보고)** `check_all_updates`·`sync_dictionary`는 타임아웃과 크기 한도가 없는 `reqwest::Client::new()`다(`gist.rs:78,172-178`). 멈춘 호스트가 시작 때 "업데이트 확인 중"을 붙잡을 수 있다.
-- **제안:** gist 메타데이터를 앱에 내장된 minisign 키로 검증하고, 설치 시점에 버전을 다시 확인하고, 타임아웃/크기 한도를 둔다(A-6.3).
-- **심각도:** 중간 · **노력:** 보통
+- **(confirmed)** `download_model` takes its URL and hash from the UI, which gets them from a mutable gist (`model.rs:57-64`, "from the gist, via the UI"). An empty hash is refused, but there is no host allow-list and no independent signature.
+- **(confirmed)** the gist and dictionary fetches use `reqwest::Client::new()` with no timeout (`gist.rs:37,78,172`); a stalled host can hold the start-up "checking updates". The model / update downloads do have connect and stall timeouts (`fetch.rs:61,133`).
+- **(checked, no gap)** a downgrade is not possible through the app update: only the release announced by the last check is installed (`app_updater.rs:65-70`), and the announcement is filtered for newer versions (`gist.rs:112-120`). A review-agent claim of a re-check gap is dropped.
+- **Fix:** verify gist metadata with the minisign keys already built into the app, take the model URL and hash only from signed metadata, add timeouts and size limits (A-6.3, A-6.5).
+- **Severity:** Medium · **Effort:** Medium
 
-### W-9 웹뷰 보강이 없다
+### W-9 No webview hardening
 
-- **위치(확인):** `tauri.conf.json` `"csp": null`(`:23`), `"withGlobalTauri": true`(`:12`). `capabilities/*.json`에 `shell:allow-spawn`, `shell:allow-execute`와 사이드카 `bin/translator`가 남아 있다(쓰는 곳은 확인하지 않았다).
-  `open_browser(url)`는 받은 주소를 그대로 연다(`io/fs.rs:93`, 보고).
-- **근거:** 채팅 텍스트에 `inner_html`을 쓰는 곳은 찾지 못했다(보고) - 증명된 XSS는 없고, 관리자 프로세스 앞의 두 번째 방어선이 없는 것이다.
-- **제안:** CSP를 두고, 안 쓰는 셸 권한을 지우고, `open_browser`에 `https`만 허용한다.
-- **심각도:** 낮음~중간 · **노력:** 작음
+- **Where (confirmed):** `tauri.conf.json` has `"csp": null` (`:23`) and `"withGlobalTauri": true` (`:12`). `capabilities/*.json` still grants `shell:allow-spawn` and `shell:allow-execute` with a sidecar `bin/translator` (whether anything uses them was not checked).
+  `open_browser(url)` hands the string to the opener as is (`io/fs.rs:93-97`, confirmed).
+- **Evidence:** no `inner_html` on chat text was found (reported). There is no demonstrated XSS; what is missing is a second layer in front of an administrator process.
+- **Fix:** set a CSP, remove unused shell permissions, allow only `https` in `open_browser`.
+- **Severity:** Low to Medium · **Effort:** Small
 
-### W-10 스니퍼 시작/재시작 경합
+### W-10 Sniffer start / restart races
 
-- **위치(보고):** `restart_sniffer_command`(`:433-450`)가 옛 핸들을 비우고 새로 시작하는 사이 락을 안 쥔다. 옛 스레드는 최대 500ms(`network.rs:111`) 더 살고 `LAST_TRAFFIC_TIME`, `IS_SNIFFER_ACTIVE` 정적 변수를 같이 쓴다.
-  소켓 생성/`SIO_RCVALL` 실패(`network.rs:126-136,169-173`)는 로그만 하고 Error 상태를 안 내서, 감시가 나중에 "게임 트래픽 없음"이라는 엉뚱한 안내를 낸다.
-- **참고:** 브리지 `capture-spike`가 재시작 뒤 새 줄이 한 번씩 도착하는 것을 확인한다(호스트 러너에서 통과).
-- **제안:** 소유자 하나 + 조인 핸들(R-1), 설정 실패마다 Error 상태 발행.
-- **심각도:** 낮음~중간 · **노력:** 보통
+- **Where (confirmed structure, rest reported):** `restart_sniffer_command` sets `sniffer_tx` to `None`, sleeps 500 ms, then starts a new worker, taking the lock separately for each step (`sniffer/mod.rs:433-450`). `start_sniffer_command` can interleave. The old thread lives up to the 500 ms receive timeout (`network.rs:111`, reported) and both share the statics `LAST_TRAFFIC_TIME` and `IS_SNIFFER_ACTIVE` (`mod.rs:25-26`).
+  A socket-create or `SIO_RCVALL` failure (`network.rs:126-136,169-173`) only logs; no Error state is sent, so the watchdog later says "no game traffic" (reported).
+- **Note:** the bridge's `capture-spike` confirmed on the hosted runner that after a restart new lines arrive once each.
+- **Fix:** one owner with a join handle (R-1) and an Error state on every setup failure.
+- **Severity:** Low to Medium · **Effort:** Medium
 
-### W-11 채팅 속 `[P0]` 글자가 진짜 자리표시자와 충돌한다 (확인, 골든 테스트로 고정)
+### W-11 A `[P0]` typed in chat collides with a real placeholder (confirmed, pinned by a golden test)
 
-- **재현(확인):** 사전 `火力 -> 딜러`로 `"[P0]火力"`을 전처리하면 `[P0][P0]`가 되고 복원하면 `딜러딜러`다(플레이어가 쓴 `[P0]`가 사라진다).
-  `crates/core/tests/golden_text.rs::a_placeholder_typed_in_chat_collides_with_a_real_one_known_defect`가 현재 동작을 고정한다.
-- **영향:** 드물지만 채팅 텍스트가 번역 입력의 구조에 간섭한다(프롬프트 구조 문자 `<end_of_turn>` 등은 이미 막혀 있다: `chat_text_cannot_inject_turn_markers`).
-- **제안:** 입력에 이미 있는 `[P<n>]`을 다른 리터럴처럼 먼저 가려 번호가 겹치지 않게 한다(수정 시 골든을 갱신).
-- **심각도:** 낮음 · **노력:** 작음 (작업 카드로 이미 만들어 둠)
+- **Repro (confirmed):** with the dictionary `火力 -> 딜러`, preprocessing `"[P0]火力"` gives `[P0][P0]` and restoring gives `딜러딜러`: the player's own `[P0]` is replaced.
+  `crates/core/tests/golden_text.rs::a_placeholder_typed_in_chat_collides_with_a_real_one_known_defect` pins today's behaviour.
+- **Effect:** rare, but chat text interferes with the structure of the translation input (prompt control tokens such as `<end_of_turn>` are already stripped: `chat_text_cannot_inject_turn_markers`).
+- **Fix:** shield any `[P<n>]` already present in the input like the other literals so numbers cannot clash; the golden snapshot then changes on purpose.
+- **Severity:** Low · **Effort:** Small (a task card exists)
 
-### W-12 새어 나온 `<start_of_turn>model`이 단어 "model"을 남긴다 (확인, 골든 테스트에 포함)
+### W-12 A leaked `<start_of_turn>model` leaves the word "model" (confirmed, in the golden table)
 
-- **재현(확인):** 모델 출력 `"<start_of_turn>model\n번역</end_of_turn><eos>"` -> 후처리 결과 `"model 번역"`. 태그만 지우고 역할 단어가 남는다.
-- **제안:** 새어 나온 역할 머리글을 통째로 지울지 정한 뒤(동작 결정) 골든을 갱신한다.
-- **심각도:** 낮음 · **노력:** 작음
+- **Repro (confirmed):** model output `"<start_of_turn>model\n번역</end_of_turn><eos>"` post-processes to `"model 번역"`: the tag is removed but the role word stays.
+- **Fix:** decide whether to remove a leaked role header as a whole (a behaviour decision), then update the golden.
+- **Severity:** Low · **Effort:** Small
 
-### W-13 실앱 검증의 공백과 한계
+### W-13 Gaps and limits of real-app verification
 
-- **(확인)** 스모크는 릴리스 태그에서만 자동으로 돈다(Kade 결정). 한 단계가 실패하면 그 뒤 단계가 **돌지 않는다**: 이번 실행에서 `capture-spike` 1행 때문에
-  chat-rules, persistence, download-integrity, translator-stub, popups가 전부 안 돌았다. 아직 읽지 못한 행: `CP-fav-*`, `CR-ruby-*`(一人 읽기, K16), `TS-dict-*`, K8 `<bos>`.
-- **(확인)** 스탠드인 앱은 MQTT 패킷 한도가 없어서 이번 버그를 드라이런에서 못 봤다. `small-packets` 스위치로 이제 잡는다.
-- **제안:** 파이프라인을 독립 단계로 두고(`if: always()`), 한 단계가 빨개도 나머지는 돌려 읽는다(A-7.1). 이 변경은 CI 변경이라 Kade의 결정이 먼저다.
-- **심각도:** 중간 · **노력:** 작음
+- **(confirmed)** the smoke runs automatically only on release tags (Kade's decision). When one step fails the later steps **do not run**: in the last run `capture-spike` failed one row, so chat-rules, persistence, download-integrity, translator-stub and popups were all skipped.
+  Rows not yet read on the real app: `CP-fav-*`, `CR-ruby-*` (the 一人 reading, K16), `TS-dict-*`, the K8 `<bos>` count.
+- **(confirmed)** the stand-in app had no MQTT packet limit, so dry runs could not show this bug. The `small-packets` switch now catches it.
+- **Fix:** keep later steps running after one fails (`if: always()`), while the release still requires every step to pass (decision D-3, A-7.1).
+- **Severity:** Medium · **Effort:** Small
 
-### 더 낮은 것 (보고)
+### Lower items (reported)
 
-- 악의적 `0x8003` 프레임이 `ruzstd`의 윈도우로 최대 100MB를 잡아 둘 수 있다(1MiB 출력 상한 전, `frame_decoder.rs:22`, `decode_buffer.rs:49`). 경로상 공격자가 필요하다. `set_max_window_size`로 막는다.
-- `nickname_cache`는 비워지지 않는다(`sniffer/mod.rs:354`). 작지만 락 안에서 훑는다(P-6).
-- 비정상 종료 때 JSONL 마지막 줄이 잘려 다음 추가가 붙을 수 있다(한 줄 더 잃는 정도).
-- `panic = "abort"`이면 `llama-server`가 다음 시작까지 남는다(`kill_orphaned_servers`와 PID 파일이 완화). Windows 작업 객체(kill-on-close)가 근본 해결이다.
-- `logging.rs:25-26`이 릴리스에서도 백엔드 크레이트를 Trace로 둔다(보고). `config.log_level`이 걸러 주는지는 확인하지 못했다.
-- 락 순서 순환은 읽은 범위에서 찾지 못했다. 디코더는 손상 입력에 대해 클램프·패닉 안전하다(`decoder.rs:29-37,105-133`, 보고).
+- A hostile `0x8003` frame can make `ruzstd` reserve up to 100 MB before the 1 MiB output cap applies (`frame_decoder.rs:22`, `decode_buffer.rs:49`); it needs an on-path attacker. Cap it with `set_max_window_size`.
+- `nickname_cache` is never evicted (`sniffer/mod.rs:354`): small, but scanned under a lock (P-6).
+- After a crash a torn last JSONL line can make the next append glue onto it (one extra line lost).
+- With `panic = "abort"`, `llama-server` stays running until the next start (`kill_orphaned_servers` and a PID file mitigate); a Windows job object (kill-on-close) would remove it.
+- `logging.rs:25-26` sets the app's own crate to Trace in all builds (confirmed code); whether `config.log_level` filters it was not checked.
+- No lock-order cycle was found in the locks read. The decoder is clamped and panic-safe on corrupt input (`decoder.rs:29-37,105-133`).
 
 ---
 
-## 6. 프로젝트 개념·기능별 권장 목록 (A)
+## 6. Recommendations by project concept and feature (A)
 
-**프로젝트 개념:** "게임 채팅을 가로채서(캡처) -> 일본어를 한국어로(번역) -> 겹쳐서 보여 준다(오버레이)", 관리자 권한으로 도는 Windows 앱이고, 번역은 로컬 llama.cpp 서버가 한다.
-이 개념에서 나오는 일관된 원칙은 네 가지다: **(1) 채팅은 한 줄도 잃지 않는다 (2) 관리자 권한으로 도는 것은 검증된 것만 (3) 사용자가 문제를 직접 알 수 있어야 한다(로그/진단) (4) 실앱에서만 보이는 문제는 실앱 검증으로.**
-아래는 기능(모듈)별로 근거 ID와 함께 정리한 권장 목록이다. 효과는 사용자가 느끼는 쪽, 노력은 구현 쪽이다.
+**Project concept:** "capture game chat -> translate Japanese to Korean -> show it as an overlay", an administrator-rights Windows app, with translation done by a local llama.cpp server.
+Four principles follow from that concept: **(1) never lose a chat line, (2) only verified code runs with administrator rights, (3) users must be able to see what went wrong (logs, diagnostics), (4) problems that only show in the real app are found by real-app verification.**
+Below, the recommendations per feature (module) with the finding IDs they come from. "Effect" is what a user or developer gains.
 
-### A-1 캡처 · 프로토콜 (`sniffer`, `core/protocol`, `core/capture`)
+### A-1 Capture and protocol (`sniffer`, `core/protocol`, `core/capture`)
 
-| # | 권장 | 근거 | 효과 | 노력 |
+| # | Recommendation | Source | Effect | Effort |
 |---|---|---|---|---|
-| A-1.1 | 스니퍼 시작/중지를 한 소유자로(`Services`) + `sniffer_change` 표를 core에 | R-1, R-2, W-10 | 이중 시작·죽은 워커 방지, 규칙을 테스트로 고정 | 보통 |
-| A-1.2 | 소켓 설정 실패마다 `Error` 상태를 발행 | W-10 | "게임 트래픽 없음"이라는 엉뚱한 안내 제거 | 작음 |
-| A-1.3 | `ruzstd` 윈도우 상한 설정 | 낮은 것 | 악의적 프레임의 메모리 확보 방지 | 작음 |
-| A-1.4 | **정제된 캡처 코퍼스**를 repo에 두고 CI에서 재생(QA 방법 3) | 계획표 | 실제 트래픽에서 디코더 회귀 방지. 닉네임·본문을 치환하는 정제기와 **Kade의 실제 캡처**가 필요 | 작음~보통 |
-| A-1.5 | 앱이 웹뷰 없이도 캡처하도록 시작을 백엔드로 이동(화면 `hydration.rs:86`이 시작시킨다) | R-1 | 웹뷰 로딩 실패가 캡처 실패로 번지지 않음 | 보통 |
+| A-1.1 | One owner for sniffer start/stop (`Services`) and a `sniffer_change` table in core | R-1, R-2, W-10 | no double starts or dead workers; rules pinned by tests | Medium |
+| A-1.2 | Send an `Error` state on every socket-setup failure | W-10 | no misleading "no game traffic" message | Small |
+| A-1.3 | Set a `ruzstd` window limit | lower items | a hostile frame cannot reserve memory | Small |
+| A-1.4 | A **sanitised capture corpus** in the repo, replayed in CI (QA method 3) | plan table | decoder regressions on real traffic; needs a sanitiser for nicknames and text and **a real capture from Kade** | Small to Medium |
+| A-1.5 | Start capture from the backend, not from the webview (today `hydration.rs:86` and `setup_flow.rs:42` start it; confirmed) | R-1 | a webview failure does not become a capture failure | Medium |
 
-### A-2 번역 (`core/text`, `crates/llama`, `translator`)
+### A-2 Translation (`core/text`, `crates/llama`, `translator`)
 
-| # | 권장 | 근거 | 효과 | 노력 |
+| # | Recommendation | Source | Effect | Effort |
 |---|---|---|---|---|
-| A-2.1 | 번역기 시작 4곳을 `Services`로 모으고 정리·세대 처리를 하나로 | R-1 | 재시작 경합과 중복 정리 코드 제거 | 보통 |
-| A-2.2 | `[P<n>]` 충돌 수정 + 골든 갱신 | W-11 | 채팅이 번역 구조에 간섭하지 못함 | 작음 |
-| A-2.3 | 새어 나온 역할 머리글 정리 방침 결정 | W-12 | 출력에 "model"이 섞이지 않음 | 작음 |
-| A-2.4 | 변이 테스트가 보여 준 구멍 6개를 테스트로 메우기(`TranslationCache` 제거 순서, `is_empty`, `Dictionary` 접근자) | PR #202 결과 | 캐시가 무엇을 버리는지 테스트가 고정 | 작음 |
-| A-2.5 | 번역 전처리의 락 범위 축소 | P-6 | 캡처 경로 대기 감소 | 작음 |
-| A-2.6 | (제안) **번역 품질 회귀용 골든 문장 모음**: 사전 용어·이모트·숫자 단위가 들어간 실전 문장 20~50개를 입력/기대 마스킹으로 고정 | 개념 | 전처리·사전 변경이 번역에 미치는 영향을 diff로 확인 | 작음 |
+| A-2.1 | Gather the four translator start sites into `Services` with one kill / retire / generation handling | R-1 | no restart races or duplicated clean-up | Medium |
+| A-2.2 | Fix the `[P<n>]` collision and update the golden | W-11 | chat cannot interfere with the translation structure | Small |
+| A-2.3 | Decide how a leaked role header is handled | W-12 | no stray "model" in output | Small |
+| A-2.4 | Close the six gaps the mutation run showed (`TranslationCache` eviction order, `is_empty`, `Dictionary` accessors) | PR #202 | the cache's eviction is pinned by tests | Small |
+| A-2.5 | Shorten the preprocessing lock scope | P-6 | less waiting on the capture path | Small |
+| A-2.6 | (proposal) A **golden set of real sentences** with dictionary terms, emotes and number units, as input and expected masking, 20 to 50 lines | concept | the effect of preprocessing or dictionary changes shows as a diff | Small |
 
-### A-3 채팅 저장 · 히스토리 (`core/history`, `io/archive`, `events.rs`)
+### A-3 Chat storage and history (`core/history`, `io/archive`, `events.rs`)
 
-| # | 권장 | 근거 | 효과 | 노력 |
+| # | Recommendation | Source | Effect | Effort |
 |---|---|---|---|---|
-| A-3.1 | **도착 즉시 저장**, 번역이 생기면 두 번째 줄(`load_recent`가 이미 합친다) | W-4 | 서버 실패/따라잡기/원장 한도로 채팅이 사라지지 않음 | 보통 |
-| A-3.2 | 2초 중복 창을 core로 옮겨 가짜 시간으로 테스트 | R-3 | 두 층 중복 제거의 필요성을 테스트로 결정 | 작음 |
-| A-3.3 | 잘린 JSONL 줄 복구(다음 추가 전에 줄바꿈 확인) | 낮은 것 | 비정상 종료 때 한 줄 더 잃는 것 방지 | 작음 |
-| A-3.4 | 내보내기의 타임스탬프 `unwrap` 제거 | W-5 | 내보내기 중 앱 종료 방지 | 작음 |
-| A-3.5 | 차단 목록 사본 정리(`is_blocked` core 함수) + 차단/해제 이벤트 일괄 발행 | R-7, P-4 | 상태 한 곳, 캡처 정체 감소 | 작음 |
+| A-3.1 | **Archive on arrival**, then a second line when a translation exists (`load_recent` already merges them) | W-4 | no lines lost to a server failure, catch-up or ledger limit | Medium |
+| A-3.2 | Move the 2-second duplicate window to core and test it with fake time | R-3 | the need for the second de-duplication layer is decided by a test | Small |
+| A-3.3 | Repair a torn JSONL line (check for a newline before appending) | lower items | one less line lost after a crash | Small |
+| A-3.4 | Remove the timestamp `unwrap` in export | W-5 | export cannot crash the app | Small |
+| A-3.5 | Tidy block-list copies (`is_blocked` in core) and emit block / unblock events in one batch | R-7, P-4 | one source of truth; less capture stalling | Small |
 
-### A-4 오버레이 UI (`src/`)
+### A-4 Overlay UI (`src/`)
 
-| # | 권장 | 근거 | 효과 | 노력 |
+| # | Recommendation | Source | Effect | Effort |
 |---|---|---|---|---|
-| A-4.1 | 맨 아래로 돌아오면 `display_limit`를 50으로 | P-1 | 장시간 사용 시 DOM 증가 억제 | 작음 |
-| A-4.2 | 창 단위(windowed) 채팅 목록 | P-1, P-2, R-5 | 3,000줄에서도 DOM 일정. 앵커 스크롤·드래그·미읽음 처리에 위험(`ui-preview` 필수) | 보통 |
-| A-4.3 | 줄별 스크롤 효과를 컨테이너 신호로, 후리가나 IPC를 일괄로 | P-2, P-3 | 탭 전환·학습 뷰 켤 때 지연 감소 | 작음 |
-| A-4.4 | 큰 뷰 분할 + 순수 함수를 `utils.rs`로 | R-5 | 동작 불변 정리 | 보통 |
-| A-4.5 | `ui-preview` 스크린샷 회귀(시각 회귀) | 계획표 | 레이아웃 파손을 PR에서 발견 | 보통 |
+| A-4.1 | Reset `display_limit` to 50 on return to the bottom | P-1 | limits DOM growth in long sessions | Small |
+| A-4.2 | A windowed chat list | P-1, P-2, R-5 | constant DOM at 3,000 rows; risk around anchor scroll, drag, unread logic (`ui-preview` required) | Medium |
+| A-4.3 | A container-level scroll effect; batched furigana IPC | P-2, P-3 | less lag on tab switch and study view | Small |
+| A-4.4 | Split big views; move pure functions to `utils.rs` | R-5 | behaviour-neutral tidying | Medium |
+| A-4.5 | Visual regression with `ui-preview` screenshots | plan table | layout breakage found in a PR | Medium |
 
-### A-5 설정 · 즐겨찾기 · 사전 (`config`, `favorites`, `Dictionary`)
+### A-5 Settings, favorites, dictionary (`config`, `favorites`, `Dictionary`)
 
-| # | 권장 | 근거 | 효과 | 노력 |
+| # | Recommendation | Source | Effect | Effort |
 |---|---|---|---|---|
-| A-5.1 | `config_version` + core의 마이그레이션 체인 (`parse_config`, `favorites_migration`의 선례를 일반화) | W-7 | 설정 필드가 바뀌어도 옛 파일이 안전 | 작음 |
-| A-5.2 | `apply_config`가 `Result`를 돌려 화면에 저장 실패를 알림, 읽기 실패에도 백업 | W-7 | 설정이 조용히 초기화되지 않음 | 작음 |
-| A-5.3 | 채널 한도 기본값을 `types`로 한 곳에(어느 값이 의도인지 먼저 결정) | R-4 | core/ui/app 값 어긋남 제거(500 vs 1000) | 작음 |
-| A-5.4 | `app_config.rs`를 `model/store/apply`로 분할 | R-8 | 논리 변경 없이 읽기 쉬워짐 | 작음 |
-| A-5.5 | 즐겨찾기는 `save_favorites`만 쓴다는 규칙을 테스트로 고정(이미 브리지 `CP-fav-*` 행이 있다 - 실앱 결과를 읽을 것) | CLAUDE.md | 설정 쓰기가 즐겨찾기를 덮지 않음 | 작음 |
+| A-5.1 | `config_version` and a migration chain in core (generalise `parse_config` and `favorites_migration`) | W-7 | old files stay safe when fields change | Small |
+| A-5.2 | `apply_config` returns a `Result` shown in the UI; back up on any read error | W-7 | settings are not reset silently | Small |
+| A-5.3 | One definition of the channel-limit defaults in `types` (decided: 1000 for Local and Beginner, D-1) | R-4 | core / ui / app agree | Small |
+| A-5.4 | Split `app_config.rs` into `model / store / apply` | R-8 | readability, no logic change | Small |
+| A-5.5 | Pin "favorites change only through `save_favorites`" with tests (the bridge's `CP-fav-*` rows exist; read their real-app result) | CLAUDE.md | a config write cannot overwrite favorites | Small |
 
-### A-6 다운로드 · 업데이트 · 보안 (`downloader`, `server_manager`, `update_signature`)
+### A-6 Download, update, security (`downloader`, `server_manager`, `update_signature`)
 
-| # | 권장 | 근거 | 효과 | 노력 |
+| # | Recommendation | Source | Effect | Effort |
 |---|---|---|---|---|
-| A-6.1 | 업데이트 교체를 core의 `install_swap`로 + 두 번째 실패 때 되돌리기 | W-1, R-6 | 업데이트 실패가 앱 소실로 이어지지 않음 | 작음 |
-| A-6.2 | **관리자 권한으로 실행되는 것의 무결성**: 파일별 SHA-256 고정 후 실행 직전 검증, 또는 폴더 ACL 잠금 | W-2 | 같은 사용자 프로세스의 상승 차단 | 보통 |
-| A-6.3 | gist 메타데이터를 내장 minisign 키로 서명 검증, 모델 URL·해시는 서명된 메타데이터에서만, 설치 시점에 버전 재확인 | W-8 | 모델/사전 공급망 신뢰 강화 | 보통 |
-| A-6.4 | AI 서버 압축을 `.part` 폴더에 풀고 이름 바꾸기(원자적) | W-3 | 중간에 끊겨도 "설치됨"으로 굳지 않음 | 작음 |
-| A-6.5 | 원격 호출에 타임아웃·크기 한도 | W-8 | 시작 시 "확인 중"에 멈추지 않음 | 작음 |
-| A-6.6 | 웹뷰 보강: CSP, 안 쓰는 셸 권한 제거, `open_browser` 스킴 허용 목록, (선택) 작업 객체 | W-9 | 관리자 프로세스 앞의 두 번째 방어선 | 작음 |
+| A-6.1 | `install_swap` in core and rename back on a second failure | W-1, R-6 | a failed update cannot leave no app | Small |
+| A-6.2 | **Integrity of what runs elevated:** per-file SHA-256 pins verified right before spawn, or a locked folder ACL | W-2 | blocks privilege gain by a same-user process | Medium |
+| A-6.3 | Verify the gist metadata with the built-in minisign keys; model URL and hash only from signed metadata | W-8 | stronger model / dictionary supply chain | Medium |
+| A-6.4 | Extract the AI server into a `.part` folder and rename (atomic) | W-3 | an interrupted extraction never counts as installed | Small |
+| A-6.5 | Timeouts and size limits on remote calls | W-8 | start-up cannot hang on "checking" | Small |
+| A-6.6 | Webview hardening: CSP, remove unused shell permissions, `open_browser` scheme allow-list, optionally a job object | W-9 | a second line of defence in front of an administrator process | Small |
 
-### A-7 테스트 · QA (브리지, 골든, 변이, 코퍼스)
+### A-7 Tests and QA (bridge, golden, mutation, corpus)
 
-| # | 권장 | 근거 | 효과 | 노력 |
+| # | Recommendation | Source | Effect | Effort |
 |---|---|---|---|---|
-| A-7.1 | 스모크 파이프라인 단계를 독립 실행(`if: always()`)해 한 단계 실패가 뒤 단계를 가리지 않게 | W-13 | 한 번의 실행에서 모든 행을 읽음 | 작음 (CI 변경: 결정 필요) |
-| A-7.2 | 다음 수동 `bridge-smoke.yml` 실행에서 `CS-restart-nodup`, `CP-big-ack`, 읽지 못한 5개 단계를 읽는다 | W-13, PR #203 | 패킷 한도 수정의 실앱 확인, Node 브로커(aedes) 한도 여부 확인 | 작음 |
-| A-7.3 | 시각 회귀(Playwright + `ui-preview`) | 계획표 | UI 변경의 의도치 않은 레이아웃 변화 발견 | 보통 |
-| A-7.4 | 변이 테스트를 파일 단위로 돌려가며(`text.rs` -> `history.rs` -> `capture/*`) 구멍을 테스트로 메운다 | PR #202 | "테스트가 진짜 버그를 알아채는가"의 지표 | 작음 |
-| A-7.5 | 결함 주입(네트워크 끊김, llama 종료, 디스크 가득) 명령을 브리지에 | 계획표 | 실패 경로의 멈춤/크래시 발견 | 보통 |
-| A-7.6 | 소크 테스트 + 읽기 전용 `stats` 명령(메모리·핸들) | 계획표 | 누수와 느린 증가 발견(P-1 같은 문제도) | 보통 |
-| A-7.7 | 스탠드인 앱에 실앱의 알려진 한계(패킷 한도 등)를 옮겨 두기 | W-13 | 드라이런이 실앱 실패를 더 많이 재현 | 작음 |
+| A-7.1 | Run smoke pipeline steps independently (`if: always()`); **the release job still needs every step to pass** (D-3) | W-13 | one run reads every row; a red step still blocks a release | Small (CI change, own PR) |
+| A-7.2 | Next manual `bridge-smoke.yml` run: read `CS-restart-nodup`, `CP-big-ack` and the five skipped steps | W-13, PR #203 | real-app proof of the packet-limit fix; shows whether the Node broker (aedes) has a limit | Small |
+| A-7.3 | Visual regression (Playwright + `ui-preview`) | plan table | unintended layout changes found in a PR | Medium |
+| A-7.4 | Rotate mutation runs over files (`text.rs` -> `history.rs` -> `capture/*`) and close the holes with tests | PR #202 | a measure of whether tests notice real bugs | Small |
+| A-7.5 | Fault injection over the bridge (network down, llama dies, disk full) | plan table | stuck states and crashes on failure paths | Medium |
+| A-7.6 | Soak test and a read-only `stats` command (memory, handles) | plan table | leaks and slow growth (P-1 would show here) | Medium |
+| A-7.7 | Move known real-app limits into the stand-in (packet limits and the like) | W-13 | dry runs reproduce more real failures | Small |
 
-### A-8 운영 · 관측성 (로그, 진단, CI, 릴리스)
+### A-8 Operations and observability (logs, diagnostics, CI, release)
 
-| # | 권장 | 근거 | 효과 | 노력 |
+| # | Recommendation | Source | Effect | Effort |
 |---|---|---|---|---|
-| A-8.1 | **로그 파일 + 패닉 훅**: 순환하는 `logs/app.log`, 패닉이 파일에 쓰이게(`panic = "abort"`라 필수) | W-5 | 사용자가 보내 줄 수 있는 진단. 현재는 stderr와 메모리 200줄(`events.rs:67`)뿐 | 작음 |
-| A-8.2 | "진단 복사" 단추: 버전, 설정(비밀 제외), 최근 로그 | 계획표 | 테스트 보고를 재현 가능하게 | 보통 |
-| A-8.3 | 릴리스 로그 수준 확인(`logging.rs:25-26` Trace) | 낮은 것 | 불필요한 로그 비용/노출 방지 | 작음 |
-| A-8.4 | `cargo audit` 주간 실행 결과를 읽는 루틴(이미 워크플로 있음) | PR #199 | 새 권고를 놓치지 않음 | 작음 |
+| A-8.1 | **A log file and a panic hook:** a rotating `logs/app.log`; panics written to it (`panic = "abort"` makes this necessary) | W-5 | diagnostics a user can send; today only stderr and 200 in-memory lines (`events.rs:67`, reported) | Small |
+| A-8.2 | A "copy diagnostics" button: version, settings (secrets excluded), recent log | plan table | reproducible tester reports | Medium |
+| A-8.3 | Check the release log level (`logging.rs:25-26` Trace) | lower items | no needless log cost or exposure | Small |
+| A-8.4 | A routine for reading the weekly `cargo audit` result | PR #199 | new advisories are not missed | Small |
 
-### A-9 문서 · 프로세스
+### A-9 Documents and process
 
-| # | 권장 | 근거 | 효과 | 노력 |
+| # | Recommendation | Source | Effect | Effort |
 |---|---|---|---|---|
-| A-9.1 | `MEMORY.md`를 규칙대로 40줄 이하의 색인으로 되돌리고 상세는 `.memory/`로 | M-1 | 세션 시작 비용과 낡은 정보 위험 감소 | 작음 |
-| A-9.2 | 세션 기록이 쌓이는 규칙(`sessions/` 17개) 정리: 닫힌 항목 삭제 | M-2 | 맥락 탐색 쉬움 | 작음 |
+| A-9.1 | Bring `MEMORY.md` back to the rule (40 lines and 6 KB, D-2), with a gate check; move details to `.memory/` | M-1 | cheap session start, no stale contradictions | Small |
+| A-9.2 | Prune closed items from `sessions/` (17 files) | M-2 | easier to find context | Small |
 
 ---
 
-## 7. 문서·프로세스 어긋남 (M)
+## 7. Documents and process (M)
 
-### M-1 `MEMORY.md`가 규칙을 크게 어겼다 (중간 / 작음)
+### M-1 `MEMORY.md` greatly exceeds its rule (Medium / Small)
 
-- **측정:** `MEMORY.md`는 **287줄, 103,173바이트**다. CLAUDE.md의 완료 조건과 `.memory/README.md`는 "색인, 약 40줄"이라고 한다.
-  "지금(Now)" 절 하나가 2026-10-04 기준으로 시작하는데 세션마다 항목이 앞에 쌓였다(이번 세션의 4개도 포함).
-- **영향:** 새 세션이 읽는 첫 문서가 100KB라 맥락 비용이 크고, 서로 모순되는 낡은 문장(예: "CS-restart-nodup 원인 미상")이 남는다.
-- **제안:** 항목마다 한두 줄 + `.memory/sessions/`·`roadmap/` 링크로 줄이고, 닫힌 항목은 삭제한다(역사는 git과 세션 기록에 있다).
-  CLAUDE.md의 "40줄" 규칙을 지킬지 값을 바꿀지는 Kade가 정한다. 규칙을 지키기로 하면 게이트에 줄 수 검사를 넣을 수 있다.
+- **Measured:** `MEMORY.md` is **287 lines, 103,173 bytes**. The Definition of Done in CLAUDE.md and `.memory/README.md` say "an index, about 40 lines". The *Now* section still starts from 2026-10-04 and each session added entries in front (including four from this session).
+- **Effect:** the first file a new session reads is 100 KB; stale sentences that contradict newer facts (for example "`CS-restart-nodup` cause unknown") stay in.
+- **Decision (D-2):** the rule is **40 lines and 6 KB**. Proposal: one or two lines per item with links into `.memory/sessions/` and `roadmap/`, closed items deleted (history lives in git and the session notes), and a gate check that fails above the limit.
 
-### M-2 날짜가 틀린 메모가 있었다 (낮음 / 작음)
+### M-2 Some notes carried a wrong date (Low / Small)
 
-- **확인:** 이번 세션의 메모 일부가 `2026-10-07`로 적혀 있었는데 실제 날짜는 2026-10-06이다. 이 PR에서 고쳤다.
-- **제안:** 메모 날짜는 `date -u +%F`로 쓴다.
+- **Confirmed:** part of this session's notes said `2026-10-07`; the actual date is 2026-10-06. Fixed in PR #204.
+- **Proposal:** write note dates with `date -u +%F`.
 
-### M-3 `docs/`에 문서가 하나뿐이다 (낮음 / 작음)
+### M-3 Only one document in `docs/` (Low / Small)
 
-- **측정:** `docs/code-review-2026-09-29.md` 하나. 구조 문서가 없어 구조 정보가 CLAUDE.md의 저장소 배치 절과 이 보고서에만 있다.
-- **제안:** 이 보고서가 그 자리를 채운다. 수치는 낡으니 로드맵 완료 때마다 갱신한다(`.memory/roadmap/refactor.md`).
+- **Measured:** before this review, `docs/` held only `code-review-2026-09-29.md`. Structure information lived in the repository-layout section of CLAUDE.md.
+- **Proposal:** this review fills that gap; the new `security_model.md`, `testing.md` and `decisions.md` add the rest. Refresh the numbers whenever a roadmap stage closes.
 
-### M-4 오래 걸리는 실앱 검증의 결과가 한곳에 안 모인다 (낮음 / 작음)
+### M-4 Real-app results are not collected in one place (Low / Small)
 
-- **확인:** 실앱(호스트 러너) 결과는 세션 기록, `test-automation.md`, MEMORY.md에 따로 적힌다.
-- **제안:** 로드맵에 "실앱에서 아직 못 읽은 행" 표를 하나 둔다(`.memory/roadmap/refactor.md`의 S1).
+- **Confirmed:** real-app (hosted runner) results are written in session notes, `test-automation.md` and `MEMORY.md` separately.
+- **Proposal:** keep a "rows not yet read on the real app" table in the roadmap (stage S0).
 
 ---
 
-## 8. 우선순위와 다음 로드맵
+## 8. Priorities and the next roadmap
 
-### 8.1 전체 표 (심각도 -> 노력 순)
+### 8.1 Full table (severity, then effort)
 
-| ID | 제목 | 심각도 | 노력 | 동작 변경 | 단계 |
+| ID | Title | Severity | Effort | Behaviour change | Stage |
 |---|---|---|---|---|---|
-| W-1 | 자체 업데이트 되돌리기 없음 | 높음 | 작음 | 예(버그 수정) | S1 |
-| W-2 | 관리자 권한 앱의 서버 exe 무결성 | 높음 | 보통 | 예 | S3 |
-| W-5 | 패닉 `unwrap` + 로그/훅 없음 | 중간 | 작음 | 예 | S1 |
-| W-3 | AI 서버 압축 해제 비원자적 | 중간 | 작음 | 예 | S1 |
-| W-7 | 설정 조용한 초기화/반쯤 쓰기 | 중간 | 작음 | 예 | S2 |
-| W-6 | 메인 스레드 `netsh` | 중간 | 작음 | 예 | S2 |
-| W-13 | 스모크 단계 독립 실행, 실앱 미확인 행 | 중간 | 작음 | 해당 없음(CI) | S0 |
-| W-4 | 일본어 채팅 미저장 경로 | 중간 | 보통 | 예 | S2 |
-| W-8 | 메타데이터 신뢰 틈, 타임아웃 | 중간 | 보통 | 예 | S3 |
-| R-1 | 서비스 수명 흩어짐 | 중간 | 보통 | 아니오 | S4 |
-| R-2 | 스레드 본문 판단 분리 | 중간 | 보통 | 아니오 | S4 |
-| R-3 | 2초 중복 창 core로 | 중간 | 작음 | 아니오 | S4 |
-| R-4 | 채널 한도 기본값 3곳 | 중간 | 작음 | 일부(값 결정) | S2 |
-| R-6 | 설치 교체 core로 | 중간 | 작음 | 아니오 | S1 |
-| W-9 | CSP·권한·`open_browser` | 낮음~중간 | 작음 | 예 | S3 |
-| W-10 | 스니퍼 경합·오류 상태 | 낮음~중간 | 보통 | 예 | S4 |
-| W-11/W-12 | `[P<n>]` 충돌, 남는 "model" | 낮음 | 작음 | 예(골든 갱신) | S5 |
-| P-1~P-3 | 채팅 목록/IPC 정리 | 낮음 | 작음 | 아니오 | S6 |
-| P-4~P-6 | 차단 이벤트 일괄, 파서, 전처리 락 | 낮음 | 작음 | 아니오 | S5 |
-| R-5 | 큰 뷰 분할 | 낮음 | 보통 | 아니오 | S6 |
-| R-7~R-9 | 차단 사본, 설정 분할, types 분할 | 낮음 | 작음 | 아니오 | S5 |
-| M-1~M-4 | `MEMORY.md` 정리 등 | 중간~낮음 | 작음 | 해당 없음 | S0 |
-| A-1.4 | 정제된 캡처 코퍼스 | 낮음 | 작음~보통 | 해당 없음 | S7 (Kade의 캡처 필요) |
-| A-4.2 | 창 단위 채팅 목록 | 낮음 | 보통 | 아니오(화면) | S6 후 선택 |
-| - | 두 `AppConfig` 합치기, tokio 전면 이식, 브리지를 core 밖으로 | **하지 않음** | - | - | 9.3 |
+| W-1 | Self-update has no rollback | High | Small | yes (bug fix) | S1 |
+| W-2 | Integrity of the server exe run with admin rights | High | Medium | yes | S3 |
+| W-5 | Panic `unwrap` and no log or hook | Medium | Small | yes | S1 |
+| W-3 | Non-atomic AI-server extraction | Medium | Small | yes | S1 |
+| W-7 | Settings reset silently / half written | Medium | Small | yes | S2 |
+| W-6 | `netsh` on the main thread | Medium | Small | yes | S2 |
+| W-13 | Smoke steps independent; unread real-app rows | Medium | Small | n/a (CI) | S0 |
+| W-4 | Japanese chat not archived on some paths | Medium | Medium | yes | S2 |
+| W-8 | Metadata trust gaps, no timeouts | Medium | Medium | yes | S3 |
+| R-1 | Service lifetime scattered | Medium | Medium | no | S4 |
+| R-2 | Separate decisions from thread bodies | Medium | Medium | no | S4 |
+| R-3 | 2-second duplicate window to core | Medium | Small | no | S4 |
+| R-4 | Channel-limit defaults in three places (decided: 1000) | Medium | Small | yes (500 -> 1000 for new configs) | S2 |
+| R-6 | Install swap to core | Medium | Small | no | S1 |
+| W-9 | CSP, permissions, `open_browser` | Low to Medium | Small | yes | S3 |
+| W-10 | Sniffer races and error state | Low to Medium | Medium | yes | S4 |
+| W-11 / W-12 | `[P<n>]` collision, stray "model" | Low | Small | yes (golden update) | S5 |
+| P-1 to P-3 | Chat list and IPC tidying | Low | Small | no | S6 |
+| P-4 to P-6 | Batched block events, parser, preprocessing lock | Low | Small | no | S5 |
+| R-5 | Split big views | Low | Medium | no | S6 |
+| R-7 to R-9 | Block copies, config split, types split | Low | Small | no | S5 |
+| M-1 to M-4 | `MEMORY.md` rule and the like | Medium to Low | Small | n/a | S0 |
+| A-1.4 | Sanitised capture corpus | Low | Small to Medium | n/a | S7 (needs Kade's capture) |
+| A-4.2 | Windowed chat list | Low | Medium | no (UI) | optional after S6 |
+| - | Merge the two `AppConfig`s, full tokio port, bridge out of core | **not doing** | - | - | 8.4 |
 
-### 8.2 단계 (기능 하나 = 브랜치 하나 = PR 하나)
+### 8.2 Stages (one feature = one branch = one PR)
 
-모든 단계의 공통 조건은 CLAUDE.md와 같다: 계획 먼저(영향 분석 후 Kade의 확인), **테스트 먼저**(버그 수정은 재현 테스트부터), 해당 부분의 게이트(`just core-check`, ui는 `just ui-check`, app은 교차 검사, Windows CI), `cargo fmt`,
-`MEMORY.md` 갱신, `claude/<이름>` 브랜치 -> PR -> 자동 병합 후 다음 단계. 앱(Windows) 코드는 이 환경에서 실행·링크할 수 없으니 `NOT VERIFIED: app gate`를 커밋에 적고 Windows CI에 맡긴다.
-리팩터링 단계(S4~S6)는 **동작을 바꾸지 않는다**(전송 형식 포함: `ChatMessage`/`SystemMessage`의 camelCase는 프로토콜이다).
+Common conditions for every stage are those of CLAUDE.md: plan first (impact analysis, then Kade's go), **test first** (a bug fix starts with a reproducing test), the gate of each part touched
+(`just core-check`, `just ui-check` for ui, the app cross-check plus Windows CI), `cargo fmt`, a `MEMORY.md` update, a `claude/<name>` branch -> PR -> auto-merge, then the next stage.
+The app (Windows) code cannot be linked or run in this environment, so commits say `NOT VERIFIED: app gate` and leave it to Windows CI.
+Refactoring stages (S4 to S6) **do not change behaviour** (the wire format is the protocol: `ChatMessage` / `SystemMessage` stay camelCase).
 
-**S0. 문서·기억 정리와 실앱 읽기** (M-1~M-4, W-13) - 작음
-- `MEMORY.md`를 색인으로 줄이고 닫힌 항목을 `.memory/`로, 이 보고서와 `refactor.md` 링크.
-- 수동 `bridge-smoke.yml`(workflow_dispatch) 실행: `CS-restart-nodup`, `CP-big-ack`, 건너뛴 5개 단계(`CP-fav-*`, `CR-ruby-*`, `TS-dict-*`, 팝업, 다운로드)를 읽는다. 빨간 행은 새 작업이 된다.
-- 완료 조건: `MEMORY.md` 40줄 안팎, 실앱에서 못 읽은 행이 표로 정리됨.
+**S0. Docs, memory and reading the real app** (M-1 to M-4, W-13, D-2, D-3) - Small
+- S0a Shrink `MEMORY.md` to 40 lines and 6 KB, move details to `.memory/`, add the gate check (decision D-2).
+- S0b Smoke steps run independently (`if: always()`) while the release job needs all of them to pass (decision D-3). First check the pipelines do not depend on each other's state (each uses its own folder).
+- S0c Run `bridge-smoke.yml` by `workflow_dispatch` on `main`: read `CS-restart-nodup`, `CP-big-ack` and the five skipped steps (`CP-fav-*`, `CR-ruby-*` and the 一人 reading, `TS-dict-*` and the K8 `<bos>` count, popups, download). A red row becomes a new task.
+- Done when: `MEMORY.md` within the cap and the gate check passing; a table of real-app rows that are still unread.
 
-**S1. 데이터를 잃지 않게 - 업데이트·압축 해제·패닉** (W-1, R-6, W-3, W-5) - 보통, PR 3개
-- S1a `install_swap`을 core로 + 두 번째 이름 바꾸기 실패 때 되돌리기(임시 폴더에 실패 주입 테스트가 먼저).
-- S1b AI 서버 압축을 `.part`에 풀고 이름 바꾸기(중간 종료 재현 테스트가 먼저, 가능한 부분은 core로).
-- S1c 내보내기 타임스탬프 `unwrap` 제거 + 패닉 훅과 로그 파일(A-8.1).
-- 완료 조건: 두 번째 이름 바꾸기가 실패해도 exe가 남는다, 중간에 끊긴 압축 해제가 "설치됨"이 아니다, 범위 밖 타임스탬프로 내보내기가 죽지 않고 패닉이 로그에 남는다.
+**S1. Do not lose the app or data - update, extraction, panic** (W-1, R-6, W-3, W-5) - Medium, 3 PRs
+- S1a `install_swap` to core and rename back when the second rename fails (a temp-directory test with an injected failure first).
+- S1b Extract the AI server into `.part` and rename (a test that an interrupted extraction is not "installed" first; the pure part in core).
+- S1c Remove the export timestamp `unwrap`, add a panic hook and a log file (A-8.1).
+- Done when: the exe survives a failing second rename, an interrupted extraction does not count as installed, an out-of-range timestamp cannot kill export, and a panic reaches the log.
 
-**S2. 조용한 누락 없애기 - 저장·설정·한도** (W-4, W-7, W-6, R-4) - 보통, PR 3~4개
-- S2a 도착 즉시 아카이브(A-3.1): 서버 실행 실패/따라잡기/원장 한도에서도 저장된다는 core 테스트가 먼저.
-- S2b 설정: 읽기 실패 백업, `apply_config`의 `Result`, 모든 쓰기를 `write_atomic`으로, `config_version`.
-- S2c 채널 한도 기본값을 `types`로(먼저 의도한 값을 Kade가 결정: Local/Beginner가 500인가 1000인가).
-- S2d `start_sniffer_command`/`ensure_firewall_rule_command`를 `async`로 + 방화벽 확인 중복 제거.
+**S2. Stop silent drops - storage, settings, limits** (W-4, W-7, W-6, R-4) - Medium, 3 to 4 PRs
+- S2a Archive on arrival (a core test first: server launch failure, catch-up and ledger limit still archive).
+- S2b Settings: backup on read failure, `apply_config` returns a `Result`, `write_atomic` everywhere, `config_version`.
+- S2c Channel-limit defaults defined once in `types`, with **Local and Beginner = 1000** (decision D-1); a table test first.
+- S2d `start_sniffer_command` and `ensure_firewall_rule_command` become `async`; remove the duplicate firewall check.
 
-**S3. 관리자 권한 앱의 신뢰 경계** (W-2, W-8, W-9) - 보통~큼, PR 3개
-- S3a 서버 exe/DLL 파일별 SHA-256 고정과 실행 직전 검증(또는 ACL).
-- S3b gist 메타데이터 minisign 검증 + 설치 시점 버전 재확인 + 원격 호출 타임아웃/크기 한도.
-- S3c CSP, 안 쓰는 셸 권한 제거, `open_browser` 스킴 허용 목록(`ui-preview`로 CSP 확인 필요).
-- 완료 조건: 변조 테스트(파일을 바꾸면 실행하지 않는다), 기존 모의 피드 흐름이 통과.
+**S3. Trust boundary of the administrator app** (W-2, W-8, W-9) - Medium to Large, 3 PRs
+- S3a Per-file SHA-256 verification of the server exe and DLLs before spawn (or ACL).
+- S3b Minisign verification of gist metadata, timeouts and size limits.
+- S3c CSP, remove unused shell permissions, `open_browser` scheme allow-list (check the CSP with `ui-preview`).
+- Done when: a tamper test (a changed file is not started) passes and the existing mock-feed flow still passes.
 
-**S4. 서비스 수명 소유자** (R-1, R-2, R-3, W-10) - 큼, PR 여러 개
-- `sniffer_change` 표와 감시 판단을 core로(가짜 시계 테스트) -> 2초 중복 창을 core로 -> `Services` 소유자로 호출부를 하나씩 옮긴다.
-- 완료 조건: 브리지 `capture-spike`/`translator-stub`이 호스트 러너에서 같은 결과, 시작 호출 지점이 줄어든다.
+**S4. Service-lifetime owner** (R-1, R-2, R-3, W-10) - Large, several PRs
+- `sniffer_change` table and watchdog decisions to core (fake-clock tests) -> the 2-second duplicate window to core -> a `Services` owner, moving call sites one at a time.
+- Done when: bridge `capture-spike` / `translator-stub` give the same results on the hosted runner and the number of start call sites drops.
 
-**S5. 작은 정리와 결함** (W-11, W-12, P-4~P-6, R-7~R-9, A-2.4) - 작음, PR 여러 개
-- `[P<n>]` 충돌 수정(골든 갱신), "model" 방침 결정, 변이 테스트가 보여 준 구멍 6개 메우기, 차단 이벤트 일괄 발행, 파서 `unknown_fields`, 차단 사본, `app_config.rs`/`types` 분할.
+**S5. Small tidying and defects** (W-11, W-12, P-4 to P-6, R-7 to R-9, A-2.4) - Small, several PRs
+- Fix the `[P<n>]` collision (golden update), decide the stray "model" handling, close the six mutation gaps with tests, batch block events, parser `unknown_fields`, block-list copies, split `app_config.rs` and `types`.
 
-**S6. UI 정리와 효율** (P-1~P-3, R-5, A-4) - 보통
-- `display_limit` 복귀, 줄별 효과·IPC 정리, 큰 뷰 분할(순수 함수는 호스트 테스트). 화면 변경이므로 `ui-preview` 스크린샷, `cargo tauri dev` 확인(Windows, 관리자). 창 단위 목록(A-4.2)은 S6 결과를 보고 결정.
+**S6. UI tidying and efficiency** (P-1 to P-3, R-5, A-4) - Medium
+- `display_limit` reset, per-row effects and IPC, split big views (host tests for pure functions). UI changes need `ui-preview` screenshots and `cargo tauri dev` (Windows, administrator). Decide the windowed list from the result.
 
-**S7. 정제된 캡처 코퍼스** (A-1.4) - 작음~보통
-- Kade의 실제 캡처 + 닉네임·본문 치환기 -> `capture_replay.rs`로 CI 재생.
+**S7. Sanitised capture corpus** (A-1.4) - Small to Medium
+- Kade's real capture and a nickname / text substitution tool, replayed in CI by `capture_replay.rs`.
 
-### 8.3 권장 순서와 이유
+### 8.3 Recommended order and why
 
 `S0 -> S1 -> S2 -> S3 -> S4 -> S5 -> S6 (-> S7)`
 
-- S0을 먼저: 이미 만든 실앱 검증이 가려 둔 행을 읽는 것이 가장 싸고, 새 문제를 일찍 보여 줄 수 있다.
-- S1이 그다음: 사용자가 앱 자체를 잃을 수 있는 유일한 경로(W-1)와 작은 수정들이다.
-- S2가 S4보다 먼저: 채팅 저장 규칙(W-4)을 먼저 고정해 두어야 서비스 수명 리팩터링이 그 규칙을 깨지 않는다.
-- S3는 노력이 크지만 위험의 크기가 크다. 서버 exe 검증(W-2)은 가능하면 S1 직후에 앞당겨도 좋다.
-- S4(수명 소유자)는 큰 변경이라 다른 PR이 열려 있지 않을 때 시작한다(충돌).
-- 콘텐츠/기능 작업과는 독립이다. S0~S2는 병행해도 충돌이 적다.
+- S0 first: reading the rows the real-app verification hid is the cheapest step and may show new problems early; the two decisions that are CI / process changes also land here.
+- S1 next: the only path where a user can lose the app itself (W-1), plus small fixes.
+- S2 before S4: the chat-storage rule (W-4) should be pinned before the service-lifetime refactor so the refactor cannot break it.
+- S3 is larger but the risk it covers is large. The server-exe check (W-2) can be moved right after S1 if you prefer.
+- S4 is a big change: start it when no other PR is open (conflicts).
+- Content and feature work is independent. S0 to S2 can run alongside it with few conflicts.
 
-### 8.4 하지 않는 것
+### 8.4 Not doing
 
-- 두 `AppConfig` 합치기: 기록된 결정(Kade, 2026-09-29), 왕복 픽스처가 지킨다.
-- `test_env`·`replay`·브리지를 core 밖으로 옮기기(약 2,800줄): 안정판에는 들어가지 않고(`test-env` 기능), 옮기는 비용이 이득보다 크다.
-- 워커 스레드와 blocking reqwest의 tokio 전면 이식: 지금 동작하고 전용 스레드가 잘 격리돼 있다.
-- 파서·텍스트 경로 미세 최적화(P-5, P-6의 락 범위 외): LLM 지연에 비해 마이크로초.
-- 정규식 캐시(이미 `lazy_static`), llama 병렬 슬롯(`--parallel 1`은 의도), `tauri-plugin-updater`(서명된 자체 업데이트가 이미 있다).
-- UI 클릭 자동화(`tauri-driver`/WebDriver): Kade의 결정(2026-10-06) - `ui-preview`가 UI 검사다.
+- Merge the two `AppConfig`s: a recorded decision (Kade, 2026-09-29); the round-trip fixture guards it.
+- Move `test_env`, `replay` and the bridge out of core (about 2,800 lines): they are not in stable builds (`test-env` feature) and moving costs more than it gains.
+- A full tokio port of the worker threads and blocking reqwest: it works and the dedicated threads are well isolated.
+- Micro-optimising the parser and text path (P-5, and P-6 beyond lock scope): microseconds against LLM latency.
+- Regex caching (already `lazy_static`), parallel llama slots (`--parallel 1` is deliberate), `tauri-plugin-updater` (a signed updater already exists).
+- UI click automation (`tauri-driver` / WebDriver): Kade's decision (2026-10-06); `ui-preview` is the UI check.
 
 ---
 
-## 9. 방법과 `NOT VERIFIED`
+## 9. Decisions made
 
-### 9.1 방법
+| # | Decision | Date | Effect |
+|---|---|---|---|
+| D-1 | Local and Beginner tab-limit default is **1000** | 2026-10-06 (Kade) | `default_tab_limits` changes from 500 to 1000 for those two; the defaults are defined once (R-4, S2c) |
+| D-2 | `MEMORY.md` is limited to **40 lines and 6 KB** (the size is my recommendation, accepted by Kade: "I'll follow your recommendation") | 2026-10-06 | S0a shrinks it and adds a gate check |
+| D-3 | Smoke steps keep running after one fails, **but a release is blocked unless all of them succeed** | 2026-10-06 (Kade) | S0b: `if: always()` on pipeline steps; `release.yml` keeps `needs: [check, build, smoke]` and the job fails when any step fails |
+| D-4 | Keep two `AppConfig` types | 2026-09-29 (Kade) | not changed |
+| D-5 | No UI click automation for now | 2026-10-06 (Kade) | `ui-preview` stays the UI check |
+| D-6 | Smoke runs automatically only from a release tag | 2026-10-06 (Kade) | manual `workflow_dispatch` otherwise |
 
-| 목적 | 방법 |
+---
+
+## 10. Method and `NOT VERIFIED`
+
+### 10.1 Method
+
+| Purpose | Method |
 |---|---|
-| 줄 수 | `find <dir> -name '*.rs' | xargs cat | wc -l`, 큰 파일은 `wc -l`로 정렬 |
-| 테스트 | `cargo test -p resonance-core -p resonance-llama -p resonance-types`(495 통과), `grep -rn '#\[test\]'`로 개수 |
-| 변이 | `cargo mutants -p resonance-core --file crates/core/src/text.rs -j 2`(로컬 4분), 호스트 러너는 `mutants.yml`(6분) |
-| 감사 | `cargo audit`(취약점 0) |
-| 코드 확인 | W-1, W-2(매니페스트), W-3, W-4(a), W-5, W-6, W-7, W-9, R-1(방화벽 중복), R-4, P-1(`display_limit`)은 해당 파일을 직접 열어 줄 번호를 확인 |
-| 보고 | 나머지는 읽기 전용 검토 에이전트(`general-purpose`)가 코드를 읽고 보고한 것. 이 세션에서 직접 확인하지 못했다 |
-| 결함 재현 | W-11은 임시 테스트로 `"[P0]火力"` 결과 확인 후 골든 테스트로 고정, W-12는 골든 표에서 확인 |
-| 스모크 | `bridge-smoke.yml`을 `main`에 수동 실행(run 37495056171)해 `CS-restart-nodup` 로그에서 패킷 한도 문구 확인 |
+| Line counts | `find <dir> -name '*.rs' \| xargs cat \| wc -l`, big files sorted with `wc -l` |
+| Tests | `cargo test -p resonance-core -p resonance-llama -p resonance-types` (495 pass); counts of `#[test]` by `grep -rn` |
+| Mutation | `cargo mutants -p resonance-core --file crates/core/src/text.rs -j 2` (4 minutes locally); hosted run through `mutants.yml` (6 minutes) |
+| Audit | `cargo audit` (0 vulnerabilities) |
+| Code confirmation | W-1, W-2 (manifest and spawn), W-3, W-4(a), W-5, W-6, W-7 (read path), W-8 (download and timeouts, downgrade), W-9, R-1 (firewall duplicate, who starts the sniffer), R-3, R-4, P-1 (`display_limit`): the file was opened and the line numbers checked |
+| Reported | everything else, from a read-only review agent (`general-purpose`) reading the code. Not checked by hand |
+| Defect reproduction | W-11 reproduced with a temporary test (`"[P0]火力"`) and then pinned by a golden test; W-12 seen in the golden table |
+| Smoke | a manual `bridge-smoke.yml` run on `main` (run 37495056171); the packet-limit text was read from the `CS-restart-nodup` log |
 
-### 9.2 `NOT VERIFIED` / 한계
+### 10.2 `NOT VERIFIED` / limits
 
-- **`src-tauri/`(Windows 전용)는 이 환경에서 컴파일·실행하지 못했다.** 교차 검사(컴파일만)만 했고, 앱 테스트는 Windows CI가 돌린다. 앱 동작에 관한 문장은 코드를 읽은 것이다.
-- **ui 게이트를 이 세션에서 돌리지 못했다**(wasm32 타깃이 이 환경에 없다). ui 테스트 개수는 `grep` 값이다.
-- **성능은 벤치마크하지 않았다.** P 항목의 효과는 모두 추정이다.
-- **보고 항목(5절의 대부분, 3절 전부)은 직접 확인하지 못했다.** 직접 확인한 항목은 본문에 "확인"으로 표시했다. 보고 항목을 구현할 때는 먼저 재현 테스트로 확인한다.
-- W-1, W-3, W-4의 시나리오는 코드로 추적했을 뿐 **재현하지 않았다**.
-- `ruzstd` 메모리 주장은 0.9.0 소스를 읽은 것이다(악의적 프레임으로 돌려 보지 않았다).
-- 열어 보지 않은 곳(보고): `tray.rs`, `furigana`/`kanji_on`/`replay`/`sniffer_net`/`paste`/`window`/`favorites_migration`(core), 대부분의 ui 컴포넌트, `.github/`와 릴리스 스크립트.
-- 확인하지 못한 것: `config.log_level`이 백엔드 로거에 닿는지, `icons.rs`의 SVG 입력이 정적인지, NSIS 설치 폴더의 쓰기 권한, `capabilities`의 `shell:allow-spawn`/`bin/translator`를 실제로 쓰는 곳.
-- `CS-restart-nodup`의 패킷 한도 수정(PR #203)은 스탠드인과 단위 테스트로만 확인했다. 실앱 결과는 다음 수동 스모크 실행에서 읽는다.
+- **`src-tauri/` (Windows only) was not compiled for behaviour or run here.** Only the cross-check (compile) was done; app tests run in Windows CI. Statements about app behaviour come from reading the code.
+- **The ui gate was not run in this session** (no wasm32 target here). The ui test count is a `grep` value.
+- **Nothing was benchmarked.** All effects in the P items are estimates.
+- **Items marked "reported" were not checked by hand.** Confirmed items are marked in the text. Before implementing a reported item, reproduce it with a test first.
+- The scenarios of W-1, W-3 and W-4 were traced in code, **not reproduced**.
+- The `ruzstd` memory claim comes from reading the 0.9.0 source; a hostile frame was not run.
+- Not opened (reported scope): `tray.rs`, core `furigana` / `kanji_on` / `replay` / `sniffer_net` / `paste` / `window` / `favorites_migration`, most ui components, `.github/` and the release scripts.
+- Not checked: whether `config.log_level` reaches the backend logger, whether the SVG input of `icons.rs` is static, the write permissions of the NSIS install folder, and whether anything uses the `shell:allow-spawn` and `bin/translator` capabilities.
+- The packet-limit fix (PR #203) was verified with the stand-in and unit tests only. The real-app result is read in the next manual smoke run.

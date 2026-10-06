@@ -42,6 +42,8 @@ pub fn start(app: &AppHandle) {
         .to_string();
     let mut options = MqttOptions::new("resonance-stream-app", &host, port);
     options.set_keep_alive(Duration::from_secs(5));
+    // The client's default is 10 KiB, which dropped the answer to `get-chat-history` after a busy session.
+    options.set_max_packet_size(wire::MAX_PACKET_BYTES, wire::MAX_PACKET_BYTES);
     options.set_last_will(LastWill::new(
         wire::STATUS_TOPIC,
         "offline",
@@ -165,7 +167,7 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
     let answer_data = |data: Value| {
         publish(
             wire::ack_topic(&request.id),
-            wire::ack_data(&request.id, data),
+            wire::fit_ack(&request.id, wire::ack_data(&request.id, data)),
         );
     };
     let rect_json = |rect: Option<resonance_types::WindowRect>| {

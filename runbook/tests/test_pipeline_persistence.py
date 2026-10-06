@@ -44,7 +44,7 @@ def run(exe, tmp_path):
 
 
 CHECKS = ("CP-archive", "CP-config", "CP-reload", "CP-block-reload", "CP-pid", "CP-version",
-          "CP-retention", "CP-retention-served", "CP-busy-world",
+          "CP-retention", "CP-retention-served", "CP-busy-world", "CP-big-ack",
           "CP-fav-save", "CP-fav-event", "CP-fav-block", "CP-fav-config", "CP-fav-reload")
 
 
@@ -65,6 +65,7 @@ def test_an_app_that_keeps_its_promises_passes_every_row(env, tmp_path):
     ("no-retention", {"CP-retention", "CP-retention-served"}),
     ("retention-takes-all", {"CP-retention"}),
     ("global-limit", {"CP-busy-world"}),
+    ("small-packets", {"CP-big-ack"}),
     ("fav-not-saved", {"CP-fav-config", "CP-fav-reload"}),
     ("fav-renumbered", {"CP-fav-save", "CP-fav-reload"}),
     ("fav-clobbered", {"CP-fav-block", "CP-fav-config", "CP-fav-reload"}),

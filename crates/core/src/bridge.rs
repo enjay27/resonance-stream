@@ -53,6 +53,10 @@ pub const APP_STARTED_EVENT: &str = "app-started";
 
 pub const STATUS_TOPIC: &str = "rs/app/status";
 pub const ERROR_TOPIC: &str = "rs/app/error";
+/// The largest MQTT packet the app's client may send or accept, in bytes. The client's own default is 10 KiB, which
+/// silently dropped the answer to `get-chat-history` once a session had a few hundred lines (a 108 KB ack). A whole
+/// history of a busy session is a few MB at most; 16 MiB leaves room and is still a hard stop against a runaway payload.
+pub const MAX_PACKET_BYTES: usize = 16 * 1024 * 1024;
 /// What the app subscribes to for commands.
 pub const COMMAND_FILTER: &str = "rs/test/command/+";
 const COMMAND_PREFIX: &str = "rs/test/command/";
@@ -445,6 +449,19 @@ pub fn ack_data(id: &str, data: Value) -> String {
     json!({ "id": id, "ok": true, "data": data }).to_string()
 }
 
+/// An ack that fits one MQTT packet: `text` itself, or an error ack for `id` when it is over [`MAX_PACKET_BYTES`].
+/// The client cannot send such a packet; it errors and reconnects, and the test run would only see a timeout.
+pub fn fit_ack(id: &str, text: String) -> String {
+    if text.len() <= MAX_PACKET_BYTES {
+        return text;
+    }
+    let error = format!(
+        "the answer is {} bytes, too large for one packet (limit {MAX_PACKET_BYTES})",
+        text.len()
+    );
+    ack(id, Err(&error))
+}
+
 /// The payload for [`ERROR_TOPIC`].
 pub fn error_message(error: &CommandError) -> String {
     match error.id() {
@@ -460,6 +477,56 @@ mod tests {
 
     fn parse(name: &str, payload: &str) -> Result<Request, CommandError> {
         parse_command(&format!("rs/test/command/{name}"), payload.as_bytes())
+    }
+
+    /// One chat line as `get-chat-history` carries it (about the size of a real `ChatMessage`).
+    fn history_line(n: usize) -> Value {
+        json!({
+            "pid": n, "channel": "GUILD", "uid": 1001, "nickname": "Alice", "level": 60,
+            "message": format!("チャットの一行、番号 {n}、ここに少し長めの文章が入ります"),
+            "timestamp": 1_790_000_000 + n, "sequenceId": n, "isBlocked": false,
+            "translated": "", "romaji": "Alice", "unknownFields": {},
+        })
+    }
+
+    #[test]
+    fn an_ack_of_a_whole_chat_history_fits_one_mqtt_packet() {
+        // rumqttc refuses to publish more than 10 KiB unless told otherwise, so the answer to
+        // `get-chat-history` after a busy session never arrived (smoke run of #200,
+        // CS-restart-nodup: 108005 bytes). The limit the bridge asks for must hold a history.
+        const RUMQTTC_DEFAULT: usize = 10 * 1024;
+        let lines = |n: usize| ack_data("id", Value::Array((0..n).map(history_line).collect()));
+
+        assert!(
+            lines(500).len() > RUMQTTC_DEFAULT,
+            "a history of 500 lines is what the default limit cannot carry"
+        );
+        // Four channels, each at a generous limit of 5000 lines.
+        let big = lines(20_000);
+        assert!(
+            big.len() < MAX_PACKET_BYTES,
+            "a history of 20000 lines is {} bytes, the limit is {MAX_PACKET_BYTES}",
+            big.len()
+        );
+    }
+
+    #[test]
+    fn an_answer_over_the_packet_limit_becomes_an_error_ack() {
+        // Publishing it would make the client error and reconnect, and the ack would be lost.
+        let small = ack_data("a1", json!([1, 2, 3]));
+        assert_eq!(
+            fit_ack("a1", small.clone()),
+            small,
+            "a small answer is left alone"
+        );
+
+        let huge = ack_data("a2", Value::String("x".repeat(MAX_PACKET_BYTES)));
+        let fitted: Value = serde_json::from_str(&fit_ack("a2", huge)).expect("json");
+        assert_eq!(fitted["id"], "a2");
+        assert_eq!(fitted["ok"], false);
+        let error = fitted["error"].as_str().expect("an error text");
+        assert!(error.contains("too large"), "{error}");
+        assert!(error.contains(&MAX_PACKET_BYTES.to_string()), "{error}");
     }
 
     #[test]

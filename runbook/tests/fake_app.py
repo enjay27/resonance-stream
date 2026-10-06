@@ -28,7 +28,8 @@ notebook does for the new version, are never parsed). Environment:
                           sender, "clear-keeps" leaves the history when told to clear it, "ruby-merged" answers `annotate-furigana`
                           with one list for all the lines, "ruby-lossy" drops a "!" from a line, "ruby-marks-plain" gives a line without
                           kanji a reading, "ruby-katakana" reads in katakana
-  FAKE_APP_PERSIST_BUG    a bug to catch in what survives a restart: "no-archive" writes no chat log, "world-archived" also archives WORLD
+  FAKE_APP_PERSIST_BUG    a bug to catch in what survives a restart: "small-packets" never sends an answer over 10 KiB (the MQTT client's
+                          default limit), "no-archive" writes no chat log, "world-archived" also archives WORLD
                           (ignored by default), "no-config" does not save the block list, "no-reload" starts with an empty log,
                           "pid-restart" numbers new lines from 1 again, "unflagged-reload" restores a blocked sender's rows unflagged,
                           "no-retention" never prunes old day logs, "retention-takes-all" prunes files that are no day log too,
@@ -934,7 +935,10 @@ class App:
             body = {"id": id_, "ok": True} if error is None else {"id": id_, "ok": False, "error": error}
             if error is None and data is not None:
                 body["data"] = data
-            self.bridge.publish(f"rs/app/ack/{id_}", json.dumps(body))
+            text = json.dumps(body)
+            if os.environ.get("FAKE_APP_PERSIST_BUG") == "small-packets" and len(text.encode("utf-8")) > 10 * 1024:
+                return  # a bug to catch: rumqttc's default limit of 10 KiB -- the ack is never sent (bridge/live.rs, #200 smoke run)
+            self.bridge.publish(f"rs/app/ack/{id_}", text)
 
         if command == "ping":
             ack()

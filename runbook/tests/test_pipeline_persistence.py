@@ -44,7 +44,8 @@ def run(exe, tmp_path):
 
 
 CHECKS = ("CP-archive", "CP-config", "CP-reload", "CP-block-reload", "CP-pid", "CP-version",
-          "CP-retention", "CP-retention-served", "CP-busy-world")
+          "CP-retention", "CP-retention-served", "CP-busy-world",
+          "CP-fav-save", "CP-fav-event", "CP-fav-block", "CP-fav-config", "CP-fav-reload")
 
 
 def test_an_app_that_keeps_its_promises_passes_every_row(env, tmp_path):
@@ -64,6 +65,10 @@ def test_an_app_that_keeps_its_promises_passes_every_row(env, tmp_path):
     ("no-retention", {"CP-retention", "CP-retention-served"}),
     ("retention-takes-all", {"CP-retention"}),
     ("global-limit", {"CP-busy-world"}),
+    ("fav-not-saved", {"CP-fav-config", "CP-fav-reload"}),
+    ("fav-renumbered", {"CP-fav-save", "CP-fav-reload"}),
+    ("fav-clobbered", {"CP-fav-block", "CP-fav-config", "CP-fav-reload"}),
+    ("fav-silent", {"CP-fav-event"}),
 ])
 def test_each_broken_promise_is_caught(env, tmp_path, monkeypatch, bug, failing):
     monkeypatch.setenv("FAKE_APP_PERSIST_BUG", bug)

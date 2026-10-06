@@ -30,7 +30,9 @@ notebook does for the new version, are never parsed). Environment:
                           (ignored by default), "no-config" does not save the block list, "no-reload" starts with an empty log,
                           "pid-restart" numbers new lines from 1 again, "unflagged-reload" restores a blocked sender's rows unflagged,
                           "no-retention" never prunes old day logs, "retention-takes-all" prunes files that are no day log too,
-                          "global-limit" reloads the newest N of ALL channels (N = the WORLD limit) instead of N per channel
+                          "global-limit" reloads the newest N of ALL channels (N = the WORLD limit) instead of N per channel,
+                          "fav-not-saved" does not write the favorites to config.json, "fav-renumbered" hands the favorites tabs new ids 1..n,
+                          "fav-clobbered" lets a block-list write bring the old favorites back, "fav-silent" never says `favorites-changed`
   FAKE_APP_DL_BUG         a bug to catch in the model download: "no-verify" accepts any bytes, "keeps-part" leaves its partial file after a
                           failure, "overwrites-on-fail" replaces the installed model before checking the new one, "accepts-http" takes
                           a plain-http address that is not this machine's
@@ -469,6 +471,7 @@ class App:
         if config and config.exists():
             saved = json.loads(config.read_text(encoding="utf-8"))
             self.blocked = {int(uid): name for uid, name in saved.get("blocked_users", {}).items()}
+        self.favorites = {"messages": saved.get("favorite_messages", []), "tabs": saved.get("favorite_tabs", [])}
         self.ignored = saved.get("archive_ignored_channels", ["WORLD"])
         self.use_translation = bool(saved.get("use_translation", False))
         self.catch_up_limit = int(saved.get("translation_catch_up_limit", 100))
@@ -539,8 +542,32 @@ class App:
             return
         saved = json.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
         saved["blocked_users"] = {str(uid): name for uid, name in self.blocked.items()}
+        if os.environ.get("FAKE_APP_PERSIST_BUG") == "fav-clobbered":  # a bug to catch: another config write brings the old favorites back
+            self.favorites = {"messages": [], "tabs": []}
+            saved["favorite_messages"], saved["favorite_tabs"] = [], []
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text(json.dumps(saved), encoding="utf-8")
+
+    def save_favorites(self, favorites: dict) -> None:
+        """`save_favorites`, as understood: the favorites only (the block list and the rest of config.json stay), written, then
+        `favorites-changed` to every window."""
+        bug = os.environ.get("FAKE_APP_PERSIST_BUG")
+        tabs = [{"id": int(t["id"]), "name": t["name"]} for t in favorites.get("tabs", [])]
+        messages = [{"text": m["text"], "note": m.get("note", ""), "shortcut": m.get("shortcut", ""), "tab": int(m.get("tab", 0))}
+                    for m in favorites["messages"]]
+        if bug == "fav-renumbered":  # a bug to catch: the tab ids are handed out again, 1..n, in order
+            renumber = {t["id"]: n for n, t in enumerate(tabs, start=1)}
+            tabs = [{**t, "id": renumber[t["id"]]} for t in tabs]
+            messages = [{**m, "tab": renumber.get(m["tab"], m["tab"])} for m in messages]
+        self.favorites = {"messages": messages, "tabs": tabs}
+        config = self.data_path("config", "config.json")
+        if config is not None and bug != "fav-not-saved":
+            saved = json.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
+            saved["favorite_messages"], saved["favorite_tabs"] = messages, tabs
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+        if bug != "fav-silent":
+            self.event("favorites-changed", self.favorites)
 
     def set_blocked(self, uid: int, blocked: bool, nickname: str = "") -> None:
         if blocked:
@@ -843,6 +870,14 @@ class App:
             ack()
         elif command == "get-chat-history":
             ack(data=[dict(m) for m in self.history])
+        elif command == "get-favorites":
+            ack(data=self.favorites)
+        elif command == "save-favorites":
+            try:
+                self.save_favorites(request["favorites"])
+                ack()
+            except (KeyError, TypeError, ValueError) as e:
+                ack(f"save-favorites refused: {e}")
         elif command == "restart-sniffer":
             self.restart_sniffer()
             ack()

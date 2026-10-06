@@ -453,7 +453,7 @@ impl Theme {
 /// game by its global shortcut. `shortcut` is a Tauri accelerator built from
 /// `KeyboardEvent.code` ("Ctrl+Shift+Digit1"); empty means none. `note` is
 /// a reminder shown under the text (its meaning in Korean); never sent.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FavoriteMessage {
     pub text: String,
@@ -484,7 +484,7 @@ pub struct FavoriteTab {
 /// (`get_favorites`, `save_favorites`, the `favorites-changed` event): the
 /// messages and the tabs. The backend is the one source of truth, so two
 /// windows never overwrite each other's settings.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FavoritesState {
     pub messages: Vec<FavoriteMessage>,

@@ -20,7 +20,7 @@
 //! `clear-history`), or what the setup wizard does (`download-model`, `start-translator`), or what a person does with the popup windows (`open-popup`, `hide-popup`,
 //! `place-popup`, `pin-main`) -- not run arbitrary code.
 
-use resonance_types::{PopupKind, WindowRect};
+use resonance_types::{FavoritesState, PopupKind, WindowRect};
 use serde_json::{json, Value};
 use std::fmt;
 use std::path::PathBuf;
@@ -110,6 +110,11 @@ pub enum Command {
     /// Stop the sniffer and start a fresh one, as the network troubleshooter's buttons do (`restart_sniffer_command`). The ack
     /// comes at once; the restart runs on a thread of its own and shows as `sniffer-state` events.
     RestartSniffer,
+    /// Replace the favorites as the favorites popup does (`save_favorites`): the favorites only, every other setting stays; the
+    /// config file is written and `favorites-changed` tells every window.
+    SaveFavorites { favorites: FavoritesState },
+    /// The favorites the app holds (messages and tabs, as `favorites-changed` carries them), in the ack's `data`.
+    GetFavorites,
     /// Start the translator as the UI does once the model and server are in place (`launch_translator`; idempotent). With
     /// `--llama-url` it uses the stand-in server and needs neither.
     StartTranslator,
@@ -232,6 +237,23 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
         "get-chat-history" => Command::GetChatHistory,
         "clear-history" => Command::ClearHistory,
         "restart-sniffer" => Command::RestartSniffer,
+        "get-favorites" => Command::GetFavorites,
+        "save-favorites" => {
+            // The whole state or nothing: a missing or malformed one would clear the user's favorites.
+            match args
+                .get("favorites")
+                .cloned()
+                .map(serde_json::from_value::<FavoritesState>)
+            {
+                Some(Ok(favorites)) => Command::SaveFavorites { favorites },
+                _ => {
+                    return Err(CommandError::BadArgument {
+                        id,
+                        reason: "save-favorites needs \"favorites\": {\"messages\": [{\"text\": ...}], \"tabs\": [{\"id\": ..., \"name\": ...}]}".into(),
+                    })
+                }
+            }
+        }
         "start-translator" => Command::StartTranslator,
         "block-user" | "unblock-user" => {
             // The game's sender ids are whole numbers, and 0 means "no sender".
@@ -505,6 +527,68 @@ mod tests {
             parse("restart-sniffer", "{}").unwrap_err(),
             CommandError::BadId
         );
+    }
+
+    #[test]
+    fn the_favorites_commands_parse() {
+        use resonance_types::{FavoriteMessage, FavoriteTab, FavoritesState};
+        // What the favorites popup sends (`save_favorites`): messages with the tab they are filed under, and the tabs with their ids.
+        let payload = r#"{"id":"f","favorites":{"messages":[{"text":"こんにちは","note":"hello","shortcut":"Ctrl+1","tab":7},{"text":"はい"}],"tabs":[{"id":7,"name":"Greetings"}]}}"#;
+        assert_eq!(
+            parse("save-favorites", payload).map(|r| r.command),
+            Ok(Command::SaveFavorites {
+                favorites: FavoritesState {
+                    messages: vec![
+                        FavoriteMessage {
+                            text: "こんにちは".into(),
+                            note: "hello".into(),
+                            shortcut: "Ctrl+1".into(),
+                            tab: 7
+                        },
+                        // note, shortcut and tab are optional, as in the config file
+                        FavoriteMessage {
+                            text: "はい".into(),
+                            ..Default::default()
+                        }
+                    ],
+                    tabs: vec![FavoriteTab {
+                        id: 7,
+                        name: "Greetings".into()
+                    }],
+                }
+            })
+        );
+        // No tabs is the default tab only.
+        assert_eq!(
+            parse(
+                "save-favorites",
+                r#"{"id":"f","favorites":{"messages":[]}}"#
+            )
+            .map(|r| r.command),
+            Ok(Command::SaveFavorites {
+                favorites: FavoritesState::default()
+            })
+        );
+        assert_eq!(
+            parse("get-favorites", r#"{"id":"g"}"#).map(|r| r.command),
+            Ok(Command::GetFavorites)
+        );
+    }
+
+    #[test]
+    fn saving_favorites_needs_the_favorites() {
+        // A missing or malformed state would otherwise clear the user's favorites: refused, with the id so the ack says why.
+        for payload in [
+            r#"{"id":"f"}"#,
+            r#"{"id":"f","favorites":"x"}"#,
+            r#"{"id":"f","favorites":{}}"#,
+            r#"{"id":"f","favorites":{"messages":[{"note":"no text"}]}}"#,
+            r#"{"id":"f","favorites":{"messages":[],"tabs":[{"name":"no id"}]}}"#,
+        ] {
+            let err = parse("save-favorites", payload).unwrap_err();
+            assert_eq!(err.id(), Some("f"), "{payload}");
+            assert!(matches!(err, CommandError::BadArgument { .. }), "{payload}");
+        }
     }
 
     #[test]

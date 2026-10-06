@@ -40,12 +40,22 @@ fn kill_server_pid(pid: u32) {
 }
 
 pub struct ServerGuard {
-    child: Child,
+    /// `None`: a stand-in server a test run named (`--llama-url`) -- not ours to start, watch or kill.
+    child: Option<Child>,
     pid_file: Option<PathBuf>,
     log_file: Option<PathBuf>,
 }
 
 impl ServerGuard {
+    /// The guard of the server `--llama-url` names: nothing started, nothing to kill, never "exited".
+    fn external() -> Self {
+        Self {
+            child: None,
+            pid_file: None,
+            log_file: None,
+        }
+    }
+
     fn new(app: &AppHandle, child: Child, log_file: Option<PathBuf>) -> Self {
         let pid = child.id();
         SERVER_PID.store(pid, Ordering::SeqCst);
@@ -54,7 +64,7 @@ impl ServerGuard {
             let _ = fs::write(path, pid.to_string());
         }
         Self {
-            child,
+            child: Some(child),
             pid_file,
             log_file,
         }
@@ -71,7 +81,8 @@ impl ServerGuard {
 
     /// How the server ended, or `None` while it still runs.
     pub fn exit_status(&mut self) -> Option<String> {
-        match self.child.try_wait() {
+        let child = self.child.as_mut()?;
+        match child.try_wait() {
             Ok(Some(status)) => Some(status.to_string()),
             Ok(None) => None,
             Err(e) => Some(format!("state unknown: {e}")),
@@ -81,8 +92,11 @@ impl ServerGuard {
 
 impl Drop for ServerGuard {
     fn drop(&mut self) {
-        let pid = self.child.id();
-        let _ = self.child.kill();
+        let Some(child) = self.child.as_mut() else {
+            return;
+        };
+        let pid = child.id();
+        let _ = child.kill();
         // A newer server may already have replaced these; only clear our own.
         let _ = SERVER_PID.compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
         if let Some(path) = &self.pid_file {
@@ -98,6 +112,17 @@ pub fn launch_ai_server(
     model_path: &PathBuf,
     config: &crate::config::AppConfig,
 ) -> Option<ServerGuard> {
+    if let Some(url) = crate::test_env::llama_url() {
+        inject_system_message(
+            app,
+            SystemLogLevel::Info,
+            "Translator",
+            format!(
+                "Using the stand-in server at {url} (--llama-url); no llama-server is started."
+            ),
+        );
+        return Some(ServerGuard::external());
+    }
     let Ok(data_dir) = crate::app_dirs::data(app) else {
         let msg = "Failed to start llama-server.exe. (no app data folder)";
         inject_system_message(app, SystemLogLevel::Error, "Translator", msg);

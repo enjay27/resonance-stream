@@ -19,13 +19,14 @@ from runbook.pipelines.chat_rules import ChatRules
 from runbook.pipelines.download_integrity import DownloadIntegrity
 from runbook.pipelines.interface import InterfacePick
 from runbook.pipelines.persistence import Persistence
+from runbook.pipelines.translator_stub import TranslatorStub
 from runbook.pipelines.updater_mock import UpdaterMock
 from runbook.pipelines.window_restore import WindowRestore
 
 PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick, "window-restore": WindowRestore, "capture-spike": CaptureSpike,
              "chat-rules": ChatRules,
              "persistence": Persistence,
-             "download-integrity": DownloadIntegrity}
+             "download-integrity": DownloadIntegrity, "translator-stub": TranslatorStub}
 
 
 def build(name: str, rec: Recorder, exe, args):

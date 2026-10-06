@@ -23,6 +23,7 @@ on:
       - 'src-tauri/src/test_env.rs'
       - 'crates/core/src/bridge.rs'
       - 'crates/core/src/test_env.rs'
+      - 'src-tauri/src/services/translator/**'
   workflow_dispatch:
   workflow_call:
 
@@ -120,6 +121,12 @@ jobs:
         continue-on-error: true
         working-directory: runbook
         run: python -m runbook.run download-integrity --exe ../target/release/resonance-stream.exe
+
+      # The translate path against a stand-in llama-server. Allowed to fail until it has passed on the real app once.
+      - name: translator-stub over the bridge
+        continue-on-error: true
+        working-directory: runbook
+        run: python -m runbook.run translator-stub --exe ../target/release/resonance-stream.exe
 
       - name: Keep the logs
         if: always()

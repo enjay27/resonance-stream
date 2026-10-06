@@ -32,6 +32,8 @@ notebook does for the new version, are never parsed). Environment:
   FAKE_APP_DL_BUG         a bug to catch in the model download: "no-verify" accepts any bytes, "keeps-part" leaves its partial file after a
                           failure, "overwrites-on-fail" replaces the installed model before checking the new one, "accepts-http" takes
                           a plain-http address that is not this machine's
+  FAKE_APP_TR_BUG         a bug to catch in the translator: "no-catchup" never retries the lines that failed, "no-restart" gives up after three failures,
+                          "translates-english" also sends lines that are not Japanese
   FAKE_APP_SNIFF_BUG      a bug to catch in the capture: "drop-after-2" publishes only the first two chats it reads,
                           "never" does not start the sniffer at all
                           (the stand-in "sniffer" is a TCP client of the port-5003 server the capture-spike pipeline starts)
@@ -56,7 +58,7 @@ from pathlib import Path
 
 SWITCHES = {"fresh", "assume-setup-done", "no-capture", "no-translator", "no-update-check", "no-popups",
             "no-window-state", "print-env"}
-VALUES = {"data-dir", "feed-url", "metadata-url", "status-file", "log-file", "bridge-url"}
+VALUES = {"data-dir", "feed-url", "metadata-url", "status-file", "log-file", "bridge-url", "llama-url"}
 
 
 def parse(argv: list[str]) -> dict:
@@ -237,6 +239,11 @@ class App:
         self.fingerprints: list[tuple[tuple, float]] = []
         self.blocked: dict[int, str] = {}
         self.next_pid = 1
+        # the translator (translator/mod.rs, as understood)
+        self.jobs: queue.Queue = queue.Queue()
+        self.owed: list[int] = []
+        self.translator_on = False
+        self.tr_seq = 0
 
     def write_status(self) -> None:
         path = self.flags.get("status-file")
@@ -361,6 +368,10 @@ class App:
         self.history.append(chat)
         self.archive(chat)
         self.event("packet-event", chat)
+        if self.japanese(chat["message"]) or os.environ.get("FAKE_APP_TR_BUG") == "translates-english":
+            self.owed.append(chat["pid"])
+            if self.translator_on:
+                self.jobs.put(chat["pid"])
 
     # -- what survives a restart (data_factory.rs, config/app_config.rs, lib.rs start-up reload, as understood)
     def data_path(self, *parts: str) -> Path | None:
@@ -417,6 +428,91 @@ class App:
             if row["uid"] == uid and row["isBlocked"] != blocked:
                 row["isBlocked"] = blocked
                 self.event("chat-message-update", row)
+
+    # -- the translator: lines with Japanese in them are owed a translation; a worker asks the server named by --llama-url
+    @staticmethod
+    def japanese(text: str) -> bool:
+        return any(0x3040 <= ord(c) <= 0x30FF or 0x3400 <= ord(c) <= 0x4DBF or 0x4E00 <= ord(c) <= 0x9FFF
+                   or 0xFF66 <= ord(c) <= 0xFF9F or c == "\u3005" for c in text)
+
+    def tr_state(self, state: str, message: str = "") -> None:
+        self.tr_seq += 1
+        self.event("translator-state", {"state": state, "message": message, "seq": self.tr_seq})
+
+    def start_translator(self) -> str | None:
+        if self.translator_on:
+            return None
+        if "llama-url" not in self.flags:
+            return "no --llama-url: the stand-in only knows the stand-in server"
+        self.translator_on = True
+        threading.Thread(target=self._translator, daemon=True).start()
+        return None
+
+    def ask(self, text: str) -> str | None:
+        prompt = ("<bos><start_of_turn>user\nYou are a professional Japanese (ja) to Korean (ko) translator.\n"
+                  "Please translate the following Japanese text into Korean:\n" + text + "<end_of_turn>\n<start_of_turn>model\n")
+        body = json.dumps({"prompt": prompt, "stream": False, "temperature": 0.1, "n_predict": max(64, len(text) * 3 + 32),
+                           "stop": ["<end_of_turn>", "<eos>"]}).encode()
+        request = urllib.request.Request(self.flags["llama-url"] + "/completion", data=body, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as r:  # noqa: S310 -- local stand-in
+                content = json.loads(r.read()).get("content", "").strip()
+        except (OSError, ValueError, http.client.HTTPException):
+            return None
+        return content or None
+
+    def healthy(self) -> bool:
+        try:
+            with urllib.request.urlopen(self.flags["llama-url"] + "/health", timeout=3) as r:  # noqa: S310
+                return r.status == 200
+        except (OSError, ValueError):
+            return False
+
+    def _translator(self) -> None:
+        bug = os.environ.get("FAKE_APP_TR_BUG", "")
+        while not self.stop:
+            self.tr_state("Starting", "Initializing AI Backend...")
+            self.tr_state("Loading Model", "Loading AI weights into VRAM...")
+            while not self.healthy():
+                time.sleep(0.3)
+                if self.stop:
+                    return
+            owed = [pid for pid in self.owed if bug != "no-catchup"]
+            if owed:
+                self.tr_state("Catching Up", f"1/{len(owed)}")
+                for pid in owed:
+                    self.translate(pid)
+            self.tr_state("Active", "AI Engine Ready")
+            failures = 0
+            while not self.stop:
+                try:
+                    pid = self.jobs.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                if self.translate(pid):
+                    failures = 0
+                    continue
+                failures += 1
+                if failures >= 3:
+                    break
+            if bug == "no-restart" or self.stop:
+                self.tr_state("Error", "AI Engine keeps stopping.")
+                return
+            self.tr_state("Restarting", "AI Engine stopped. Restarting in 2s...")
+            time.sleep(2)
+
+    def translate(self, pid: int) -> bool:
+        row = next((m for m in self.history if m["pid"] == pid), None)
+        if row is None or row.get("translated"):
+            return True
+        korean = self.ask(row["message"])
+        if korean is None:
+            return False
+        row["translated"] = korean
+        if pid in self.owed:
+            self.owed.remove(pid)
+        self.event("translation-event", {"pid": pid, "translated": korean})
+        return True
 
     # -- the model download (downloader/model.rs and fetch.rs, as understood)
     def progress(self, label: str, percent: int) -> None:
@@ -547,6 +643,9 @@ class App:
             if os.environ.get("FAKE_APP_CHAT_BUG") != "clear-keeps":
                 self.history.clear()
             ack()
+        elif command == "start-translator":
+            error = self.start_translator()
+            ack(error)
         elif command == "download-model":
             ack()
             threading.Thread(target=self.download_model, args=(request,), daemon=True).start()

@@ -108,6 +108,15 @@ pub fn load_recent(dir: &Path, limits: &ChannelLimits) -> Vec<ChatMessage> {
     load_recent_within(dir, limits, MAX_SCAN_LINES)
 }
 
+/// Sets the blocked flag of each restored message from the block list as it is now. A row carries the flag it
+/// had when it was saved, which is stale both ways: a sender blocked since then must come back hidden, and one
+/// unblocked since then must not stay hidden.
+pub fn apply_block_list(messages: &mut [ChatMessage], is_blocked: impl Fn(u64) -> bool) {
+    for message in messages {
+        message.is_blocked = is_blocked(message.uid);
+    }
+}
+
 /// [`load_recent`] examining at most `max_lines` log lines (newest first), so
 /// the start-up cost does not grow with the age of the log folder: a channel
 /// that never fills (LOCAL, PARTY) would otherwise read every line ever saved.
@@ -303,6 +312,40 @@ mod tests {
             ..Default::default()
         })
         .unwrap()
+    }
+
+    #[test]
+    fn restored_rows_follow_the_block_list_as_it_is_now_not_as_it_was_when_saved() {
+        // Saved while sender 1 was not blocked, and while sender 2 was.
+        let mut rows = vec![
+            ChatMessage {
+                pid: 1,
+                uid: 1,
+                is_blocked: false,
+                ..Default::default()
+            },
+            ChatMessage {
+                pid: 2,
+                uid: 2,
+                is_blocked: true,
+                ..Default::default()
+            },
+            ChatMessage {
+                pid: 3,
+                uid: 3,
+                is_blocked: false,
+                ..Default::default()
+            },
+            ChatMessage {
+                pid: 4,
+                uid: 0, // the player's own line: no sender id
+                ..Default::default()
+            },
+        ];
+        // Since then: sender 1 was blocked, sender 2 was unblocked.
+        apply_block_list(&mut rows, |uid| uid == 1);
+        let flags: Vec<bool> = rows.iter().map(|m| m.is_blocked).collect();
+        assert_eq!(flags, [true, false, false, false]);
     }
 
     #[test]

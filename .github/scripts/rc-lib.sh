@@ -91,14 +91,3 @@ rc_nth_merge() {
   fi
   sed -n "${rank}p" <<<"$list"
 }
-
-# What the candidate's notes say about the real-app smoke test, given the result of
-# the `smoke` job (success | failure | cancelled | skipped | empty). A candidate is
-# published whatever the result; only a stable release waits for a green smoke test.
-rc_smoke_note() {
-  case "${1:-}" in
-    success) printf '%s\n' '- 실제 앱 스모크 테스트: 통과' ;;
-    failure | cancelled) printf '%s\n' '> **실제 앱 스모크 테스트가 실패했습니다.** 후보는 그대로 게시되었지만 일부 기능이 깨졌을 수 있습니다. 실패한 단계는 CI 실행 로그에서 확인하세요.' ;;
-    *) printf '%s\n' '- 실제 앱 스모크 테스트: 실행하지 않음' ;;
-  esac
-}

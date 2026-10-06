@@ -22,8 +22,8 @@ Tick `[x]` only when it ran the way "done when" says; a smoke row that is `conti
 0. **Two findings from the last smoke runs** (details in the changelog, "Found, not fixed"):
    - [x] `PP-place` fixed (#184): the real app now restores the popup at 520x660 (smoke run of #184: popups 8/8; inner 504x651 before and after).
    - [x] `translator-stub`: UTF-8 fixes (#183 read, #185 print); the real app now passes **6/6** (translate, prompt, restart, catch-up; K8 `<bos>` count 1 reported).
-1. [~] **Smoke is a gate for a stable release only** (`claude/smoke-gates-rc-and-release`, then `claude/smoke-gate-release-only`, Kade 2026-10-06: "make release only"): no `continue-on-error` left in `bridge-smoke.yml`; `release.yml` runs it on a separate test-flag build of the tagged commit and `release` needs it.
-   `release-candidate.yml` still runs it on the exe it built (input `exe-artifact`) but **only as a report**: the candidate is published whatever it said, and the notes carry a warning (red) or a line (green / not run) -- `rc_smoke_note`. Why: a candidate exists to be tried on Windows; a runner-only failure must not withhold it. `rc` is never merged into `main`, and candidate PRs into `main` are merged by hand, so there is no `rc` -> `main` gate to add (a required check there would be a branch-protection setting, Kade's).
+1. [x] **Smoke runs only from a pushed release tag** (`claude/smoke-gates-rc-and-release`, `claude/smoke-gate-release-only`, then `claude/smoke-on-release-tag-only`, Kade 2026-10-06: "PR to rc or main MUST NOT trigger smoke. Only release tagged push"): `bridge-smoke.yml` has no `pull_request` trigger (it is ~20 min and was the bottleneck of every bridge PR); `release.yml` calls it on a separate test-flag build of the tagged commit and `release` needs it. `release-candidate.yml` no longer runs it (`rc_smoke_note` and its notes line are gone). `workflow_dispatch` stays for a manual run on a branch. `rc-lib.test.sh` pins all of this.
+   Consequence: **a bridge / runbook change is no longer proven on the real app before it merges.** Its real-app result comes from a manual `workflow_dispatch` run or from the next release tag; say so in the commit body. `rc` is never merged into `main`, and candidate PRs into `main` are merged by hand, so there is no `rc` -> `main` gate to add.
    The call paths (`workflow_call`) cannot run before merge: **the first rc / release run is their test**; a red release run only blocks that publish (re-run). The `push`-triggered rc workflow is read from the `rc` branch: this change takes effect once `main` is merged into `rc`.
 2. **Small rows** (no app change; another row in an existing pipeline), three PRs in this order:
    - [x] `persistence` (#188): **CP-version**, **CP-retention** + **CP-retention-served**, **CP-busy-world** built; each caught by a stand-in bug switch (`no-retention`, `retention-takes-all`, `global-limit`, a wrong `FAKE_APP_VERSION`). **Real app: green** (the smoke run of #188).
@@ -38,7 +38,7 @@ Tick `[x]` only when it ran the way "done when" says; a smoke row that is `conti
    - reqwest 0.11 -> 0.12 (the `cargo audit` finding from #172; K24 said "dropped by design, revisit only if asked" -- it was asked
      by the audit; **unanswered**). Needs the app gate on Windows.
    - K8 `<bos>`: the stand-in reports the literal `<bos>` count of every prompt; the answer still waits for resonance-lab.
-   - Whether the rc flow should run `bridge-smoke` before a candidate is published.
+   - (decided: the rc flow does not run `bridge-smoke`, Kade 2026-10-06.)
 
 ## Facts to keep
 
@@ -50,4 +50,4 @@ Tick `[x]` only when it ran the way "done when" says; a smoke row that is `conti
 ## Prompt for the next session
 
 > Read `CLAUDE.md`, `MEMORY.md`, `.memory/roadmap/test-automation.md` and `.memory/sessions/2026-10-06-command-rows-handoff.md`. I am Kade.
-> First read the smoke run of the newest PR on `main` (`bridge-smoke.yml`) and say which rows passed on the real app; `CS-restart-nodup` has never run there. Then show me the impact analysis for command row A (`restart-sniffer`) and wait for my go.
+> First read `.memory/sessions/2026-10-06-command-rows-handoff.md` and the top of `MEMORY.md`: smoke runs only from a release tag now, so do not wait for it. `CS-restart-nodup` is red on the real app (no ack after the restart, cause unknown; #192 added the evidence, needs a manual `workflow_dispatch` run of `bridge-smoke.yml` on a branch to read it). Then show me the impact analysis for command row A (`restart-sniffer`) and wait for my go.

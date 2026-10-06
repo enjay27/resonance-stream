@@ -16,7 +16,8 @@
 //!
 //! A command is on an allowlist ([`Command`]): a test can ask for what the
 //! flags already do (`replay-chat`) or press a button the window has (`start-update`,
-//! `restart-update`), not run arbitrary code.
+//! `restart-update`), or what a chat row's menu does (`block-user`, `unblock-user`,
+//! `clear-history`) -- not run arbitrary code.
 
 use serde_json::{json, Value};
 use std::fmt;
@@ -92,6 +93,15 @@ pub enum Command {
     /// Install the downloaded update and restart (the dialog's 재시작). A refusal is the ack's error; a success
     /// ends this process and a new one announces itself with `app-started`.
     RestartUpdate,
+    /// Put a sender on the block list, as the chat row's menu does (`block_user_command`): their rows
+    /// are flagged and a `chat-message-update` says so for each. `nickname` is only the label kept in the list.
+    BlockUser { uid: u64, nickname: String },
+    /// Take a sender off the block list (`unblock_user_command`).
+    UnblockUser { uid: u64 },
+    /// The backend's chat log as the UI reads it at start-up (`get_chat_history`), in the ack's `data`.
+    GetChatHistory,
+    /// Empty the backend's chat and system logs (`clear_chat_history`, the clear button).
+    ClearHistory,
 }
 
 /// A command and the id its ack carries.
@@ -177,6 +187,36 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
                             "grow-window needs whole \"min_width\" and \"min_height\" (1-100000)"
                                 .into(),
                     }),
+                }
+            }
+            "get-chat-history" => Command::GetChatHistory,
+            "clear-history" => Command::ClearHistory,
+            "block-user" | "unblock-user" => {
+                // The game's sender ids are whole numbers, and 0 means "no sender".
+                let Some(uid) = args
+                    .get("uid")
+                    .and_then(Value::as_u64)
+                    .filter(|&uid| uid > 0)
+                else {
+                    return Err(CommandError::BadArgument {
+                        id,
+                        reason: format!("{name} needs a whole \"uid\" above 0"),
+                    });
+                };
+                if name == "unblock-user" {
+                    Command::UnblockUser { uid }
+                } else {
+                    let nickname = match args.get("nickname") {
+                        None => String::new(),
+                        Some(Value::String(nickname)) => nickname.clone(),
+                        Some(_) => {
+                            return Err(CommandError::BadArgument {
+                                id,
+                                reason: "block-user's \"nickname\" must be a string".into(),
+                            })
+                        }
+                    };
+                    Command::BlockUser { uid, nickname }
                 }
             }
             "start-update" => Command::StartUpdate,
@@ -301,6 +341,58 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn the_chat_commands_parse() {
+        assert_eq!(
+            parse("block-user", r#"{"id":"b","uid":1001,"nickname":"Alice"}"#).map(|r| r.command),
+            Ok(Command::BlockUser {
+                uid: 1001,
+                nickname: "Alice".into()
+            })
+        );
+        // The nickname is only a label in the block list: optional.
+        assert_eq!(
+            parse("block-user", r#"{"id":"b","uid":7}"#).map(|r| r.command),
+            Ok(Command::BlockUser {
+                uid: 7,
+                nickname: String::new()
+            })
+        );
+        assert_eq!(
+            parse("unblock-user", r#"{"id":"u","uid":1001}"#).map(|r| r.command),
+            Ok(Command::UnblockUser { uid: 1001 })
+        );
+        assert_eq!(
+            parse("get-chat-history", r#"{"id":"h"}"#).map(|r| r.command),
+            Ok(Command::GetChatHistory)
+        );
+        assert_eq!(
+            parse("clear-history", r#"{"id":"c"}"#).map(|r| r.command),
+            Ok(Command::ClearHistory)
+        );
+    }
+
+    #[test]
+    fn blocking_needs_a_whole_uid() {
+        // A uid is what the game sends: a whole number, and never 0 (0 is "no sender").
+        for payload in [
+            r#"{"id":"b"}"#,
+            r#"{"id":"b","uid":0}"#,
+            r#"{"id":"b","uid":-3}"#,
+            r#"{"id":"b","uid":1.5}"#,
+            r#"{"id":"b","uid":"1001"}"#,
+            r#"{"id":"b","uid":5,"nickname":9}"#,
+        ] {
+            let err = parse("block-user", payload).unwrap_err();
+            assert!(
+                matches!(&err, CommandError::BadArgument { id, .. } if id == "b"),
+                "{payload}: {err:?}"
+            );
+        }
+        let err = parse("unblock-user", r#"{"id":"u"}"#).unwrap_err();
+        assert!(matches!(err, CommandError::BadArgument { .. }));
     }
 
     #[test]

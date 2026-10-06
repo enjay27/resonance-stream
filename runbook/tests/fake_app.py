@@ -23,6 +23,9 @@ notebook does for the new version, are never parsed). Environment:
   FAKE_APP_K18_BUG        a bug to catch: "quit", "close" or "both" -- that way out saves the GROWN window
                           (what window-state would do if settings were still open at exit)
   FAKE_APP_BAD_STATUS=1   a bug to catch: a status file without pid and data_dir
+  FAKE_APP_CHAT_BUG       a bug to catch in the chat rules: "no-dedupe" publishes a repeated line again, "no-retro" blocks
+                          only later lines (earlier rows keep their flag), "block-later" never flags later lines of a blocked
+                          sender, "clear-keeps" leaves the history when told to clear it
   FAKE_APP_SNIFF_BUG      a bug to catch in the capture: "drop-after-2" publishes only the first two chats it reads,
                           "never" does not start the sniffer at all
                           (the stand-in "sniffer" is a TCP client of the port-5003 server the capture-spike pipeline starts)
@@ -222,6 +225,12 @@ class App:
         self.seq = 0
         self.announced_url: str | None = None
         self.stop = False
+        # the chat rules (sniffer/mod.rs, capture/message_processor.rs, events.rs, as understood)
+        self.history: list[dict] = []
+        self.signatures: dict[tuple, int] = {}
+        self.fingerprints: list[tuple[tuple, float]] = []
+        self.blocked: dict[int, str] = {}
+        self.next_pid = 1
 
     def write_status(self) -> None:
         path = self.flags.get("status-file")
@@ -303,6 +312,61 @@ class App:
                     continue
                 self.event("packet-event", {"pid": count, **chat})
 
+    # -- the chat rules, fed by `replay-chat`
+    def replay(self, path: str) -> None:
+        lines = []
+        for raw in Path(path).read_text(encoding="utf-8").splitlines():
+            if raw.strip() and not raw.lstrip().startswith("#"):
+                lines.append(json.loads(raw))
+        threading.Thread(target=self._replay, args=(lines,), daemon=True).start()
+
+    def _replay(self, lines: list[dict]) -> None:
+        time.sleep(float(os.environ.get("FAKE_APP_LEAD_IN_MS", "300")) / 1000)
+        for index, line in enumerate(lines):
+            time.sleep(line.get("delay_ms", 0) / 1000)
+            chat = {"channel": line.get("channel", "WORLD"), "nickname": line.get("nickname", "Tester"),
+                    "uid": line.get("uid", 1), "level": line.get("level", 0), "message": line["text"],
+                    "timestamp": line.get("timestamp", int(time.time())), "sequenceId": line.get("sequence_id", index + 1),
+                    "isBlocked": False}
+            self.feed(chat)
+        self.event("system-event", {"pid": 0, "level": "info", "source": "Replay", "message": "Replay finished"})
+
+    def feed(self, chat: dict) -> None:
+        bug = os.environ.get("FAKE_APP_CHAT_BUG", "")
+        if chat["uid"] in self.blocked and bug != "block-later":
+            chat["isBlocked"] = True
+        signature = (chat["uid"], chat["timestamp"], chat["sequenceId"])
+        if signature in self.signatures and bug != "no-dedupe":
+            if chat["isBlocked"]:  # the pipeline's UpdateBlockedMessage
+                row = next((m for m in self.history if m["pid"] == self.signatures[signature]), None)
+                if row and not row["isBlocked"]:
+                    row["isBlocked"] = True
+                    self.event("chat-message-update", row)
+            return
+        now = time.monotonic()
+        fingerprint = (chat["uid"], chat["message"], chat["timestamp"])  # events.rs: the same line from a second client within 2 s
+        self.fingerprints = [(f, t) for f, t in self.fingerprints if now - t <= 2]
+        if any(f == fingerprint for f, _ in self.fingerprints) and bug != "no-dedupe":
+            return
+        self.fingerprints.append((fingerprint, now))
+        chat["pid"] = self.next_pid
+        self.next_pid += 1
+        self.signatures[signature] = chat["pid"]
+        self.history.append(chat)
+        self.event("packet-event", chat)
+
+    def set_blocked(self, uid: int, blocked: bool, nickname: str = "") -> None:
+        if blocked:
+            self.blocked[uid] = nickname
+        else:
+            self.blocked.pop(uid, None)
+        if os.environ.get("FAKE_APP_CHAT_BUG") == "no-retro":
+            return
+        for row in self.history:
+            if row["uid"] == uid and row["isBlocked"] != blocked:
+                row["isBlocked"] = blocked
+                self.event("chat-message-update", row)
+
     # -- the main window (window.rs and the window-state plugin, as understood)
     def state_file(self) -> Path | None:
         data = self.flags.get("data-dir")
@@ -360,6 +424,24 @@ class App:
                 self.bridge.publish(f"rs/app/ack/{id_}", json.dumps({"id": id_, "ok": True, "data": old}))
             else:  # already big enough: nothing changed (data null)
                 self.bridge.publish(f"rs/app/ack/{id_}", json.dumps({"id": id_, "ok": True, "data": None}))
+        elif command == "replay-chat":
+            try:
+                self.replay(request["path"])
+                ack()
+            except (OSError, ValueError, KeyError) as e:
+                ack(f"replay failed: {e}")
+        elif command == "block-user":
+            self.set_blocked(int(request["uid"]), True, request.get("nickname", ""))
+            ack()
+        elif command == "unblock-user":
+            self.set_blocked(int(request["uid"]), False)
+            ack()
+        elif command == "get-chat-history":
+            ack(data=[dict(m) for m in self.history])
+        elif command == "clear-history":
+            if os.environ.get("FAKE_APP_CHAT_BUG") != "clear-keeps":
+                self.history.clear()
+            ack()
         elif command == "close-window":
             ack()
             time.sleep(0.2)

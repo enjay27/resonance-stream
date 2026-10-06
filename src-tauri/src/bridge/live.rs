@@ -216,6 +216,28 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
                 answer(Err(e));
             }
         }
+        // The chat-row menu's and the clear button's commands, called the way the UI's invoke reaches them.
+        Command::BlockUser { uid, nickname } => {
+            crate::services::sniffer::block_user_command(
+                *uid,
+                nickname.clone(),
+                app.clone(),
+                app.state(),
+            );
+            answer(Ok(()));
+        }
+        Command::UnblockUser { uid } => {
+            crate::services::sniffer::unblock_user_command(*uid, app.clone(), app.state());
+            answer(Ok(()));
+        }
+        Command::GetChatHistory => {
+            let history = crate::commands::get_chat_history(app.state());
+            answer_data(serde_json::to_value(history).unwrap_or(Value::Null));
+        }
+        Command::ClearHistory => {
+            crate::commands::clear_chat_history(app.state());
+            answer(Ok(()));
+        }
         Command::Quit => {
             answer(Ok(()));
             // Let the ack leave before the process does.

@@ -51,6 +51,7 @@ BURST_LINES = 500
 BYTE_LINES = 20  # one byte per segment is thousands of tiny packets: enough to prove the reassembly, few enough that a busy runner keeps up
 BURST_WAIT_S = 60  # how long a burst may take to arrive
 IDLE_WAIT_S = 100  # silence: the app's watchdog trips ~20 s after the last frame and again every ~20 s; its log line is written at ~20 s and ~80 s
+READY_WAIT_S = 90  # a command is held until the app has finished starting (up to 60 s), which takes ~20 s with the sniffer on
 BIND_WAIT_S = 90  # how long the sniffer may take to say it listens (the window must load first)
 
 
@@ -350,7 +351,7 @@ class CaptureSpike:
             self.rec.auto("CS-restart-nodup", "a line the chat log restored is not shown again", False, "the second run did not start or bind")
             return
         time.sleep(1)
-        restored = [m["message"] for m in again.send("get-chat-history")["data"]]
+        restored = [m["message"] for m in again.send("get-chat-history", timeout=READY_WAIT_S)["data"]]
         time.sleep(1)
         self.send_frames(server, frames)
         time.sleep(GRACE_S)

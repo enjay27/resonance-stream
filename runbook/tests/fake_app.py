@@ -48,6 +48,8 @@ notebook does for the new version, are never parsed). Environment:
                           "never" does not start the sniffer at all, "no-watchdog" never notices a silent game, "no-throttle" writes the
                           watchdog's line on every trip, "vpn-mismatch" names the VPN in the log but not on the badge, "no-remember" does
                           not teach the capture the chat reloaded from the logs (a re-sent line is shown again)
+  FAKE_APP_READY_DELAY    seconds after start before the app takes a command (the real one holds a command until its start-up is done,
+                          which takes ~20 s with the sniffer on); `quit` is taken at once
   FAKE_APP_WATCHDOG       "check,trip,window" seconds of the stand-in watchdog: how often it looks, how long a silence trips it, how long
                           an identical log line is held back (default 5,15,60 like the app)
   FAKE_APP_VPN            the name of a VPN adapter the default route runs through (the watchdog says so)
@@ -263,6 +265,7 @@ class App:
         self.use_translation = False
         self.catch_up_limit = 100
         self.last_traffic = time.monotonic()
+        self.started_at = time.monotonic()
         self.tr_seq = 0
         # the popup windows (window.rs, as understood)
         self.popups: dict[str, dict] = {}
@@ -763,6 +766,9 @@ class App:
     def handle(self, topic: str, payload: bytes) -> None:
         request = json.loads(payload)
         command, id_ = topic.rsplit("/", 1)[-1], request.get("id", "")
+        left = self.started_at + float(os.environ.get("FAKE_APP_READY_DELAY", "0")) - time.monotonic()
+        if left > 0:  # bridge/live.rs: a command waits until the app has finished starting
+            time.sleep(left)
 
         def ack(error: str | None = None, data=None) -> None:
             body = {"id": id_, "ok": True} if error is None else {"id": id_, "ok": False, "error": error}

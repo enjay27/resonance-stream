@@ -13,7 +13,8 @@ name: Mutation testing
 # only when the tool itself broke: the unmutated tests fail (exit 4) or it was misused.
 #
 # Scope: one file of resonance-core at a time (default text.rs, the translation text
-# processing); a whole crate is hours. Run another file by hand with the `file` input.
+# processing, 87 mutants, 4 minutes on a laptop with `-j 2`); a whole crate is far longer.
+# Run another file by hand with the `file` input.
 on:
   pull_request:
     paths:
@@ -38,7 +39,7 @@ jobs:
   mutants:
     name: cargo mutants
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

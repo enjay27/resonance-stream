@@ -149,3 +149,12 @@ def test_the_server_can_cut_a_stream_into_one_byte_segments(env):
         extra.close()
     finally:
         server.close()
+
+
+def test_a_slow_starting_app_is_waited_for_after_the_restart(env, tmp_path, monkeypatch):
+    """Real app, hosted runner: a start with the sniffer on takes ~20 s to be ready, and the bridge holds a command until then; the
+    restart row asked for the chat log with the default 10 s and died on `no ack`."""
+    monkeypatch.setenv("FAKE_APP_READY_DELAY", "11.5")
+    rec, got = run(env, tmp_path)
+    assert got["CS-restart-nodup"].status == "pass", rec.report()
+    assert rec.summary()["fail"] == 0, rec.report()

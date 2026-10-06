@@ -17,6 +17,11 @@ On the same running app, per variant, a burst and a stream cut into one-byte seg
   CS-<variant>-burst   500 chat frames written at once (many frames in a segment, frames split across segments) all arrive, each once
   CS-<variant>-bytes   20 frames written one byte per TCP segment all arrive, each once
 
+Then, per variant, the network troubleshooter's restart (`restart-sniffer`, the app's `restart_sniffer_command`):
+
+  CS-<variant>-sniffer-restart   the sniffer says it listens again (Pending or Active) after the command
+  CS-<variant>-after-restart     6 new frames written after that all arrive, each once (new texts: the new worker is taught the old chat)
+
 And, on the first variant only (they take minutes of silence and a restart):
 
   CS-watchdog        once the frames stop, the sniffer says so: its state turns Error with the red badge's text
@@ -48,10 +53,12 @@ PORT = 5003
 MAX_GAP_S = 0.3  # the sample's pauses are for reading; the sniffer does not need them
 GRACE_S = 6  # after the last frame, how long to wait for the last chat
 BURST_LINES = 500
+RESTART_LINES = 6  # new texts for the sniffer that comes back (it was taught the old ones, so the old frames would prove nothing)
 BYTE_LINES = 20  # one byte per segment is thousands of tiny packets: enough to prove the reassembly, few enough that a busy runner keeps up
 BURST_WAIT_S = 60  # how long a burst may take to arrive
 IDLE_WAIT_S = 100  # silence: the app's watchdog trips ~20 s after the last frame and again every ~20 s; its log line is written at ~20 s and ~80 s
 READY_WAIT_S = 90  # a command is held until the app has finished starting (up to 60 s), which takes ~20 s with the sniffer on
+RESTART_WAIT_S = 90  # how long the sniffer may take to come back after `restart-sniffer` (the app pauses 0.5 s, then binds again)
 BIND_WAIT_S = 90  # how long the sniffer may take to say it listens (the window must load first)
 
 
@@ -194,7 +201,8 @@ class CaptureSpike:
     def run(self, key_path: str | None = None, password: str | None = None) -> None:
         """(`key_path` and `password` are for the pipelines that sign; this one ignores them.)"""
         frames = sample_frames(self.sample)
-        self.bursts = {"burst": burst_frames(BURST_LINES, "burst", 1000, self.runs), "bytes": burst_frames(BYTE_LINES, "bytes", 5000, self.runs)}
+        self.bursts = {"burst": burst_frames(BURST_LINES, "burst", 1000, self.runs), "bytes": burst_frames(BYTE_LINES, "bytes", 5000, self.runs),
+                       "after-restart": burst_frames(RESTART_LINES, "after-restart", 9000, self.runs)}
         first = True
         for variant in self.variants:
             ip = "127.0.0.1" if variant == "loopback" else lan_address()
@@ -291,6 +299,8 @@ class CaptureSpike:
         self.burst(events, server, ip, variant, "bytes", f"{BYTE_LINES} frames written one byte per TCP segment", 1)
         if deep:
             self.silence(events, variant)
+        self.sniffer_restart(events, server, ip, variant)
+        if deep:
             self.restart(exe, events, server, frames, archived, ip, variant)
         else:
             self.quit(events)
@@ -312,6 +322,30 @@ class CaptureSpike:
         ok = sorted(mine) == sorted(wanted)
         self.rec.auto(f"CS-{variant}-{kind}", f"the sniffer saw all of {what} on {ip}, each once", ok,
                       f"{len(set(mine) & set(wanted))} of {len(wanted)} lines arrived, {len(mine)} packet-events; {self.said(events)}")
+
+    def sniffer_restart(self, events: bridge.Serve, server: FrameServer, ip: str, variant: str) -> None:
+        """`restart-sniffer` (what the network troubleshooter's buttons do): the sniffer says it listens again, and then reads new chat."""
+        check = f"CS-{variant}-sniffer-restart"
+        began = time.time() * 1000
+        try:
+            events.send("restart-sniffer")
+        except RuntimeError as e:
+            self.rec.auto(check, "restart-sniffer is taken and the sniffer comes back", False, f"{e}; {self.said(events)}")
+            return
+        deadline = time.monotonic() + RESTART_WAIT_S
+        back = []
+        while not back and time.monotonic() < deadline:
+            back = [m["message"]["payload"] for m in events.events()
+                    if m["topic"] == "rs/app/event/sniffer-state" and m["received_at"] >= began
+                    and m["message"]["payload"].get("state") in ("Pending", "Active")]
+            if not back:
+                time.sleep(0.5)
+        self.rec.auto(check, f"after restart-sniffer the sniffer says it listens again on {ip}", bool(back),
+                      f"states: {[p.get('state') for p in back]}" if back else f"no Pending or Active state in {RESTART_WAIT_S:.0f} s; {self.said(events)}")
+        if not back:
+            return
+        time.sleep(1)
+        self.burst(events, server, ip, variant, "after-restart", f"{RESTART_LINES} new frames after restart-sniffer", None)
 
     def silence(self, events: bridge.Serve, variant: str) -> None:
         """No traffic for `IDLE_WAIT_S`: what the watchdog and the system log do about it."""

@@ -109,6 +109,12 @@ jobs:
         working-directory: runbook
         run: python -m runbook.run chat-rules --exe ../target/release/resonance-stream.exe
 
+      # What survives a restart: chat log, block list, pids. Allowed to fail until it has passed on the real app once.
+      - name: persistence over the bridge
+        continue-on-error: true
+        working-directory: runbook
+        run: python -m runbook.run persistence --exe ../target/release/resonance-stream.exe
+
       - name: Keep the logs
         if: always()
         uses: actions/upload-artifact@v4

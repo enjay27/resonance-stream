@@ -26,6 +26,9 @@ notebook does for the new version, are never parsed). Environment:
   FAKE_APP_CHAT_BUG       a bug to catch in the chat rules: "no-dedupe" publishes a repeated line again, "no-retro" blocks
                           only later lines (earlier rows keep their flag), "block-later" never flags later lines of a blocked
                           sender, "clear-keeps" leaves the history when told to clear it
+  FAKE_APP_PERSIST_BUG    a bug to catch in what survives a restart: "no-archive" writes no chat log, "world-archived" also archives WORLD
+                          (ignored by default), "no-config" does not save the block list, "no-reload" starts with an empty log,
+                          "pid-restart" numbers new lines from 1 again, "unflagged-reload" restores a blocked sender's rows unflagged
   FAKE_APP_SNIFF_BUG      a bug to catch in the capture: "drop-after-2" publishes only the first two chats it reads,
                           "never" does not start the sniffer at all
                           (the stand-in "sniffer" is a TCP client of the port-5003 server the capture-spike pipeline starts)
@@ -353,13 +356,58 @@ class App:
         self.next_pid += 1
         self.signatures[signature] = chat["pid"]
         self.history.append(chat)
+        self.archive(chat)
         self.event("packet-event", chat)
+
+    # -- what survives a restart (data_factory.rs, config/app_config.rs, lib.rs start-up reload, as understood)
+    def data_path(self, *parts: str) -> Path | None:
+        data = self.flags.get("data-dir")
+        return Path(data).joinpath(*parts) if data else None
+
+    def load_persisted(self) -> None:
+        bug = os.environ.get("FAKE_APP_PERSIST_BUG", "")
+        config = self.data_path("config", "config.json")
+        if config and config.exists():
+            saved = json.loads(config.read_text(encoding="utf-8"))
+            self.blocked = {int(uid): name for uid, name in saved.get("blocked_users", {}).items()}
+        logs = self.data_path("data", "chat_logs")
+        if logs and logs.is_dir() and bug != "no-reload":
+            for file in sorted(logs.glob("*.jsonl")):
+                for raw in file.read_text(encoding="utf-8").splitlines():
+                    row = json.loads(raw)
+                    row["isBlocked"] = row["uid"] in self.blocked and bug != "unflagged-reload"
+                    self.history.append(row)
+            for pid, row in enumerate(self.history, start=1):  # load_recent: saved pids come from earlier runs, so 1..=n again
+                row["pid"] = pid
+            if bug != "pid-restart":
+                self.next_pid = len(self.history) + 1
+            for row in self.history:
+                self.signatures[(row["uid"], row["timestamp"], row["sequenceId"])] = row["pid"]
+
+    def archive(self, chat: dict) -> None:
+        bug = os.environ.get("FAKE_APP_PERSIST_BUG", "")
+        logs = self.data_path("data", "chat_logs")
+        if logs is None or bug == "no-archive" or (chat["channel"] == "WORLD" and bug != "world-archived"):
+            return
+        logs.mkdir(parents=True, exist_ok=True)
+        with open(logs / f"{time.strftime('%Y-%m-%d')}.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(chat, ensure_ascii=False) + "\n")
+
+    def save_blocked(self) -> None:
+        config = self.data_path("config", "config.json")
+        if config is None or os.environ.get("FAKE_APP_PERSIST_BUG") == "no-config":
+            return
+        saved = json.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
+        saved["blocked_users"] = {str(uid): name for uid, name in self.blocked.items()}
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(json.dumps(saved), encoding="utf-8")
 
     def set_blocked(self, uid: int, blocked: bool, nickname: str = "") -> None:
         if blocked:
             self.blocked[uid] = nickname
         else:
             self.blocked.pop(uid, None)
+        self.save_blocked()
         if os.environ.get("FAKE_APP_CHAT_BUG") == "no-retro":
             return
         for row in self.history:
@@ -547,6 +595,7 @@ def main() -> int:
     app.status["ready"] = True
     app.write_status()
     app.load_window_state()
+    app.load_persisted()
     app.connect_bridge()
     line = os.environ.get("FAKE_APP_IFACE_LINE")
     if line and "no-capture" not in flags:

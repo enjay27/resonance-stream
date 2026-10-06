@@ -113,6 +113,9 @@ pub enum Command {
     /// Replace the favorites as the favorites popup does (`save_favorites`): the favorites only, every other setting stays; the
     /// config file is written and `favorites-changed` tells every window.
     SaveFavorites { favorites: FavoritesState },
+    /// The furigana the app gives for these lines (`annotate_furigana`, what the chat row's Study view asks): one list of
+    /// `{text, reading?}` spans per line, in order, in the ack's `data`.
+    AnnotateFurigana { texts: Vec<String> },
     /// The favorites the app holds (messages and tabs, as `favorites-changed` carries them), in the ack's `data`.
     GetFavorites,
     /// Start the translator as the UI does once the model and server are in place (`launch_translator`; idempotent). With
@@ -238,6 +241,25 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
         "clear-history" => Command::ClearHistory,
         "restart-sniffer" => Command::RestartSniffer,
         "get-favorites" => Command::GetFavorites,
+        "annotate-furigana" => {
+            let texts = args
+                .get("texts")
+                .and_then(Value::as_array)
+                .and_then(|list| {
+                    list.iter()
+                        .map(|text| text.as_str().map(str::to_string))
+                        .collect::<Option<Vec<_>>>()
+                });
+            match texts {
+                Some(texts) => Command::AnnotateFurigana { texts },
+                None => {
+                    return Err(CommandError::BadArgument {
+                        id,
+                        reason: "annotate-furigana needs \"texts\": a list of strings".into(),
+                    })
+                }
+            }
+        }
         "save-favorites" => {
             // The whole state or nothing: a missing or malformed one would clear the user's favorites.
             match args
@@ -587,6 +609,40 @@ mod tests {
         ] {
             let err = parse("save-favorites", payload).unwrap_err();
             assert_eq!(err.id(), Some("f"), "{payload}");
+            assert!(matches!(err, CommandError::BadArgument { .. }), "{payload}");
+        }
+    }
+
+    #[test]
+    fn annotate_furigana_takes_a_list_of_lines() {
+        // What the chat row's Study view asks (`annotate_furigana`): one string per line, in order.
+        assert_eq!(
+            parse(
+                "annotate-furigana",
+                r#"{"id":"a","texts":["日韓辞書","ありがとう!",""]}"#
+            )
+            .map(|r| r.command),
+            Ok(Command::AnnotateFurigana {
+                texts: vec!["日韓辞書".into(), "ありがとう!".into(), String::new()]
+            })
+        );
+        // No lines is a valid, empty question.
+        assert_eq!(
+            parse("annotate-furigana", r#"{"id":"a","texts":[]}"#).map(|r| r.command),
+            Ok(Command::AnnotateFurigana { texts: vec![] })
+        );
+    }
+
+    #[test]
+    fn annotate_furigana_refuses_anything_but_a_list_of_strings() {
+        for payload in [
+            r#"{"id":"a"}"#,
+            r#"{"id":"a","texts":"日韓辞書"}"#,
+            r#"{"id":"a","texts":[1,2]}"#,
+            r#"{"id":"a","texts":["ok",null]}"#,
+        ] {
+            let err = parse("annotate-furigana", payload).unwrap_err();
+            assert_eq!(err.id(), Some("a"), "{payload}");
             assert!(matches!(err, CommandError::BadArgument { .. }), "{payload}");
         }
     }

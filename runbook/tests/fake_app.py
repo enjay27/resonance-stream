@@ -25,7 +25,9 @@ notebook does for the new version, are never parsed). Environment:
   FAKE_APP_BAD_STATUS=1   a bug to catch: a status file without pid and data_dir
   FAKE_APP_CHAT_BUG       a bug to catch in the chat rules: "no-dedupe" publishes a repeated line again, "no-retro" blocks
                           only later lines (earlier rows keep their flag), "block-later" never flags later lines of a blocked
-                          sender, "clear-keeps" leaves the history when told to clear it
+                          sender, "clear-keeps" leaves the history when told to clear it, "ruby-merged" answers `annotate-furigana`
+                          with one list for all the lines, "ruby-lossy" drops a "!" from a line, "ruby-marks-plain" gives a line without
+                          kanji a reading, "ruby-katakana" reads in katakana
   FAKE_APP_PERSIST_BUG    a bug to catch in what survives a restart: "no-archive" writes no chat log, "world-archived" also archives WORLD
                           (ignored by default), "no-config" does not save the block list, "no-reload" starts with an empty log,
                           "pid-restart" numbers new lines from 1 again, "unflagged-reload" restores a blocked sender's rows unflagged,
@@ -66,6 +68,7 @@ import json
 import os
 import shutil
 import queue
+import re
 import socket
 import struct
 import subprocess
@@ -548,6 +551,30 @@ class App:
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text(json.dumps(saved), encoding="utf-8")
 
+    # -- furigana (resonance_core::furigana, as understood): the spans of a line, joined, are the line; a run of kanji gets a hiragana
+    #    reading, everything else is plain. A toy dictionary: the contract is what the pipeline judges, not the readings.
+    READINGS = {"日韓辞書": "にっかんじしょ", "今日": "きょう", "募集": "ぼしゅう", "一人": "ひとり", "二人": "ふたり",
+                "一人前": "いちにんまえ", "行": "い"}
+
+    def annotate(self, text: str) -> list[dict]:
+        bug = os.environ.get("FAKE_APP_CHAT_BUG", "")
+        spans = []
+        for run in re.findall(r"[\u4e00-\u9fff]+|[^\u4e00-\u9fff]+", text):
+            if bug == "ruby-lossy":
+                run = run.replace("!", "")
+            if not run:
+                continue
+            if re.match(r"[\u4e00-\u9fff]", run):
+                reading = self.READINGS.get(run, "よみ")
+                if bug == "ruby-katakana":
+                    reading = "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c for c in reading)
+                spans.append({"text": run, "reading": reading})
+            elif bug == "ruby-marks-plain":
+                spans.append({"text": run, "reading": run})
+            else:
+                spans.append({"text": run})
+        return spans
+
     def save_favorites(self, favorites: dict) -> None:
         """`save_favorites`, as understood: the favorites only (the block list and the rest of config.json stay), written, then
         `favorites-changed` to every window."""
@@ -870,6 +897,14 @@ class App:
             ack()
         elif command == "get-chat-history":
             ack(data=[dict(m) for m in self.history])
+        elif command == "annotate-furigana":
+            texts = request.get("texts")
+            if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
+                ack("annotate-furigana needs a list of strings")
+            elif os.environ.get("FAKE_APP_CHAT_BUG") == "ruby-merged":  # a bug to catch: one list for all the lines
+                ack(data=[[span for t in texts for span in self.annotate(t)]])
+            else:
+                ack(data=[self.annotate(t) for t in texts])
         elif command == "get-favorites":
             ack(data=self.favorites)
         elif command == "save-favorites":

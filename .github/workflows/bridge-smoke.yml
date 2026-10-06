@@ -24,6 +24,7 @@ on:
       - 'crates/core/src/bridge.rs'
       - 'crates/core/src/test_env.rs'
       - 'src-tauri/src/services/translator/**'
+      - 'src-tauri/src/window.rs'
   workflow_dispatch:
   workflow_call:
 
@@ -127,6 +128,12 @@ jobs:
         continue-on-error: true
         working-directory: runbook
         run: python -m runbook.run translator-stub --exe ../target/release/resonance-stream.exe
+
+      # The popup windows (real windows on the runner). Allowed to fail until it has passed on the real app once.
+      - name: popups over the bridge
+        continue-on-error: true
+        working-directory: runbook
+        run: python -m runbook.run popups --exe ../target/release/resonance-stream.exe
 
       - name: Keep the logs
         if: always()

@@ -54,14 +54,14 @@ def make_new_exe(src: str | Path, dest: str | Path) -> Path:
 # --- the command line -----------------------------------------------------------------------------
 def flag_args(data_dir: str | Path, status_file: str | Path, *, feed_url: str | None = None,
               metadata_url: str | None = None, log_file: str | Path | None = None, fresh: bool = True,
-              capture: bool = False, window_state: bool = False, translator: bool = False,
+              capture: bool = False, window_state: bool = False, translator: bool = False, popups: bool = False,
               extra: tuple[str, ...] = ()) -> list[str]:
     """An isolated run: its own data folder, no wizard, no sniffer, no translator, no popups, no saved
-    window place. The update check is left ON -- it is what is being tested. `capture=True` leaves the sniffer on, `window_state=True` lets the app restore and save the window's size and place, `translator=True` leaves the translator on (give it `--llama-url` in `extra`)."""
+    window place. The update check is left ON -- it is what is being tested. `capture=True` leaves the sniffer on, `window_state=True` lets the app restore and save the window's size and place, `translator=True` leaves the translator on (give it `--llama-url` in `extra`), `popups=True` lets the app create its popup windows."""
     args = ["--data-dir", str(data_dir)]
     if fresh:
         args.append("--fresh")
-    args += ["--assume-setup-done", *([] if capture else ["--no-capture"]), *([] if translator else ["--no-translator"]), "--no-popups",
+    args += ["--assume-setup-done", *([] if capture else ["--no-capture"]), *([] if translator else ["--no-translator"]), *([] if popups else ["--no-popups"]),
              *([] if window_state else ["--no-window-state"]), "--status-file", str(status_file)]
     if log_file is not None:
         args += ["--log-file", str(log_file)]

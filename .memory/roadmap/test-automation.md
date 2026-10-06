@@ -35,8 +35,7 @@ Tick `[x]` only when it ran the way "done when" says; a smoke row that is `conti
    (`cargo-mutants`, weekly), a sanitised capture corpus replayed in CI, visual regression with `ui-preview`, fault injection
    over the bridge, soak + a read-only `stats` command, in-app "copy diagnostics".
 5. **Decisions that wait on Kade**
-   - reqwest 0.11 -> 0.12 (the `cargo audit` finding from #172; K24 said "dropped by design, revisit only if asked" -- it was asked
-     by the audit; **unanswered**). Needs the app gate on Windows.
+   - [x] reqwest 0.11 -> 0.12 (the `cargo audit` finding from #172): done on `claude/reqwest-upgrade` (2026-10-07), audit clean. Still to see: the app gate in Windows CI and a real run of the downloads.
    - K8 `<bos>`: the stand-in reports the literal `<bos>` count of every prompt; the answer still waits for resonance-lab.
    - (decided: the rc flow does not run `bridge-smoke`, Kade 2026-10-06.)
 

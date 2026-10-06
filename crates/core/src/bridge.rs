@@ -17,7 +17,7 @@
 //! A command is on an allowlist ([`Command`]): a test can ask for what the
 //! flags already do (`replay-chat`) or press a button the window has (`start-update`,
 //! `restart-update`), or what a chat row's menu does (`block-user`, `unblock-user`,
-//! `clear-history`) -- not run arbitrary code.
+//! `clear-history`), or what the setup wizard does (`download-model`) -- not run arbitrary code.
 
 use serde_json::{json, Value};
 use std::fmt;
@@ -43,6 +43,9 @@ pub const EVENT_NAMES: [&str; 13] = [
 /// Published by the app itself, not heard from the window: the update's state after every change
 /// (`{"state": "none" | "available:<version>" | "downloading" | "downloaded" | "error:<reason>"}`).
 pub const UPDATE_STATE_EVENT: &str = "update-state";
+/// Published by the app itself when a download a test asked for ends: `{"id": <the command's id>, "what": "model",
+/// "ok": bool, "error": text or null}`. (The download's own `download-progress` events are the UI's.)
+pub const DOWNLOAD_RESULT_EVENT: &str = "download-result";
 /// Published once when the bridge starts (`{"pid","version","exe"}`): a second one with another pid means the app restarted.
 pub const APP_STARTED_EVENT: &str = "app-started";
 
@@ -102,6 +105,14 @@ pub enum Command {
     GetChatHistory,
     /// Empty the backend's chat and system logs (`clear_chat_history`, the clear button).
     ClearHistory,
+    /// Download the translation model as the setup wizard does (`download_model`), from what the UI would take out of the
+    /// gist: the url, the version and the SHA-256 the file must have (empty is allowed here -- the app must refuse it).
+    /// The ack only says it started; the end is a [`DOWNLOAD_RESULT_EVENT`] carrying this command's id.
+    DownloadModel {
+        url: String,
+        version: String,
+        sha256: String,
+    },
 }
 
 /// A command and the id its ack carries.
@@ -218,6 +229,32 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
                     };
                     Command::BlockUser { uid, nickname }
                 }
+            }
+            "download-model" => {
+                let text = |key: &str| match args.get(key) {
+                    None => Ok(None),
+                    Some(Value::String(text)) => Ok(Some(text.clone())),
+                    Some(_) => Err(format!("download-model's \"{key}\" must be a string")),
+                };
+                let fields = (text("url"), text("version"), text("sha256"));
+                match fields {
+                (Ok(Some(url)), Ok(version), Ok(Some(sha256))) if !url.is_empty() => {
+                    Command::DownloadModel {
+                        url,
+                        version: version.unwrap_or_else(|| "test".into()),
+                        sha256,
+                    }
+                }
+                (Err(reason), _, _) | (_, Err(reason), _) | (_, _, Err(reason)) => {
+                    return Err(CommandError::BadArgument { id, reason })
+                }
+                _ => return Err(CommandError::BadArgument {
+                    id,
+                    reason:
+                        "download-model needs a \"url\" and a \"sha256\" (a string, may be empty)"
+                            .into(),
+                }),
+            }
             }
             "start-update" => Command::StartUpdate,
             "restart-update" => Command::RestartUpdate,
@@ -393,6 +430,57 @@ mod tests {
         }
         let err = parse("unblock-user", r#"{"id":"u"}"#).unwrap_err();
         assert!(matches!(err, CommandError::BadArgument { .. }));
+    }
+
+    #[test]
+    fn download_model_carries_what_the_ui_hands_the_command() {
+        assert_eq!(
+            parse(
+                "download-model",
+                r#"{"id":"d","url":"http://127.0.0.1:9/model.gguf","version":"m2","sha256":"ab"}"#
+            )
+            .map(|r| r.command),
+            Ok(Command::DownloadModel {
+                url: "http://127.0.0.1:9/model.gguf".into(),
+                version: "m2".into(),
+                sha256: "ab".into()
+            })
+        );
+        // An empty hash is a case worth sending (the app refuses it), but the key must be there; the version may be left out.
+        assert_eq!(
+            parse(
+                "download-model",
+                r#"{"id":"d","url":"http://x/y","sha256":""}"#
+            )
+            .map(|r| r.command),
+            Ok(Command::DownloadModel {
+                url: "http://x/y".into(),
+                version: "test".into(),
+                sha256: String::new()
+            })
+        );
+        for payload in [
+            r#"{"id":"d","sha256":"ab"}"#,
+            r#"{"id":"d","url":"","sha256":"ab"}"#,
+            r#"{"id":"d","url":"http://x/y"}"#,
+            r#"{"id":"d","url":"http://x/y","sha256":7}"#,
+            r#"{"id":"d","url":"http://x/y","sha256":"ab","version":3}"#,
+        ] {
+            let err = parse("download-model", payload).unwrap_err();
+            assert!(
+                matches!(&err, CommandError::BadArgument { id, .. } if id == "d"),
+                "{payload}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_download_result_is_an_event_the_app_publishes_itself() {
+        assert!(!EVENT_NAMES.contains(&DOWNLOAD_RESULT_EVENT));
+        assert_eq!(
+            event_topic(DOWNLOAD_RESULT_EVENT),
+            "rs/app/event/download-result"
+        );
     }
 
     #[test]

@@ -94,6 +94,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return self._reply(200, owner.metadata_text().encode("utf-8"), "application/json")
         if self.path == "/update.exe" and owner.exe_mode != "404":
             return self._exe(owner)
+        if self.path == "/model.gguf" and owner.model_mode != "404":
+            return self._model(owner)
         self._reply(404, b"not found")
 
     def _reply(self, status: int, body: bytes, content_type: str = "text/plain") -> None:
@@ -114,11 +116,26 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         # cut: the handler returns and the connection closes early
 
 
+def _model_handler(self, owner: "MockServer") -> None:
+    body = owner.model_bytes
+    self._send(200, body)
+    if owner.model_mode == "ok":
+        self.wfile.write(body)
+        return
+    # cut: the headers promised the whole file; half of it goes out, then the connection closes
+    self.wfile.write(body[: max(1, len(body) // 2)])
+    self.wfile.flush()
+
+
+_Handler._model = _model_handler  # type: ignore[attr-defined]
+
+
 class MockServer:
-    """GitHub in miniature on 127.0.0.1: `/latest.json`, `/metadata.json`, `/update.exe`.
+    """GitHub in miniature on 127.0.0.1: `/latest.json`, `/metadata.json`, `/update.exe`, `/model.gguf`.
 
     `feed_mode`: ok | garbage (not JSON) | 404.   `exe_mode`: ok | cut (connection closes early) |
-    stall (goes silent after a third) | 404.   Set them, or `version`, while it runs.
+    stall (goes silent after a third) | 404.   `model_mode` (the file at `/model.gguf`, `model_bytes`): ok | cut | 404.
+    Set them, or `version`, while it runs.
     `hits` lists every request, in order.
     """
 
@@ -130,6 +147,8 @@ class MockServer:
         self.notes = notes
         self.feed_mode = "ok"
         self.exe_mode = "ok"
+        self.model_bytes = b""
+        self.model_mode = "ok"
         self.hits: list[str] = []
         self.stopping = threading.Event()
         self._httpd: http.server.ThreadingHTTPServer | None = None

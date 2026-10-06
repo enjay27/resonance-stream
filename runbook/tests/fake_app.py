@@ -29,6 +29,9 @@ notebook does for the new version, are never parsed). Environment:
   FAKE_APP_PERSIST_BUG    a bug to catch in what survives a restart: "no-archive" writes no chat log, "world-archived" also archives WORLD
                           (ignored by default), "no-config" does not save the block list, "no-reload" starts with an empty log,
                           "pid-restart" numbers new lines from 1 again, "unflagged-reload" restores a blocked sender's rows unflagged
+  FAKE_APP_DL_BUG         a bug to catch in the model download: "no-verify" accepts any bytes, "keeps-part" leaves its partial file after a
+                          failure, "overwrites-on-fail" replaces the installed model before checking the new one, "accepts-http" takes
+                          a plain-http address that is not this machine's
   FAKE_APP_SNIFF_BUG      a bug to catch in the capture: "drop-after-2" publishes only the first two chats it reads,
                           "never" does not start the sniffer at all
                           (the stand-in "sniffer" is a TCP client of the port-5003 server the capture-spike pipeline starts)
@@ -415,6 +418,60 @@ class App:
                 row["isBlocked"] = blocked
                 self.event("chat-message-update", row)
 
+    # -- the model download (downloader/model.rs and fetch.rs, as understood)
+    def progress(self, label: str, percent: int) -> None:
+        self.event("download-progress", {"current_file": label, "percent": percent, "total_percent": percent})
+
+    def download_model(self, request: dict) -> None:
+        import hashlib
+        import http.client
+
+        bug = os.environ.get("FAKE_APP_DL_BUG", "")
+        url, expected = request["url"], request["sha256"].strip().lower()
+
+        def done(error: str | None = None) -> None:
+            self.event("download-result", {"id": request["id"], "what": "model", "ok": error is None, "error": error})
+
+        if not expected:
+            return done("No SHA-256 published for this model; refusing to download it")
+        parts = urllib.parse.urlparse(url)
+        local_http = parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost")
+        if parts.scheme != "https" and not local_http and bug != "accepts-http":
+            return done(f"Refusing to download from a non-HTTPS URL: {url!r}")
+        folder = self.data_path("data", "models", "translation-model")
+        folder.mkdir(parents=True, exist_ok=True)
+        dest, part = folder / "model.gguf", folder / "model.gguf.new.part"
+        if dest.exists() and hashlib.sha256(dest.read_bytes()).hexdigest() == expected:
+            self.progress("로컬 AI 모델 확인 완료 (Skipped download)", 100)
+            return done()
+        error = None
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:  # noqa: S310 -- local mock
+                total = int(response.headers.get("Content-Length", "0"))
+                data = b""
+                while True:
+                    chunk = response.read(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+                    part.write_bytes(data)
+                    self.progress("AI 모델 다운로드 중...", min(100, len(data) * 100 // max(total, 1)))
+            if len(data) != total:
+                error = f"Download incomplete: {len(data)} of {total} bytes"
+            elif hashlib.sha256(data).hexdigest() != expected and bug != "no-verify":
+                error = "SHA-256 mismatch: the downloaded file is not the published one"
+        except (OSError, http.client.HTTPException, ValueError) as e:
+            error = f"Download failed: {e}"
+            data = b""
+        if error is not None:
+            if bug == "overwrites-on-fail" and data:
+                dest.write_bytes(data)
+            if bug != "keeps-part":
+                part.unlink(missing_ok=True)
+            return done(error)
+        part.replace(dest)
+        done()
+
     # -- the main window (window.rs and the window-state plugin, as understood)
     def state_file(self) -> Path | None:
         data = self.flags.get("data-dir")
@@ -490,6 +547,9 @@ class App:
             if os.environ.get("FAKE_APP_CHAT_BUG") != "clear-keeps":
                 self.history.clear()
             ack()
+        elif command == "download-model":
+            ack()
+            threading.Thread(target=self.download_model, args=(request,), daemon=True).start()
         elif command == "close-window":
             ack()
             time.sleep(0.2)

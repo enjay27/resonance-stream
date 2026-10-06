@@ -81,3 +81,22 @@ pub fn default_spacing() -> u32 {
 pub struct TauriEvent {
     pub payload: ProgressPayload,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The same file the app's `AppConfig` test reads (`src-tauri/src/config/app_config.rs`):
+    /// every field set to a value that is not its default. If one side lacks a field, names
+    /// it differently or types it differently, the round trip loses it and the two differ.
+    const FULL: &str = include_str!("../crates/types/testdata/app_config_full.json");
+
+    #[test]
+    fn the_ui_config_round_trips_every_field_the_app_writes() {
+        let want: serde_json::Value = serde_json::from_str(FULL).expect("fixture is JSON");
+        let config: AppConfig =
+            serde_json::from_str(FULL).expect("fixture reads as the ui's config");
+        let got = serde_json::to_value(&config).expect("config serializes");
+        assert_eq!(got, want);
+    }
+}

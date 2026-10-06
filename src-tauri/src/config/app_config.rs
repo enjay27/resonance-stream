@@ -381,6 +381,20 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
 mod tests {
     use super::*;
 
+    /// The same file the ui's `AppConfig` test reads (`src/ui_types.rs`): every field set to
+    /// a value that is not its default. A field one side lacks, names or types differently
+    /// is lost in the round trip, and the two differ -- the silent break CLAUDE.md warns of.
+    const FULL: &str = include_str!("../../../crates/types/testdata/app_config_full.json");
+
+    #[test]
+    fn the_app_config_round_trips_every_field_the_ui_reads() {
+        let want: serde_json::Value = serde_json::from_str(FULL).expect("fixture is JSON");
+        let config: AppConfig =
+            serde_json::from_str(FULL).expect("fixture reads as the app's config");
+        let got = serde_json::to_value(&config).expect("config serializes");
+        assert_eq!(got, want);
+    }
+
     #[test]
     fn a_config_missing_fields_keeps_the_rest() {
         // Regression (N3): one missing field used to reset every setting.

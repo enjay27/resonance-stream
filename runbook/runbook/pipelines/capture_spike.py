@@ -351,7 +351,14 @@ class CaptureSpike:
             self.rec.auto("CS-restart-nodup", "a line the chat log restored is not shown again", False, "the second run did not start or bind")
             return
         time.sleep(1)
-        restored = [m["message"] for m in again.send("get-chat-history", timeout=READY_WAIT_S)["data"]]
+        try:
+            restored = [m["message"] for m in again.send("get-chat-history", timeout=READY_WAIT_S)["data"]]
+        except RuntimeError as e:
+            # Seen on the hosted runner: the second start bound its sniffer and then never answered a command. Say what the app
+            # itself said, so one run is enough to tell a lost command from a blocked handler.
+            self.rec.auto("CS-restart-nodup", "a line the chat log restored is not shown again", False, self.silent_app(exe, again, e))
+            self.quit(again)
+            return
         time.sleep(1)
         self.send_frames(server, frames)
         time.sleep(GRACE_S)
@@ -363,6 +370,14 @@ class CaptureSpike:
                       f"{len(archived)} archived lines; restored {len(restored)} rows, missing {missing}; shown again: {reshown}; "
                       f"shown again that were not archived (WORLD): {[t for t in shown if t not in archived]}")
         self.quit(again)
+
+    @staticmethod
+    def silent_app(exe: Path, events: bridge.Serve, error: Exception) -> str:
+        """The evidence for an app that stopped answering: the error, the last topics it published, the tail of its own log."""
+        topics = [m["topic"].removeprefix("rs/app/") for m in events.events()]
+        log = mockfeed.log_tail(exe.parent / "again.log", 40)
+        print(f"  the second run stopped answering ({error}); its log:\n" + "\n".join("    " + t for t in log.splitlines()), flush=True)
+        return f"{error}; last topics: {topics[-12:]}; app log (last 40 lines): {log!r}"
 
     @staticmethod
     def quit(events: bridge.Serve) -> bool:

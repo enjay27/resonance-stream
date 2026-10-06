@@ -158,3 +158,16 @@ def test_a_slow_starting_app_is_waited_for_after_the_restart(env, tmp_path, monk
     rec, got = run(env, tmp_path)
     assert got["CS-restart-nodup"].status == "pass", rec.report()
     assert rec.summary()["fail"] == 0, rec.report()
+
+
+def test_an_app_that_never_answers_after_the_restart_fails_the_row_with_its_log(env, tmp_path, monkeypatch):
+    """Real app, hosted runner (run 37430504474): the second start bound its sniffer, then the first command got no ack in 90 s.
+    A traceback says nothing about why; the row must fail on its own and carry the second run's app log and the topics it published."""
+    monkeypatch.setenv("FAKE_APP_READY_DELAY", "30")
+    monkeypatch.setattr(capture_spike, "READY_WAIT_S", 2)
+    rec, got = run(env, tmp_path)
+    row = got["CS-restart-nodup"]
+    assert row.status == "fail", rec.report()
+    assert "no ack for get-chat-history" in row.evidence, row.evidence
+    assert "app log" in row.evidence and "topics" in row.evidence, row.evidence
+    assert "CS-lan-error" not in got and "CS-loopback-error" not in got, rec.report()

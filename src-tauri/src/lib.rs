@@ -83,10 +83,14 @@ pub fn run() {
 
             // Chat saved by earlier runs (daily chat logs), newest last; new
             // pids continue after them so the list stays in order.
-            let restored = resonance_core::history::load_recent(
+            let mut restored = resonance_core::history::load_recent(
                 &crate::io::chat_logs_dir(&handle),
                 &config.channel_limits(),
             );
+            // Each row has the blocked flag it was saved with; the block list may have changed since.
+            resonance_core::history::apply_block_list(&mut restored, |uid| {
+                config.blocked_users.contains_key(&uid)
+            });
             state.next_pid.fetch_max(
                 restored.len() as u64 + 1,
                 std::sync::atomic::Ordering::SeqCst,

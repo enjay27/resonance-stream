@@ -244,6 +244,17 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             crate::commands::clear_chat_history(app.state());
             answer(Ok(()));
         }
+        Command::GetFavorites => {
+            // What `save_favorites` tells the windows (`favorites-changed`); the UI reads the same from the config it loads.
+            let favorites = app.state::<crate::AppState>().config.read().favorites();
+            answer_data(serde_json::to_value(favorites).unwrap_or(Value::Null));
+        }
+        Command::SaveFavorites { favorites } => {
+            // The popup's own command: the favorites only, the config file written, `favorites-changed` emitted. It returns
+            // when the file is written, so the ack means "saved".
+            crate::config::save_favorites(app.clone(), app.state(), favorites.clone());
+            answer(Ok(()));
+        }
         Command::RestartSniffer => {
             // Runs on a thread of its own (a pause for the OS to release the socket): ack now, the test waits for `sniffer-state`.
             crate::services::sniffer::restart_sniffer_command(app.clone());

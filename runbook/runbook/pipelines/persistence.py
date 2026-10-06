@@ -12,6 +12,15 @@ folder. Rows:
                    flagged (the block list was read back)
   CP-version       the version the app announces is the workspace version of this checkout (a stale exe says so here)
 
+Favorites (`save-favorites` is what the favorites popup sends; the favorites are saved before the block, so the block must not undo them):
+
+  CP-fav-save      `get-favorites` gives back what was saved: messages in order with their notes, shortcuts and tab ids; tabs in order
+                   with ids that are not 1..n (a renumbering would show)
+  CP-fav-event     `favorites-changed` was published once, with that state
+  CP-fav-block     after `block-user` (another config write) the favorites are as they were
+  CP-fav-config    `config.json` holds `favorite_messages` and `favorite_tabs` as saved, next to the block list
+  CP-fav-reload    after a restart the favorites are the same, tab ids included
+
 Then, on the same folder, with `chat_log_retention_days` set to 2 and old day logs put there by hand:
 
   CP-retention         the day logs older than that are deleted at start-up; yesterday's and today's stay; a file that is no day log
@@ -57,6 +66,15 @@ def second_replay(ts: int) -> str:
 
 
 ARCHIVED = ["guild one", "party one", "guild two"]
+# Tab ids are not 1..n and not in order, so a renumbering or a re-sort shows; one shortcut that a PC does not use for anything else.
+FAVORITES = {
+    "messages": [
+        {"text": "こんにちは！", "note": "안녕하세요", "shortcut": "", "tab": 0},
+        {"text": "ボス戦行きます", "note": "보스전 갑니다", "shortcut": "Ctrl+Alt+F8", "tab": 12},
+        {"text": "ありがとう", "note": "", "shortcut": "", "tab": 7},
+    ],
+    "tabs": [{"id": 12, "name": "Boss"}, {"id": 7, "name": "Thanks"}],
+}
 KEEP_DAYS = 2  # retention: today and yesterday stay
 BUSY_WORLD_LIMIT = 10
 BUSY_WORLD_LINES = 40
@@ -138,6 +156,25 @@ class Persistence:
         except RuntimeError:
             return False
 
+    def favorites_saved(self, events: bridge.Serve) -> None:
+        """Save `FAVORITES` as the popup does and judge what the app gives back and what it announced."""
+        began = time.time() * 1000
+        events.send("save-favorites", {"favorites": FAVORITES})
+        told = []
+        for _ in range(20):  # the event follows the saved file; a second or two is plenty
+            told = [m["message"]["payload"] for m in events.events()
+                    if m["topic"] == "rs/app/event/favorites-changed" and m["received_at"] >= began]
+            if told:
+                break
+            time.sleep(0.25)
+        time.sleep(0.5)  # a second, doubled event would come right behind
+        told = [m["message"]["payload"] for m in events.events()
+                if m["topic"] == "rs/app/event/favorites-changed" and m["received_at"] >= began]
+        got = events.send("get-favorites")["data"]
+        self.rec.auto("CP-fav-save", "get-favorites gives back what was saved, tab ids and order included", got == FAVORITES, f"got: {got}")
+        self.rec.auto("CP-fav-event", "favorites-changed was published once, with the saved state", told == [FAVORITES],
+                      f"{len(told)} event(s): {told}")
+
     def round(self) -> None:
         exe = updater.fresh_copy(self.exe, self.runs, "run")
         first = self.start("first", exe, fresh=True)
@@ -155,8 +192,11 @@ class Persistence:
         if not self.replay(first, exe.parent / "first.jsonl", first_replay(ts), "guild two"):
             self.rec.auto("CP-archive", "the chat log holds what was said", False, "the replay never arrived")
             return
+        self.favorites_saved(first)
         first.send("block-user", {"uid": ALICE, "nickname": "Alice"})
         time.sleep(GRACE_S)
+        self.rec.auto("CP-fav-block", "a later config write (the block) leaves the favorites as they were",
+                      first.send("get-favorites")["data"] == FAVORITES, f"favorites now: {first.send('get-favorites')['data']}")
         shown = [m["message"] for m in first.send("get-chat-history")["data"]]
         try:
             first.send("quit", timeout=15)
@@ -175,6 +215,9 @@ class Persistence:
             saved = {"error": str(e)}
         self.rec.auto("CP-config", "config.json holds the block list", saved.get("blocked_users") == {str(ALICE): "Alice"},
                       f"blocked_users: {saved.get('blocked_users', saved)}")
+        on_disk = {"messages": saved.get("favorite_messages"), "tabs": saved.get("favorite_tabs")}
+        self.rec.auto("CP-fav-config", "config.json holds the favorites as saved, next to the block list", on_disk == FAVORITES,
+                      f"on disk: {on_disk}")
 
         second = self.start("second", exe, fresh=False)
         if second is None:
@@ -183,6 +226,8 @@ class Persistence:
         history = second.send("get-chat-history")["data"]
         self.rec.auto("CP-reload", "after a restart the chat log is the archived lines, oldest first",
                       [m["message"] for m in history] == ARCHIVED, f"served: {[m['message'] for m in history]}")
+        again = second.send("get-favorites")["data"]
+        self.rec.auto("CP-fav-reload", "after a restart the favorites are the same, tab ids included", again == FAVORITES, f"served: {again}")
         flags = {m["message"]: m["isBlocked"] for m in history}
         self.rec.auto("CP-block-reload", "the blocked sender's restored rows are still flagged",
                       flags == {"guild one": True, "party one": False, "guild two": True}, f"flags: {flags}")

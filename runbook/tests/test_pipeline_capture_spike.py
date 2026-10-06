@@ -39,6 +39,9 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(common, "RUNS", tmp_path)
     monkeypatch.setattr(capture_spike, "MAX_GAP_S", 0.02)
     monkeypatch.setattr(capture_spike, "GRACE_S", 1.5)
+    monkeypatch.setattr(capture_spike, "BURST_WAIT_S", 15)
+    monkeypatch.setattr(capture_spike, "IDLE_WAIT_S", 12)  # the stand-in watchdog trips every ~3.3 s and its log throttle holds 6 s
+    monkeypatch.setenv("FAKE_APP_WATCHDOG", "0.3,3,6")
     monkeypatch.setenv("RUNBOOK_DRYRUN", "1")
     exe = tmp_path / "local" / "resonance-stream.exe"
     exe.parent.mkdir()
@@ -95,3 +98,54 @@ def test_a_copy_without_its_firewall_rule_is_a_skip_that_says_how(env, tmp_path,
     monkeypatch.setattr(capture_spike, "rule_exists", lambda name: False)
     rec, got = run(env, tmp_path)
     assert got["CS-loopback"].status == "skip" and "--add-firewall-rule" in got["CS-loopback"].evidence, rec.report()
+
+
+DEEP = ("CS-loopback-burst", "CS-loopback-bytes", "CS-watchdog", "CS-log-dedup", "CS-vpn-hint", "CS-restart-nodup")
+
+
+def test_the_burst_idle_and_restart_rows_pass_on_a_capture_that_keeps_its_promises(env, tmp_path):
+    rec, got = run(env, tmp_path)
+    assert rec.summary()["fail"] == 0, rec.report()
+    for check in DEEP:
+        assert got[check].status == "pass", rec.report()
+    assert "500 of 500" in got["CS-loopback-burst"].evidence and "20 of 20" in got["CS-loopback-bytes"].evidence
+
+
+@pytest.mark.parametrize("bug, failing", [
+    ("no-watchdog", {"CS-watchdog", "CS-log-dedup"}),
+    ("no-throttle", {"CS-log-dedup"}),
+    ("vpn-mismatch", {"CS-vpn-hint"}),
+    ("no-remember", {"CS-restart-nodup"}),
+])
+def test_each_broken_promise_of_the_deep_rows_is_caught(env, tmp_path, monkeypatch, bug, failing):
+    monkeypatch.setenv("FAKE_APP_SNIFF_BUG", bug)
+    monkeypatch.setenv("FAKE_APP_VPN", "vEthernet (stand-in)")
+    rec, got = run(env, tmp_path)
+    caught = {c for c in DEEP if c in got and got[c].status == "fail"}
+    assert failing <= caught, f"{bug}: wanted {failing} among the failures, got {caught}\n{rec.report()}"
+
+
+def test_a_burst_has_a_unique_line_per_frame_and_the_sizes_asked_for(tmp_path):
+    frames = capture_spike.burst_frames(12, "burst", 1000, tmp_path)
+    assert [f["text"] for f in frames] == [f"burst {n}" for n in range(1, 13)]
+    assert len({f["hex"] for f in frames}) == 12
+
+
+def test_the_server_can_cut_a_stream_into_one_byte_segments(env):
+    server = capture_spike.FrameServer("127.0.0.1")
+    try:
+        got = bytearray()
+        server.client.settimeout(3)
+        server.send(b"hello world", chunk=1)
+        # the client of the server drains in a thread of its own, so listen as a second client instead
+        extra = socket.create_connection(("127.0.0.1", 5003), timeout=3)
+        import time as _t
+
+        _t.sleep(0.3)
+        server.send(b"abcdef", chunk=1)
+        while len(got) < 6:
+            got += extra.recv(16)
+        assert bytes(got) == b"abcdef"
+        extra.close()
+    finally:
+        server.close()

@@ -4,11 +4,10 @@
 
 ## Now — 2026-10-06
 
-**Where things stand.** `main` has the test bridge's packet-limit fix (#203), reqwest 0.12 (#199), golden tests (#201), weekly mutation tests (#202) and the English review documents (#204-#206). Roadmap stages S0-S7 are in [`.memory/roadmap/refactor.md`](.memory/roadmap/refactor.md). S0a (this index) and S0b (smoke steps independent, PR open) are done; order agreed with Kade: S0c, S1a-c, S3a, S2c, S2a, S2b, S2d, S3b, S3c, S4-S7, one PR at a time. Roadmap and architecture work continues in a new session.
+**Where things stand.** `main` has the test bridge's packet-limit fix (#203), reqwest 0.12 (#199), golden tests (#201), weekly mutation tests (#202) and the English review documents (#204-#206). Roadmap stages S0-S7 are in [`.memory/roadmap/refactor.md`](.memory/roadmap/refactor.md). S0a (this index) and S0b (smoke steps independent, #208) and S0c (smoke run 37545082187 green) are done; order agreed with Kade: S1a-c, S3a, S2c, S2a, S2b, S2d, S3b, S3c, S4-S7, one PR at a time. Roadmap and architecture work continues in a new session.
 
 **Written but not verified**
-- The packet-limit fix and row `CP-big-ack` on the real app: a manual `bridge-smoke.yml` run on `main` reads them (S0c). Whether the Node broker (aedes) has a packet limit of its own is open.
-- Real-app rows never read: `CS-restart-nodup`, `CP-fav-*`, `CR-ruby-*` (the 一人 reading, K16), `TS-dict-*`, popups, download-integrity. Run 37495056171 stopped at capture-spike, so the five later steps did not run.
+- Smoke run 37545082187 (`main` at #208, 2026-10-06) ended green: all eight pipelines passed, so rows `CS-restart-nodup`, `CP-big-ack`, `CP-fav-*`, popups and download-integrity are read as passing. **Only the step results were read, not the per-row values**: the K8 `<bos>` count and the K16 一人 reading are still Kade's to read from the uploaded `bridge-smoke-logs`. Whether the Node broker (aedes) has a packet limit of its own is open.
 - reqwest 0.12 on Kade's PC: translation, dictionary sync and favorites work; the model download was skipped and the update dialog did not show (up to date, or broken? read the system log's update line).
 - The app's own tests (`cargo test -p resonance-stream`) run only in Windows CI; here the app is only cross-checked. Smoke runs only from a release tag or by hand, so the rc / release call paths are unproven until the first tag.
 - Older things written but never run on Windows: [`active-issues/unverified-on-windows.md`](.memory/active-issues/unverified-on-windows.md), sorted by how to check them in [`checklist-triage.md`](.memory/active-issues/checklist-triage.md); the human-only ones are Kade's.

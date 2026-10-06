@@ -1,7 +1,7 @@
 # Structure improvement roadmap (2026-10 review)
 
 Measured 2026-10-06 on `main` `1478528` (right after PR #203). Evidence, numbers and proposals are in [`docs/architecture_review.md`](../../docs/architecture_review.md)
-(item IDs W / R / P / A / M, decisions D-1..D-6). The earlier 2026-09 refactor is in [`refactor-2026-09.md`](refactor-2026-09.md); the real-app test automation roadmap is [`test-automation.md`](test-automation.md).
+(item IDs W / R / P / A / M, decisions D-1..D-7). Related: [`security_model.md`](../../docs/security_model.md), [`testing.md`](../../docs/testing.md), the decision log [`decisions.md`](../../docs/decisions.md). The earlier 2026-09 refactor is in [`refactor-2026-09.md`](refactor-2026-09.md); the real-app test automation roadmap is [`test-automation.md`](test-automation.md).
 
 ## Done-conditions of every stage
 

@@ -170,9 +170,17 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  # The real app, started on a hosted Windows runner and driven over the test bridge (eight pipelines, bridge-smoke.yml).
+  # The shipped exe has no test bridge, so this builds a separate exe with the test flags from the same commit (see bridge-smoke.yml), in parallel with the signed build.
+  # A red row stops the publish; run the workflow again from the tag after a fix or a runner hiccup.
+  smoke:
+    name: real-app smoke test
+    needs: [check, gates]
+    uses: ./.github/workflows/bridge-smoke.yml
+
   release:
     name: publish the release
-    needs: [check, build]
+    needs: [check, build, smoke]
     runs-on: ubuntu-latest
     permissions:
       contents: write

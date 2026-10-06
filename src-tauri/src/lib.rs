@@ -12,6 +12,7 @@ pub mod config;
 pub mod events;
 pub mod io;
 pub mod logging;
+pub mod panic_hook;
 pub mod protocol;
 pub mod services;
 pub mod shortcut;
@@ -36,6 +37,7 @@ pub fn run() {
     // The test flags first: they may move the data folders and name the log file.
     test_env::init();
     logging::init_logger(test_env::log_file());
+    panic_hook::install();
 
     // A popup is placed by `show_popup`, hidden, just before it is shown: the
     // plugin restoring it at creation would show it first at the default place.
@@ -51,6 +53,9 @@ pub fn run() {
         .on_window_event(window::on_window_event)
         .setup(|app| {
             let handle = app.handle().clone();
+            if let Ok(data_dir) = app_dirs::data(&handle) {
+                panic_hook::set_log_dir(&data_dir);
+            }
             window::prewarm_popups(handle.clone());
             // --- STATE FIRST: everything below logs through it and reads its config ---
             let mut config = read_config_file(&handle);

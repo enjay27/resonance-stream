@@ -17,8 +17,10 @@
 //! A command is on an allowlist ([`Command`]): a test can ask for what the
 //! flags already do (`replay-chat`) or press a button the window has (`start-update`,
 //! `restart-update`), or what a chat row's menu does (`block-user`, `unblock-user`,
-//! `clear-history`), or what the setup wizard does (`download-model`, `start-translator`) -- not run arbitrary code.
+//! `clear-history`), or what the setup wizard does (`download-model`, `start-translator`), or what a person does with the popup windows (`open-popup`, `hide-popup`,
+//! `place-popup`, `pin-main`) -- not run arbitrary code.
 
+use resonance_types::{PopupKind, WindowRect};
 use serde_json::{json, Value};
 use std::fmt;
 use std::path::PathBuf;
@@ -108,6 +110,18 @@ pub enum Command {
     /// Start the translator as the UI does once the model and server are in place (`launch_translator`; idempotent). With
     /// `--llama-url` it uses the stand-in server and needs neither.
     StartTranslator,
+    /// Open a popup window as the title bar's buttons do (`open_popup`): shown at its saved place, in front; one that is
+    /// already open is only brought forward. The ack comes once the window is shown.
+    OpenPopup { kind: PopupKind },
+    /// Close a popup the way its X does (the close request: it hides, it is not destroyed).
+    HidePopup { kind: PopupKind },
+    /// Put a popup at this outer rect (physical pixels), as a person dragging and resizing it would.
+    PlacePopup { kind: PopupKind, rect: WindowRect },
+    /// Each popup's window as it is now, in the ack's `data`: `{"popup-cheatsheet": {exists, visible, rect, always_on_top}, ...}`,
+    /// and `main` with the same, plus `labels`: every window the app has, so "never a second window" can be seen.
+    SnapshotPopups,
+    /// Pin the overlay over the game or let it go (`set_always_on_top`); the popups follow it.
+    PinMain { on: bool },
     /// Download the translation model as the setup wizard does (`download_model`), from what the UI would take out of the
     /// gist: the url, the version and the SHA-256 the file must have (empty is allowed here -- the app must refuse it).
     /// The ack only says it started; the end is a [`DOWNLOAD_RESULT_EVENT`] carrying this command's id.
@@ -116,6 +130,14 @@ pub enum Command {
         version: String,
         sha256: String,
     },
+}
+
+/// The word a test writes for a popup (`PopupKind`'s wire name).
+fn popup_name(kind: PopupKind) -> &'static str {
+    match kind {
+        PopupKind::CheatSheet => "cheatsheet",
+        PopupKind::Favorites => "favorites",
+    }
 }
 
 /// A command and the id its ack carries.
@@ -176,72 +198,73 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
         Some(id) if !id.is_empty() && !id.contains(['/', '+', '#']) => id.to_string(),
         _ => return Err(CommandError::BadId),
     };
-    let command =
-        match name {
-            "ping" => Command::Ping,
-            "quit" => Command::Quit,
-            "snapshot" => Command::Snapshot,
-            "close-window" => Command::CloseWindow,
-            "grow-window" => {
-                // Whole logical pixels, at least 1: a size that is missing, negative, fractional or absurd is the test's mistake.
-                let size = |key: &str| {
-                    args.get(key)
-                        .and_then(Value::as_u64)
-                        .and_then(|n| u32::try_from(n).ok())
-                        .filter(|&n| n > 0 && n <= 100_000)
-                };
-                match (size("min_width"), size("min_height")) {
-                    (Some(min_width), Some(min_height)) => Command::GrowWindow {
-                        min_width,
-                        min_height,
-                    },
-                    _ => return Err(CommandError::BadArgument {
+    let command = match name {
+        "ping" => Command::Ping,
+        "quit" => Command::Quit,
+        "snapshot" => Command::Snapshot,
+        "close-window" => Command::CloseWindow,
+        "grow-window" => {
+            // Whole logical pixels, at least 1: a size that is missing, negative, fractional or absurd is the test's mistake.
+            let size = |key: &str| {
+                args.get(key)
+                    .and_then(Value::as_u64)
+                    .and_then(|n| u32::try_from(n).ok())
+                    .filter(|&n| n > 0 && n <= 100_000)
+            };
+            match (size("min_width"), size("min_height")) {
+                (Some(min_width), Some(min_height)) => Command::GrowWindow {
+                    min_width,
+                    min_height,
+                },
+                _ => {
+                    return Err(CommandError::BadArgument {
                         id,
                         reason:
                             "grow-window needs whole \"min_width\" and \"min_height\" (1-100000)"
                                 .into(),
-                    }),
+                    })
                 }
             }
-            "get-chat-history" => Command::GetChatHistory,
-            "clear-history" => Command::ClearHistory,
-            "start-translator" => Command::StartTranslator,
-            "block-user" | "unblock-user" => {
-                // The game's sender ids are whole numbers, and 0 means "no sender".
-                let Some(uid) = args
-                    .get("uid")
-                    .and_then(Value::as_u64)
-                    .filter(|&uid| uid > 0)
-                else {
-                    return Err(CommandError::BadArgument {
-                        id,
-                        reason: format!("{name} needs a whole \"uid\" above 0"),
-                    });
+        }
+        "get-chat-history" => Command::GetChatHistory,
+        "clear-history" => Command::ClearHistory,
+        "start-translator" => Command::StartTranslator,
+        "block-user" | "unblock-user" => {
+            // The game's sender ids are whole numbers, and 0 means "no sender".
+            let Some(uid) = args
+                .get("uid")
+                .and_then(Value::as_u64)
+                .filter(|&uid| uid > 0)
+            else {
+                return Err(CommandError::BadArgument {
+                    id,
+                    reason: format!("{name} needs a whole \"uid\" above 0"),
+                });
+            };
+            if name == "unblock-user" {
+                Command::UnblockUser { uid }
+            } else {
+                let nickname = match args.get("nickname") {
+                    None => String::new(),
+                    Some(Value::String(nickname)) => nickname.clone(),
+                    Some(_) => {
+                        return Err(CommandError::BadArgument {
+                            id,
+                            reason: "block-user's \"nickname\" must be a string".into(),
+                        })
+                    }
                 };
-                if name == "unblock-user" {
-                    Command::UnblockUser { uid }
-                } else {
-                    let nickname = match args.get("nickname") {
-                        None => String::new(),
-                        Some(Value::String(nickname)) => nickname.clone(),
-                        Some(_) => {
-                            return Err(CommandError::BadArgument {
-                                id,
-                                reason: "block-user's \"nickname\" must be a string".into(),
-                            })
-                        }
-                    };
-                    Command::BlockUser { uid, nickname }
-                }
+                Command::BlockUser { uid, nickname }
             }
-            "download-model" => {
-                let text = |key: &str| match args.get(key) {
-                    None => Ok(None),
-                    Some(Value::String(text)) => Ok(Some(text.clone())),
-                    Some(_) => Err(format!("download-model's \"{key}\" must be a string")),
-                };
-                let fields = (text("url"), text("version"), text("sha256"));
-                match fields {
+        }
+        "download-model" => {
+            let text = |key: &str| match args.get(key) {
+                None => Ok(None),
+                Some(Value::String(text)) => Ok(Some(text.clone())),
+                Some(_) => Err(format!("download-model's \"{key}\" must be a string")),
+            };
+            let fields = (text("url"), text("version"), text("sha256"));
+            match fields {
                 (Ok(Some(url)), Ok(version), Ok(Some(sha256))) if !url.is_empty() => {
                     Command::DownloadModel {
                         url,
@@ -259,25 +282,76 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
                             .into(),
                 }),
             }
-            }
-            "start-update" => Command::StartUpdate,
-            "restart-update" => Command::RestartUpdate,
-            "replay-chat" => match args.get("path").and_then(Value::as_str) {
-                Some(path) if !path.is_empty() => Command::ReplayChat { path: path.into() },
-                _ => {
-                    return Err(CommandError::BadArgument {
-                        id,
-                        reason: "replay-chat needs a string \"path\"".into(),
-                    })
-                }
-            },
-            _ => {
-                return Err(CommandError::Unknown {
+        }
+        "snapshot-popups" => Command::SnapshotPopups,
+        "pin-main" => match args.get("on").and_then(Value::as_bool) {
+            Some(on) => Command::PinMain { on },
+            None => {
+                return Err(CommandError::BadArgument {
                     id,
-                    name: name.to_string(),
+                    reason: "pin-main needs \"on\": true or false".into(),
                 })
             }
-        };
+        },
+        "open-popup" | "hide-popup" | "place-popup" => {
+            let kind = args
+                .get("kind")
+                .and_then(Value::as_str)
+                .and_then(|name| PopupKind::ALL.into_iter().find(|k| name == popup_name(*k)));
+            let Some(kind) = kind else {
+                return Err(CommandError::BadArgument {
+                    id,
+                    reason: format!("{name} needs a \"kind\": \"cheatsheet\" or \"favorites\""),
+                });
+            };
+            match name {
+                "open-popup" => Command::OpenPopup { kind },
+                "hide-popup" => Command::HidePopup { kind },
+                _ => {
+                    let whole = |key: &str| {
+                        args.get(key)
+                            .and_then(Value::as_i64)
+                            .and_then(|n| i32::try_from(n).ok())
+                    };
+                    let size = |key: &str| {
+                        args.get(key)
+                            .and_then(Value::as_u64)
+                            .and_then(|n| u32::try_from(n).ok())
+                            .filter(|&n| n > 0 && n <= 100_000)
+                    };
+                    match (whole("x"), whole("y"), size("width"), size("height")) {
+                            (Some(x), Some(y), Some(width), Some(height)) => Command::PlacePopup {
+                                kind,
+                                rect: WindowRect { x, y, width, height },
+                            },
+                            _ => {
+                                return Err(CommandError::BadArgument {
+                                    id,
+                                    reason: "place-popup needs whole \"x\" \"y\" and a \"width\" \"height\" of 1-100000".into(),
+                                })
+                            }
+                        }
+                }
+            }
+        }
+        "start-update" => Command::StartUpdate,
+        "restart-update" => Command::RestartUpdate,
+        "replay-chat" => match args.get("path").and_then(Value::as_str) {
+            Some(path) if !path.is_empty() => Command::ReplayChat { path: path.into() },
+            _ => {
+                return Err(CommandError::BadArgument {
+                    id,
+                    reason: "replay-chat needs a string \"path\"".into(),
+                })
+            }
+        },
+        _ => {
+            return Err(CommandError::Unknown {
+                id,
+                name: name.to_string(),
+            })
+        }
+    };
     Ok(Request { id, command })
 }
 
@@ -493,6 +567,77 @@ mod tests {
             parse("start-translator", r#"{"id":"t"}"#).map(|r| r.command),
             Ok(Command::StartTranslator)
         );
+    }
+
+    #[test]
+    fn the_popup_commands_parse() {
+        use resonance_types::{PopupKind, WindowRect};
+        assert_eq!(
+            parse("open-popup", r#"{"id":"p","kind":"cheatsheet"}"#).map(|r| r.command),
+            Ok(Command::OpenPopup {
+                kind: PopupKind::CheatSheet
+            })
+        );
+        assert_eq!(
+            parse("hide-popup", r#"{"id":"p","kind":"favorites"}"#).map(|r| r.command),
+            Ok(Command::HidePopup {
+                kind: PopupKind::Favorites
+            })
+        );
+        assert_eq!(
+            parse(
+                "place-popup",
+                r#"{"id":"p","kind":"favorites","x":-20,"y":40,"width":500,"height":640}"#
+            )
+            .map(|r| r.command),
+            Ok(Command::PlacePopup {
+                kind: PopupKind::Favorites,
+                rect: WindowRect {
+                    x: -20,
+                    y: 40,
+                    width: 500,
+                    height: 640
+                }
+            })
+        );
+        assert_eq!(
+            parse("snapshot-popups", r#"{"id":"p"}"#).map(|r| r.command),
+            Ok(Command::SnapshotPopups)
+        );
+        assert_eq!(
+            parse("pin-main", r#"{"id":"p","on":true}"#).map(|r| r.command),
+            Ok(Command::PinMain { on: true })
+        );
+    }
+
+    #[test]
+    fn the_popup_commands_refuse_what_they_cannot_act_on() {
+        for (name, payload) in [
+            ("open-popup", r#"{"id":"p"}"#),
+            ("open-popup", r#"{"id":"p","kind":"settings"}"#),
+            ("open-popup", r#"{"id":"p","kind":3}"#),
+            ("hide-popup", r#"{"id":"p","kind":"main"}"#),
+            (
+                "place-popup",
+                r#"{"id":"p","kind":"favorites","x":1,"y":2,"width":0,"height":9}"#,
+            ),
+            (
+                "place-popup",
+                r#"{"id":"p","kind":"favorites","x":1,"y":2,"width":9}"#,
+            ),
+            (
+                "place-popup",
+                r#"{"id":"p","kind":"favorites","x":1.5,"y":2,"width":9,"height":9}"#,
+            ),
+            ("pin-main", r#"{"id":"p"}"#),
+            ("pin-main", r#"{"id":"p","on":"yes"}"#),
+        ] {
+            let err = parse(name, payload).unwrap_err();
+            assert!(
+                matches!(&err, CommandError::BadArgument { id, .. } if id == "p"),
+                "{name} {payload}: {err:?}"
+            );
+        }
     }
 
     #[test]

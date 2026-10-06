@@ -238,6 +238,29 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             crate::commands::clear_chat_history(app.state());
             answer(Ok(()));
         }
+        Command::OpenPopup { kind } => {
+            // `open_popup` is async on purpose (a window made from a synchronous command can deadlock on Windows):
+            // run it on the async runtime and answer when the window is shown.
+            let (app, kind) = (app.clone(), *kind);
+            let (tx, rx) = std::sync::mpsc::channel();
+            tauri::async_runtime::spawn(async move {
+                let _ = tx.send(crate::window::open_popup(app, kind).await);
+            });
+            match rx.recv_timeout(Duration::from_secs(30)) {
+                Ok(result) => answer(result),
+                Err(_) => answer(Err("the popup was not shown within 30 s".into())),
+            }
+        }
+        Command::HidePopup { kind } => answer(crate::window::hide_popup(app, *kind)),
+        Command::PlacePopup { kind, rect } => answer(crate::window::place_popup(app, *kind, *rect)),
+        Command::SnapshotPopups => answer_data(crate::window::popups_snapshot(app)),
+        Command::PinMain { on } => match app.get_window("main") {
+            Some(window) => {
+                crate::window::set_always_on_top(window, *on);
+                answer(Ok(()));
+            }
+            None => answer(Err("There is no main window".into())),
+        },
         Command::StartTranslator => {
             crate::commands::launch_translator(app.clone(), app.state());
             answer(Ok(()));

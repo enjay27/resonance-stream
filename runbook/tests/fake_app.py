@@ -34,6 +34,9 @@ notebook does for the new version, are never parsed). Environment:
                           a plain-http address that is not this machine's
   FAKE_APP_TR_BUG         a bug to catch in the translator: "no-catchup" never retries the lines that failed, "no-restart" gives up after three failures,
                           "translates-english" also sends lines that are not Japanese
+  FAKE_APP_POPUP_BUG      a bug to catch in the popup windows: "second-window" makes another window when a popup is opened twice, "no-restore"
+                          opens a popup at its default place instead of where it was left, "pin-ignored" leaves the popups unpinned when the main
+                          window is pinned
   FAKE_APP_SNIFF_BUG      a bug to catch in the capture: "drop-after-2" publishes only the first two chats it reads,
                           "never" does not start the sniffer at all
                           (the stand-in "sniffer" is a TCP client of the port-5003 server the capture-spike pipeline starts)
@@ -244,6 +247,9 @@ class App:
         self.owed: list[int] = []
         self.translator_on = False
         self.tr_seq = 0
+        # the popup windows (window.rs, as understood)
+        self.popups: dict[str, dict] = {}
+        self.main_on_top = False
 
     def write_status(self) -> None:
         path = self.flags.get("status-file")
@@ -429,6 +435,47 @@ class App:
                 row["isBlocked"] = blocked
                 self.event("chat-message-update", row)
 
+    # -- the popup windows: two kinds, made hidden ~2 s after start unless --no-popups, closing hides, the place is remembered
+    POPUP_SIZES = {"popup-cheatsheet": (420, 560), "popup-favorites": (480, 620)}
+    POPUP_NAMES = {"cheatsheet": "popup-cheatsheet", "favorites": "popup-favorites"}
+
+    def popup_state_file(self) -> Path | None:
+        data = self.flags.get("data-dir")
+        return Path(data) / "config" / "popup-state.json" if data and "no-window-state" not in self.flags else None
+
+    def make_popup(self, label: str) -> dict:
+        width, height = self.POPUP_SIZES.get(label, (420, 560))
+        popup = {"exists": True, "visible": False, "rect": {"x": 300, "y": 200, "width": width, "height": height},
+                 "always_on_top": self.main_on_top}
+        self.popups[label] = popup
+        return popup
+
+    def prewarm_popups(self) -> None:
+        time.sleep(2)
+        for label in self.POPUP_SIZES:
+            if label not in self.popups:
+                self.make_popup(label)
+
+    def open_popup(self, label: str) -> None:
+        bug = os.environ.get("FAKE_APP_POPUP_BUG", "")
+        if label in self.popups and bug == "second-window":
+            self.make_popup(label + "-2")
+        popup = self.popups.get(label) or self.make_popup(label)
+        path = self.popup_state_file()
+        if path and path.exists() and not popup["visible"] and bug != "no-restore":
+            saved = json.loads(path.read_text(encoding="utf-8")).get(label)
+            if saved:
+                popup["rect"] = saved
+        popup["visible"] = True
+        self.event("popup-shown", {})
+
+    def popups_snapshot(self) -> dict:
+        out = {"main": {"exists": True, "visible": True, "always_on_top": self.main_on_top, "rect": dict(self.rect)}}
+        for label in self.POPUP_SIZES:
+            out[label] = dict(self.popups[label]) if label in self.popups else {"exists": False}
+        out["labels"] = sorted(["main", *self.popups])
+        return out
+
     # -- the translator: lines with Japanese in them are owed a translation; a worker asks the server named by --llama-url
     @staticmethod
     def japanese(text: str) -> bool:
@@ -587,6 +634,10 @@ class App:
         if path:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(self.rect), encoding="utf-8")
+        popup_path = self.popup_state_file()
+        if popup_path:
+            popup_path.parent.mkdir(parents=True, exist_ok=True)
+            popup_path.write_text(json.dumps({label: p["rect"] for label, p in self.popups.items()}), encoding="utf-8")
         self.stop = True
 
     def handle(self, topic: str, payload: bytes) -> None:
@@ -642,6 +693,29 @@ class App:
         elif command == "clear-history":
             if os.environ.get("FAKE_APP_CHAT_BUG") != "clear-keeps":
                 self.history.clear()
+            ack()
+        elif command in ("open-popup", "hide-popup", "place-popup"):
+            label = self.POPUP_NAMES.get(request.get("kind", ""))
+            if label is None:
+                ack("unknown popup kind")
+            elif command == "open-popup":
+                self.open_popup(label)
+                ack()
+            elif label not in self.popups:
+                ack(f"{label} does not exist")
+            elif command == "hide-popup":
+                self.popups[label]["visible"] = False
+                ack()
+            else:
+                self.popups[label]["rect"] = {k: request[k] for k in ("x", "y", "width", "height")}
+                ack()
+        elif command == "snapshot-popups":
+            ack(data=self.popups_snapshot())
+        elif command == "pin-main":
+            self.main_on_top = bool(request["on"])
+            if os.environ.get("FAKE_APP_POPUP_BUG") != "pin-ignored":
+                for popup in self.popups.values():
+                    popup["always_on_top"] = self.main_on_top
             ack()
         elif command == "start-translator":
             error = self.start_translator()
@@ -760,6 +834,8 @@ def main() -> int:
     if line and "no-capture" not in flags:
         level = "error" if line.startswith("NETWORK_ERROR") else "info"
         app.event("system-event", {"pid": 1, "level": level, "source": "Sniffer", "message": line})
+    if "no-popups" not in flags:
+        threading.Thread(target=app.prewarm_popups, daemon=True).start()
     if "no-capture" not in flags:
         app.start_sniffer()
     app.announced_url = None if "no-update-check" in flags else app.check()

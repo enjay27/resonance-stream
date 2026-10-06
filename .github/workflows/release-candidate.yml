@@ -4,9 +4,11 @@ name: Release candidate
 # for testing on Windows: one plain exe (no installer) + SHA256SUMS.txt,
 # tagged v<workspace version>-rc.<feature>[.<n>], where <feature> is the
 # merged branch's name without its prefix (candidate/main-ui -> main-ui) and
-# .<n> counts repeat builds of the same feature. The CI gates and a real-app smoke test of the built exe
-# (bridge-smoke.yml) must pass before anything is published. Only the newest 5 candidate
-# releases (and their tags) are kept.
+# .<n> counts repeat builds of the same feature. The CI gates must pass before anything is published.
+# A real-app smoke test of the built exe (bridge-smoke.yml) runs too, but only as a report: a red one
+# is written into the notes and the candidate is published anyway (a candidate exists so the
+# exe can be tried on Windows; only a stable release waits for a green smoke test, release.yml).
+# Only the newest 5 candidate releases (and their tags) are kept.
 #
 # Prereleases never become "Latest", and the app does not read GitHub
 # releases for its update check (it reads the gist), so users never see one.
@@ -124,7 +126,8 @@ jobs:
           retention-days: 3
 
   # The exe that was just built, started for real on a hosted Windows runner and driven over the test bridge (eight
-  # pipelines, bridge-smoke.yml). A red row stops the publish. Like the gates, only rc's newest commit is tested here.
+  # pipelines, bridge-smoke.yml). Only a report: the `release` job does not wait for it to pass, and the notes say how it
+  # went. Like the gates, only rc's newest commit is tested here.
   smoke:
     name: real-app smoke test
     needs: [pick, build]
@@ -136,7 +139,7 @@ jobs:
   release:
     name: publish prerelease
     needs: [pick, build, smoke]
-    if: ${{ !cancelled() && needs.build.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.smoke.result) }}
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -183,6 +186,7 @@ jobs:
           TAG: ${{ steps.name.outputs.tag }}
           BRANCH: ${{ steps.name.outputs.branch }}
           SHA: ${{ needs.pick.outputs.sha }}
+          SMOKE: ${{ needs.smoke.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -196,6 +200,7 @@ jobs:
           # shellcheck disable=SC2016
           {
             printf '> **테스트용 후보 빌드입니다.** 정식 릴리스가 아니며, 앱의 업데이트 알림에도 나타나지 않습니다.\n\n'
+            case "$SMOKE" in failure | cancelled) rc_smoke_note "$SMOKE"; printf '\n' ;; esac
             printf '### 실행 방법\n'
             printf '1. `%s` 를 내려받습니다. 설치는 필요 없습니다.\n' "$exe"
             printf '2. 실행하면 관리자 권한을 요청합니다 (패킷 캡처에 필요) → **예**.\n'
@@ -206,6 +211,7 @@ jobs:
             printf -- '- 커밋: `%s`\n' "$SHA"
             if [ -n "$BRANCH" ]; then printf -- '- 브랜치: `%s`\n' "$BRANCH"; fi
             printf -- '- CI 실행: %s\n' "$RUN_URL"
+            case "$SMOKE" in failure | cancelled) ;; *) rc_smoke_note "$SMOKE" ;; esac
             printf -- '- SHA-256: `%s`\n\n' "$sum"
             if [ -s pr.json ]; then
               printf '## 이번 후보: %s (#%s)\n\n' "$(jq -r .title pr.json)" "$(jq -r .number pr.json)"

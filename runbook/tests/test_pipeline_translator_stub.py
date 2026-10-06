@@ -49,7 +49,8 @@ def run(exe, tmp_path):
 
 
 CHECKS = ("TS-ready", "TS-log-quiet", "TS-translate", "TS-prompt", "TS-restart", "TS-catchup", "TS-reload",
-          "TS-later-wait", "TS-later-catchup", "TS-live-first", "TS-hang")
+          "TS-later-wait", "TS-later-catchup", "TS-live-first", "TS-hang",
+          "TS-dict-before", "TS-dict-sync", "TS-dict-local", "TS-dict-bad", "TS-dict-auto-off", "TS-dict-auto-on")
 
 
 def test_a_translator_that_follows_the_rules_passes_every_row(env, tmp_path):
@@ -72,6 +73,19 @@ def test_a_translator_that_follows_the_rules_passes_every_row(env, tmp_path):
 ])
 def test_each_broken_rule_is_caught(env, tmp_path, monkeypatch, bug, failing):
     monkeypatch.setenv("FAKE_APP_TR_BUG", bug)
+    rec, got = run(env, tmp_path)
+    caught = {c for c in CHECKS if c in got and got[c].status == "fail"}
+    assert failing <= caught, f"{bug}: wanted {failing} among the failures, got {caught}\n{rec.report()}"
+
+
+@pytest.mark.parametrize("bug, failing", [
+    ("sync-not-installed", {"TS-dict-sync"}),
+    ("local-needs-restart", {"TS-dict-local"}),
+    ("bad-saved", {"TS-dict-bad"}),
+    ("auto-always", {"TS-dict-auto-off"}),
+])
+def test_each_broken_dictionary_rule_is_caught(env, tmp_path, monkeypatch, bug, failing):
+    monkeypatch.setenv("FAKE_APP_DICT_BUG", bug)
     rec, got = run(env, tmp_path)
     caught = {c for c in CHECKS if c in got and got[c].status == "fail"}
     assert failing <= caught, f"{bug}: wanted {failing} among the failures, got {caught}\n{rec.report()}"

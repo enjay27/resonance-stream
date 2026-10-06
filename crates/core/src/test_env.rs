@@ -31,7 +31,7 @@ enum Kind {
 }
 
 /// Every flag, in the order `TestEnv::set_flags` lists them.
-const FLAGS: [(&str, Kind); 16] = [
+const FLAGS: [(&str, Kind); 17] = [
     ("data-dir", Kind::Value),
     ("fresh", Kind::Switch),
     ("assume-setup-done", Kind::Switch),
@@ -42,6 +42,7 @@ const FLAGS: [(&str, Kind); 16] = [
     ("no-window-state", Kind::Switch),
     ("feed-url", Kind::Value),
     ("metadata-url", Kind::Value),
+    ("dictionary-url", Kind::Value),
     ("status-file", Kind::Value),
     ("log-file", Kind::Value),
     ("replay-chat", Kind::Value),
@@ -68,6 +69,8 @@ pub struct TestEnv {
     pub feed_url: Option<String>,
     /// Read the gist metadata from here instead of the public gist.
     pub metadata_url: Option<String>,
+    /// Read the custom dictionary (`sync_dictionary`) from here instead of the public gist.
+    pub dictionary_url: Option<String>,
     /// Write a JSON status file (start, ready, update state) here.
     pub status_file: Option<PathBuf>,
     /// Also write the log here (a release exe has no console).
@@ -100,6 +103,7 @@ impl TestEnv {
             self.no_window_state,
             self.feed_url.is_some(),
             self.metadata_url.is_some(),
+            self.dictionary_url.is_some(),
             self.status_file.is_some(),
             self.log_file.is_some(),
             self.replay_chat.is_some(),
@@ -151,17 +155,17 @@ impl TestEnv {
                 }
                 self.llama_url = Some(base);
             }
-            "feed-url" | "metadata-url" => {
+            "feed-url" | "metadata-url" | "dictionary-url" => {
                 if !is_test_url_allowed(&value) {
                     return Err(TestEnvError::BadUrl {
                         flag: name.to_string(),
                         url: value,
                     });
                 }
-                if name == "feed-url" {
-                    self.feed_url = Some(value);
-                } else {
-                    self.metadata_url = Some(value);
+                match name {
+                    "feed-url" => self.feed_url = Some(value),
+                    "metadata-url" => self.metadata_url = Some(value),
+                    _ => self.dictionary_url = Some(value),
                 }
             }
             _ => unreachable!("not a value flag: {name}"),
@@ -499,6 +503,7 @@ impl TestEnv {
             switch(self.no_window_state, "no-window-state"),
             value(self.feed_url.clone(), "feed-url"),
             value(self.metadata_url.clone(), "metadata-url"),
+            value(self.dictionary_url.clone(), "dictionary-url"),
             value(path(&self.status_file), "status-file"),
             value(path(&self.log_file), "log-file"),
             value(self.bridge_url.clone(), "bridge-url"),
@@ -681,6 +686,7 @@ mod tests {
             "--feed-url",
             "https://example.com/latest.json",
             "--metadata-url=http://127.0.0.1:8099/meta.json",
+            "--dictionary-url=http://127.0.0.1:8099/custom_dict.json",
         ]);
         assert_eq!(env.status_file, Some("/tmp/status.json".into()));
         assert_eq!(env.log_file, Some("/tmp/app.log".into()));
@@ -691,6 +697,31 @@ mod tests {
         assert_eq!(
             env.metadata_url.as_deref(),
             Some("http://127.0.0.1:8099/meta.json")
+        );
+        assert_eq!(
+            env.dictionary_url.as_deref(),
+            Some("http://127.0.0.1:8099/custom_dict.json")
+        );
+    }
+
+    #[test]
+    fn a_dictionary_url_is_https_or_local_http_and_is_passed_on_a_restart() {
+        // The same rule as the feed and metadata URLs: a test must not be able to send the app to some other host.
+        assert_eq!(
+            run(
+                &["--dictionary-url", "http://example.com/custom_dict.json"],
+                &[]
+            ),
+            Err(TestEnvError::BadUrl {
+                flag: "dictionary-url".into(),
+                url: "http://example.com/custom_dict.json".into()
+            })
+        );
+        let env = ok(&["--dictionary-url", "https://example.com/custom_dict.json"]);
+        assert_eq!(env.set_flags(), ["dictionary-url"]);
+        assert_eq!(
+            env.restart_args(),
+            ["--dictionary-url=https://example.com/custom_dict.json"]
         );
     }
 

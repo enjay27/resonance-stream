@@ -53,7 +53,7 @@ def make_new_exe(src: str | Path, dest: str | Path) -> Path:
 
 # --- the command line -----------------------------------------------------------------------------
 def flag_args(data_dir: str | Path, status_file: str | Path, *, feed_url: str | None = None,
-              metadata_url: str | None = None, log_file: str | Path | None = None, fresh: bool = True,
+              metadata_url: str | None = None, dictionary_url: str | None = None, log_file: str | Path | None = None, fresh: bool = True,
               capture: bool = False, window_state: bool = False, translator: bool = False, popups: bool = False,
               extra: tuple[str, ...] = ()) -> list[str]:
     """An isolated run: its own data folder, no wizard, no sniffer, no translator, no popups, no saved
@@ -69,6 +69,8 @@ def flag_args(data_dir: str | Path, status_file: str | Path, *, feed_url: str | 
         args += ["--feed-url", feed_url]
     if metadata_url is not None:
         args += ["--metadata-url", metadata_url]
+    if dictionary_url is not None:
+        args += ["--dictionary-url", dictionary_url]
     return [*args, *extra]
 
 
@@ -93,6 +95,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return self._reply(200, body, "application/json")
         if self.path == "/metadata.json":
             return self._reply(200, owner.metadata_text().encode("utf-8"), "application/json")
+        if self.path == "/custom_dict.json":
+            return self._reply(200, owner.dictionary_text.encode("utf-8"), "application/json; charset=utf-8")
         if self.path == "/update.exe" and owner.exe_mode != "404":
             return self._exe(owner)
         if self.path == "/model.gguf" and owner.model_mode != "404":
@@ -132,7 +136,7 @@ _Handler._model = _model_handler  # type: ignore[attr-defined]
 
 
 class MockServer:
-    """GitHub in miniature on 127.0.0.1: `/latest.json`, `/metadata.json`, `/update.exe`, `/model.gguf`.
+    """GitHub in miniature on 127.0.0.1: `/latest.json`, `/metadata.json`, `/update.exe`, `/model.gguf`, `/custom_dict.json`.
 
     `feed_mode`: ok | garbage (not JSON) | 404.   `exe_mode`: ok | cut (connection closes early) |
     stall (goes silent after a third) | 404.   `model_mode` (the file at `/model.gguf`, `model_bytes`): ok | cut | 404.
@@ -150,6 +154,7 @@ class MockServer:
         self.exe_mode = "ok"
         self.model_bytes = b""
         self.model_mode = "ok"
+        self.dictionary_text = '{"term": {"ボス": "보스"}}'  # what `/custom_dict.json` serves (the gist's custom dictionary)
         self.hits: list[str] = []
         self.stopping = threading.Event()
         self._httpd: http.server.ThreadingHTTPServer | None = None
@@ -168,6 +173,10 @@ class MockServer:
     @property
     def metadata_url(self) -> str:
         return self.base_url + "/metadata.json"
+
+    @property
+    def dictionary_url(self) -> str:
+        return self.base_url + "/custom_dict.json"
 
     @property
     def exe_url(self) -> str:

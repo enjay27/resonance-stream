@@ -45,7 +45,12 @@ notebook does for the new version, are never parsed). Environment:
                           opens a popup at its default place instead of where it was left, "pin-ignored" leaves the popups unpinned when the main
                           window is pinned
   FAKE_APP_SNIFF_BUG      a bug to catch in the capture: "drop-after-2" publishes only the first two chats it reads,
-                          "never" does not start the sniffer at all
+                          "never" does not start the sniffer at all, "no-watchdog" never notices a silent game, "no-throttle" writes the
+                          watchdog's line on every trip, "vpn-mismatch" names the VPN in the log but not on the badge, "no-remember" does
+                          not teach the capture the chat reloaded from the logs (a re-sent line is shown again)
+  FAKE_APP_WATCHDOG       "check,trip,window" seconds of the stand-in watchdog: how often it looks, how long a silence trips it, how long
+                          an identical log line is held back (default 5,15,60 like the app)
+  FAKE_APP_VPN            the name of a VPN adapter the default route runs through (the watchdog says so)
                           (the stand-in "sniffer" is a TCP client of the port-5003 server the capture-spike pipeline starts)
 """
 from __future__ import annotations
@@ -257,6 +262,7 @@ class App:
         self.translator_on = False
         self.use_translation = False
         self.catch_up_limit = 100
+        self.last_traffic = time.monotonic()
         self.tr_seq = 0
         # the popup windows (window.rs, as understood)
         self.popups: dict[str, dict] = {}
@@ -313,7 +319,36 @@ class App:
         if not ip or os.environ.get("FAKE_APP_SNIFF_BUG") == "never":  # "never": a bug to catch, the sniffer does not start
             return
         self.event("sniffer-state", {"state": "Pending", "message": "Listening for game traffic...", "seq": 1})
+        self.last_traffic = time.monotonic()
         threading.Thread(target=self._sniff, args=(ip,), daemon=True).start()
+        if os.environ.get("FAKE_APP_SNIFF_BUG") != "no-watchdog":
+            threading.Thread(target=self._watchdog, daemon=True).start()
+
+    def _watchdog(self) -> None:
+        """sniffer/mod.rs spawn_watchdog + the throttled system log, as understood: a silence longer than `trip` says so (log + red badge),
+        the same log line is held back for `window` seconds and then comes with a count of what it held back."""
+        check, trip, window = (float(x) for x in os.environ.get("FAKE_APP_WATCHDOG", "5,15,60").split(","))
+        vpn = os.environ.get("FAKE_APP_VPN")
+        written, held = None, 0
+        while not self.stop:
+            time.sleep(check)
+            if time.monotonic() - self.last_traffic <= trip:
+                continue
+            text = "Watchdog: No game traffic for 15s."
+            if vpn:
+                text = f"{text[:-1]} The default route runs through a VPN adapter ({vpn}); turn the VPN off or exclude the game from it."
+            now = time.monotonic()
+            if os.environ.get("FAKE_APP_SNIFF_BUG") == "no-throttle" or written is None or now - written >= window:
+                self.event("system-event", {"pid": 0, "level": "warning", "source": "Sniffer",
+                                            "message": text + (f" (repeated {held} more times)" if held else "")})
+                written, held = now, 0
+            else:
+                held += 1
+            badge = "게임 트래픽 감지 안됨 (클릭하여 어댑터 복구)"
+            if vpn and os.environ.get("FAKE_APP_SNIFF_BUG") != "vpn-mismatch":
+                badge = f"게임 트래픽 감지 안됨 (VPN 사용 중: {vpn} - VPN을 끄거나 게임을 터널에서 제외하세요)"
+            self.event("sniffer-state", {"state": "Error", "message": badge, "seq": 2})
+            self.last_traffic = now
 
     def _sniff(self, ip: str) -> None:
         deadline = time.monotonic() + 60
@@ -325,9 +360,10 @@ class App:
                 time.sleep(0.3)
         if sock is None:
             return
+        sock.settimeout(None)
         buf, count = b"", 0
         while True:
-            data = sock.recv(4096)
+            data = sock.recv(65536)
             if not data:
                 return
             buf += data
@@ -335,12 +371,13 @@ class App:
                 size = int.from_bytes(buf[:4], "big")
                 chat = decode_chat_frame(buf[:size])
                 buf = buf[size:]
+                self.last_traffic = time.monotonic()
                 if chat is None:
                     continue
                 count += 1
                 if os.environ.get("FAKE_APP_SNIFF_BUG") == "drop-after-2" and count > 2:
                     continue
-                self.event("packet-event", {"pid": count, **chat})
+                self.feed({**chat, "timestamp": 0, "sequenceId": chat.get("sequenceId", 0), "isBlocked": False})
 
     # -- the chat rules, fed by `replay-chat`
     def replay(self, path: str) -> None:
@@ -437,7 +474,8 @@ class App:
             if bug != "pid-restart":
                 self.next_pid = len(self.history) + 1
             for row in self.history:
-                self.signatures[(row["uid"], row["timestamp"], row["sequenceId"])] = row["pid"]
+                if os.environ.get("FAKE_APP_SNIFF_BUG") != "no-remember":  # the capture is taught the chat reloaded from disk
+                    self.signatures[(row["uid"], row["timestamp"], row["sequenceId"])] = row["pid"]
 
     @staticmethod
     def prune(logs: Path, keep_days: int, bug: str) -> None:

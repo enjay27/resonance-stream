@@ -1,5 +1,7 @@
 # Unverified on Windows
 
+> **2026-10-06:** every bullet below is sorted by how it can be checked now (covered by an automatic run / a small extra row / a new bridge command / ui-preview / human only) in [`checklist-triage.md`](checklist-triage.md). Start there.
+
 The Linux cloud sessions cannot build `src-tauri/` (WinDivert, `windows-sys`, GTK
 missing). Anything listed here compiled only in CI, or not at all, and has not been
 run as the real app.

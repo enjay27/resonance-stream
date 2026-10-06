@@ -7,23 +7,12 @@ name: Bridge smoke test
 # hosted runner give the app an elevated, interactive session with a WebView2 window?
 # The "session" step prints what it finds, and the logs of both runs are uploaded.
 #
-# Not part of the CI workflow, so auto-merge never waits for it. Every step is a gate: a failing row fails the job
-# (nothing here is continue-on-error any more; the eight pipelines passed on the hosted runner, 2026-10-06).
-# A pull request runs it only when it touches the bridge, its runner, this file or the test flags. `workflow_call` makes it a
-# gate of release-candidate.yml (with `exe-artifact`: it tests the exe that job just built, no second build) and of
-# release.yml (no input: it builds a test-env exe of the tagged commit; the shipped exe has no bridge, so it cannot be driven).
+# It is slow (~20 min), so it runs only where a red row has to stop something: `release.yml` calls it (`workflow_call`, no input:
+# it builds a test-env exe of the tagged commit; the shipped exe has no bridge, so it cannot be driven) when a release tag is pushed.
+# No pull request, no push to a branch and no release candidate starts it (`rc-lib.test.sh` pins that). `workflow_dispatch` is a
+# manual run on a branch, for looking into a red row. Every step is a gate: a failing row fails the job (nothing here is
+# continue-on-error; the eight pipelines passed on the hosted runner, 2026-10-06).
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/bridge-smoke.yml'
-      - 'runbook/bridge/**'
-      - 'runbook/runbook/**'
-      - 'src-tauri/src/bridge/**'
-      - 'src-tauri/src/test_env.rs'
-      - 'crates/core/src/bridge.rs'
-      - 'crates/core/src/test_env.rs'
-      - 'src-tauri/src/services/translator/**'
-      - 'src-tauri/src/window.rs'
   workflow_dispatch:
   workflow_call:
     inputs:

@@ -77,18 +77,15 @@ eq "past the end fails" "failed" "$(rc_nth_merge 4 <<<"$shas" 2>/dev/null || ech
 eq "empty history fails" "failed" "$(printf '' | rc_nth_merge 1 2>/dev/null || echo failed)"
 eq "past the end says so" "rc에 4번째 머지가 없습니다 (3개뿐)" "$(rc_nth_merge 4 <<<"$shas" 2>&1 >/dev/null || true)"
 
-# --- rc_smoke_note: what the notes say about the real-app smoke test (a candidate is published whatever it said) ---
-eq "smoke passed"  "- 실제 앱 스모크 테스트: 통과" "$(rc_smoke_note success)"
-eq "smoke failed is a warning" "> **실제 앱 스모크 테스트가 실패했습니다.** 후보는 그대로 게시되었지만 일부 기능이 깨졌을 수 있습니다. 실패한 단계는 CI 실행 로그에서 확인하세요." "$(rc_smoke_note failure)"
-eq "smoke cancelled is a warning too" "$(rc_smoke_note failure)" "$(rc_smoke_note cancelled)"
-eq "smoke skipped says so" "- 실제 앱 스모크 테스트: 실행하지 않음" "$(rc_smoke_note skipped)"
-eq "no result says so"     "$(rc_smoke_note skipped)" "$(rc_smoke_note '')"
-
 # --- test flags (src-tauri `test-env` feature): candidates are built with them, stable releases never ---
 workflows=../workflows
 eq "candidate builds with test-env" "1" "$(grep -c 'tauri-apps/cli@2 build .*--features test-env' "$workflows/release-candidate.yml")"
 eq "stable release never mentions test-env" "0" "$(grep -c 'test-env' "$workflows/release.yml")"
-eq "candidate publishes whatever the smoke test said" "0" "$(grep -c '^    if:.*needs\.smoke' "$workflows/release-candidate.yml")"
+# The real-app smoke test is slow and starts only from a pushed release tag: no pull request, no push to a branch, no candidate.
+eq "candidate does not run the smoke test" "0" "$(cat "$workflows/release-candidate.yml" ../scripts/rc-lib.sh | grep -c 'bridge-smoke\.yml\|needs\.smoke\|rc_smoke_note')"
+eq "smoke test has no pull_request trigger" "0" "$(grep -c '^  pull_request' "$workflows/bridge-smoke.yml")"
+eq "smoke test has no push trigger" "0" "$(grep -c '^  push' "$workflows/bridge-smoke.yml")"
+eq "stable release calls the smoke test once" "1" "$(grep -c 'uses: \./\.github/workflows/bridge-smoke\.yml' "$workflows/release.yml")"
 eq "stable release waits for the smoke test" "1" "$(grep -c 'needs: \[check, build, smoke\]' "$workflows/release.yml")"
 eq "candidate notes name the test flags" "1" "$(grep -c "printf '5\. .*--data-dir" "$workflows/release-candidate.yml")"
 

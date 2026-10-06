@@ -260,11 +260,9 @@ A change that needs a run on Kade's Windows PC before `main` goes through `rc`:
 1. Work on `candidate/<feature>` (from `main`), gate green, push. Open a PR **into `rc`**
    -- Kade or another maintainer merges it by hand (auto-merge never touches it).
 2. The merge starts `.github/workflows/release-candidate.yml`: CI's gates, then a
-   Windows build of the plain exe (`tauri build --no-bundle`, no installer), then the
-   **real-app smoke test** (`bridge-smoke.yml`: that exe started on a hosted Windows runner
-   and driven over the test bridge, eight pipelines; **only a report here** -- a red row is
-   written into the notes and the candidate is published anyway, because a candidate exists
-   to be tried on Windows; only a stable release waits for a green smoke test), then a
+   Windows build of the plain exe (`tauri build --no-bundle`, no installer). **No real-app
+   smoke test runs here**, and none runs on a pull request either: it is slow, and it starts
+   only from a pushed release tag (`release.yml`; `rc-lib.test.sh` pins that). Then a
    GitHub **prerelease** `v<version>-rc.<feature>` (`.2`, `.3` ... for a repeat
    build of the same branch) with the exe, `SHA256SUMS.txt`, and Korean notes: how to
    run it, the merged PR's description, the commits not yet on `main`, and their
@@ -285,8 +283,8 @@ announced version -- so a stable release is built and signed by
 `.github/workflows/release.yml`, never by hand: bump `[workspace.package] version`, write
 `release-notes/v<version>.md` (copy `release-notes/TEMPLATE.md`), merge to `main`, then
 push the tag `v<version>` on it. The workflow gates, runs the same
-real-app smoke test on a separate test-flag build of that commit (the shipped exe has no
-bridge; a red row stops the publish), builds
+real-app smoke test -- the only place it runs -- on a separate test-flag build of that commit
+(the shipped exe has no bridge; a red row stops the publish), builds
 the plain exe, signs it with the `TAURI_SIGNING_PRIVATE_KEY` secret, checks the
 signature the way the app will (`examples/verify_update.rs`) and publishes the exe,
 `<exe>.sig` and `latest.json` (the update feed). The private keys are never

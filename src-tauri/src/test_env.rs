@@ -153,6 +153,13 @@ pub fn allow_local_http() -> bool {
     flag(|env| env.feed_url.is_some() || env.metadata_url.is_some())
 }
 
+/// `--llama-url`: the stand-in llama-server to use instead of starting one (`http://127.0.0.1:PORT`).
+pub fn llama_url() -> Option<&'static str> {
+    ACTIVE
+        .get()
+        .and_then(|active| active.env.llama_url.as_deref())
+}
+
 /// `--replay-chat`: the file whose chat lines are fed in as if captured.
 pub fn replay_chat() -> Option<&'static Path> {
     ACTIVE

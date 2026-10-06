@@ -31,7 +31,7 @@ enum Kind {
 }
 
 /// Every flag, in the order `TestEnv::set_flags` lists them.
-const FLAGS: [(&str, Kind); 15] = [
+const FLAGS: [(&str, Kind); 16] = [
     ("data-dir", Kind::Value),
     ("fresh", Kind::Switch),
     ("assume-setup-done", Kind::Switch),
@@ -46,6 +46,7 @@ const FLAGS: [(&str, Kind); 15] = [
     ("log-file", Kind::Value),
     ("replay-chat", Kind::Value),
     ("bridge-url", Kind::Value),
+    ("llama-url", Kind::Value),
     ("print-env", Kind::Switch),
 ];
 
@@ -77,6 +78,9 @@ pub struct TestEnv {
     /// Connect to this local MQTT broker (`mqtt://127.0.0.1:1883`) and publish
     /// what the app does / obey what the test publishes (see [`bridge_addr`]).
     pub bridge_url: Option<String>,
+    /// Use the llama-server that answers here (`http://127.0.0.1:PORT`) instead of starting one: a stand-in
+    /// that needs no model and no GPU. Local http only, with a port; stored without a trailing slash.
+    pub llama_url: Option<String>,
     /// Print the resolved settings as JSON and exit.
     pub print_env: bool,
 }
@@ -100,6 +104,7 @@ impl TestEnv {
             self.log_file.is_some(),
             self.replay_chat.is_some(),
             self.bridge_url.is_some(),
+            self.llama_url.is_some(),
             self.print_env,
         ];
         FLAGS
@@ -134,6 +139,17 @@ impl TestEnv {
                     return Err(TestEnvError::BadBridgeUrl { url: value });
                 }
                 self.bridge_url = Some(value);
+            }
+            "llama-url" => {
+                let base = value.trim_end_matches('/').to_string();
+                // Local http with a port, and no path: the app appends /health and /completion itself.
+                let ok = is_local_http_url(&base)
+                    && split_authority(&base).is_some_and(|(_, _, port)| port.is_some())
+                    && base.matches('/').count() == 2;
+                if !ok {
+                    return Err(TestEnvError::BadLlamaUrl { url: value });
+                }
+                self.llama_url = Some(base);
             }
             "feed-url" | "metadata-url" => {
                 if !is_test_url_allowed(&value) {
@@ -174,6 +190,8 @@ pub enum TestEnvError {
     BadBridgeUrl { url: String },
     /// A feed / metadata URL that is neither `https` nor local `http`.
     BadUrl { flag: String, url: String },
+    /// A `--llama-url` that is not `http://` to this machine with a port.
+    BadLlamaUrl { url: String },
 }
 
 impl fmt::Display for TestEnvError {
@@ -198,6 +216,10 @@ impl fmt::Display for TestEnvError {
             Self::BadBridgeUrl { url } => write!(
                 f,
                 "--bridge-url {url:?}: only mqtt://127.0.0.1 / localhost / [::1], with an optional port"
+            ),
+            Self::BadLlamaUrl { url } => write!(
+                f,
+                "--llama-url {url:?}: only http://127.0.0.1:PORT / localhost / [::1], with a port and no path"
             ),
             Self::BadUrl { flag, url } => write!(
                 f,
@@ -480,6 +502,7 @@ impl TestEnv {
             value(path(&self.status_file), "status-file"),
             value(path(&self.log_file), "log-file"),
             value(self.bridge_url.clone(), "bridge-url"),
+            value(self.llama_url.clone(), "llama-url"),
         ]
         .into_iter()
         .flatten()
@@ -836,6 +859,47 @@ mod tests {
             run(&["--bridge-url"], &[]),
             Err(TestEnvError::MissingValue("bridge-url".into()))
         );
+    }
+
+    #[test]
+    fn llama_url_is_a_local_http_server_with_a_port() {
+        let env = ok(&["--llama-url", "http://127.0.0.1:8099"]);
+        assert_eq!(env.llama_url.as_deref(), Some("http://127.0.0.1:8099"));
+        assert!(env.set_flags().contains(&"llama-url"));
+        // A trailing slash is not part of the base address the app appends /completion to.
+        let env = ok(&["--llama-url=http://localhost:8099/"]);
+        assert_eq!(env.llama_url.as_deref(), Some("http://localhost:8099"));
+        let env = run(&[], &[("RESONANCE_TEST_LLAMA_URL", "http://[::1]:9")]).expect("parses");
+        assert_eq!(env.llama_url.as_deref(), Some("http://[::1]:9"));
+        assert_eq!(
+            run(&["--llama-url"], &[]),
+            Err(TestEnvError::MissingValue("llama-url".into()))
+        );
+        // A restarted app keeps talking to the same stand-in.
+        assert_eq!(
+            ok(&["--llama-url", "http://127.0.0.1:8099"]).restart_args(),
+            ["--llama-url=http://127.0.0.1:8099"]
+        );
+    }
+
+    #[test]
+    fn llama_url_refuses_anything_but_local_http_with_a_port() {
+        for url in [
+            "http://llama.example.com:8080",
+            "https://127.0.0.1:8080",
+            "http://127.0.0.1",
+            "http://127.0.0.1:abc",
+            "http://127.0.0.1.example.com:8080",
+            "http://user@127.0.0.1:8080",
+            "http://127.0.0.1:8080/v1/x",
+            "127.0.0.1:8080",
+        ] {
+            assert_eq!(
+                run(&["--llama-url", url], &[]),
+                Err(TestEnvError::BadLlamaUrl { url: url.into() }),
+                "{url}"
+            );
+        }
     }
 
     #[test]

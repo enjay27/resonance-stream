@@ -17,7 +17,7 @@
 //! A command is on an allowlist ([`Command`]): a test can ask for what the
 //! flags already do (`replay-chat`) or press a button the window has (`start-update`,
 //! `restart-update`), or what a chat row's menu does (`block-user`, `unblock-user`,
-//! `clear-history`), or what the setup wizard does (`download-model`) -- not run arbitrary code.
+//! `clear-history`), or what the setup wizard does (`download-model`, `start-translator`) -- not run arbitrary code.
 
 use serde_json::{json, Value};
 use std::fmt;
@@ -105,6 +105,9 @@ pub enum Command {
     GetChatHistory,
     /// Empty the backend's chat and system logs (`clear_chat_history`, the clear button).
     ClearHistory,
+    /// Start the translator as the UI does once the model and server are in place (`launch_translator`; idempotent). With
+    /// `--llama-url` it uses the stand-in server and needs neither.
+    StartTranslator,
     /// Download the translation model as the setup wizard does (`download_model`), from what the UI would take out of the
     /// gist: the url, the version and the SHA-256 the file must have (empty is allowed here -- the app must refuse it).
     /// The ack only says it started; the end is a [`DOWNLOAD_RESULT_EVENT`] carrying this command's id.
@@ -202,6 +205,7 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
             }
             "get-chat-history" => Command::GetChatHistory,
             "clear-history" => Command::ClearHistory,
+            "start-translator" => Command::StartTranslator,
             "block-user" | "unblock-user" => {
                 // The game's sender ids are whole numbers, and 0 means "no sender".
                 let Some(uid) = args
@@ -480,6 +484,14 @@ mod tests {
         assert_eq!(
             event_topic(DOWNLOAD_RESULT_EVENT),
             "rs/app/event/download-result"
+        );
+    }
+
+    #[test]
+    fn start_translator_parses() {
+        assert_eq!(
+            parse("start-translator", r#"{"id":"t"}"#).map(|r| r.command),
+            Ok(Command::StartTranslator)
         );
     }
 

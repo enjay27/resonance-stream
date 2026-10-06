@@ -238,6 +238,10 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             crate::commands::clear_chat_history(app.state());
             answer(Ok(()));
         }
+        Command::StartTranslator => {
+            crate::commands::launch_translator(app.clone(), app.state());
+            answer(Ok(()));
+        }
         Command::DownloadModel {
             url,
             version,

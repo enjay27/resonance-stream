@@ -4,8 +4,12 @@ use std::sync::atomic::{AtomicU16, Ordering};
 pub const PREFERRED_SERVER_PORT: u16 = 8080;
 static SERVER_PORT: AtomicU16 = AtomicU16::new(PREFERRED_SERVER_PORT);
 
-/// Base URL of the running llama-server (the port is chosen at launch).
+/// Base URL of the running llama-server (the port is chosen at launch), or the stand-in a test run
+/// named with `--llama-url`.
 pub fn server_url() -> String {
+    if let Some(url) = crate::test_env::llama_url() {
+        return url.to_string();
+    }
     format!("http://127.0.0.1:{}", SERVER_PORT.load(Ordering::Relaxed))
 }
 

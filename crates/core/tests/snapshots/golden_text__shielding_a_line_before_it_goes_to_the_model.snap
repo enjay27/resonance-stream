@@ -1,0 +1,49 @@
+---
+source: crates/core/tests/golden_text.rs
+expression: table
+---
+in:     こんにちは
+masked: こんにちは
+
+in:     【募集】火力できる方いませんか
+masked: [P0]募集[P1][P2]できる方いませんか
+  [P0] -> 【
+  [P1] -> 】
+  [P2] -> 딜러
+
+in:     「完凸」してます
+masked: [P0][P2][P1]してます
+  [P0] -> 「
+  [P1] -> 」
+  [P2] -> 풀돌
+
+in:     アズルルさんと@Bob12で行く
+masked: [P0]さんと[P1]で行く
+  [P0] -> Azururu
+  [P1] -> @Bob12
+
+in:     アリスボブとアリスで行く
+masked: [P0]と[P1]で行く
+  [P0] -> 앨리스밥
+  [P1] -> 앨리스
+
+in:     3人で2周、5回、1種
+masked: [P0]で[P1]、[P2]、[P3]
+  [P0] -> 3인
+  [P1] -> 2주
+  [P2] -> 5회
+  [P3] -> 1종
+
+in:     火力火力火力
+masked: [P0][P0][P0]
+  [P0] -> 딜러
+
+in:     [P0]という文字列そのもの
+masked: [P0]という文字列そのもの
+
+in:     [스티커]を送った
+masked: [P0]を送った
+  [P0] -> [스티커]
+
+in:     
+masked:

@@ -231,6 +231,12 @@ pub fn mark_ready(app: &AppHandle) {
     write_status(active);
 }
 
+/// Has start-up finished (`mark_ready`)? A normal run, which has no test flags, counts as ready. The bridge holds
+/// its commands back until this is true, because it starts listening before the rest of start-up.
+pub fn is_ready() -> bool {
+    ACTIVE.get().is_none_or(|active| active.status.lock().ready)
+}
+
 /// Records where the app's own update stands (`--status-file`'s `update`).
 pub fn report_update(state: UpdateState) {
     let Some(active) = ACTIVE.get() else { return };

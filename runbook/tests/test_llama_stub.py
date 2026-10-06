@@ -37,8 +37,10 @@ def test_the_source_line_is_what_follows_the_instruction():
 
 def test_health_is_503_while_loading_then_200():
     with LlamaStub(loading_seconds=0.6) as stub:
+        time.sleep(0.8)  # loading begins at the first /health request, not when the stub starts
         status, body = get(stub.url + "/health")
         assert status == 503 and body["error"]["message"] == "Loading model" and body["error"]["code"] == 503
+        assert stub.health_503 == 1
         time.sleep(0.8)
         assert get(stub.url + "/health") == (200, {"status": "ok"})
         stub.health_mode = "down"

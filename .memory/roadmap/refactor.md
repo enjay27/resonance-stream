@@ -24,7 +24,7 @@ Measured 2026-10-06 on `main` `1478528` (right after PR #203). Evidence, numbers
 Order: biggest risk first (losing the app or data) -> silent drops -> trust boundary -> structure -> efficiency. Every stage starts after Kade's go.
 
 - **S0 Docs, memory and reading the real app** (M-1..M-4, W-13, D-2, D-3)
-  - S0a Shrink `MEMORY.md` to 40 lines / 6 KB (now 287 lines / 103 KB), details to `.memory/`, plus a gate check that fails above the limit.
+  - ~~S0a Shrink `MEMORY.md` to 40 lines / 6 KB~~ **done 2026-10-06** (was 289 lines / 104 KB; now 32 lines / 3.6 KB; the old text is `sessions/2026-10-06-memory-index-archive.md`; CI step `memory-check.sh` fails above the limit).
   - S0b `bridge-smoke.yml`: pipeline steps run with `if: always()`; the job still fails when any step fails, so `release.yml` (`needs: [check, build, smoke]`) still blocks. First check the pipelines are independent (each uses its own folder). CI change: own PR.
   - S0c Run `bridge-smoke.yml` by `workflow_dispatch` on `main` and read **`CS-restart-nodup`, `CP-big-ack` and the five skipped steps** (chat-rules `CR-ruby-*` and the 一人 reading K16, persistence `CP-fav-*`, translator-stub `TS-dict-*` and the K8 `<bos>` count, popups, download-integrity).
 - **S1 Do not lose the app or data** (W-1, R-6, W-3, W-5)

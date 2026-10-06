@@ -182,8 +182,9 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
    browser with the `ui-preview` skill (`.claude/skills/ui-preview/`, runs on Linux),
    and need a manual run (`cargo tauri dev`, Windows, as Administrator); say in the
    commit body which of the two was done.
-3. **Record the outcome in the memory tree.** `MEMORY.md` is an index under ~40 lines —
-   update its *Now* section. Detail goes in `.memory/` (see its README).
+3. **Record the outcome in the memory tree.** `MEMORY.md` is an index of at most **40 lines and 6 KB**
+   (CI fails above: `bash .github/scripts/memory-check.sh`) -- update its *Now* section and delete what is done.
+   Detail goes in `.memory/` (see its README).
 4. **Push the branch and open the PR** — see *Version Control*; CI merges it when green.
 
 ---

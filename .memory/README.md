@@ -1,8 +1,10 @@
 # .memory — which file takes what
 
 `MEMORY.md` (repo root) is the index. It holds only what would be *false* the moment
-it goes stale: what is next, and what is written but not yet verified. Everything
-else lives here, one folder per kind of note.
+it goes stale: what is next, and what is written but not yet verified. **At most 40 lines
+and 6 KB; CI fails above** (`bash .github/scripts/memory-check.sh`). Everything
+else lives here, one folder per kind of note. When an item in `MEMORY.md` is done, delete
+it; the history is in git and `sessions/`.
 
 | folder | takes | rule |
 |---|---|---|

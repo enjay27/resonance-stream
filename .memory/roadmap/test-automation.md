@@ -21,13 +21,10 @@ Tick `[x]` only when it ran the way "done when" says; a smoke row that is `conti
 
 0. **Two findings from the last smoke runs** (details in the changelog, "Found, not fixed"):
    - [x] `PP-place` fixed (#184): the real app now restores the popup at 520x660 (smoke run of #184: popups 8/8; inner 504x651 before and after).
-   - [~] `translator-stub`: #183 fixed the first cp1252 crash (reading the broker); the run of #184 then hit a second one, **printing** Japanese evidence
-     to a cp1252 pipe (`UnicodeEncodeError` in `TS-error`). `claude/runbook-utf8-output`: `common.utf8_output()` called first in `run.main`. The `TS-*` rows
-     after `TS-ready` still need a real-app run.
-1. **Make the proven smoke steps gates.** One PR on `.github/workflows/bridge-smoke.yml`: drop `continue-on-error` from every
-   pipeline step that passed on the real app in a run of `main` (capture-spike 5/5, chat-rules 7/7, persistence 7/7, download-integrity 8/8 are
-   proven; translator-stub and popups once finding 0 is fixed and their rows are green). Until then a green smoke run can hide a red step.
-   Consider also making the rc build (`release-candidate.yml`) call it (`workflow_call` is already there).
+   - [x] `translator-stub`: UTF-8 fixes (#183 read, #185 print); the real app now passes **6/6** (translate, prompt, restart, catch-up; K8 `<bos>` count 1 reported).
+1. [~] **Smoke is a gate** (`claude/smoke-gates-rc-and-release`): no `continue-on-error` left in `bridge-smoke.yml`; `release-candidate.yml` runs it on the exe it
+   built (input `exe-artifact`) and `release` needs it; `release.yml` runs it on a separate test-flag build of the tagged commit and `release` needs it.
+   The call paths (`workflow_call`) cannot run before merge: **the first rc / release run is their test**; a red one only blocks that publish (re-run).
 2. **Small rows** (no app change; another row in an existing pipeline) -- the list is in the triage: retention-days prune,
    busy-WORLD reload, translation-ledger "turn on later", log dedup, version row, burst frames, the K5 watchdog / VPN-hint rows
    (the capture spike now makes them possible).

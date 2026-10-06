@@ -4,7 +4,8 @@ name: Release candidate
 # for testing on Windows: one plain exe (no installer) + SHA256SUMS.txt,
 # tagged v<workspace version>-rc.<feature>[.<n>], where <feature> is the
 # merged branch's name without its prefix (candidate/main-ui -> main-ui) and
-# .<n> counts repeat builds of the same feature. Only the newest 5 candidate
+# .<n> counts repeat builds of the same feature. The CI gates and a real-app smoke test of the built exe
+# (bridge-smoke.yml) must pass before anything is published. Only the newest 5 candidate
 # releases (and their tags) are kept.
 #
 # Prereleases never become "Latest", and the app does not read GitHub
@@ -122,9 +123,20 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  # The exe that was just built, started for real on a hosted Windows runner and driven over the test bridge (eight
+  # pipelines, bridge-smoke.yml). A red row stops the publish. Like the gates, only rc's newest commit is tested here.
+  smoke:
+    name: real-app smoke test
+    needs: [pick, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.pick.outputs.rank == '1' }}
+    uses: ./.github/workflows/bridge-smoke.yml
+    with:
+      exe-artifact: exe
+
   release:
     name: publish prerelease
-    needs: [pick, build]
+    needs: [pick, build, smoke]
+    if: ${{ !cancelled() && needs.build.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.smoke.result) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

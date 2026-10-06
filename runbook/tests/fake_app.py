@@ -28,7 +28,9 @@ notebook does for the new version, are never parsed). Environment:
                           sender, "clear-keeps" leaves the history when told to clear it
   FAKE_APP_PERSIST_BUG    a bug to catch in what survives a restart: "no-archive" writes no chat log, "world-archived" also archives WORLD
                           (ignored by default), "no-config" does not save the block list, "no-reload" starts with an empty log,
-                          "pid-restart" numbers new lines from 1 again, "unflagged-reload" restores a blocked sender's rows unflagged
+                          "pid-restart" numbers new lines from 1 again, "unflagged-reload" restores a blocked sender's rows unflagged,
+                          "no-retention" never prunes old day logs, "retention-takes-all" prunes files that are no day log too,
+                          "global-limit" reloads the newest N of ALL channels (N = the WORLD limit) instead of N per channel
   FAKE_APP_DL_BUG         a bug to catch in the model download: "no-verify" accepts any bytes, "keeps-part" leaves its partial file after a
                           failure, "overwrites-on-fail" replaces the installed model before checking the new one, "accepts-http" takes
                           a plain-http address that is not this machine's
@@ -43,6 +45,7 @@ notebook does for the new version, are never parsed). Environment:
 """
 from __future__ import annotations
 
+import datetime
 import http.client
 import json
 import os
@@ -241,6 +244,7 @@ class App:
         self.signatures: dict[tuple, int] = {}
         self.fingerprints: list[tuple[tuple, float]] = []
         self.blocked: dict[int, str] = {}
+        self.ignored = ["WORLD"]
         self.next_pid = 1
         # the translator (translator/mod.rs, as understood)
         self.jobs: queue.Queue = queue.Queue()
@@ -387,16 +391,35 @@ class App:
     def load_persisted(self) -> None:
         bug = os.environ.get("FAKE_APP_PERSIST_BUG", "")
         config = self.data_path("config", "config.json")
+        saved: dict = {}
         if config and config.exists():
             saved = json.loads(config.read_text(encoding="utf-8"))
             self.blocked = {int(uid): name for uid, name in saved.get("blocked_users", {}).items()}
+        self.ignored = saved.get("archive_ignored_channels", ["WORLD"])
+        limits = {"WORLD": 200, **saved.get("tab_limits", {})}
         logs = self.data_path("data", "chat_logs")
         if logs and logs.is_dir() and bug != "no-reload":
+            self.prune(logs, int(saved.get("chat_log_retention_days", 0)), bug)
+            rows = []
             for file in sorted(logs.glob("*.jsonl")):
                 for raw in file.read_text(encoding="utf-8").splitlines():
-                    row = json.loads(raw)
+                    try:
+                        row = json.loads(raw)
+                    except ValueError:  # load_recent skips a line that is no chat message
+                        continue
                     row["isBlocked"] = row["uid"] in self.blocked and bug != "unflagged-reload"
-                    self.history.append(row)
+                    rows.append(row)
+            if bug == "global-limit":
+                rows = rows[-limits["WORLD"]:]
+            else:  # load_recent: the newest `limit` of each channel, oldest first
+                kept: dict[str, int] = {}
+                newest_first = []
+                for row in reversed(rows):
+                    kept[row["channel"]] = kept.get(row["channel"], 0) + 1
+                    if kept[row["channel"]] <= limits.get(row["channel"], 1000):
+                        newest_first.append(row)
+                rows = newest_first[::-1]
+            self.history.extend(rows)
             for pid, row in enumerate(self.history, start=1):  # load_recent: saved pids come from earlier runs, so 1..=n again
                 row["pid"] = pid
             if bug != "pid-restart":
@@ -404,10 +427,27 @@ class App:
             for row in self.history:
                 self.signatures[(row["uid"], row["timestamp"], row["sequenceId"])] = row["pid"]
 
+    @staticmethod
+    def prune(logs: Path, keep_days: int, bug: str) -> None:
+        """data_factory::prune_chat_logs: a day log older than `keep_days` days (today counts as one) goes; 0 keeps all."""
+        if keep_days <= 0 or bug == "no-retention":
+            return
+        oldest = datetime.date.today() - datetime.timedelta(days=keep_days - 1)
+        for file in logs.glob("*.jsonl"):
+            try:
+                day = datetime.date.fromisoformat(file.stem)
+            except ValueError:  # not a day log: never touched
+                if bug == "retention-takes-all":
+                    file.unlink()
+                continue
+            if day < oldest:
+                file.unlink()
+
     def archive(self, chat: dict) -> None:
         bug = os.environ.get("FAKE_APP_PERSIST_BUG", "")
         logs = self.data_path("data", "chat_logs")
-        if logs is None or bug == "no-archive" or (chat["channel"] == "WORLD" and bug != "world-archived"):
+        ignored = [] if bug == "world-archived" else self.ignored
+        if logs is None or bug == "no-archive" or chat["channel"] in ignored:
             return
         logs.mkdir(parents=True, exist_ok=True)
         with open(logs / f"{time.strftime('%Y-%m-%d')}.jsonl", "a", encoding="utf-8") as f:

@@ -13,7 +13,7 @@ from runbook.common import Recorder  # noqa: E402
 @pytest.mark.parametrize("name", sorted(run.PIPELINES))
 def test_every_pipeline_can_be_built_from_the_command_line_options(name, tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))  # the update pipeline looks for the real config
-    args = types.SimpleNamespace(version="9.9.9", ui=False)
+    args = types.SimpleNamespace(version="9.9.9", ui=False, add_firewall_rule=False)
     pipeline = run.build(name, Recorder(name), tmp_path / "app.exe", args)
     assert callable(pipeline.run)
 

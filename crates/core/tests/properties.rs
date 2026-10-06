@@ -69,7 +69,7 @@ fn push_all(assembler: &mut FrameAssembler, segments: &[Vec<u8>]) -> Vec<(bool, 
     let mut out = Vec::new();
     for segment in segments {
         for frame in assembler.push(segment) {
-            out.push((format!("{:?}", frame.kind) == "Live", frame.root));
+            out.push((frame.kind == FrameKind::Live, frame.root));
         }
         assert!(
             assembler.pending_len() <= MAX_FRAME_LEN,

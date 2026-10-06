@@ -8,6 +8,8 @@ what the app actually sent. Behaviour, changeable while it runs:
     health_mode      ok | loading (503 for `loading_seconds` after the FIRST /health request -- the app's first poll is when a real
                      server would have begun loading -- then ok) | down (503 always)
     completion_mode  ok | error (500) | empty (a reply with blank content) | slot (503 "no slot available") | close (the connection closes with no reply)
+                     | hang (the request is read and never answered, until `release_hang()` -- then the connection closes)
+    completion_delay seconds an ok / empty reply waits before it is sent (a slow model)
     translations     {japanese text: korean text}; any other line comes back as "[KO] " + the line
 """
 from __future__ import annotations
@@ -75,12 +77,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if mode == "close":
             self.close_connection = True
             return
+        if mode == "hang":
+            owner.hang_released.wait(owner.hang_seconds)
+            self.close_connection = True
+            return
         if mode == "error":
             return self._reply(500, error_body(500, "Internal Server Error", "server_error"))
         if mode == "slot":
             return self._reply(503, error_body(503, "no slot available", "unavailable_error"))
         prompt = str(body.get("prompt", ""))
         source = source_of(prompt)
+        if owner.completion_delay > 0:
+            time.sleep(owner.completion_delay)
         content = "  " if mode == "empty" else " " + owner.translations.get(source, "[KO] " + source) + " "
         self._reply(200, json.dumps({
             "index": 0, "content": content, "tokens": [], "id_slot": 0, "stop": True, "model": "stand-in",
@@ -98,6 +106,9 @@ class LlamaStub:
         self.health_mode = "loading" if loading_seconds > 0 else "ok"
         self.loading_seconds = loading_seconds
         self.completion_mode = "ok"
+        self.completion_delay = 0.0
+        self.hang_seconds = 120.0  # a hang that nobody releases still ends
+        self.hang_released = threading.Event()
         self.translations: dict[str, str] = {}
         self.requests: list[dict] = []
         self.hits: list[str] = []
@@ -131,7 +142,13 @@ class LlamaStub:
         self._thread.start()
         return self
 
+    def release_hang(self) -> None:
+        """Ends the requests that are hanging (their connections close) and lets the next `hang` request hang again."""
+        self.hang_released.set()
+        self.hang_released = threading.Event()
+
     def stop(self) -> None:
+        self.hang_released.set()
         if self._httpd is not None:
             self._httpd.shutdown()
             self._httpd.server_close()

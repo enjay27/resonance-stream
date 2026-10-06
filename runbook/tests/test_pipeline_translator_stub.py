@@ -24,6 +24,12 @@ pytestmark = [
 def env(monkeypatch, tmp_path):
     monkeypatch.setattr(common, "RUNS", tmp_path)
     monkeypatch.setattr(translator_stub, "LOADING_S", 1.0)
+    monkeypatch.setattr(translator_stub, "SLOW_LOADING_S", 3.0)
+    monkeypatch.setattr(translator_stub, "SLOW_DELAY_S", 0.6)
+    monkeypatch.setattr(translator_stub, "WAIT_S", 8.0)
+    monkeypatch.setattr(translator_stub, "HANG_MARGIN_S", 4.0)
+    monkeypatch.setattr(translator_stub, "REQUEST_TIMEOUT_S", 1.5)  # the app waits 30 s for a reply, its stand-in here 1 s
+    monkeypatch.setenv("FAKE_APP_REQUEST_TIMEOUT", "1")
     monkeypatch.setenv("RUNBOOK_DRYRUN", "1")
     exe = tmp_path / "local" / "resonance-stream.exe"
     exe.parent.mkdir()
@@ -42,7 +48,8 @@ def run(exe, tmp_path):
     return rec, {r.check: r for r in rec.rows}
 
 
-CHECKS = ("TS-ready", "TS-translate", "TS-prompt", "TS-restart", "TS-catchup")
+CHECKS = ("TS-ready", "TS-log-quiet", "TS-translate", "TS-prompt", "TS-restart", "TS-catchup", "TS-reload",
+          "TS-later-wait", "TS-later-catchup", "TS-live-first", "TS-hang")
 
 
 def test_a_translator_that_follows_the_rules_passes_every_row(env, tmp_path):
@@ -57,6 +64,11 @@ def test_a_translator_that_follows_the_rules_passes_every_row(env, tmp_path):
     ("no-catchup", {"TS-catchup"}),
     ("no-restart", {"TS-restart"}),
     ("translates-english", {"TS-translate"}),
+    ("no-limit", {"TS-later-catchup"}),
+    ("live-starves", {"TS-live-first"}),
+    ("poll-spam", {"TS-log-quiet"}),
+    ("hang-stalls", {"TS-hang"}),
+    ("reload-twice", {"TS-reload"}),
 ])
 def test_each_broken_rule_is_caught(env, tmp_path, monkeypatch, bug, failing):
     monkeypatch.setenv("FAKE_APP_TR_BUG", bug)

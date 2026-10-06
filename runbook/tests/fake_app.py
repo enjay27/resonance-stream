@@ -34,8 +34,13 @@ notebook does for the new version, are never parsed). Environment:
   FAKE_APP_DL_BUG         a bug to catch in the model download: "no-verify" accepts any bytes, "keeps-part" leaves its partial file after a
                           failure, "overwrites-on-fail" replaces the installed model before checking the new one, "accepts-http" takes
                           a plain-http address that is not this machine's
+  FAKE_APP_REQUEST_TIMEOUT  seconds the translator waits for the server's reply (default 10; the real client waits 30)
   FAKE_APP_TR_BUG         a bug to catch in the translator: "no-catchup" never retries the lines that failed, "no-restart" gives up after three failures,
-                          "translates-english" also sends lines that are not Japanese
+                          "translates-english" also sends lines that are not Japanese, "no-limit" catches up every owed line instead of the
+                          newest translation_catch_up_limit, "live-starves" serves live lines only after the whole catch-up,
+                          "poll-spam" puts a "Polling .../health" line in the system log for every health poll,
+                          "hang-stalls" never gives up on a request the server does not answer, "reload-twice" serves a row that was
+                          saved twice (untranslated, then translated) twice after a restart
   FAKE_APP_POPUP_BUG      a bug to catch in the popup windows: "second-window" makes another window when a popup is opened twice, "no-restore"
                           opens a popup at its default place instead of where it was left, "pin-ignored" leaves the popups unpinned when the main
                           window is pinned
@@ -250,6 +255,8 @@ class App:
         self.jobs: queue.Queue = queue.Queue()
         self.owed: list[int] = []
         self.translator_on = False
+        self.use_translation = False
+        self.catch_up_limit = 100
         self.tr_seq = 0
         # the popup windows (window.rs, as understood)
         self.popups: dict[str, dict] = {}
@@ -380,7 +387,7 @@ class App:
         self.event("packet-event", chat)
         if self.japanese(chat["message"]) or os.environ.get("FAKE_APP_TR_BUG") == "translates-english":
             self.owed.append(chat["pid"])
-            if self.translator_on:
+            if self.translator_on and self.use_translation:
                 self.jobs.put(chat["pid"])
 
     # -- what survives a restart (data_factory.rs, config/app_config.rs, lib.rs start-up reload, as understood)
@@ -396,6 +403,8 @@ class App:
             saved = json.loads(config.read_text(encoding="utf-8"))
             self.blocked = {int(uid): name for uid, name in saved.get("blocked_users", {}).items()}
         self.ignored = saved.get("archive_ignored_channels", ["WORLD"])
+        self.use_translation = bool(saved.get("use_translation", False))
+        self.catch_up_limit = int(saved.get("translation_catch_up_limit", 100))
         limits = {"WORLD": 200, **saved.get("tab_limits", {})}
         logs = self.data_path("data", "chat_logs")
         if logs and logs.is_dir() and bug != "no-reload":
@@ -409,6 +418,9 @@ class App:
                         continue
                     row["isBlocked"] = row["uid"] in self.blocked and bug != "unflagged-reload"
                     rows.append(row)
+            if os.environ.get("FAKE_APP_TR_BUG") != "reload-twice":  # load_recent: a message saved twice (untranslated, then translated) comes back once, newest line
+                newest = {(r["uid"], r["timestamp"], r["sequenceId"]): i for i, r in enumerate(rows)}
+                rows = [r for i, r in enumerate(rows) if newest[(r["uid"], r["timestamp"], r["sequenceId"])] == i]
             if bug == "global-limit":
                 rows = rows[-limits["WORLD"]:]
             else:  # load_recent: the newest `limit` of each channel, oldest first
@@ -542,11 +554,20 @@ class App:
                            "stop": ["<end_of_turn>", "<eos>"]}).encode()
         request = urllib.request.Request(self.flags["llama-url"] + "/completion", data=body, headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(request, timeout=10) as r:  # noqa: S310 -- local stand-in
+            with urllib.request.urlopen(request, timeout=self.request_timeout()) as r:  # noqa: S310 -- local stand-in
                 content = json.loads(r.read()).get("content", "").strip()
         except (OSError, ValueError, http.client.HTTPException):
             return None
         return content or None
+
+    @staticmethod
+    def request_timeout() -> float:
+        if os.environ.get("FAKE_APP_TR_BUG") == "hang-stalls":
+            return 3600.0
+        return float(os.environ.get("FAKE_APP_REQUEST_TIMEOUT", "10"))
+
+    def system(self, message: str, level: str = "info") -> None:
+        self.event("system-event", {"pid": 0, "level": level, "source": "Translator", "message": message})
 
     def healthy(self) -> bool:
         try:
@@ -561,14 +582,34 @@ class App:
             self.tr_state("Starting", "Initializing AI Backend...")
             self.tr_state("Loading Model", "Loading AI weights into VRAM...")
             while not self.healthy():
+                if bug == "poll-spam":
+                    self.system(f"Polling {self.flags['llama-url']}/health...", "debug")
                 time.sleep(0.3)
                 if self.stop:
                     return
-            owed = [pid for pid in self.owed if bug != "no-catchup"]
-            if owed:
-                self.tr_state("Catching Up", f"1/{len(owed)}")
-                for pid in owed:
+            while not self.jobs.empty():  # queued while the server loaded: they are owed instead
+                try:
+                    self.jobs.get_nowait()
+                except queue.Empty:
+                    break
+            pids = list(self.owed)
+            if bug != "no-limit":  # the newest `translation_catch_up_limit`; the older ones are passed over for good
+                pids = pids[-self.catch_up_limit:] if self.catch_up_limit > 0 else []
+                self.owed = [pid for pid in self.owed if pid in pids]
+            if bug == "no-catchup":
+                pids = []
+            if pids:
+                self.system(f"Catching up {len(pids)} missed message(s)...")
+                for done, pid in enumerate(pids):
+                    self.tr_state("Catching Up", f"{done + 1}/{len(pids)}")
+                    while bug != "live-starves":  # live lines go before the next catch-up item
+                        try:
+                            live = self.jobs.get_nowait()
+                        except queue.Empty:
+                            break
+                        self.translate(live)
                     self.translate(pid)
+                self.system(f"Catch-up done ({len(self.owed)} still untranslated).")
             self.tr_state("Active", "AI Engine Ready")
             failures = 0
             while not self.stop:
@@ -596,6 +637,7 @@ class App:
         if korean is None:
             return False
         row["translated"] = korean
+        self.archive(row)
         if pid in self.owed:
             self.owed.remove(pid)
         self.event("translation-event", {"pid": pid, "translated": korean})
@@ -870,6 +912,8 @@ def main() -> int:
     app.load_window_state()
     app.load_persisted()
     app.connect_bridge()
+    if app.use_translation and "llama-url" in flags and "no-translator" not in flags:  # lib.rs: the worker starts with the app
+        app.start_translator()
     line = os.environ.get("FAKE_APP_IFACE_LINE")
     if line and "no-capture" not in flags:
         level = "error" if line.startswith("NETWORK_ERROR") else "info"

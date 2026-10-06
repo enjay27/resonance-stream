@@ -96,3 +96,35 @@ def test_the_apps_own_client_works_against_the_stand_in():
         stub.completion_mode = "close"
         code, lines = ask(stub.url, "こんにちは")
         assert code == 1 and lines[1].startswith("error:")
+
+
+def test_a_slow_server_answers_after_its_delay():
+    with LlamaStub() as stub:
+        stub.completion_delay = 0.5
+        began = time.monotonic()
+        status, body = post(stub.url + "/completion", {"prompt": PROMPT})
+        assert status == 200 and body["content"].strip() == "[KO] こんにちは"
+        assert time.monotonic() - began >= 0.5
+
+
+def test_a_hanging_server_gives_no_reply_until_released_and_then_closes():
+    with LlamaStub() as stub:
+        stub.completion_mode = "hang"
+        results = []
+
+        def ask():
+            try:
+                results.append(post(stub.url + "/completion", {"prompt": PROMPT}))
+            except Exception as e:  # noqa: BLE001 -- a closed connection is the expected end
+                results.append(type(e).__name__)
+
+        import threading
+
+        t = threading.Thread(target=ask)
+        t.start()
+        t.join(timeout=1.0)
+        assert t.is_alive(), "a hanging server must not answer"
+        assert len(stub.requests) == 1  # it did receive the request
+        stub.release_hang()
+        t.join(timeout=5)
+        assert not t.is_alive() and results and not isinstance(results[0], tuple), results

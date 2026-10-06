@@ -151,3 +151,34 @@ def test_the_bridge_packages_are_installed_before_a_pipeline_starts(monkeypatch)
     exe.write_text("x")
     run.main(["window-restore", "--exe", str(exe)])
     assert calls == ["npm ci"]
+
+
+def test_the_broker_and_verify_are_read_as_utf8_not_the_machine_codepage(monkeypatch, tmp_path):
+    """On Windows `text=True` alone reads the broker's Japanese text as cp1252 (the `translator-stub` run died with
+    `UnicodeDecodeError: 'charmap' codec can't decode byte 0x81`), so every child process says its encoding."""
+    seen = {}
+
+    class FakeProc:
+        stdout = type("O", (), {"readline": lambda self: '{"port": 1}\n'})()
+        stderr = None
+        stdin = None
+
+        def poll(self):
+            return 0
+
+    def popen(*args, **kwargs):
+        seen["popen"] = kwargs
+        return FakeProc()
+
+    def run(*args, **kwargs):
+        seen["run"] = kwargs
+        return type("R", (), {"returncode": 0, "stdout": '{"ok": true, "checks": []}', "stderr": ""})()
+
+    monkeypatch.setattr(bridge.subprocess, "Popen", popen)
+    monkeypatch.setattr(bridge.subprocess, "run", run)
+    monkeypatch.setattr(bridge, "node_path", lambda: "node")
+    bridge.Serve(tmp_path / "out.jsonl")
+    bridge.verify("replay-chat", tmp_path / "log", tmp_path / "sample")
+    for call in ("popen", "run"):
+        assert seen[call].get("encoding") == "utf-8", call
+        assert seen[call].get("errors") == "replace", call

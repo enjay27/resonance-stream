@@ -22,8 +22,8 @@ Tick `[x]` only when it ran the way "done when" says; a smoke row that is `conti
 0. **Two findings from the last smoke runs** (details in the changelog, "Found, not fixed"):
    - [ ] `PP-place`: a restored popup comes back 30 px taller (real app, 2 runs). App bug in `window.rs` -> test first in `crates/core` if the
      rect arithmetic can be pulled out (as `inner_size_for` was), then a branch; the smoke run shows it.
-   - [ ] `translator-stub` crashes on Windows after `TS-ready` (cp1252 read of Japanese text, `runbook/runbook/bridge.py` lines 47, 113): add
-     `encoding="utf-8"`; then read the remaining `TS-*` rows -- the first real look at translate / prompt / restart / catch-up.
+   - [x] `translator-stub` crash on Windows: `bridge.py` now reads its child processes as UTF-8 (`claude/bridge-utf8-pipes`, test first). The
+     `TS-*` rows after `TS-ready` have still to be read from the next smoke run on the real app (first real look at translate / restart / catch-up).
 1. **Make the proven smoke steps gates.** One PR on `.github/workflows/bridge-smoke.yml`: drop `continue-on-error` from every
    pipeline step that passed on the real app in a run of `main` (capture-spike 5/5, chat-rules 7/7, persistence 7/7, download-integrity 8/8 are
    proven; translator-stub and popups once finding 0 is fixed and their rows are green). Until then a green smoke run can hide a red step.

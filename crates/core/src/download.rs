@@ -213,6 +213,29 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     })
 }
 
+/// The update's swap: the running exe moves to `old`, the downloaded one takes its place.
+/// A stale `old` from an earlier update is dropped first. If the second rename fails the
+/// first one is undone, so the app is never left without an exe at `current`; the error
+/// says what failed and whether the previous version is back.
+pub fn install_swap(current: &Path, temp: &Path, old: &Path) -> Result<(), String> {
+    if old.exists() {
+        let _ = std::fs::remove_file(old);
+    }
+    std::fs::rename(current, old).map_err(|e| format!("Failed to backup current exe: {}", e))?;
+    if let Err(e) = std::fs::rename(temp, current) {
+        return Err(match std::fs::rename(old, current) {
+            Ok(()) => format!("Failed to install new exe: {}; the previous version was restored", e),
+            Err(restore) => format!(
+                "Failed to install new exe: {}; restoring the previous version also failed: {} (it is at {})",
+                e,
+                restore,
+                old.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Is `remote` a newer version than `current`? Versions that both parse as
 /// semver ("0.4.0", "v0.5.1") are compared; anything else falls back to
 /// "different means newer", as before.
@@ -360,6 +383,79 @@ mod tests {
         let dir = temp_dir("giveup");
         let err = replace_file(&dir.join("missing"), &dir.join("x"), 2, Duration::ZERO);
         assert!(err.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- install_swap: the update's two renames --------------------------
+
+    fn swap_paths(
+        dir: &std::path::Path,
+    ) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        (
+            dir.join("app.exe"),
+            dir.join("update_temp.exe"),
+            dir.join("app.exe.old"),
+        )
+    }
+
+    #[test]
+    fn install_swap_puts_the_new_exe_in_place_and_keeps_the_old_one() {
+        let dir = temp_dir("swap-ok");
+        let (current, temp, old) = swap_paths(&dir);
+        std::fs::write(&current, b"v1").unwrap();
+        std::fs::write(&temp, b"v2").unwrap();
+        install_swap(&current, &temp, &old).unwrap();
+        assert_eq!(std::fs::read(&current).unwrap(), b"v2");
+        assert_eq!(std::fs::read(&old).unwrap(), b"v1");
+        assert!(!temp.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn install_swap_drops_a_stale_backup_first() {
+        let dir = temp_dir("swap-stale");
+        let (current, temp, old) = swap_paths(&dir);
+        std::fs::write(&current, b"v2").unwrap();
+        std::fs::write(&temp, b"v3").unwrap();
+        std::fs::write(&old, b"v1").unwrap();
+        install_swap(&current, &temp, &old).unwrap();
+        assert_eq!(std::fs::read(&current).unwrap(), b"v3");
+        assert_eq!(std::fs::read(&old).unwrap(), b"v2");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn install_swap_puts_the_running_exe_back_when_the_second_rename_fails() {
+        // W-1: the current exe was already moved to `.old` when installing the new one failed.
+        let dir = temp_dir("swap-rollback");
+        let (current, temp, old) = swap_paths(&dir);
+        std::fs::write(&current, b"v1").unwrap();
+        // `update_temp.exe` is gone (an antivirus took it), so the second rename fails.
+        let err = install_swap(&current, &temp, &old).unwrap_err();
+        assert!(err.contains("Failed to install new exe"), "{err}");
+        assert!(err.contains("restored"), "{err}");
+        assert_eq!(
+            std::fs::read(&current).unwrap(),
+            b"v1",
+            "the app must still be there"
+        );
+        assert!(!old.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn install_swap_changes_nothing_when_the_first_rename_fails() {
+        let dir = temp_dir("swap-first");
+        let (current, temp, old) = swap_paths(&dir);
+        std::fs::write(&temp, b"v2").unwrap();
+        let err = install_swap(&current, &temp, &old).unwrap_err();
+        assert!(err.contains("Failed to backup current exe"), "{err}");
+        assert_eq!(
+            std::fs::read(&temp).unwrap(),
+            b"v2",
+            "the download is kept for another try"
+        );
+        assert!(!current.exists() && !old.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

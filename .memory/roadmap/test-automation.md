@@ -22,9 +22,9 @@ Tick `[x]` only when it ran the way "done when" says; a smoke row that is `conti
 0. **Two findings from the last smoke runs** (details in the changelog, "Found, not fixed"):
    - [x] `PP-place` fixed (#184): the real app now restores the popup at 520x660 (smoke run of #184: popups 8/8; inner 504x651 before and after).
    - [x] `translator-stub`: UTF-8 fixes (#183 read, #185 print); the real app now passes **6/6** (translate, prompt, restart, catch-up; K8 `<bos>` count 1 reported).
-1. [~] **Smoke is a gate** (`claude/smoke-gates-rc-and-release`): no `continue-on-error` left in `bridge-smoke.yml`; `release-candidate.yml` runs it on the exe it
-   built (input `exe-artifact`) and `release` needs it; `release.yml` runs it on a separate test-flag build of the tagged commit and `release` needs it.
-   The call paths (`workflow_call`) cannot run before merge: **the first rc / release run is their test**; a red one only blocks that publish (re-run).
+1. [~] **Smoke is a gate for a stable release only** (`claude/smoke-gates-rc-and-release`, then `claude/smoke-gate-release-only`, Kade 2026-10-06: "make release only"): no `continue-on-error` left in `bridge-smoke.yml`; `release.yml` runs it on a separate test-flag build of the tagged commit and `release` needs it.
+   `release-candidate.yml` still runs it on the exe it built (input `exe-artifact`) but **only as a report**: the candidate is published whatever it said, and the notes carry a warning (red) or a line (green / not run) -- `rc_smoke_note`. Why: a candidate exists to be tried on Windows; a runner-only failure must not withhold it. `rc` is never merged into `main`, and candidate PRs into `main` are merged by hand, so there is no `rc` -> `main` gate to add (a required check there would be a branch-protection setting, Kade's).
+   The call paths (`workflow_call`) cannot run before merge: **the first rc / release run is their test**; a red release run only blocks that publish (re-run). The `push`-triggered rc workflow is read from the `rc` branch: this change takes effect once `main` is merged into `rc`.
 2. **Small rows** (no app change; another row in an existing pipeline) -- the list is in the triage: retention-days prune,
    busy-WORLD reload, translation-ledger "turn on later", log dedup, version row, burst frames, the K5 watchdog / VPN-hint rows
    (the capture spike now makes them possible).

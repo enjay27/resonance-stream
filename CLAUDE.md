@@ -262,7 +262,9 @@ A change that needs a run on Kade's Windows PC before `main` goes through `rc`:
 2. The merge starts `.github/workflows/release-candidate.yml`: CI's gates, then a
    Windows build of the plain exe (`tauri build --no-bundle`, no installer), then the
    **real-app smoke test** (`bridge-smoke.yml`: that exe started on a hosted Windows runner
-   and driven over the test bridge, eight pipelines; a red row stops the publish), then a
+   and driven over the test bridge, eight pipelines; **only a report here** -- a red row is
+   written into the notes and the candidate is published anyway, because a candidate exists
+   to be tried on Windows; only a stable release waits for a green smoke test), then a
    GitHub **prerelease** `v<version>-rc.<feature>` (`.2`, `.3` ... for a repeat
    build of the same branch) with the exe, `SHA256SUMS.txt`, and Korean notes: how to
    run it, the merged PR's description, the commits not yet on `main`, and their

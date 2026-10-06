@@ -1,0 +1,18 @@
+---
+source: crates/core/tests/golden_text.rs
+expression: table
+---
+in:       [P0]火力
+masked: [P0][P0]
+  [P0] -> 딜러
+restored: 딜러딜러
+
+in:       火力[P0]
+masked: [P0][P0]
+  [P0] -> 딜러
+restored: 딜러딜러
+
+in:       [P1]火力
+masked: [P1][P0]
+  [P0] -> 딜러
+restored: [P1]딜러

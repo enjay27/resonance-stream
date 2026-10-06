@@ -1,0 +1,12 @@
+---
+source: crates/core/tests/golden_text.rs
+expression: table
+---
+"emojiPic=1234" -> "[스티커]"
+"emojiPic=" -> "[스티커]"
+"こんにちは" -> "こんにちは"
+"<sprite=5>" -> "[이모지]"
+"前<sprite=1>中<sprite=22>後" -> "前[이모지]中[이모지]後"
+"壊れた<sprite=3" -> "壊れた<sprite=3"
+"<sprite=1><sprite=2>" -> "[이모지][이모지]"
+"" -> ""

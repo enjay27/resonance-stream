@@ -1,0 +1,12 @@
+---
+source: crates/core/tests/golden_text.rs
+expression: table
+---
+"アズルル" -> "Azururu"
+"さくら" -> "Sakura"
+"山田 太郎" -> "Yamada Tarou"
+"ＡＢＣ" -> "ABC"
+"abc" -> "Abc"
+"ゆうきくん" -> "Yuukikun"
+"ー" -> "-"
+"" -> ""

@@ -147,6 +147,13 @@ pub fn metadata_url() -> Option<&'static str> {
         .and_then(|active| active.env.metadata_url.as_deref())
 }
 
+/// `--dictionary-url`: where the custom dictionary is read from (`sync_dictionary`).
+pub fn dictionary_url() -> Option<&'static str> {
+    ACTIVE
+        .get()
+        .and_then(|active| active.env.dictionary_url.as_deref())
+}
+
 /// May a download come from `http://127.0.0.1` (and the like)? Only when a test
 /// run points the feed or the metadata at a mock server of its own.
 pub fn allow_local_http() -> bool {

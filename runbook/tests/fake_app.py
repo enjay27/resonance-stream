@@ -53,6 +53,9 @@ notebook does for the new version, are never parsed). Environment:
                           watchdog's line on every trip, "vpn-mismatch" names the VPN in the log but not on the badge, "no-remember" does
                           not teach the capture the chat reloaded from the logs (a re-sent line is shown again), "restart-dead" takes
                           `restart-sniffer` and never starts the sniffer again
+  FAKE_APP_DICT_BUG       a bug to catch in the custom dictionary: "sync-not-installed" saves a synced dictionary but only uses it after a
+                          restart, "local-needs-restart" does the same for the editor's save, "bad-saved" writes a text that does not parse
+                          before it notices, "auto-always" syncs at start-up although `auto_sync_latest_dict` is off
   FAKE_APP_READY_DELAY    seconds after start before the app takes a command (the real one holds a command until its start-up is done,
                           which takes ~20 s with the sniffer on); `quit` is taken at once
   FAKE_APP_WATCHDOG       "check,trip,window" seconds of the stand-in watchdog: how often it looks, how long a silence trips it, how long
@@ -82,7 +85,7 @@ from pathlib import Path
 
 SWITCHES = {"fresh", "assume-setup-done", "no-capture", "no-translator", "no-update-check", "no-popups",
             "no-window-state", "print-env"}
-VALUES = {"data-dir", "feed-url", "metadata-url", "status-file", "log-file", "bridge-url", "llama-url"}
+VALUES = {"data-dir", "feed-url", "metadata-url", "dictionary-url", "status-file", "log-file", "bridge-url", "llama-url"}
 
 
 def parse(argv: list[str]) -> dict:
@@ -475,6 +478,15 @@ class App:
             saved = json.loads(config.read_text(encoding="utf-8"))
             self.blocked = {int(uid): name for uid, name in saved.get("blocked_users", {}).items()}
         self.favorites = {"messages": saved.get("favorite_messages", []), "tabs": saved.get("favorite_tabs", [])}
+        self.auto_sync_dict = bool(saved.get("auto_sync_latest_dict", False))
+        self.dict_version = ""
+        self.dictionary = {}
+        path = self.data_path("data", "custom_dict.json")
+        if path is not None and path.exists():
+            try:
+                self.dictionary = self.parse_dictionary(path.read_text(encoding="utf-8"))
+            except ValueError:
+                pass
         self.ignored = saved.get("archive_ignored_channels", ["WORLD"])
         self.use_translation = bool(saved.get("use_translation", False))
         self.catch_up_limit = int(saved.get("translation_catch_up_limit", 100))
@@ -575,6 +587,70 @@ class App:
                 spans.append({"text": run})
         return spans
 
+    # -- the custom dictionary (downloader/gist.rs, text.rs, as understood): {"category": {"ja": "ko"}}; a term is shielded as [P<n>] on
+    #    its way to the server and put back in the answer, longest term first
+    @staticmethod
+    def parse_dictionary(text: str) -> dict[str, str]:
+        if not text.strip():
+            return {}
+        root = json.loads(text)
+        if not isinstance(root, dict):
+            raise ValueError("Root JSON is not an object.")
+        terms = {}
+        for inner in root.values():
+            if isinstance(inner, dict):
+                terms.update({ja: ko for ja, ko in inner.items() if ja and isinstance(ko, str)})
+        return terms
+
+    def shield(self, text: str) -> tuple[str, dict[str, str]]:
+        masked, restore = text, {}
+        for ja, ko in sorted(self.dictionary.items(), key=lambda t: (-len(t[0]), t[0])):
+            if ja in masked:
+                key = f"[P{len(restore)}]"
+                masked, restore[key] = masked.replace(ja, key), ko
+        return masked, restore
+
+    def save_dictionary_file(self, text: str) -> None:
+        path = self.data_path("data", "custom_dict.json")
+        if path is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+
+    def sync_dictionary(self, version: str) -> str | None:
+        """`sync_dictionary`: fetch, validate, save, install, remember the version. The error text is the ack's."""
+        url = self.flags.get("dictionary-url")
+        if not url:
+            return "no --dictionary-url: the stand-in only knows the stand-in server"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:  # noqa: S310 -- local mock
+                text = r.read().decode("utf-8")
+        except (OSError, ValueError, http.client.HTTPException) as e:
+            return str(e)
+        try:
+            terms = self.parse_dictionary(text)
+        except ValueError as e:
+            return f"Invalid dictionary received from Gist: {e}"
+        self.save_dictionary_file(text)
+        if os.environ.get("FAKE_APP_DICT_BUG") != "sync-not-installed":  # a bug to catch: used only after a restart
+            self.dictionary = terms
+        self.dict_version = version
+        return None
+
+    def save_local_dictionary(self, content: str) -> str | None:
+        """`save_local_dictionary`: validate, write, install from the next job on."""
+        bug = os.environ.get("FAKE_APP_DICT_BUG")
+        if bug == "bad-saved":  # a bug to catch: written before it is looked at
+            self.save_dictionary_file(content)
+        try:
+            terms = self.parse_dictionary(content)
+        except ValueError as e:
+            return f"JSON Syntax Error: {e}"
+        if bug != "bad-saved":
+            self.save_dictionary_file(content)
+        if bug != "local-needs-restart":
+            self.dictionary = terms
+        return None
+
     def save_favorites(self, favorites: dict) -> None:
         """`save_favorites`, as understood: the favorites only (the block list and the rest of config.json stay), written, then
         `favorites-changed` to every window."""
@@ -670,8 +746,9 @@ class App:
         return None
 
     def ask(self, text: str) -> str | None:
+        masked, restore = self.shield(text)
         prompt = ("<bos><start_of_turn>user\nYou are a professional Japanese (ja) to Korean (ko) translator.\n"
-                  "Please translate the following Japanese text into Korean:\n" + text + "<end_of_turn>\n<start_of_turn>model\n")
+                  "Please translate the following Japanese text into Korean:\n" + masked + "<end_of_turn>\n<start_of_turn>model\n")
         body = json.dumps({"prompt": prompt, "stream": False, "temperature": 0.1, "n_predict": max(64, len(text) * 3 + 32),
                            "stop": ["<end_of_turn>", "<eos>"]}).encode()
         request = urllib.request.Request(self.flags["llama-url"] + "/completion", data=body, headers={"Content-Type": "application/json"})
@@ -680,6 +757,8 @@ class App:
                 content = json.loads(r.read()).get("content", "").strip()
         except (OSError, ValueError, http.client.HTTPException):
             return None
+        for key, ko in restore.items():
+            content = content.replace(key, ko)
         return content or None
 
     @staticmethod
@@ -897,6 +976,10 @@ class App:
             ack()
         elif command == "get-chat-history":
             ack(data=[dict(m) for m in self.history])
+        elif command == "sync-dictionary":
+            ack(self.sync_dictionary(str(request.get("version", ""))))
+        elif command == "save-local-dictionary":
+            ack(self.save_local_dictionary(str(request.get("content", ""))))
         elif command == "annotate-furigana":
             texts = request.get("texts")
             if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
@@ -964,10 +1047,17 @@ class App:
     def check(self) -> str | None:
         """Returns the announced download url when a newer version is on offer."""
         try:
-            urllib.request.urlopen(self.flags["metadata-url"], timeout=5).read()  # noqa: S310 -- local
+            metadata = urllib.request.urlopen(self.flags["metadata-url"], timeout=5).read()  # noqa: S310 -- local
         except (OSError, KeyError, ValueError):
             self.log("check failed: metadata")
             return None
+        # the UI's silent dictionary update (hydration.rs): only when auto-sync is on, whatever the gist announces
+        try:
+            announced = json.loads(metadata)["dictionary"]["version"]
+        except (ValueError, KeyError, TypeError):
+            announced = None
+        if announced and announced != self.dict_version and (self.auto_sync_dict or os.environ.get("FAKE_APP_DICT_BUG") == "auto-always"):
+            self.sync_dictionary(announced)
         try:
             body = urllib.request.urlopen(self.flags["feed-url"], timeout=5).read()  # noqa: S310
         except urllib.error.HTTPError:

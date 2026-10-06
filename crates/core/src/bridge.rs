@@ -113,6 +113,13 @@ pub enum Command {
     /// Replace the favorites as the favorites popup does (`save_favorites`): the favorites only, every other setting stays; the
     /// config file is written and `favorites-changed` tells every window.
     SaveFavorites { favorites: FavoritesState },
+    /// Fetch the custom dictionary and install it, as the settings view's sync does (`sync_dictionary`, `version` is what
+    /// the gist announced and is kept as the current one). With `--dictionary-url` it reads that instead of the public gist.
+    /// A failed fetch or a dictionary that does not parse is the ack's error.
+    SyncDictionary { version: String },
+    /// Save the dictionary editor's text and install it from the translator's next job on (`save_local_dictionary`).
+    /// A text that does not parse is the ack's error and nothing is saved.
+    SaveLocalDictionary { content: String },
     /// The furigana the app gives for these lines (`annotate_furigana`, what the chat row's Study view asks): one list of
     /// `{text, reading?}` spans per line, in order, in the ack's `data`.
     AnnotateFurigana { texts: Vec<String> },
@@ -241,6 +248,27 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
         "clear-history" => Command::ClearHistory,
         "restart-sniffer" => Command::RestartSniffer,
         "get-favorites" => Command::GetFavorites,
+        "sync-dictionary" | "save-local-dictionary" => {
+            let (key, what) = if name == "sync-dictionary" {
+                ("version", "the dictionary version the gist announced")
+            } else {
+                ("content", "the dictionary's JSON text")
+            };
+            match args.get(key).and_then(Value::as_str) {
+                Some(text) if name == "sync-dictionary" => Command::SyncDictionary {
+                    version: text.to_string(),
+                },
+                Some(text) => Command::SaveLocalDictionary {
+                    content: text.to_string(),
+                },
+                None => {
+                    return Err(CommandError::BadArgument {
+                        id,
+                        reason: format!("{name} needs \"{key}\": {what} (a string)"),
+                    })
+                }
+            }
+        }
         "annotate-furigana" => {
             let texts = args
                 .get("texts")
@@ -644,6 +672,55 @@ mod tests {
             let err = parse("annotate-furigana", payload).unwrap_err();
             assert_eq!(err.id(), Some("a"), "{payload}");
             assert!(matches!(err, CommandError::BadArgument { .. }), "{payload}");
+        }
+    }
+
+    #[test]
+    fn the_dictionary_commands_parse() {
+        // What the settings view (`sync_dictionary`, with the version the gist announced) and the dictionary editor
+        // (`save_local_dictionary`, the whole JSON text) invoke.
+        assert_eq!(
+            parse("sync-dictionary", r#"{"id":"s","version":"runbook-mock"}"#).map(|r| r.command),
+            Ok(Command::SyncDictionary {
+                version: "runbook-mock".into()
+            })
+        );
+        assert_eq!(
+            parse(
+                "save-local-dictionary",
+                r#"{"id":"d","content":"{\"term\":{\"ボス\":\"보스\"}}"}"#
+            )
+            .map(|r| r.command),
+            Ok(Command::SaveLocalDictionary {
+                content: r#"{"term":{"ボス":"보스"}}"#.into()
+            })
+        );
+        // An empty text is an empty dictionary: valid, the app decides.
+        assert_eq!(
+            parse("save-local-dictionary", r#"{"id":"d","content":""}"#).map(|r| r.command),
+            Ok(Command::SaveLocalDictionary {
+                content: String::new()
+            })
+        );
+    }
+
+    #[test]
+    fn the_dictionary_commands_need_their_text() {
+        for (name, payload) in [
+            ("sync-dictionary", r#"{"id":"s"}"#),
+            ("sync-dictionary", r#"{"id":"s","version":7}"#),
+            ("save-local-dictionary", r#"{"id":"d"}"#),
+            ("save-local-dictionary", r#"{"id":"d","content":{"a":1}}"#),
+        ] {
+            let err = parse(name, payload).unwrap_err();
+            assert_eq!(
+                err.id(),
+                Some(if name == "sync-dictionary" { "s" } else { "d" })
+            );
+            assert!(
+                matches!(err, CommandError::BadArgument { .. }),
+                "{name} {payload}"
+            );
         }
     }
 

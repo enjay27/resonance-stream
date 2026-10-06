@@ -57,6 +57,26 @@ def test_flag_args_carry_the_mock_urls_and_the_log_file():
     assert args[args.index("--log-file") + 1] == "app.log"
 
 
+def test_flag_args_carry_the_dictionary_url():
+    args = mockfeed.flag_args("d", "s", dictionary_url="http://127.0.0.1:5/custom_dict.json")
+    assert args[args.index("--dictionary-url") + 1] == "http://127.0.0.1:5/custom_dict.json"
+    assert "--dictionary-url" not in mockfeed.flag_args("d", "s")
+
+
+def test_the_mock_serves_a_dictionary_and_counts_who_asked_for_it():
+    import urllib.request
+
+    server = mockfeed.MockServer().start()
+    try:
+        assert server.dictionary_url == server.base_url + "/custom_dict.json"
+        server.dictionary_text = '{"term": {"ボス": "보스"}}'
+        body = urllib.request.urlopen(server.dictionary_url, timeout=5).read().decode("utf-8")  # noqa: S310 -- local
+        assert body == '{"term": {"ボス": "보스"}}'
+        assert server.hits.count("GET /custom_dict.json") == 1
+    finally:
+        server.stop()
+
+
 def test_flag_args_can_leave_out_fresh():
     assert "--fresh" not in mockfeed.flag_args("d", "s", fresh=False)
 
@@ -64,9 +84,9 @@ def test_flag_args_can_leave_out_fresh():
 def test_every_flag_is_one_the_app_knows():
     known = {"--data-dir", "--fresh", "--assume-setup-done", "--no-capture", "--no-translator",
              "--no-update-check", "--no-popups", "--no-window-state", "--feed-url", "--metadata-url",
-             "--status-file", "--log-file", "--print-env"}
+             "--dictionary-url", "--status-file", "--log-file", "--print-env"}
     args = mockfeed.flag_args("d", "s", feed_url="http://127.0.0.1:5/f", metadata_url="http://127.0.0.1:5/m",
-                              log_file="l")
+                              dictionary_url="http://127.0.0.1:5/d", log_file="l")
     assert {a for a in args if a.startswith("--")} <= known
 
 

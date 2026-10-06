@@ -171,7 +171,7 @@ pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, 
     // 2. Fetch from Remote
     let client = reqwest::Client::new();
     let response = client
-        .get(DICT_URL)
+        .get(crate::test_env::dictionary_url().unwrap_or(DICT_URL))
         .send()
         .await
         .map_err(|e| e.to_string())?;

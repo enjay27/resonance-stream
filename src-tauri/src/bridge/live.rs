@@ -244,6 +244,20 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             crate::commands::clear_chat_history(app.state());
             answer(Ok(()));
         }
+        Command::SyncDictionary { version } => {
+            // The settings view's sync: an async command that fetches, validates, saves and installs; its error is the ack's.
+            let synced = tauri::async_runtime::block_on(
+                crate::services::downloader::sync_dictionary(app.clone(), version.clone()),
+            );
+            answer(synced.map(|_| ()));
+        }
+        Command::SaveLocalDictionary { content } => {
+            // The dictionary editor's save: validates, writes custom_dict.json, installs from the next job on.
+            answer(crate::services::downloader::save_local_dictionary(
+                app.clone(),
+                content.clone(),
+            ));
+        }
         Command::AnnotateFurigana { texts } => {
             // The UI's own command, an async fn that only computes: run it to the end here (this thread is not the runtime's).
             let spans =

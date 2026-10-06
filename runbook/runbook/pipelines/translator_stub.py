@@ -14,6 +14,21 @@ from what the stand-in received. Rows:
   TS-log-quiet  the system log has no "Polling .../health" line (the health wait is quiet there)
   TS-reload     after the app is closed and started again on the same folder, each Japanese line is served once, with its translation
 
+The custom dictionary (`sync-dictionary`, `save-local-dictionary`: the settings view's sync and the dictionary editor's save). A term is
+shielded: the server is sent a placeholder `[P<n>]` where the term stood, and the Korean comes back in the shown translation. One run
+with a stand-in server for the dictionary (`--dictionary-url`; `mockfeed.MockServer`), a line about ボス said at each step:
+
+  TS-dict-before  before any dictionary the server is sent the line as it is
+  TS-dict-sync    after `sync-dictionary` the next line goes out with a placeholder and comes back with the dictionary's Korean (보스); the
+                  server was asked for the dictionary once and `custom_dict.json` holds what it served
+  TS-dict-local   after `save-local-dictionary` with another Korean term the next line uses it, with no restart of the translator
+  TS-dict-bad     a text that does not parse is refused, the file is as it was, and the dictionary in use is kept
+
+And two runs with the update check on (the gist announces a newer dictionary), `auto_sync_latest_dict` off and on:
+
+  TS-dict-auto-off  the update check ran and nothing was synced (no request for the dictionary): the default syncs nothing at start
+  TS-dict-auto-on   with `auto_sync_latest_dict` on the dictionary is fetched at start-up
+
 Three more runs of their own:
 
   TS-later-wait / TS-later-catchup  translation off (`use_translation` false), five Japanese lines are said, then `start-translator` with
@@ -43,6 +58,9 @@ SLOW_LOADING_S = 12.0  # the lines of the live-first run arrive while the server
 SLOW_DELAY_S = 2.0  # then each reply takes this long, so the catch-up is still running when the live line arrives
 REQUEST_TIMEOUT_S = 30.0  # the app's own limit for a reply (resonance_llama::REQUEST_TIMEOUT)
 HANG_MARGIN_S = 30.0
+BOSS = ["ボスはどこですか", "ボスを倒しました", "ボスが強いです", "ボスは楽勝でした"]  # one line per step of the dictionary run
+LOCAL_DICTIONARY = '{"term": {"ボス": "BOSS"}}'
+AUTO_GRACE_S = 10.0  # after the update check has run, how long a start-up sync that should not happen is waited for
 WAIT_S = 60.0  # how long a run waits for a state or a translation it expects before it says the row failed
 
 
@@ -58,6 +76,7 @@ class TranslatorStub:
         self.runs = Path(runs or common.RUNS) / "translator-stub"
         self._serves: list[bridge.Serve] = []
         self._stubs: list[LlamaStub] = []
+        self._servers: list[mockfeed.MockServer] = []
 
     def run(self, key_path: str | None = None, password: str | None = None) -> None:
         """(`key_path` and `password` are for the pipelines that sign; this one ignores them.)"""
@@ -68,6 +87,9 @@ class TranslatorStub:
         for stub in self._stubs:
             stub.stop()
         self._stubs.clear()
+        for server in self._servers:
+            server.stop()
+        self._servers.clear()
         for serve in self._serves:
             serve.stop()
         self._serves.clear()
@@ -178,8 +200,11 @@ class TranslatorStub:
             self.reload(exe, stub, [GREETING, THANKS, *lost])
         self.later_round()
         self.slow_round()
+        self.dictionary_round()
+        self.auto_sync_round(False)
+        self.auto_sync_round(True)
 
-    def launch(self, label: str, exe: Path, stub: LlamaStub, config: dict | None = None) -> bridge.Serve | None:
+    def launch(self, label: str, exe: Path, stub: LlamaStub, config: dict | None = None, extra: tuple[str, ...] = ()) -> bridge.Serve | None:
         """Starts the app on its own folder, at `stub`; writes `config` first when given. None when it never says app-started."""
         data = exe.parent / "data"
         if config is not None:
@@ -188,7 +213,7 @@ class TranslatorStub:
         events = bridge.Serve(exe.parent / f"{label}-events.jsonl")
         self._serves.append(events)
         args = mockfeed.flag_args(data, exe.parent / f"{label}-status.json", log_file=exe.parent / f"{label}.log", fresh=False, translator=True,
-                                  extra=("--no-update-check", "--llama-url", stub.url, "--bridge-url", events.url))
+                                  extra=("--no-update-check", "--llama-url", stub.url, "--bridge-url", events.url, *extra))
         mockfeed.start_app(exe, args)
         return events if bridge.wait_started(events, exe.parent / f"{label}.log", label=f"the app ({label})") else None
 
@@ -250,6 +275,109 @@ class TranslatorStub:
         self.rec.auto("TS-later-catchup", f"turned on later, Catching Up translates the newest {LATER_LIMIT} lines, oldest first, and passes over the older",
                       ok, f"Catching Up seen: {caught}; the server was asked {asked} (wanted {want}); older lines translated: "
                           f"{[t for t in LATER[:-LATER_LIMIT] if history.get(t)]}")
+        self.leave(events)
+
+    def say(self, events: bridge.Serve, exe: Path, stub: LlamaStub, text: str, seq: int) -> tuple[str, str]:
+        """One Japanese line in; what the server was sent for it and the translation shown for it (both empty when it never came)."""
+        asked = len(stub.requests)
+        self.replay(events, exe.parent / f"say-{seq}.jsonl", [line(text, seq, int(time.time()), 0)])
+        deadline = time.monotonic() + WAIT_S
+        while time.monotonic() < deadline and len(stub.requests) <= asked:
+            time.sleep(0.3)
+        sent = source_of(stub.requests[asked]["prompt"]) if len(stub.requests) > asked else ""
+        while time.monotonic() < deadline and text not in self.done(events):
+            time.sleep(0.3)
+        return sent, self.done(events).get(text, "")
+
+    def dictionary_round(self) -> None:
+        """`sync-dictionary` and `save-local-dictionary`, seen from what the translator sends and shows."""
+        stub = LlamaStub().start()
+        self._stubs.append(stub)
+        server = mockfeed.MockServer().start()
+        self._servers.append(server)
+        exe = updater.fresh_copy(self.exe, self.runs, "dict")
+        events = self.launch("dict", exe, stub, {"init_done": True, "use_translation": True}, extra=("--dictionary-url", server.dictionary_url))
+        rows = ("TS-dict-before", "TS-dict-sync", "TS-dict-local", "TS-dict-bad")
+        if events is None:
+            self.rec.auto(rows[0], "the dictionary run started", False, "no app-started event in 120 s")
+            return
+        try:
+            events.expect("translator-state", {"payload.state": "Active"}, timeout=90)
+        except RuntimeError as e:
+            self.rec.auto(rows[0], "the translator is up before the dictionary is tried", False, str(e))
+            self.leave(events)
+            return
+        on_disk = exe.parent / "data" / "data" / "custom_dict.json"
+        sent, shown = self.say(events, exe, stub, BOSS[0], 101)
+        self.rec.auto("TS-dict-before", "before any dictionary the server is sent the line as it is", sent == BOSS[0] and "ボス" in shown,
+                      f"sent {sent!r}, shown {shown!r}")
+        try:
+            events.send("sync-dictionary", {"version": "dict-v1"}, timeout=30)
+            sent, shown = self.say(events, exe, stub, BOSS[1], 102)
+            saved = on_disk.read_text(encoding="utf-8") if on_disk.exists() else None
+            asked = server.hits.count("GET /custom_dict.json")
+            ok = "[P" in sent and "ボス" not in sent and "보스" in shown and asked == 1 and saved == server.dictionary_text
+            detail = (f"sent {sent!r}, shown {shown!r}; the server was asked for the dictionary {asked} time(s); "
+                      f"custom_dict.json {'holds what was served' if saved == server.dictionary_text else f'holds {saved!r}'}")
+        except RuntimeError as e:
+            ok, detail = False, str(e)
+        self.rec.auto("TS-dict-sync", "after sync-dictionary the next line goes out with a placeholder and comes back with the Korean term", ok, detail)
+        try:
+            events.send("save-local-dictionary", {"content": LOCAL_DICTIONARY}, timeout=15)
+            sent, shown = self.say(events, exe, stub, BOSS[2], 103)
+            restarted = [st for st in self.states(events) if st in ("Restarting", "Starting")]
+            ok = "[P" in sent and "ボス" not in sent and "BOSS" in shown and "보스" not in shown and len(restarted) <= 1
+            detail = f"sent {sent!r}, shown {shown!r}; translator states {self.states(events)}"
+        except RuntimeError as e:
+            ok, detail = False, str(e)
+        self.rec.auto("TS-dict-local", "after save-local-dictionary the next line uses the edited term, with no restart", ok, detail)
+        try:
+            events.send("save-local-dictionary", {"content": '{"term": {'}, timeout=15)
+            ok, detail = False, "the app took a text that does not parse"
+        except RuntimeError as e:
+            ok, detail = "refused" in str(e), str(e)
+        kept = on_disk.read_text(encoding="utf-8") if on_disk.exists() else None
+        sent, shown = self.say(events, exe, stub, BOSS[3], 104)
+        self.rec.auto("TS-dict-bad", "a text that does not parse is refused, the file is as it was and the dictionary in use is kept",
+                      ok and kept == LOCAL_DICTIONARY and "BOSS" in shown,
+                      f"{detail}; the file holds {kept!r}; the next line is shown {shown!r}")
+        self.leave(events)
+
+    def auto_sync_round(self, auto: bool) -> None:
+        """The update check on, the gist announcing a dictionary this folder has not got: `auto_sync_latest_dict` decides whether it is fetched."""
+        check = "TS-dict-auto-on" if auto else "TS-dict-auto-off"
+        title = ("with auto_sync_latest_dict on the dictionary is fetched at start-up" if auto
+                 else "with auto_sync_latest_dict off (the default) nothing is synced at start-up")
+        server = mockfeed.MockServer().start()
+        self._servers.append(server)
+        label = "auto-on" if auto else "auto-off"
+        exe = updater.fresh_copy(self.exe, self.runs, label)
+        data = exe.parent / "data"
+        (data / "config").mkdir(parents=True, exist_ok=True)
+        (data / "config" / "config.json").write_text(json.dumps({"init_done": True, "auto_sync_latest_dict": auto}), encoding="utf-8")
+        events = bridge.Serve(exe.parent / f"{label}-events.jsonl")
+        self._serves.append(events)
+        args = mockfeed.flag_args(data, exe.parent / f"{label}-status.json", log_file=exe.parent / f"{label}.log", fresh=False,
+                                  feed_url=server.feed_url, metadata_url=server.metadata_url, dictionary_url=server.dictionary_url,
+                                  extra=("--bridge-url", events.url))
+        mockfeed.start_app(exe, args)
+        if not bridge.wait_started(events, exe.parent / f"{label}.log", label=f"the app ({label})"):
+            self.rec.auto(check, title, False, "no app-started event in 120 s")
+            return
+        deadline = time.monotonic() + WAIT_S
+        while time.monotonic() < deadline and "GET /metadata.json" not in server.hits:
+            time.sleep(0.5)
+        checked = "GET /metadata.json" in server.hits
+        if auto:
+            while time.monotonic() < deadline and "GET /custom_dict.json" not in server.hits:
+                time.sleep(0.5)
+        else:
+            time.sleep(AUTO_GRACE_S)
+        asked = server.hits.count("GET /custom_dict.json")
+        invoked = [m["topic"] for m in events.events() if m["topic"] == "rs/app/command/sync_dictionary"]
+        ok = checked and (asked >= 1 if auto else asked == 0 and not invoked)
+        self.rec.auto(check, title, ok, f"the update check ran: {checked}; the dictionary was asked for {asked} time(s); "
+                                        f"the UI invoked sync_dictionary {len(invoked)} time(s)")
         self.leave(events)
 
     def slow_round(self) -> None:

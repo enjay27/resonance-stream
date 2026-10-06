@@ -31,6 +31,11 @@ And on a folder of its own, WORLD archived and `tab_limits.WORLD` = 10, five GUI
 
   CP-busy-world        after a restart all five GUILD lines are back and only the newest ten WORLD lines (a busy WORLD chat does not
                        push GUILD out of the reload, nor does WORLD overflow its own limit)
+
+And on a folder of its own, `tab_limits.GUILD` = 400 and 300 GUILD lines replayed:
+
+  CP-big-ack           `get-chat-history` answers with all 300 lines: the answer is far over 10 KiB, the MQTT client's default packet limit,
+                       which once dropped it (smoke run of #200: 108005 bytes, CS-restart-nodup)
 """
 from __future__ import annotations
 
@@ -79,6 +84,7 @@ KEEP_DAYS = 2  # retention: today and yesterday stay
 BUSY_WORLD_LIMIT = 10
 BUSY_WORLD_LINES = 40
 BUSY_GUILD_LINES = 5
+BIG_LINES = 300  # about 60 KB of JSON in one answer; the MQTT client's default limit is 10 KiB
 REPO = Path(__file__).resolve().parents[3]
 
 
@@ -243,6 +249,7 @@ class Persistence:
             return
         self.retention(exe, ts)
         self.busy_world(ts)
+        self.big_answer(ts)
 
     @staticmethod
     def day_file(exe: Path, day: datetime.date) -> Path:
@@ -307,6 +314,30 @@ class Persistence:
                       got_guild == guild and got_world == world[-BUSY_WORLD_LIMIT:],
                       f"GUILD {len(got_guild)} of {len(guild)}, WORLD {len(got_world)} (wanted the newest {BUSY_WORLD_LIMIT}: {world[-BUSY_WORLD_LIMIT]} .. {world[-1]}); got {got_world[:1]} .. {got_world[-1:]}")
         self.leave(second)
+
+    def big_answer(self, ts: int) -> None:
+        """A folder of its own: 300 GUILD lines, then one `get-chat-history` whose answer is several times the MQTT client's 10 KiB default."""
+        what = "get-chat-history answers with a whole busy chat, however big the answer"
+        exe = updater.fresh_copy(self.exe, self.runs, "big")
+        config_path = exe.parent / "data" / "config" / "config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(json.dumps({"tab_limits": {"GUILD": BIG_LINES + 100}}), encoding="utf-8")
+        texts = [f"guild line {n}" for n in range(1, BIG_LINES + 1)]
+        text = "\n".join(line("GUILD", "Alice", ALICE, n, t, ts, 0) for n, t in enumerate(texts, start=1)) + "\n"
+        app = self.start("big", exe, fresh=False)
+        if app is None or not self.replay(app, exe.parent / "big.jsonl", text, texts[-1]):
+            self.rec.auto("CP-big-ack", what, False, "the app did not start" if app is None else "the replay never arrived")
+            return
+        try:
+            history = app.send("get-chat-history", timeout=30)["data"]
+        except RuntimeError as e:
+            self.rec.auto("CP-big-ack", what, False, f"no answer: {e}")
+            self.leave(app)
+            return
+        got = [m["message"] for m in history]
+        self.rec.auto("CP-big-ack", f"get-chat-history answers with all {BIG_LINES} lines in one answer",
+                      got == texts, f"{len(got)} of {len(texts)} lines (first {got[:1]}, last {got[-1:]})")
+        self.leave(app)
 
     @staticmethod
     def packets(events: bridge.Serve) -> list[dict]:

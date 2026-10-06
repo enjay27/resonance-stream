@@ -4,6 +4,7 @@ mod message_processor;
 mod pipeline;
 mod recorder;
 mod stream_tracker;
+pub mod synth;
 
 pub use self::message_processor::fingerprint;
 pub use self::pipeline::{ChatPipeline, PipelineAction};

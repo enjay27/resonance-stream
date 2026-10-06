@@ -14,16 +14,21 @@ import sys
 
 from runbook import bridge, common
 from runbook.common import Recorder
+from runbook.pipelines.capture_spike import CaptureSpike
 from runbook.pipelines.interface import InterfacePick
 from runbook.pipelines.updater_mock import UpdaterMock
 from runbook.pipelines.window_restore import WindowRestore
 
-PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick, "window-restore": WindowRestore}
+PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick, "window-restore": WindowRestore, "capture-spike": CaptureSpike}
 
 
 def build(name: str, rec: Recorder, exe, args):
-    """The pipeline `name`, with only the options it takes (`--version` and `--ui` are the update pipeline's)."""
-    options = {"new_version": args.version, "ui_checks": args.ui} if name == "updater-mock" else {}
+    """The pipeline `name`, with only the options it takes (`--version` and `--ui` are the update pipeline's, `--add-firewall-rule` the capture spike's)."""
+    options = {}
+    if name == "updater-mock":
+        options = {"new_version": args.version, "ui_checks": args.ui}
+    elif name == "capture-spike":
+        options = {"add_firewall_rule": args.add_firewall_rule}
     return PIPELINES[name](rec, exe, **options)
 
 
@@ -35,6 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--key", default=os.environ.get("RUNBOOK_TEXT_BACKUP_KEY"), help="the BACKUP signing key file")
     parser.add_argument("--version", default="9.9.9", help="the version the mock release announces")
     parser.add_argument("--ui", action="store_true", help="also ask about what the dialog looked like")
+    parser.add_argument("--add-firewall-rule", action="store_true",
+                        help="capture-spike: make the firewall rule the app wants for each copy it starts (this copy only, any remote "
+                             "address) and remove it at the end -- edits the Windows firewall, so it is never on by default")
     args = parser.parse_args(argv)
     exe = args.exe or os.environ.get("RUNBOOK_TEXT_LOCAL_EXE") or (
         str(common.default_exe()) if common.default_exe().is_file() else None)

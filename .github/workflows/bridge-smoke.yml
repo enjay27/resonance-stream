@@ -3,7 +3,7 @@ name: Bridge smoke test
 # Builds the candidate exe (the same command as release-candidate.yml, test flags on)
 # on a Windows runner and drives it over the test bridge, with nobody at the keyboard:
 # `replay-chat` (the whole pipeline from replayed lines to `packet-event`) and
-# `window-restore` (K18, real window geometry). It answers one question first: does the
+# `window-restore` (K18, real window geometry) and `capture-spike` (the sniffer against traffic this machine sends). It answers one question first: does the
 # hosted runner give the app an elevated, interactive session with a WebView2 window?
 # The "session" step prints what it finds, and the logs of both runs are uploaded.
 #
@@ -93,6 +93,14 @@ jobs:
         continue-on-error: true
         working-directory: runbook
         run: python -m runbook.run window-restore --exe ../target/release/resonance-stream.exe
+
+      # The spike (plan item 5): does the sniffer see chat that this same machine sends? Tried on the LAN address and
+      # on 127.0.0.1. The runner is disposable, so it may make the firewall rule the app wants for the copy it starts.
+      # Allowed to fail: a red row here is the answer, not a broken build.
+      - name: capture-spike over the bridge
+        continue-on-error: true
+        working-directory: runbook
+        run: python -m runbook.run capture-spike --exe ../target/release/resonance-stream.exe --add-firewall-rule
 
       - name: Keep the logs
         if: always()

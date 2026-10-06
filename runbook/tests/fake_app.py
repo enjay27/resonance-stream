@@ -23,6 +23,9 @@ notebook does for the new version, are never parsed). Environment:
   FAKE_APP_K18_BUG        a bug to catch: "quit", "close" or "both" -- that way out saves the GROWN window
                           (what window-state would do if settings were still open at exit)
   FAKE_APP_BAD_STATUS=1   a bug to catch: a status file without pid and data_dir
+  FAKE_APP_SNIFF_BUG      a bug to catch in the capture: "drop-after-2" publishes only the first two chats it reads,
+                          "never" does not start the sniffer at all
+                          (the stand-in "sniffer" is a TCP client of the port-5003 server the capture-spike pipeline starts)
 """
 from __future__ import annotations
 
@@ -138,6 +141,64 @@ class Mqtt:
         self._send(0x82, struct.pack(">H", 1) + self._string(topic_filter) + bytes([0]))
 
 
+def _varint(data: bytes, at: int) -> tuple[int, int]:
+    value = shift = 0
+    while at < len(data):
+        byte = data[at]
+        at += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            break
+        shift += 7
+    return value, at
+
+
+def _fields(data: bytes):
+    """(field number, value) of a protobuf message: an int for a varint, bytes for a length-delimited field."""
+    at = 0
+    while at < len(data):
+        tag, at = _varint(data, at)
+        kind, number = tag & 7, tag >> 3
+        if kind == 0:
+            value, at = _varint(data, at)
+        elif kind == 2:
+            size, at = _varint(data, at)
+            value, at = data[at:at + size], at + size
+        else:
+            return
+        yield number, value
+
+
+def decode_chat_frame(frame: bytes) -> dict | None:
+    """A live chat frame (`[len][0x0002][16-byte header][root]`) as the ChatMessage JSON the app publishes; None for the rest.
+    The stand-in's own reading of the layout resonance_core::capture::synth writes."""
+    if len(frame) < 23 or frame[4:6] != b"\x00\x02" or frame[22] != 0x0A:
+        return None
+    root_len, at = _varint(frame, 23)
+    chat = {"channel": "WORLD", "nickname": "", "uid": 0, "level": 0, "message": ""}
+    names = {1: "WORLD", 2: "LOCAL", 3: "PARTY", 4: "GUILD", 9: "BEGINNER"}
+    for number, value in _fields(frame[at:at + root_len]):
+        if number == 1 and isinstance(value, int):
+            chat["channel"] = names.get(value, "WORLD")
+        elif number == 2 and isinstance(value, bytes):
+            for n2, v2 in _fields(value):
+                if n2 == 1:
+                    chat["sequenceId"] = v2
+                elif n2 == 2:
+                    for n3, v3 in _fields(v2):
+                        if n3 == 1:
+                            chat["uid"] = v3
+                        elif n3 == 2:
+                            chat["nickname"] = v3.decode("utf-8", "replace")
+                        elif n3 == 5:
+                            chat["level"] = v3
+                elif n2 == 4:
+                    for n3, v3 in _fields(v2):
+                        if n3 == 3:
+                            chat["message"] += v3.decode("utf-8", "replace")
+    return chat if chat["message"] else None
+
+
 class App:
     def __init__(self, flags: dict) -> None:
         self.flags = flags
@@ -203,6 +264,44 @@ class App:
         self.bridge.subscribe("rs/test/command/+")
         self.event("app-started", {"pid": os.getpid(), "version": self.version, "exe": str(self.exe)})
         self.bridge.publish("rs/app/status", "online", retain=True)
+
+    # -- the sniffer (services/sniffer, as understood): a TCP client of the capture-spike pipeline's port-5003 server stands in for
+    #    the raw socket on the adapter named by `network_interface` in config.json
+    def start_sniffer(self) -> None:
+        data = self.flags.get("data-dir")
+        config = Path(data) / "config" / "config.json" if data else None
+        ip = json.loads(config.read_text(encoding="utf-8")).get("network_interface") if config and config.exists() else None
+        if not ip or os.environ.get("FAKE_APP_SNIFF_BUG") == "never":  # "never": a bug to catch, the sniffer does not start
+            return
+        self.event("sniffer-state", {"state": "Pending", "message": "Listening for game traffic...", "seq": 1})
+        threading.Thread(target=self._sniff, args=(ip,), daemon=True).start()
+
+    def _sniff(self, ip: str) -> None:
+        deadline = time.monotonic() + 60
+        sock = None
+        while sock is None and time.monotonic() < deadline:
+            try:
+                sock = socket.create_connection((ip, 5003), timeout=2)
+            except OSError:
+                time.sleep(0.3)
+        if sock is None:
+            return
+        buf, count = b"", 0
+        while True:
+            data = sock.recv(4096)
+            if not data:
+                return
+            buf += data
+            while len(buf) >= 6 and len(buf) >= int.from_bytes(buf[:4], "big"):
+                size = int.from_bytes(buf[:4], "big")
+                chat = decode_chat_frame(buf[:size])
+                buf = buf[size:]
+                if chat is None:
+                    continue
+                count += 1
+                if os.environ.get("FAKE_APP_SNIFF_BUG") == "drop-after-2" and count > 2:
+                    continue
+                self.event("packet-event", {"pid": count, **chat})
 
     # -- the main window (window.rs and the window-state plugin, as understood)
     def state_file(self) -> Path | None:
@@ -371,6 +470,8 @@ def main() -> int:
     if line and "no-capture" not in flags:
         level = "error" if line.startswith("NETWORK_ERROR") else "info"
         app.event("system-event", {"pid": 1, "level": level, "source": "Sniffer", "message": line})
+    if "no-capture" not in flags:
+        app.start_sniffer()
     app.announced_url = None if "no-update-check" in flags else app.check()
     while time.monotonic() < deadline and not app.stop:
         if app.bridge is None:

@@ -2,6 +2,7 @@
 
 - Baseline commit: `1478528` (`main`, right after PR #203); measured 2026-10-06, decisions of the same day added in section 9.
 - Scope: repository structure, layers, refactoring candidates, weak points and risks, inefficient logic, recommendations by project concept and feature, documents and process.
+- Related documents: [`security_model.md`](security_model.md) (trust boundaries), [`testing.md`](testing.md) (test layers and commands), [`decisions.md`](decisions.md) (decision log).
 - **This document only proposes.** No code was changed.
 - Every claim carries its source:
   - **measured**: a value obtained by running something.
@@ -40,7 +41,7 @@ Severity is **High / Medium / Low**, effort is **Small / Medium / Large**.
 |---|---|
 | Rust | core 13,843 lines (of which `kanji_on_table.rs` 2,982, `test_env.rs` 1,324, `bridge.rs` 1,102) · types 1,261 · llama 137 · ui (`src/`) 11,095 · app (`src-tauri/src`) 5,530 |
 | Python (runbook) | 8,501 lines, 11 pipelines |
-| Tests | `cargo test -p resonance-core -p resonance-llama -p resonance-types`: **495 pass** (2026-10-06). `#[test]` counts: core 385 · types 49 · llama 61 · ui 157 · app 21 |
+| Tests | `cargo test -p resonance-core -p resonance-llama -p resonance-types`: **495 pass** (2026-10-06); ui host tests: **157 pass**. `#[test]` counts: core 385 · types 49 · llama 61 · ui 157 · app 21 |
 | Golden (snapshot) tests | 8 (`crates/core/tests/snapshots/`, PR #201) |
 | Mutation tests | `text.rs`, 87 mutants: 75 caught · **8 missed** · 4 unviable; 6 minutes on a hosted runner (PR #202) |
 | Dependency audit | `cargo audit`: 0 vulnerabilities after reqwest 0.12 (PR #199) |
@@ -347,7 +348,7 @@ Mostly **reported** (a review agent estimated from reading the code); nothing wa
 ### W-8 Download and metadata trust gaps, no timeouts
 
 - **(confirmed)** `download_model` takes its URL and hash from the UI, which gets them from a mutable gist (`model.rs:57-64`, "from the gist, via the UI"). An empty hash is refused, but there is no host allow-list and no independent signature.
-- **(confirmed)** the gist and dictionary fetches use `reqwest::Client::new()` with no timeout (`gist.rs:37,78,172`); a stalled host can hold the start-up "checking updates". The model / update downloads do have connect and stall timeouts (`fetch.rs:61,133`).
+- **(confirmed)** the update-feed, gist-metadata and dictionary fetches use `reqwest::Client::new()` with no timeout (`gist.rs:37,78,172`); a stalled host can hold the start-up "checking updates". Only the update feed has a size cap (256 KB, `gist.rs:20,51`); the metadata and dictionary bodies have none. The model / update downloads do have connect and stall timeouts (`fetch.rs:61,133`).
 - **(checked, no gap)** a downgrade is not possible through the app update: only the release announced by the last check is installed (`app_updater.rs:65-70`), and the announcement is filtered for newer versions (`gist.rs:112-120`). A review-agent claim of a re-check gap is dropped.
 - **Fix:** verify gist metadata with the minisign keys already built into the app, take the model URL and hash only from signed metadata, add timeouts and size limits (A-6.3, A-6.5).
 - **Severity:** Medium · **Effort:** Medium
@@ -632,6 +633,9 @@ Refactoring stages (S4 to S6) **do not change behaviour** (the wire format is th
 | D-4 | Keep two `AppConfig` types | 2026-09-29 (Kade) | not changed |
 | D-5 | No UI click automation for now | 2026-10-06 (Kade) | `ui-preview` stays the UI check |
 | D-6 | Smoke runs automatically only from a release tag | 2026-10-06 (Kade) | manual `workflow_dispatch` otherwise |
+| D-7 | Documents are written in English | 2026-10-06 (Kade) | `docs/` and `.memory/roadmap/` in English; release notes for users stay Korean |
+
+The full log, with the reasons and the open questions, is in [`decisions.md`](decisions.md).
 
 ---
 
@@ -653,7 +657,7 @@ Refactoring stages (S4 to S6) **do not change behaviour** (the wire format is th
 ### 10.2 `NOT VERIFIED` / limits
 
 - **`src-tauri/` (Windows only) was not compiled for behaviour or run here.** Only the cross-check (compile) was done; app tests run in Windows CI. Statements about app behaviour come from reading the code.
-- **The ui gate was not run in this session** (no wasm32 target here). The ui test count is a `grep` value.
+- **The ui gate was run later in the same session**: `cargo check -p resonance-stream-ui --target wasm32-unknown-unknown` passes and `cargo test -p resonance-stream-ui` passes 157 tests (measured). The app part is still only cross-checked.
 - **Nothing was benchmarked.** All effects in the P items are estimates.
 - **Items marked "reported" were not checked by hand.** Confirmed items are marked in the text. Before implementing a reported item, reproduce it with a test first.
 - The scenarios of W-1, W-3 and W-4 were traced in code, **not reproduced**.

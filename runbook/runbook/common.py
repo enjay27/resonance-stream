@@ -14,6 +14,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -90,6 +91,16 @@ def ask_text(name: str, prompt: str) -> str:
     if dry_run():
         raise RuntimeError(f"dry run: set RUNBOOK_TEXT_{name}")
     return input(prompt).strip().strip('"').strip()
+
+
+def utf8_output() -> None:
+    """Print as UTF-8 whatever the console's code page is: a pipe on Windows is cp1252, and a report row with the app's
+    Japanese text then raised `UnicodeEncodeError` in the middle of a pipeline."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):  # not a text stream (a notebook's, a test's capture)
+            pass
 
 
 def default_exe() -> Path:

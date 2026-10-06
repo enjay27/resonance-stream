@@ -7,9 +7,10 @@ name: Bridge smoke test
 # hosted runner give the app an elevated, interactive session with a WebView2 window?
 # The "session" step prints what it finds, and the logs of both runs are uploaded.
 #
-# Not part of the CI workflow, so auto-merge never waits for it. While the runner's
-# behaviour is unproven `window-restore` is allowed to fail (continue-on-error); once
-# a run shows it passes, remove that line. A pull request runs it only when it touches
+# Not part of the CI workflow, so auto-merge never waits for it. `replay-chat` and
+# `window-restore` have passed on the hosted runner and fail the job; `capture-spike` and
+# `chat-rules` are allowed to fail (continue-on-error) until a run shows what the real app does.
+# A pull request runs it only when it touches
 # the bridge, its runner, this file or the test flags; `workflow_call` lets
 # release-candidate.yml use it on the exe it has just built.
 on:
@@ -89,8 +90,7 @@ jobs:
           --work "$env:RUNNER_TEMP/bridge-replay"
 
       - name: window-restore over the bridge
-        # Unproven on a hosted runner (a window may not get a real work area): see the header.
-        continue-on-error: true
+        # Proven on a hosted runner (9 of 9 on 2026-10-06, 1024x720 work area): a failing row fails the job.
         working-directory: runbook
         run: python -m runbook.run window-restore --exe ../target/release/resonance-stream.exe
 
@@ -101,6 +101,13 @@ jobs:
         continue-on-error: true
         working-directory: runbook
         run: python -m runbook.run capture-spike --exe ../target/release/resonance-stream.exe --add-firewall-rule
+
+      # What the backend does with chat lines: dedupe, block list, chat log (`replay-chat` + the chat commands).
+      # Unproven against the real app until its first run, hence allowed to fail.
+      - name: chat-rules over the bridge
+        continue-on-error: true
+        working-directory: runbook
+        run: python -m runbook.run chat-rules --exe ../target/release/resonance-stream.exe
 
       - name: Keep the logs
         if: always()

@@ -15,11 +15,13 @@ import sys
 from runbook import bridge, common
 from runbook.common import Recorder
 from runbook.pipelines.capture_spike import CaptureSpike
+from runbook.pipelines.chat_rules import ChatRules
 from runbook.pipelines.interface import InterfacePick
 from runbook.pipelines.updater_mock import UpdaterMock
 from runbook.pipelines.window_restore import WindowRestore
 
-PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick, "window-restore": WindowRestore, "capture-spike": CaptureSpike}
+PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick, "window-restore": WindowRestore, "capture-spike": CaptureSpike,
+             "chat-rules": ChatRules}
 
 
 def build(name: str, rec: Recorder, exe, args):

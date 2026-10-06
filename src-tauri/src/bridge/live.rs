@@ -238,6 +238,30 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             crate::commands::clear_chat_history(app.state());
             answer(Ok(()));
         }
+        Command::DownloadModel {
+            url,
+            version,
+            sha256,
+        } => {
+            // The wizard's download; its end (the return value the UI shows) comes as a `download-result` event.
+            let (app, id) = (app.clone(), request.id.clone());
+            let (url, version, sha256) = (url.clone(), version.clone(), sha256.clone());
+            tauri::async_runtime::spawn(async move {
+                let result =
+                    crate::services::downloader::model::download_model(app, url, version, sha256)
+                        .await;
+                publish_event(
+                    wire::DOWNLOAD_RESULT_EVENT,
+                    serde_json::json!({
+                        "id": id,
+                        "what": "model",
+                        "ok": result.is_ok(),
+                        "error": result.err(),
+                    }),
+                );
+            });
+            answer(Ok(()));
+        }
         Command::Quit => {
             answer(Ok(()));
             // Let the ack leave before the process does.

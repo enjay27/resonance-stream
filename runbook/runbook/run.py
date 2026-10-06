@@ -16,6 +16,7 @@ from runbook import bridge, common
 from runbook.common import Recorder
 from runbook.pipelines.capture_spike import CaptureSpike
 from runbook.pipelines.chat_rules import ChatRules
+from runbook.pipelines.download_integrity import DownloadIntegrity
 from runbook.pipelines.interface import InterfacePick
 from runbook.pipelines.persistence import Persistence
 from runbook.pipelines.updater_mock import UpdaterMock
@@ -23,7 +24,8 @@ from runbook.pipelines.window_restore import WindowRestore
 
 PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick, "window-restore": WindowRestore, "capture-spike": CaptureSpike,
              "chat-rules": ChatRules,
-             "persistence": Persistence}
+             "persistence": Persistence,
+             "download-integrity": DownloadIntegrity}
 
 
 def build(name: str, rec: Recorder, exe, args):

@@ -115,6 +115,12 @@ jobs:
         working-directory: runbook
         run: python -m runbook.run persistence --exe ../target/release/resonance-stream.exe
 
+      # The model download's rules against a local mock server. Allowed to fail until it has passed on the real app once.
+      - name: download-integrity over the bridge
+        continue-on-error: true
+        working-directory: runbook
+        run: python -m runbook.run download-integrity --exe ../target/release/resonance-stream.exe
+
       - name: Keep the logs
         if: always()
         uses: actions/upload-artifact@v4

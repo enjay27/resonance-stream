@@ -107,7 +107,8 @@ class Popups:
 
         first.send("open-popup", {"kind": "favorites"}, timeout=40)
         first.send("place-popup", {"kind": "favorites", **PLACE}, timeout=15)
-        placed = self.snap(first)[FAV].get("rect")
+        placed_state = self.snap(first)[FAV]
+        placed = placed_state.get("rect")
         first.send("hide-popup", {"kind": "favorites"}, timeout=15)
         # The main window's X: the app must end, and take its hidden popups with it.
         first.send("close-window", timeout=15)
@@ -127,9 +128,11 @@ class Popups:
             self.rec.auto("PP-place", "a popup opens where it was left after a restart", False, "no app-started event in 120 s")
             return
         second.send("open-popup", {"kind": "favorites"}, timeout=40)
-        rect = self.snap(second)[FAV].get("rect")
+        after = self.snap(second)[FAV]
+        rect = after.get("rect")
         self.rec.auto("PP-place", "a popup left at a place opens there after a restart", near(rect, PLACE),
-                      f"left at {placed}; asked for {PLACE}; after restart {rect}")
+                      f"left at {placed} (inner {placed_state.get('inner')}); asked for {PLACE}; "
+                      f"after restart {rect} (inner {after.get('inner')})")
         try:
             second.send("quit", timeout=15)
         except RuntimeError:

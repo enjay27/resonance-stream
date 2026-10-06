@@ -20,8 +20,9 @@ Tick `[x]` only when it ran the way "done when" says; a smoke row that is `conti
 ## Next, in this order
 
 0. **Two findings from the last smoke runs** (details in the changelog, "Found, not fixed"):
-   - [ ] `PP-place`: a restored popup comes back 30 px taller (real app, 2 runs). App bug in `window.rs` -> test first in `crates/core` if the
-     rect arithmetic can be pulled out (as `inner_size_for` was), then a branch; the smoke run shows it.
+   - [~] `PP-place`: restored popup 30 px taller (left 520x660, back 520x690; the plugin saves/restores the INNER size, `set_size` on the hidden
+     undecorated window inflates it). `claude/popup-restore-size`: `show_popup` restores again once shown; the snapshot now reports `inner`. Not unit-testable
+     (Tauri glue): **the smoke run is the test** -- if `PP-place` is still red, read its `inner` numbers before a second attempt.
    - [x] `translator-stub` crash on Windows: `bridge.py` now reads its child processes as UTF-8 (`claude/bridge-utf8-pipes`, test first). The
      `TS-*` rows after `TS-ready` have still to be read from the next smoke run on the real app (first real look at translate / restart / catch-up).
 1. **Make the proven smoke steps gates.** One PR on `.github/workflows/bridge-smoke.yml`: drop `continue-on-error` from every

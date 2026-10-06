@@ -66,14 +66,22 @@ fn show_popup(app: &AppHandle, kind: PopupKind) -> Result<(), String> {
         Some(window) => window,
         None => create_popup(app, kind)?,
     };
+    let mut restored = false;
     // Without the plugin (`--no-window-state`) there is nothing to restore from.
     if !crate::test_env::no_window_state() && !window.is_visible().unwrap_or(false) {
         // Size and place only: with `VISIBLE` the plugin would show it itself,
         // before we are ready.
         let _ = window.restore_state(StateFlags::SIZE | StateFlags::POSITION);
+        restored = true;
     }
     let _ = window.unminimize();
     window.show().map_err(|e| e.to_string())?;
+    // The plugin saved the INNER size. Set while the window is hidden, an undecorated window came back about 30 px
+    // taller than it was left (the bridge's `PP-place`, real app, 2 runs); set again once shown it is exact, as
+    // `apply_rect` is. The place was set before showing, so nothing jumps.
+    if restored {
+        let _ = window.restore_state(StateFlags::SIZE | StateFlags::POSITION);
+    }
     // A popup kept hidden has an old copy of the settings: let its page refresh.
     let _ = app.emit_to(kind.label(), "popup-shown", ());
     window.set_focus().map_err(|e| e.to_string())
@@ -98,9 +106,14 @@ fn window_json(app: &AppHandle, label: &str) -> serde_json::Value {
         .get_window(label)
         .and_then(|window| window_rect(&window))
         .and_then(|rect| serde_json::to_value(rect).ok());
+    let inner = webview
+        .inner_size()
+        .ok()
+        .map(|size| serde_json::json!({ "width": size.width, "height": size.height }));
     serde_json::json!({
         "exists": true,
         "visible": webview.is_visible().unwrap_or(false),
+        "inner": inner,
         "always_on_top": webview.is_always_on_top().unwrap_or(false),
         "rect": rect,
     })

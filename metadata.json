@@ -1,0 +1,14 @@
+{
+  "revision": 1,
+  "model": {
+    "latest_version": "1.1.0",
+    "download_url": "https://huggingface.co/enjay27/TranslateGemma-Blue-Protocol-Translator-JA-KO/resolve/main/translategemma-4b-it-blueprotocol-ja2ko-q4_k_m.gguf",
+    "release_notes": "기본 번역 모델 (TranslateGemma)",
+    "sha256": "7dc18e6bd8d3d7404f63e8996bb6d44bf35256a20406c1105e37c2424b96847d"
+  },
+  "dictionary": {
+    "version": "1.0.6",
+    "updated_at": "2026-03-08",
+    "sha256": "ed652de90628231d61071634c27552fa53e5d6ed325e4ae4679e3a67da1a19a8"
+  }
+}

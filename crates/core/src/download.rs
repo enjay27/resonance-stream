@@ -116,6 +116,73 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// multi-GB model on a slow link may take an hour as long as it keeps moving.
 pub const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The whole of a small remote call -- the update feed, the metadata, the dictionary: connecting,
+/// the answer and its body. These are a few kilobytes, so unlike a download a host that takes
+/// longer is stuck, and must not hold the start-up "checking for updates" forever (review W-8).
+pub const REMOTE_CALL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A response body that went past its cap.
+#[derive(Debug, PartialEq, Eq)]
+pub struct BodyTooLarge {
+    pub limit: usize,
+}
+
+impl std::fmt::Display for BodyTooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const KIB: usize = 1024;
+        const MIB: usize = 1024 * 1024;
+        let limit = self.limit;
+        if limit >= MIB && limit % MIB == 0 {
+            write!(
+                f,
+                "The response is larger than the {} MiB the app accepts",
+                limit / MIB
+            )
+        } else if limit >= KIB && limit % KIB == 0 {
+            write!(
+                f,
+                "The response is larger than the {} KiB the app accepts",
+                limit / KIB
+            )
+        } else {
+            write!(
+                f,
+                "The response is larger than the {limit} bytes the app accepts"
+            )
+        }
+    }
+}
+
+/// Counts the bytes of a response body as its chunks arrive and refuses the one that takes it
+/// past `limit`, so a host that never stops sending cannot fill the memory.
+#[derive(Debug)]
+pub struct BodyCap {
+    limit: usize,
+    seen: usize,
+}
+
+impl BodyCap {
+    pub fn new(limit: usize) -> Self {
+        Self { limit, seen: 0 }
+    }
+
+    /// Adds a chunk of `len` bytes; an error when the body would be larger than the limit.
+    pub fn add(&mut self, len: usize) -> Result<(), BodyTooLarge> {
+        match self.seen.checked_add(len) {
+            Some(total) if total <= self.limit => {
+                self.seen = total;
+                Ok(())
+            }
+            _ => Err(BodyTooLarge { limit: self.limit }),
+        }
+    }
+
+    /// Bytes accepted so far.
+    pub fn seen(&self) -> usize {
+        self.seen
+    }
+}
+
 /// Tells a stuck download from a slow one: it is stuck when no data has
 /// arrived for `limit`. The clock is passed in, so this is tested without
 /// waiting.
@@ -505,6 +572,55 @@ mod tests {
         assert_eq!(kept, dir.join("config.json.v7"));
         assert_eq!(std::fs::read_to_string(&kept).unwrap(), "{}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- short remote calls: a limit on the wait and on the body (W-8) ---
+
+    #[test]
+    fn a_body_may_be_exactly_as_large_as_its_cap() {
+        let mut cap = BodyCap::new(10);
+        assert!(cap.add(4).is_ok());
+        assert!(cap.add(6).is_ok());
+        assert_eq!(cap.seen(), 10);
+    }
+
+    #[test]
+    fn a_body_one_byte_over_its_cap_is_refused() {
+        let mut cap = BodyCap::new(10);
+        cap.add(10).unwrap();
+        assert_eq!(cap.add(1), Err(BodyTooLarge { limit: 10 }));
+    }
+
+    #[test]
+    fn a_huge_chunk_cannot_wrap_the_count() {
+        let mut cap = BodyCap::new(10);
+        cap.add(5).unwrap();
+        assert!(cap.add(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn the_message_names_the_limit() {
+        assert_eq!(
+            BodyTooLarge { limit: 262_144 }.to_string(),
+            "The response is larger than the 256 KiB the app accepts"
+        );
+        assert_eq!(
+            BodyTooLarge {
+                limit: 4 * 1024 * 1024
+            }
+            .to_string(),
+            "The response is larger than the 4 MiB the app accepts"
+        );
+        assert_eq!(
+            BodyTooLarge { limit: 1000 }.to_string(),
+            "The response is larger than the 1000 bytes the app accepts"
+        );
+    }
+
+    #[test]
+    fn a_short_call_gives_up_before_a_download_would_but_after_connecting() {
+        assert!(REMOTE_CALL_TIMEOUT > CONNECT_TIMEOUT);
+        assert!(REMOTE_CALL_TIMEOUT <= STALL_TIMEOUT.saturating_mul(2));
     }
 
     // --- install_swap: the update's two renames --------------------------

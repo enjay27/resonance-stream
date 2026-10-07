@@ -1,7 +1,9 @@
 use crate::inject_system_message;
 use crate::protocol::types::SystemLogLevel;
 use parking_lot::Mutex;
-use resonance_core::download::is_newer_version;
+use resonance_core::download::{
+    is_newer_version, BodyCap, BodyTooLarge, CONNECT_TIMEOUT, REMOTE_CALL_TIMEOUT,
+};
 use resonance_core::test_env::UpdateState;
 use resonance_core::text::Dictionary;
 use resonance_core::update_feed::{parse_feed_allowing, UpdateFeed};
@@ -18,10 +20,41 @@ const FEED_URL: &str =
     "https://github.com/enjay27/resonance-stream/releases/latest/download/latest.json";
 /// A feed is a few lines of JSON plus release notes.
 const FEED_MAX_BYTES: usize = 256 * 1024;
+/// The metadata names three versions, a model and its hash. Generous: not measured, the host is
+/// out of reach of the session that set it.
+const METADATA_MAX_BYTES: usize = 64 * 1024;
+/// The custom dictionary: a list of words. Generous (4 MiB), well above any list a person keeps.
+const DICT_MAX_BYTES: usize = 4 * 1024 * 1024;
 const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/custom_dict.json";
 
 // --- 1. Structs matching the unified Gist JSON: shared with the UI ---
 pub use resonance_types::{GistMetadata, RemoteDictionary, UpdateCheckResult, VersionInfo};
+
+/// A client for the small calls (feed, metadata, dictionary): it gives up connecting, and gives up
+/// on the whole call, instead of waiting on a stalled host while the start-up shows "checking"
+/// (review W-8). The downloads have their own, longer rules (`fetch.rs`).
+fn remote_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REMOTE_CALL_TIMEOUT)
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// The body of `res`, up to `limit` bytes: a longer one is refused at once when the host announces
+/// its length, and as it arrives otherwise, so a host that never stops cannot fill the memory.
+async fn read_capped(mut res: reqwest::Response, limit: usize) -> Result<Vec<u8>, String> {
+    if res.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(BodyTooLarge { limit }.to_string());
+    }
+    let mut cap = BodyCap::new(limit);
+    let mut body = Vec::new();
+    while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
+        cap.add(chunk.len()).map_err(|e| e.to_string())?;
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
 
 /// The release the last update check announced. The app updater downloads
 /// and verifies exactly this one: its url, its version and its signature.
@@ -34,7 +67,7 @@ pub fn announced_update() -> Option<UpdateFeed> {
 
 /// Reads the release feed. `Ok(None)`: no stable release exists yet (404).
 async fn fetch_update_feed() -> Result<Option<UpdateFeed>, String> {
-    let mut res = reqwest::Client::new()
+    let res = remote_client()?
         .get(crate::test_env::feed_url().unwrap_or(FEED_URL))
         .send()
         .await
@@ -45,13 +78,9 @@ async fn fetch_update_feed() -> Result<Option<UpdateFeed>, String> {
     if !res.status().is_success() {
         return Err(format!("Update feed returned: {}", res.status()));
     }
-    let mut body = Vec::new();
-    while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
-        body.extend_from_slice(&chunk);
-        if body.len() > FEED_MAX_BYTES {
-            return Err("The update feed is too large".to_string());
-        }
-    }
+    let body = read_capped(res, FEED_MAX_BYTES)
+        .await
+        .map_err(|e| format!("Update feed: {e}"))?;
     let text = String::from_utf8(body).map_err(|_| "The update feed is not text".to_string())?;
     parse_feed_allowing(&text, crate::test_env::allow_local_http()).map(Some)
 }
@@ -75,15 +104,16 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
             },
         });
     }
-    let client = reqwest::Client::new();
-    let mut remote_data: GistMetadata = client
+    let response = remote_client()?
         .get(crate::test_env::metadata_url().unwrap_or(METADATA_URL))
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?
-        .json()
+        .map_err(|e| format!("Network error: {}", e))?;
+    let body = read_capped(response, METADATA_MAX_BYTES)
         .await
-        .map_err(|e| format!("JSON parsing error: {}", e))?;
+        .map_err(|e| format!("Metadata: {e}"))?;
+    let mut remote_data: GistMetadata =
+        serde_json::from_slice(&body).map_err(|e| format!("JSON parsing error: {}", e))?;
 
     let metadata = crate::config::load_metadata(&app);
     let current_app_version = app.package_info().version.to_string();
@@ -169,13 +199,16 @@ pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, 
     let dict_path = dictionary_path(&app);
 
     // 2. Fetch from Remote
-    let client = reqwest::Client::new();
-    let response = client
+    let response = remote_client()?
         .get(crate::test_env::dictionary_url().unwrap_or(DICT_URL))
         .send()
         .await
         .map_err(|e| e.to_string())?;
-    let json_content = response.text().await.map_err(|e| e.to_string())?;
+    let body = read_capped(response, DICT_MAX_BYTES)
+        .await
+        .map_err(|e| format!("Dictionary: {e}"))?;
+    let json_content =
+        String::from_utf8(body).map_err(|_| "The dictionary is not text".to_string())?;
 
     // Validate before saving: a dictionary that does not parse is rejected
     let dict = Dictionary::from_json_str(&json_content)

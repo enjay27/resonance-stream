@@ -370,7 +370,7 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                 // the translator does later only adds to the training-pair file and a
                 // newer chat-log line with the translation.
                 crate::services::translator::archive_arrival(app, &chat);
-                let translator = state.translator_tx.lock();
+                let translator = state.services.translator_sender();
                 match translator.as_ref() {
                     Some(tx) if use_translation && contains_japanese(&chat.message) => {
                         let _ = tx.send(TranslationJob::new(chat));

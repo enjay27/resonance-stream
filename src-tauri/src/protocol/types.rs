@@ -28,7 +28,8 @@ pub struct AppState {
     /// Swapped whole when the dictionary is synced or edited; the translator
     /// takes a cheap `Arc` clone per job.
     pub dictionary: RwLock<Arc<Dictionary>>,
-    pub translator_tx: Mutex<Option<Sender<crate::services::translator::TranslationJob>>>,
+    /// Who runs: the translator's queue now, the sniffer's handle next (`services/owner.rs`).
+    pub services: crate::services::owner::Services,
     /// Japanese messages of this run still owed a translation; caught up at
     /// each translator start (see `translator::catch_up`).
     pub translation_ledger: Mutex<resonance_core::workers::TranslationLedger>,

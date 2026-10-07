@@ -239,8 +239,6 @@ fn apply_config(
         WorkerChange::Keep => {}
         change @ (WorkerChange::Start | WorkerChange::Restart) => {
             if change == WorkerChange::Restart {
-                // Drop the old sender to break the current thread's loop
-                *state.translator_tx.lock() = None;
                 inject_system_message(
                     &app,
                     SystemLogLevel::Info,
@@ -248,14 +246,12 @@ fn apply_config(
                     "Applying new AI Engine specifications...",
                 );
             }
-            let model_path = crate::get_model_path(&app);
-            let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
-            *state.translator_tx.lock() = Some(tx);
+            // Drops the old worker's queue (its thread ends), then starts the new one.
+            state.services.restart_translator(&app);
         }
         WorkerChange::Stop => {
-            // Drop the Sender (Kills the thread and frees VRAM)
-            *state.translator_tx.lock() = None;
-            crate::services::translator::retire_translator_workers();
+            // Drops the queue (kills the thread and frees VRAM) and retires the workers.
+            state.services.stop_translator();
             inject_system_message(
                 &app,
                 SystemLogLevel::Info,

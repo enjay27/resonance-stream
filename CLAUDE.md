@@ -85,7 +85,8 @@ src-tauri/            app crate (resonance-stream, lib resonance_stream_lib)
   src/events.rs         inject_system_message / store_and_emit: emit to UI + keep history
   src/commands.rs       history + translator commands; window.rs, tray.rs, shortcut.rs
   src/protocol/types.rs AppState and backend-only types; re-exports resonance-types
-  src/services/         sniffer/ (sockets, workers) translator/ (llama server) downloader/
+  src/services/         owner.rs (Services: who runs, the one start/stop/restart) sniffer/ (sockets, workers)
+                          translator/ (llama server) downloader/
   src/config/ src/io/   config + metadata persistence, archive writer
 graft/                graft's generated cards — GITIGNORED, regenerable (`graft build`)
 style/ public/        CSS source, static assets

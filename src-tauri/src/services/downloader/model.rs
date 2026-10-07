@@ -127,7 +127,7 @@ pub async fn download_model(
     // llama-server maps the current model file, and Windows will not replace
     // a mapped file: stop the translator for the swap, then bring it back.
     let state = app.state::<crate::AppState>();
-    let was_running = state.translator_tx.lock().take().is_some();
+    let was_running = state.services.stop_translator();
     if was_running {
         crate::services::translator::server_manager::kill_orphaned_servers(&app);
     }
@@ -138,9 +138,7 @@ pub async fn download_model(
     .await
     .map_err(|e| e.to_string())?;
     if was_running {
-        let tx =
-            crate::services::translator::start_translator_worker(app.clone(), get_model_path(&app));
-        *state.translator_tx.lock() = Some(tx);
+        state.services.start_translator(&app);
     }
     if let Err(e) = replaced {
         let _ = fs::remove_file(&staged);

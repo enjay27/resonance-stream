@@ -72,7 +72,7 @@ pub fn run() {
                 next_pid: 1.into(),
                 nickname_cache: Mutex::new(std::collections::HashMap::new()),
                 dictionary: RwLock::new(Arc::new(dictionary)),
-                translator_tx: Mutex::new(None),
+                services: Default::default(),
                 translation_ledger: Mutex::new(Default::default()),
                 data_factory_tx: Mutex::new(None),
                 sniffer_tx: Mutex::new(None),
@@ -147,12 +147,7 @@ pub fn run() {
 
             // --- START AI IF NEEDED ---
             if config.use_translation {
-                let model_path = crate::get_model_path(&handle);
-                *state.translator_tx.lock() =
-                    Some(crate::services::translator::start_translator_worker(
-                        handle.clone(),
-                        model_path,
-                    ));
+                state.services.start_translator(&handle);
             }
 
             // --- START THE CHAT ARCHIVE (each tab decides what it takes) ---

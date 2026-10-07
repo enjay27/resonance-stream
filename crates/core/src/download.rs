@@ -33,6 +33,33 @@ pub fn check_download_url_allowing(url: &str, allow_local_http: bool) -> Result<
     }
 }
 
+/// Whether `open_browser` may open `url`: a plain `https` page, with a host, and no space,
+/// control character or backslash anywhere. The ui only ever asks for github.com; the app runs
+/// as Administrator and the opener would hand `file:`, `ms-msdt:` and the like to Windows, so
+/// anything else is refused (review W-9).
+pub fn check_open_url(url: &str) -> Result<(), String> {
+    let refused = || {
+        Err(format!(
+            "Refusing to open {:?}: only plain https pages are opened",
+            url
+        ))
+    };
+    let is_https = url
+        .get(..8)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
+    if !is_https {
+        return refused();
+    }
+    let rest = &url[8..];
+    let bad_char = url
+        .chars()
+        .any(|c| c.is_ascii_control() || c == ' ' || c == '\\');
+    if rest.is_empty() || bad_char || rest.starts_with(['/', '?', '#']) {
+        return refused();
+    }
+    Ok(())
+}
+
 /// Checks a finished download: its size against `Content-Length` (when the
 /// server sent one) and its SHA-256 against `expected_sha256` (when known).
 pub struct DownloadCheck {
@@ -382,6 +409,40 @@ mod tests {
         assert!(check_download_url("http://example.com/a").is_err());
         assert!(check_download_url("file:///C:/evil.exe").is_err());
         assert!(check_download_url("").is_err());
+    }
+
+    #[test]
+    fn only_https_pages_are_opened_in_the_browser() {
+        // The ui only ever asks for github.com; what else may reach `open_browser` is a script
+        // that should not be there (review W-9), so anything but a plain https page is refused.
+        assert!(check_open_url("https://github.com/enjay27/resonance-stream").is_ok());
+        assert!(check_open_url("HTTPS://github.com/x?y=1#z").is_ok());
+        for refused in [
+            "http://github.com",
+            "file:///C:/Windows/System32/calc.exe",
+            "javascript:alert(1)",
+            "data:text/html,<script>1</script>",
+            "mailto:a@b.c",
+            "tel:123",
+            "ms-msdt:/id",
+            "\\\\server\\share\\x.exe",
+            "C:\\Windows\\System32\\calc.exe",
+            "",
+            "https://",
+            "https:///no-host",
+            "https://?q=1",
+            "https://#frag",
+            " https://github.com",
+            "https://git hub.com",
+            "https://github.com/a\nb",
+            "https://github.com/a\0b",
+            "https://\\evil.com",
+        ] {
+            assert!(
+                check_open_url(refused).is_err(),
+                "{refused:?} must be refused"
+            );
+        }
     }
 
     #[test]

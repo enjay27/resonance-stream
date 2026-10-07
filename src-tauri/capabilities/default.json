@@ -1,28 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window and its popup windows (open_popup)",
+  "description": "Capability for the main window and its popup windows (open_popup). No shell and no opener: nothing in the ui uses them, and open_browser is a command of our own that checks the URL.",
   "windows": [
     "main",
     "popup-*"
   ],
   "permissions": [
     "core:default",
-    "opener:default",
-    "shell:allow-spawn",
     "core:window:default",
     "core:window:allow-minimize",
     "core:window:allow-close",
-    "core:window:allow-start-dragging",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "args": true,
-          "sidecar": true,
-          "name": "bin/translator"
-        }
-      ]
-    }
+    "core:window:allow-start-dragging"
   ]
 }

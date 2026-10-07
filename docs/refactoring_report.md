@@ -82,7 +82,7 @@ Legend: ✅ solved · 🟡 partly, or in another way · ⏸ left out on purpose 
 
 | ID | Before | After | Status |
 |---|---|---|---|
-| W-9 Webview | shell and opener permissions nobody used; `open_browser` took any URL | 8 -> 5 permissions, the shell plugin removed, `open_browser` opens only `https` (#221) | 🟡 the CSP is **not started**: a wrong one blanks the window, so it goes through `rc` and needs a test on Windows |
+| W-9 Webview | shell and opener permissions nobody used; `open_browser` took any URL | 8 -> 5 permissions, the shell plugin removed, `open_browser` opens only `https` (#221) | 🟡 the CSP is a candidate PR into `rc` (a wrong one blanks the window, so it needs a test on Windows) |
 | W-10 Sniffer races | a failed socket setup showed nothing; two captures could overlap | every setup failure is an `Error` state; a dead capture stops the watchdog from talking over it (#224, #226) | ✅ ❓ |
 | W-11, W-12 Text bugs | `딜러딜러`, `model 번역` | `[P0]딜러`, `번역` (section 2; #228, #229) | ✅ |
 | P-1 List never shrinks | the display limit stayed raised after scrolling up | back at the bottom it is cut to one page (#232) | ✅ (confirmed in a real window, 2026-10-07) |
@@ -151,7 +151,7 @@ The new checks cost lines in the places that cross a trust boundary, which is wh
 |---|---|---|---|
 | Views | `DictionaryModal` 478 lines (complexity 82), `FavoritesWindow` 482 (77), `NavBar` 373 (53), `ChatContainer` 299 (56) | Medium | Medium |
 | Thread bodies | `start_sniffer_worker` 169 lines, `start_translator_worker` 140, the bridge's `handle` 208 | Medium | Medium |
-| Webview CSP (W-9) | not started; goes through `rc` and a test on Windows | Medium | Small |
+| Webview CSP (W-9) | a candidate PR into `rc` exists (branch `candidate/webview-csp`), checked in Chromium and pinned by a test; the exe is untested on Windows | Medium | Small |
 | Server files | the window between the hash check and the spawn (an ACL would close it) | Low to Medium | Medium |
 | Installed copies | 0.6.x reads the unsigned gist until it is updated | Medium | - |
 | Not seen in a real window | the wizard's refusal line, the update check, how the new dictionary terms read in real chat (S6 and the signed first-run path were confirmed by the maintainer on 2026-10-07) | Low | Small |

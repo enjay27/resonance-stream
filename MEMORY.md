@@ -1,12 +1,13 @@
 # Active State — resonance-stream
 
-**Index, not the record.** At most 40 lines and 6 KB, checked by CI (`bash .github/scripts/memory-check.sh`, decision D-2). Only what would be *false* once stale lives here; the rest is in `.memory/`.
+**Index, not the record.** At most 40 lines, 6 KB and 200 characters a line, checked by CI (`memory-check.sh`, D-2).
+Only what would be *false* once stale lives here; the rest is in `.memory/`.
 
 ## Now — 2026-10-08
 
 - **Where:** stages S0–S6 and signed metadata M1–M3 merged; open items: [`roadmap/refactor.md`](.memory/roadmap/refactor.md), "Open items found after S6".
 - **Next:** N-2, then N-5, one PR at a time; each changes a wire or a pipeline: plan first, wait for Kade. Steps: [n2-n5 handoff](.memory/sessions/2026-10-07-open-items-n2-n5-handoff.md).
-- **Claude config refactor** (`enjay27/claude-skills` `docs/refactor-plan.md` §4): R1, R2 done; R3a shrink *Now* (this); next R3b checks, R4 context-guard.
+- **Claude config refactor** (`enjay27/claude-skills` `docs/refactor-plan.md` §4): R1, R2, R3a (*Now* shrink), R3b (CI checks) done; next R4 context-guard.
 - **Waiting on Kade:** push `metadata-v3` (dictionary 1.0.8); a stable release (also the only proof of O-3); S7 capture; hy-mt2 inputs (D-29).
 - **Kade, in a real window:** N-6 and N-1 (the line under the sync button), the wizard's refusal line, the new class-tree names in chat.
 - **K16 and `TS-meta-*` values:** artifact `bridge-smoke-logs` of run 37613640483 **expires 2026-10-14**; after that, re-run `bridge-smoke.yml` on `main`.
@@ -31,5 +32,5 @@
 | [`.memory/sessions/`](.memory/sessions/) | why a decision was made, wrong turns included; the index before the shrink is `2026-10-06-memory-index-archive.md` |
 
 ## Rules
-- At most 40 lines and 6 KB; CI fails above. *Now* carries what is next and what is unverified; detail goes to `.memory/`.
+- At most 40 lines, 6 KB, 200 characters a line; CI fails above. *Now* carries what is next and what is unverified; detail goes to `.memory/`.
 - Update *Now* every session, even when the answer is "unchanged". Delete an item when it is done; git and `sessions/` keep the history.

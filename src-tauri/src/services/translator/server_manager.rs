@@ -134,6 +134,26 @@ pub fn launch_ai_server(
         .join(AI_SERVER_FOLDER)
         .join(AI_SERVER_FILENAME);
 
+    // The server runs elevated from a folder the user can write to: only the files of the
+    // pinned zip may be started (review W-2).
+    let server_dir = server_path.parent().unwrap_or(&data_dir);
+    let problems = resonance_core::server_pins::verify_dir(
+        server_dir,
+        resonance_core::server_pins::AI_SERVER_PINS,
+    );
+    if !problems.is_empty() {
+        let msg = format!(
+            "The AI engine was not started: its files are not the ones this version expects ({}). \
+             Delete the folder {} and restart the app to download it again.",
+            resonance_core::server_pins::summary(&problems),
+            server_dir.display()
+        );
+        log::error!("[Translator] {msg}");
+        inject_system_message(app, SystemLogLevel::Error, "Translator", &msg);
+        super::emit_translator_state(app, TranslatorState::Error, &msg);
+        return None;
+    }
+
     let mut server_cmd = Command::new(&server_path);
     server_cmd.arg("-m").arg(model_path);
     let port = pick_local_port(PREFERRED_SERVER_PORT);

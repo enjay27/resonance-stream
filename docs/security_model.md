@@ -58,7 +58,7 @@ Result: whoever controls the feed or the release page cannot get code run withou
 |---|---|
 | The zip comes from this repo's releases over HTTPS and its **SHA-256 is a constant in code** (`server.rs:6-8`, computed 2026-09-29) | confirmed |
 | Extraction is **not atomic**; an existing `llama-server.exe` counts as installed (`server.rs:38-40`) | confirmed gap W-3 (A-6.4) |
-| At start the app spawns `<app data>/bin/ai-server/llama-server.exe` with `Command::new`, **no check of the exe or its DLLs** (`server_manager.rs:131-139`) | confirmed gap W-2 (A-6.2) |
+| At start the app spawns `<app data>/bin/ai-server/llama-server.exe` with `Command::new`. Since S3a the 22 files are checked against pinned SHA-256 values right before the spawn (`resonance_core::server_pins`), and any other `.exe` / `.dll` in the folder is refused; on a mismatch nothing is started and the user is told | W-2 closed against an edit made while the app is not running. **Open:** the gap between the check and the spawn (a process that swaps a file in that window); a locked folder ACL would close it |
 | Only the PID this app started is killed (current PID plus the PID file of a crashed run) (`server_manager.rs:271-294`) | confirmed |
 | It binds `127.0.0.1` on 8080 or a free port | per CLAUDE.md; not re-checked |
 
@@ -108,7 +108,7 @@ The zip pin protects the download, not the files later on disk. A process of the
 | # | Scenario | Today | Gap |
 |---|---|---|---|
 | T-1 | A hostile host serves a fake update | rejected: HTTPS, announced release only, minisign with version binding | none known |
-| T-2 | A process of the same user replaces `llama-server.exe` or a DLL | runs elevated at the next translator start | **W-2** |
+| T-2 | A process of the same user replaces `llama-server.exe` or a DLL | runs elevated at the next translator start | **W-2** (checked before spawn since S3a; the check-to-spawn window stays open) |
 | T-3 | The metadata gist is changed to point at another model URL and hash | accepted: both come from the gist | **W-8** |
 | T-4 | An update swap fails halfway (antivirus, lock) | the app is left without an exe | **W-1** |
 | T-5 | The app is killed while extracting the AI server | the half-extracted folder counts as installed | **W-3** |
@@ -136,7 +136,7 @@ In order of risk; each item is a stage in the roadmap (`.memory/roadmap/refactor
 |---|---|---|
 | W-1 no rollback in the update swap | `install_swap` in core; rename `.old` back on a second failure | S1a |
 | W-3 non-atomic extraction | extract to `.part`, then rename | S1b |
-| W-2 unchecked server exe and DLLs | per-file SHA-256 pins verified just before spawn, or a locked folder ACL | S3a |
+| W-2 unchecked server exe and DLLs | ~~per-file SHA-256 pins verified just before spawn~~ done (S3a); a locked folder ACL remains an option for the window between check and spawn | S3a |
 | W-8 unsigned metadata, no timeouts | minisign check of the gist metadata with the built-in keys; timeouts and size caps | S3b |
 | W-9 webview | CSP, remove unused shell permissions, `open_browser` only `https` | S3c |
 | A-1.3 zstd window | `set_max_window_size` | with S4 or S5 |

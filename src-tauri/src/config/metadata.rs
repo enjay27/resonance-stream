@@ -1,7 +1,8 @@
 use crate::{inject_system_message, SystemLogLevel};
+use resonance_core::download::{keep_bad_copy, read_text_retrying, write_atomic};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 use tauri::AppHandle;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -28,7 +29,7 @@ impl Default for AppMetadata {
 fn get_metadata_path(app: &AppHandle) -> PathBuf {
     let config_dir = crate::app_dirs::config(app).expect("Could not resolve app config dir");
     if !config_dir.exists() {
-        let _ = fs::create_dir_all(&config_dir);
+        let _ = std::fs::create_dir_all(&config_dir);
     }
     config_dir.join("metadata.json")
 }
@@ -36,15 +37,38 @@ fn get_metadata_path(app: &AppHandle) -> PathBuf {
 pub fn load_metadata(app: &AppHandle) -> AppMetadata {
     let path = get_metadata_path(app);
 
-    if let Ok(content) = fs::read_to_string(&path) {
-        if let Ok(metadata) = serde_json::from_str(&content) {
-            return metadata;
+    // Not there yet (a first run): the defaults are written. A file that is there but cannot be
+    // read or parsed also gives the defaults -- version 0.0.0 asks for a model re-download --
+    // so it is kept as `metadata.json.bad` and the user is told.
+    let default_meta = AppMetadata::default();
+    match read_text_retrying(&path, 3, Duration::from_millis(250)) {
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(metadata) => return metadata,
+            Err(e) => unusable(app, &path, &format!("it could not be parsed ({e})")),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            // Unreadable, not damaged: the file is left alone (a save would replace it).
+            unusable(app, &path, &format!("it could not be read ({e})"));
+            return default_meta;
         }
     }
-
-    let default_meta = AppMetadata::default();
     save_metadata(app, &default_meta);
     default_meta
+}
+
+/// Tells the user that `metadata.json` was not used, and keeps a copy of it.
+fn unusable(app: &AppHandle, path: &std::path::Path, why: &str) {
+    let kept = match keep_bad_copy(path) {
+        Ok(copy) => format!("kept as {}", copy.display()),
+        Err(e) => format!("and it could not be copied either ({e})"),
+    };
+    inject_system_message(
+        app,
+        SystemLogLevel::Warning,
+        "Metadata",
+        format!("metadata.json was not used: {why}; the defaults are in use ({kept}). The model may be offered for download again."),
+    );
 }
 
 pub fn save_metadata(app: &AppHandle, metadata: &AppMetadata) {
@@ -57,6 +81,13 @@ pub fn save_metadata(app: &AppHandle, metadata: &AppMetadata) {
 
     let path = get_metadata_path(app);
     if let Ok(json) = serde_json::to_string_pretty(metadata) {
-        let _ = fs::write(path, json);
+        if let Err(e) = write_atomic(&path, json.as_bytes()) {
+            inject_system_message(
+                app,
+                SystemLogLevel::Error,
+                "Metadata",
+                format!("metadata.json was not saved ({e})"),
+            );
+        }
     }
 }

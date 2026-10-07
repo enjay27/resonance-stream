@@ -213,6 +213,32 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     })
 }
 
+/// Reads a settings file as text, trying again while it cannot be read (an antivirus scan or
+/// another program may hold it for a moment). The last error comes back after `attempts`.
+pub fn read_text_retrying(path: &Path, attempts: u32, pause: Duration) -> io::Result<String> {
+    let mut last_err = None;
+    for attempt in 0..attempts.max(1) {
+        if attempt > 0 {
+            std::thread::sleep(pause);
+        }
+        match std::fs::read_to_string(path) {
+            Ok(text) => return Ok(text),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.expect("at least one attempt"))
+}
+
+/// Copies a file that cannot be used to `<path>.bad` (the next save would replace it) and says
+/// where the copy is. The original stays.
+pub fn keep_bad_copy(path: &Path) -> io::Result<std::path::PathBuf> {
+    let mut bad = path.as_os_str().to_owned();
+    bad.push(".bad");
+    let bad = std::path::PathBuf::from(bad);
+    std::fs::copy(path, &bad)?;
+    Ok(bad)
+}
+
 /// `<path>.part`: where something is built before it is moved to `path`.
 pub fn part_path(path: &Path) -> std::path::PathBuf {
     let mut part = path.as_os_str().to_owned();
@@ -406,6 +432,61 @@ mod tests {
         let dir = temp_dir("giveup");
         let err = replace_file(&dir.join("missing"), &dir.join("x"), 2, Duration::ZERO);
         assert!(err.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- reading a settings file: a lock is waited out, a bad file is kept (W-7) ---
+
+    #[test]
+    fn a_file_that_appears_while_retrying_is_read() {
+        // An antivirus scan holds the file for a moment: the read is tried again.
+        let dir = temp_dir("read-late");
+        let path = dir.join("config.json");
+        let late = path.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(40));
+            std::fs::write(late, b"{}").unwrap();
+        });
+        let text = read_text_retrying(&path, 100, Duration::from_millis(10)).unwrap();
+        writer.join().unwrap();
+        assert_eq!(text, "{}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_that_stays_unreadable_gives_the_last_error_after_its_attempts() {
+        let dir = temp_dir("read-never");
+        let err = read_text_retrying(&dir.join("missing.json"), 3, Duration::ZERO).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_readable_file_is_read_on_the_first_try() {
+        let dir = temp_dir("read-now");
+        let path = dir.join("config.json");
+        std::fs::write(&path, "hello").unwrap();
+        assert_eq!(
+            read_text_retrying(&path, 1, Duration::ZERO).unwrap(),
+            "hello"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bad_file_is_kept_beside_the_original() {
+        let dir = temp_dir("bad-copy");
+        let path = dir.join("config.json");
+        std::fs::write(&path, "{ torn").unwrap();
+        let kept = keep_bad_copy(&path).unwrap();
+        assert_eq!(kept, dir.join("config.json.bad"));
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "{ torn");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{ torn",
+            "the original is not touched"
+        );
+        assert!(keep_bad_copy(&dir.join("missing.json")).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -61,6 +61,7 @@ pub fn run() {
             let mut config = read_config_file(&handle);
             config.init_done = test_env::init_done_for_run(config.init_done);
             let dictionary = resonance_core::text::Dictionary::load(&dictionary_path(&handle));
+            let load_notice = take_load_notice();
             app.manage(AppState {
                 config: RwLock::new(config.clone()),
                 config_lock: Mutex::new(()),
@@ -86,6 +87,11 @@ pub fn run() {
             // Before anything that emits, so the bridge hears all of it: the translator's first states, the first system
             // messages (it queues until connected). Its commands wait for `mark_ready` below.
             bridge::start(&handle);
+
+            // What the start-up read found wrong with config.json (the state did not exist to log it).
+            if let Some(notice) = load_notice {
+                inject_system_message(&handle, SystemLogLevel::Error, "Settings", notice);
+            }
 
             // Old daily logs past the retention setting go before the reload.
             crate::io::prune_chat_logs(&handle);

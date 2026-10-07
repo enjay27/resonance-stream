@@ -4,9 +4,11 @@ Resonance Stream is a Windows desktop app: it sniffs Blue Protocol: Star Resonan
 chat packets (raw socket, no client hooking), translates Japanese chat to Korean
 through a local llama.cpp server, and shows it in a Tauri overlay.
 
-It is one Cargo workspace in five crates, three parts, plus the runbook (`runbook/`, treated as
-docs). **Which part you touch decides which gate applies.** That is the most important thing
-on this page.
+One Cargo workspace in five crates, three parts, plus the runbook (treated as docs).
+**Which part you touch decides which gate applies** -- the most important thing on this page.
+
+Follow the `kade-workflow` skill (plan first, test first, gates, commit and PR style, context
+budget). Where it and this file differ, this file wins. Current state: @MEMORY.md
 
 | tree | part | builds on | gate |
 |---|---|---|---|
@@ -15,203 +17,83 @@ on this page.
 | `src-tauri/` | **app** — Tauri 2 backend: sockets, translator server, downloader, windows, tray | **Windows only** | `just app-check` (Windows) · `just app-cross-check` (Linux, compile only) |
 | `runbook/` | **runbook** — Jupyter notebooks + Python helpers that Kade runs by hand on Windows (`runbook/README.md`) | any OS (dry runs) | **none — treated as docs** (see `.claude/rules/runbook.md`) |
 
-`just check` runs `fmt-check`, then every gate the current OS can run (`pip install
-rust-just` or `cargo install just`). On Linux the app gate is a **compile-only**
-cross-check against `x86_64-pc-windows-gnu` (needs `rustup target add
-x86_64-pc-windows-gnu` and `apt install gcc-mingw-w64-x86-64`); it cannot link, so
-the app's own tests run only on Windows. CI (`.github/workflows/ci.yml`) runs core +
-ui on Linux and the full app gate on `windows-latest`, on every push and PR.
+`just check` (`pip install rust-just`) runs `fmt-check`, then every gate this OS can run. On Linux
+the app gate is a **compile-only** cross-check against `x86_64-pc-windows-gnu` (rustup target +
+`gcc-mingw-w64-x86-64`), so the app's own tests run only on Windows. CI (`ci.yml`) runs core + ui
+on Linux and the full app gate on `windows-latest`, on every push and PR.
 
 **New pure logic goes in `crates/core`**, where it is tested on every OS. Anything that
 crosses the Tauri boundary is defined once, in `crates/types` (serde, serde_with — it
 compiles to wasm) -- `AppConfig`, the settings file's type, too (`crates/types/src/app_config.rs`;
-the app owns the file and the real defaults, the ui re-exports the same type). Until
-2026-10-07 it was two types, the app's and the ui's (Kade, 2026-09-29); Kade merged them.
-
----
+the app owns the file and the real defaults, the ui re-exports the same type).
 
 ## Tech Stack
 
-- **Frontend:** Leptos 0.8 (CSR) → wasm via **Trunk**; Tailwind 4 + daisyUI through
-  `npx @tailwindcss/cli` (Trunk pre-build hook, `cmd /c` — Windows shell).
-- **Backend:** Tauri 2 (`unstable`, tray, global-shortcut, fs, shell, opener).
-- **Capture:** raw socket with `SIO_RCVALL` (`windows-sys`,
-  `src-tauri/src/services/sniffer/network.rs`). Needs **Administrator**. Port 5003
-  carries chat. No Npcap / WinDivert (removed 2026-09-29; capture never used them).
-- **Translation:** llama.cpp server (Vulkan build, downloaded at runtime from this
-  repo's releases) on `127.0.0.1:8080`, or a free port if 8080 is taken; only the PID the
-  app started is ever killed. Pre/post-processing in `crates/core/src/text.rs`.
-- **Remote metadata:** a public gist (`downloader/gist.rs`) carries model/dictionary
-  versions and the custom dictionary; the app's own update comes from the newest stable
-  release's `latest.json` (see the `release` skill, *Stable releases*), checked against signing keys built into
-  the app. The gist's `app` entry is ignored by the app and kept only for copies that
-  predate the signed updater (the 0.6.0 bridge release). Public URLs, not secrets.
-- **Packaging:** `package.bat` → `cargo tauri build` → NSIS installer in `dist/`.
-  Test builds: a merge into `rc` publishes a plain exe as a GitHub prerelease (see
-  the `release` skill, *Release candidates*). The app version is `[workspace.package] version` in `Cargo.toml`.
+- **Frontend:** Leptos 0.8 (CSR) → wasm via Trunk; Tailwind 4 + daisyUI (Trunk pre-build hook, `cmd /c`).
+  **Backend:** Tauri 2 (`unstable`, tray, global-shortcut, fs, shell, opener).
+- **Capture:** raw socket with `SIO_RCVALL`, needs **Administrator**; port 5003 carries chat. No Npcap / WinDivert.
+- **Translation:** llama.cpp server (Vulkan, downloaded at runtime) on `127.0.0.1:8080` or a free port;
+  only the PID the app started is ever killed. Pre/post-processing in `crates/core/src/text.rs`.
+- **Updates and metadata:** signed stable-release feed and signed metadata; detail in `.claude/rules/app.md`.
+- **Packaging:** `package.bat` → `cargo tauri build` → NSIS in `dist/`; version: `[workspace.package]` in `Cargo.toml`.
 
----
-
-## Repository Layout
+## Repository Layout (top level; per file: `.claude/rules/{core,ui,app}.md` and graft)
 
 ```
-.claude/              graft wiring (hooks, helpers), skills/: graft, workflow-control, ui-preview
+.claude/              graft wiring, rules/ (path-scoped), skills/: graft, release, ui-preview, workflow-control
 .memory/              working memory; see .memory/README.md
-.github/workflows/    CI — the gates, per OS
-justfile              the gates as commands
-crates/core/           resonance-core — pure logic, tested on any OS
-  src/protocol/         port 5003: stream framing (framing.rs) + protobuf-style decoding
-  src/capture/          ChatPipeline: raw IPv4/TCP bytes → dedup/blocked ChatMessages
-  src/text.rs           translation pre/post-processing, Dictionary, emotes, romaji
-  src/history.rs        ChatHistory (backend chat log) + load_recent (daily chat_logs reload)
-  src/workers.rs        worker decisions: translator on/off/restart, stale jobs, port
-  src/download.rs       download checks: HTTPS, length + SHA-256, progress, versions
-  src/sniffer_net.rs    sniffer network setup: per-exe firewall rule name, adapter pick (route first)
-crates/llama/          resonance-llama — llama-server HTTP client (/completion, /health), any OS
-crates/types/          resonance-types — DTOs shared across the Tauri boundary (serde only)
+.github/ justfile     CI (gates per OS; release, rc, metadata workflows); the gates as commands
+crates/               core, llama, types — pure logic, tested on any OS
 src/                  ui crate (resonance-stream-ui)
-  app/                  App shell; actions.rs (save_config, clear_history),
-                          hydration.rs (start-up load), setup_flow.rs (first-run wizard)
-  store.rs              AppSignals (app-wide signals, AppSignals::new) + AppActions
-  config_signals.rs     ConfigSignals: the signals that mirror AppConfig; to_config() / apply()
-  status_signals.rs     ServiceSignals / SetupSignals / UpdateSignals: backend status, wizard, update dialogs
-  view_signals.rs       ChatSignals / UiSignals: chat list, system log, scroll + unread, open dialogs
-  chat_view.rs          chat list: per-tab views + limits (ChatStore), filter, paging -- pure, host-tested
-  components/           views; settings/ is one file per settings section
-  hooks/                backend event, config and tray wiring
-  ui_types.rs           ui-only types + re-export of resonance-types (AppConfig included)
 src-tauri/            app crate (resonance-stream, lib resonance_stream_lib)
-  src/lib.rs            module list, crate-root re-exports, run() — start-up wiring only
-  src/events.rs         inject_system_message / store_and_emit: emit to UI + keep history
-  src/commands.rs       history + translator commands; window.rs, tray.rs, shortcut.rs
-  src/protocol/types.rs AppState and backend-only types; re-exports resonance-types
-  src/services/         owner.rs (Services: who runs, the one start/stop/restart) sniffer/ (sockets, workers)
-                          translator/ (llama server) downloader/
-  src/config/ src/io/   config + metadata persistence, archive writer
-graft/                graft's generated cards — GITIGNORED, regenerable (`graft build`)
-style/ public/        CSS source, static assets
-runbook/              the runbook: notebooks, helpers, dry-run tests -- docs, see Guardrails
+metadata/ release-notes/  signed metadata source; release notes per version
+docs/                 architecture review, decisions log, security model, testing
+runbook/              notebooks Kade runs on Windows -- docs, see .claude/rules/runbook.md
+graft/ style/ public/ graft's cards (GITIGNORED, `graft build`); CSS source; static assets
 ```
-
----
 
 ## Using graft (the repo is indexed)
 
 Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
-
 - **Before moving, renaming or splitting a symbol:** `graft callers <sym> --depth all`.
   Editing the primary file and stopping is the classic miss.
 - `graft skeleton <file>` before reading a large file whole.
 - After structural changes graft rebuilds via the PostToolUse hook; `graft build` if stale.
 
----
-
 ## Guardrails
 
-- **Plan first.** Do not modify modules, components, manifests or CI on the first turn
-  of a task. Present an impact analysis (graft `callers` output is the evidence) and
-  wait for explicit confirmation. See `.claude/skills/workflow-control/SKILL.md`.
-- **Refactors do not change behaviour.** A move/split commit changes no logic, no UI,
-  no wire format. `ChatMessage`/`SystemMessage` serialize as camelCase across the
-  Tauri boundary — renaming a field is a protocol change, not a refactor.
-- **Zero hardcoded credentials.** No tokens or keys in committed files. The gist and
-  release URLs are public and fine.
-- **TDD for every task flow.** Test first: write the failing unit test that pins the
-  wanted behaviour, run it and see it fail for the right reason, then write the code
-  that makes it pass, then refactor with the tests green. A bug fix starts with a
-  test that reproduces the bug. Pure logic is tested in `crates/core` (or the ui's pure
-  modules), so it runs on every OS. If a change cannot be unit-tested (Tauri/Windows
-  glue), say so in the commit body. `just coverage` shows what the tests do not reach.
+- **Refactors do not change behaviour.** `ChatMessage`/`SystemMessage` serialize as camelCase
+  across the Tauri boundary — renaming a field is a protocol change, not a refactor.
+- **Zero hardcoded credentials.** No tokens or keys in committed files; gist and release URLs are public.
+- **Where tests go.** Pure logic is tested in `crates/core` (or the ui's pure modules), so it
+  runs on every OS. `just coverage` shows what the tests do not reach.
 - **The runbook is docs**: no CI job, no gate, no test-first requirement for `runbook/`; the full rule is `.claude/rules/runbook.md`.
-- **Auto-correction restraint.** Self-correct at most **2** times, then stop and ask.
-- **Never report a gate as passed when it could not run.** A Linux session cannot
-  build `src-tauri/`; say so, and leave it to the Windows CI job.
-- **A blocked host is asked for, not worked around.** A session can only reach the hosts
-  in its environment's trusted-host list. When a build, download or test needs a host
-  that is blocked (e.g. `Lindera.dev`, which the furigana dictionary's build script
-  downloads from), stop and ask Kade to add it -- name the host and what needs it. Do not
-  substitute a mirror, re-encode another copy, patch a dependency or stub the result to
-  get past it. Until it is added, the gate that needs it is reported as not run.
-  `Lindera.dev` is trusted since 2026-10-03.
-
----
+- **A Linux session cannot build `src-tauri/`**; say so, and leave it to the Windows CI job.
+- **Trusted hosts:** `Lindera.dev` (the furigana dictionary's build script downloads from it).
 
 ## Definition of Done
 
 0. **Test first.** New behaviour or a bug fix has its failing unit test before its code.
 1. **Run the gate for every part touched** (table above). `cargo fmt` is part of it.
-2. **Behaviour check where a gate cannot see it.** UI changes are screenshotted in a
-   browser with the `ui-preview` skill (`.claude/skills/ui-preview/`, runs on Linux),
-   and need a manual run (`cargo tauri dev`, Windows, as Administrator); say in the
-   commit body which of the two was done.
-3. **Record the outcome in the memory tree.** `MEMORY.md` is an index of at most **40 lines and 6 KB**
-   (CI fails above: `bash .github/scripts/memory-check.sh`) -- update its *Now* section and delete what is done.
-   Detail goes in `.memory/` (see its README).
-4. **Push the branch and open the PR** — see *Version Control*; CI merges it when green.
-
----
+2. **Behaviour check where a gate cannot see it.** UI changes: `.claude/rules/ui.md`.
+3. **Update `MEMORY.md` *Now*** (≤ 40 lines, 6 KB: `memory-check.sh`); detail in `.memory/` (its README).
+4. **Push the branch and open the PR**; CI merges it when green.
 
 ## Version Control
 
-**One task, one branch, one PR.** Claude runs the whole flow without being asked.
+**One task, one branch, one PR**, run by Claude without being asked.
 
-1. **Start.** Every new task gets its own branch from an up-to-date `main`:
-   `git checkout main && git pull && git checkout -b claude/<short-task-name>`.
-   Never commit to `main`. A follow-up to a merged task is a new task: new branch.
-2. **During the task, commit freely** -- as many local commits as help. Unpushed history may
-   be tidied (`git commit --amend`, or `git reset --soft <base>` + one commit to squash).
-   Never rewrite history that is already pushed.
-3. **Finish = test, then push.** When the task is done, run the gate for every part
-   touched (table at the top; `cargo fmt` included) and fix failures. Only a green
-   local gate is pushed: `git push -u origin claude/<name>`. A gate that could not run
-   here is named in the last commit body (`NOT VERIFIED: app gate -- no Windows
-   toolchain in this session`) and left to CI.
-4. **Open the PR** against `main` (check for a PR template first). Do not merge it by
-   hand: `.github/workflows/auto-merge.yml` merges it and deletes its `claude/*` branch (never any other branch) once the CI
-   workflow passes on the PR's latest commit. If CI fails, fix on the same branch and
-   push again -- the run for the new commit decides. Never skip, disable or edit a
-   test/gate to get green.
-
-### Several tasks in one session
-
-When a session is given a series of tasks (or one task split into steps, one PR each):
-
-1. **One PR at a time, in order.** Finish a task (gate green, pushed), open its PR, then
-   **wait until the PR is merged** -- the auto-merge workflow merges it once CI passes on
-   the latest commit. Do not start the next task, or push anything for it, before that.
-2. **CI failed?** Fix it first, on the same branch, and push again. The run for the new
-   commit decides. Never skip, disable or edit a test/gate to get green. Retry until the
-   PR merges; if a failure is not this PR's (red on `main` too), say so on the PR.
-3. **Before the next task, check it is really done:** the PR is closed as *merged* and its
-   `claude/*` branch is gone. Then start from `main` again: `git fetch origin main &&
-   git checkout -B claude/<next> origin/main`. A later task never stacks on an unmerged one.
-4. Waiting is done with the PR event subscription (`subscribe_pr_activity`) and a
-   check-in (`send_later`), not with `sleep` loops. Update `MEMORY.md` in each task's own
-   branch, so a merged task never leaves the index behind.
-
-```bash
-git status            # check BEFORE -A, never after
-git add -A && git commit
-```
-
-- **Commit subject states the point of the change**, not the files touched
-  (`Protocol decoding builds on any OS now -- moved out of the Windows crate`,
-  not `move files`). The body says what changed, why, and **what is verified vs open**.
-- `MEMORY.md` and `.memory/` updates go in the branch, before the push.
-- **Claude never commits work it did not do.** Pre-existing changes stay untouched.
-- Only `claude/*` branches auto-merge, and only PRs into `main`: a PR into `rc` (or any
-  other branch) stays open until a person merges it. `workflow_run` workflows are read from `main`, so a
-  change to `auto-merge.yml` itself takes effect after it has been merged once.
-- Merges made by the workflow use `GITHUB_TOKEN`, which does not start a `push` run on
-  `main`; the PR's own run is the gate.
-
-### Test branches, release candidates, stable releases
-
-The procedure is the `release` skill (`.claude/skills/release/SKILL.md`); the rules for release
-files (never publish a stable release by hand, release notes) are in `.claude/rules/release.md`.
-
-### Never commit
-- Secrets, `.env`.
-- Build output: `target/`, `dist/`, `style/output.css`, `*.exe`.
-- `graft/` (regenerable), `node_modules/`, IDE folders.
-- A half-applied or unformatted tree "to save progress". Use a branch.
+- Branch from an up-to-date `main`: `git fetch origin main && git checkout -B claude/<task> origin/main`.
+  Never commit to `main`; a follow-up is a new branch. Never rewrite history that is already pushed.
+- `.github/workflows/auto-merge.yml` merges a green PR and deletes its `claude/*` branch. Never
+  merge by hand, and never skip, disable or edit a test/gate to get green. A failure that is
+  not this PR's (red on `main` too) is said on the PR.
+- **Several tasks:** one PR at a time; start the next only when the last is *merged* and its
+  branch is gone. Wait with `subscribe_pr_activity` and a `send_later` check-in, not `sleep` loops.
+- Only `claude/*` PRs into `main` auto-merge; a PR into `rc` (or anywhere else) waits for a person.
+  `workflow_run` workflows are read from `main`: an `auto-merge.yml` change acts after its own merge.
+  Workflow merges use `GITHUB_TOKEN` (no `push` run on `main`); the PR's own run is the gate.
+- **Test branches, release candidates, stable releases:** the `release` skill; the rules for release
+  files (never publish by hand, release notes) are in `.claude/rules/release.md`.
+- **Never commit:** secrets, `.env`; build output (`target/`, `dist/`, `style/output.css`, `*.exe`);
+  `graft/`, `node_modules/`, IDE folders; a half-applied or unformatted tree "to save progress".

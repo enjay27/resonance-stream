@@ -85,22 +85,6 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
         }
     };
 
-    Effect::new(move |_| {
-        if sig.with(|m| m.translated.is_some()) {
-            if signals.chat.is_at_bottom.get_untracked() {
-                request_animation_frame(move || {
-                    if let Some(window) = web_sys::window() {
-                        if let Some(doc) = window.document() {
-                            if let Some(el) = doc.get_element_by_id("chat-scroll-container") {
-                                el.set_scroll_top(el.scroll_height());
-                            }
-                        }
-                    }
-                });
-            }
-        }
-    });
-
     let pid = sig.with_untracked(|m| m.pid);
     let menu_open = move |kind: MenuKind| {
         Memo::new(move |_| signals.ui.active_menu.get() == Some(RowMenu { pid, kind }))

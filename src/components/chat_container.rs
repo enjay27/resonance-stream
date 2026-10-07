@@ -76,8 +76,11 @@ pub fn ChatContainer() -> impl IntoView {
     });
 
     // --- AUTO-SCROLL EFFECT ---
+    // Stay at the bottom when the list changes, and when a row of it changes in place (a translation
+    // landing makes a row taller): one effect here, where each row once had its own.
     Effect::new(move |_| {
         filtered_chat.track();
+        signals.chat.rows_changed.track();
         if signals.chat.is_at_bottom.get_untracked() {
             request_animation_frame(move || {
                 if let Some(el) = chat_container_ref.get() {

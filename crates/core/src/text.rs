@@ -149,6 +149,13 @@ enum Piece {
     Placeholder(String),
 }
 
+/// Adds plain text to `pieces`; nothing for an empty stretch.
+fn push_text(pieces: &mut Vec<Piece>, text: &str) {
+    if !text.is_empty() {
+        pieces.push(Piece::Text(text.to_string()));
+    }
+}
+
 struct Masker {
     pieces: Vec<Piece>,
     replacements: HashMap<String, String>,
@@ -186,12 +193,10 @@ impl Masker {
         let mut pieces = Vec::with_capacity(self.pieces.len() + 2);
         for piece in std::mem::take(&mut self.pieces) {
             match piece {
-                Piece::Text(text) if text.contains(target) => {
+                Piece::Text(text) => {
                     let mut parts = text.split(target).peekable();
                     while let Some(part) = parts.next() {
-                        if !part.is_empty() {
-                            pieces.push(Piece::Text(part.to_string()));
-                        }
+                        push_text(&mut pieces, part);
                         if parts.peek().is_some() {
                             pieces.push(Piece::Placeholder(placeholder.clone()));
                         }
@@ -214,16 +219,12 @@ impl Masker {
             let mut last = 0;
             for caps in re.captures_iter(&text) {
                 let m = caps.get(0).expect("group 0 always matches");
-                if m.start() > last {
-                    pieces.push(Piece::Text(text[last..m.start()].to_string()));
-                }
+                push_text(&mut pieces, &text[last..m.start()]);
                 let placeholder = self.new_placeholder(replacement(&caps));
                 pieces.push(Piece::Placeholder(placeholder));
                 last = m.end();
             }
-            if last < text.len() {
-                pieces.push(Piece::Text(text[last..].to_string()));
-            }
+            push_text(&mut pieces, &text[last..]);
         }
         self.pieces = pieces;
     }
@@ -978,6 +979,62 @@ mod tests {
         assert_eq!(cache.get("b"), None);
         assert!(cache.get("a").is_some() && cache.get("c").is_some());
         assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn the_line_stored_longest_ago_and_never_read_leaves_first() {
+        // Storing a line moves the clock too. If it did not, every line would
+        // be tied and the victim would be whichever the map listed first; with
+        // this many lines that is not the oldest.
+        let mut cache = TranslationCache::new(32);
+        for i in 0..32 {
+            cache.put(&format!("line{i}"), "x");
+        }
+        cache.put("one more", "y");
+        assert_eq!(cache.get("line0"), None);
+        assert_eq!(cache.len(), 32);
+    }
+
+    #[test]
+    fn a_read_moves_a_line_past_ones_stored_before_it() {
+        // Reading every line but the newest makes the newest the one used
+        // longest ago. A read that did not move the clock would leave all of
+        // them tied, and the victim would be whichever the map listed first;
+        // with this many lines that is not the newest.
+        let mut cache = TranslationCache::new(32);
+        for i in 0..32 {
+            cache.put(&format!("line{i}"), "x");
+        }
+        for i in 0..31 {
+            assert!(cache.get(&format!("line{i}")).is_some());
+        }
+        cache.put("one more", "y");
+        assert_eq!(cache.get("line31"), None);
+        assert_eq!(cache.len(), 32);
+    }
+
+    #[test]
+    fn a_cache_with_a_line_is_not_empty() {
+        let mut cache = TranslationCache::new(2);
+        assert!(cache.is_empty());
+        cache.put("a", "A");
+        assert!(!cache.is_empty());
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn a_dictionary_counts_and_finds_each_of_its_terms() {
+        let dict = Dictionary::from_json_str(
+            r#"{"role": {"火力": "딜러", "盾": "탱커"}, "item": {"薬": "포션"}}"#,
+        )
+        .unwrap();
+        assert_eq!(dict.len(), 3);
+        assert!(!dict.is_empty());
+        for (ja, ko) in [("火力", "딜러"), ("盾", "탱커"), ("薬", "포션")] {
+            assert!(dict.contains_key(ja), "{ja} is in the dictionary");
+            assert_eq!(dict.get(ja).map(String::as_str), Some(ko));
+        }
+        assert!(!dict.contains_key("剣"));
     }
 
     #[test]

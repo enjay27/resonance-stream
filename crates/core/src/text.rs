@@ -252,6 +252,11 @@ pub fn preprocess_text(
 ) -> ShieldData {
     let mut masker = Masker::new(input);
 
+    // A placeholder the player typed is shielded first, as itself and under a
+    // number of its own: the restore below reads `[P0]` (and `[ p0 ]`, `［P0］`)
+    // as the shield's, so left alone it would be swapped for a real term.
+    masker.mask_regex(&PLACEHOLDER_PATTERN, |caps| caps[0].to_string());
+
     // 0. Emote tokens (display text, not Japanese)
     for token in [STICKER_TOKEN, EMOTE_TOKEN] {
         masker.mask_literal(token, token);
@@ -979,6 +984,50 @@ mod tests {
         assert_eq!(cache.get("b"), None);
         assert!(cache.get("a").is_some() && cache.get("c").is_some());
         assert_eq!(cache.len(), 2);
+    }
+
+    fn round_trip(line: &str, dict: &Dictionary) -> (ShieldData, String) {
+        let shield = preprocess_text(line, dict, None);
+        let restored = postprocess_text(&shield.masked_text, &shield);
+        (shield, restored)
+    }
+
+    #[test]
+    fn a_placeholder_typed_in_chat_comes_back_as_typed() {
+        let dict = Dictionary::from_json_str(r#"{"role": {"火力": "딜러"}}"#).unwrap();
+        for (line, want) in [
+            ("[P0]火力", "[P0]딜러"),
+            ("火力[P0]", "딜러[P0]"),
+            ("[P1]火力", "[P1]딜러"),
+            ("[P0][P0]火力", "[P0][P0]딜러"),
+        ] {
+            let (_, restored) = round_trip(line, &dict);
+            assert_eq!(restored, want, "line {line:?}");
+        }
+    }
+
+    #[test]
+    fn every_spelling_the_restore_accepts_is_shielded_when_typed() {
+        // The restore reads `[ P 3 ]`, `[p3]` and full-width brackets as a
+        // placeholder, so a player's text in any of those spellings is shielded.
+        let dict = Dictionary::from_json_str(r#"{"role": {"火力": "딜러"}}"#).unwrap();
+        let (_, restored) = round_trip("火力 [ P 0 ] [p1] ［P2］ [P 3]", &dict);
+        assert_eq!(restored, "딜러 [ P 0 ] [p1] ［P2］ [P 3]");
+    }
+
+    #[test]
+    fn a_typed_placeholder_gets_a_number_of_its_own() {
+        let dict = Dictionary::from_json_str(r#"{"role": {"火力": "딜러"}}"#).unwrap();
+        let (shield, _) = round_trip("[P0]火力", &dict);
+        assert_eq!(shield.masked_text, "[P0][P1]");
+        assert_eq!(
+            shield.replacements.get("[P0]").map(String::as_str),
+            Some("[P0]")
+        );
+        assert_eq!(
+            shield.replacements.get("[P1]").map(String::as_str),
+            Some("딜러")
+        );
     }
 
     #[test]

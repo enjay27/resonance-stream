@@ -369,10 +369,10 @@ Mostly **reported** (a review agent estimated from reading the code); nothing wa
 - **Fix:** one owner with a join handle (R-1) and an Error state on every setup failure.
 - **Severity:** Low to Medium · **Effort:** Medium
 
-### W-11 A `[P0]` typed in chat collides with a real placeholder (confirmed, pinned by a golden test)
+### W-11 A `[P0]` typed in chat collides with a real placeholder (confirmed; **fixed 2026-10-07, S5b**)
 
 - **Repro (confirmed):** with the dictionary `火力 -> 딜러`, preprocessing `"[P0]火力"` gives `[P0][P0]` and restoring gives `딜러딜러`: the player's own `[P0]` is replaced.
-  `crates/core/tests/golden_text.rs::a_placeholder_typed_in_chat_collides_with_a_real_one_known_defect` pins today's behaviour.
+  The golden test `a_placeholder_typed_in_chat_collides_with_a_real_one_known_defect` pinned that behaviour; it is now `a_placeholder_typed_in_chat_keeps_its_own_text` and shows the fixed result (`[P0]딜러`).
 - **Effect:** rare, but chat text interferes with the structure of the translation input (prompt control tokens such as `<end_of_turn>` are already stripped: `chat_text_cannot_inject_turn_markers`).
 - **Fix:** shield any `[P<n>]` already present in the input like the other literals so numbers cannot clash; the golden snapshot then changes on purpose.
 - **Severity:** Low · **Effort:** Small (a task card exists)

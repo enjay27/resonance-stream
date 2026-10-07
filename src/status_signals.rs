@@ -70,6 +70,9 @@ pub struct SetupSignals {
     pub set_downloading: WriteSignal<bool>,
     pub progress: ReadSignal<u8>,
     pub set_progress: WriteSignal<u8>,
+    /// Why the last "start downloading" stopped, shown under the button in the wizard's last step.
+    pub setup_error: ReadSignal<Option<String>>,
+    pub set_setup_error: WriteSignal<Option<String>>,
 }
 
 impl SetupSignals {
@@ -78,6 +81,7 @@ impl SetupSignals {
         let (status_text, set_status_text) = signal::<String>(String::new());
         let (downloading, set_downloading) = signal::<bool>(false);
         let (progress, set_progress) = signal::<u8>(0);
+        let (setup_error, set_setup_error) = signal::<Option<String>>(None);
         SetupSignals {
             wizard_step,
             set_wizard_step,
@@ -87,6 +91,8 @@ impl SetupSignals {
             set_downloading,
             progress,
             set_progress,
+            setup_error,
+            set_setup_error,
         }
     }
 }

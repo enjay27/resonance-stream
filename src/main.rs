@@ -13,6 +13,7 @@ pub mod readability;
 pub mod ruby_view;
 pub mod service_state;
 pub mod settings_nav;
+pub mod setup_plan;
 pub mod shortcut_keys;
 pub mod status_signals;
 pub mod status_view;

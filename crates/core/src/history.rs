@@ -1,7 +1,7 @@
 //! Backend chat history: the newest messages of each channel, keyed by pid.
 
 use chrono::{Days, NaiveDate};
-use resonance_types::{Channel, ChatMessage};
+use resonance_types::{default_channel_limit, Channel, ChatMessage};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
@@ -66,8 +66,7 @@ pub fn remove_expired_chat_logs(dir: &Path, today: NaiveDate, keep_days: u32) ->
 }
 
 /// How many messages of each channel the backend keeps and reloads: the
-/// numbers of the UI's channel tabs (src/chat_view.rs `tab_limit`; unset:
-/// WORLD 200, others 1000). Per channel, so a busy WORLD chat cannot push
+/// numbers of the UI's channel tabs (unset: `resonance_types::default_channel_limit`). Per channel, so a busy WORLD chat cannot push
 /// GUILD or PARTY messages out.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChannelLimits(HashMap<Channel, usize>);
@@ -89,7 +88,7 @@ impl ChannelLimits {
         self.0
             .get(&channel)
             .copied()
-            .unwrap_or(if channel == Channel::World { 200 } else { 1000 })
+            .unwrap_or_else(|| default_channel_limit(channel))
             .max(1)
     }
 }
@@ -446,7 +445,7 @@ mod tests {
         let l = limits(&[("전체", 5), ("커스텀", 5), ("GUILD", 0), ("PARTY", 30)]);
         assert_eq!(l.of(Channel::Party), 30);
         assert_eq!(l.of(Channel::Guild), 1); // at least 1
-        assert_eq!(l.of(Channel::World), 200);
+        assert_eq!(l.of(Channel::World), 500);
         assert_eq!(l.of(Channel::Local), 1000);
         // Names that are no channel (the all-tab, a made-up one) limit nothing.
         let ignored = limits(&[("전체", 1), ("TRADE", 1)]);

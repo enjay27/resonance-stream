@@ -4,12 +4,12 @@ use serde_with::DisplayFromStr;
 
 // Types shared with the backend live in crates/types.
 pub use resonance_types::{
-    contains_japanese, default_catch_up_limit, default_favorite_messages, Channel, ChatMessage,
-    ComputeMode, FavoriteMessage, FavoriteTab, FolderStatus, GistMetadata, LogLevel,
-    NetworkInterface, ProgressPayload, RemoteDictionary, RubySpan, ServiceStates, SnifferState,
-    SnifferStatePayload, SystemLogLevel, SystemMessage, TabSwitchModifier, Theme, Tier,
-    TranslationResult, TranslationView, TranslatorState, TranslatorStatePayload, UpdateCheckResult,
-    VersionInfo, WindowRect, ALL_TAB, CUSTOM_TAB, SYSTEM_TAB,
+    contains_japanese, default_catch_up_limit, default_favorite_messages, default_tab_limit,
+    Channel, ChatMessage, ComputeMode, FavoriteMessage, FavoriteTab, FolderStatus, GistMetadata,
+    LogLevel, NetworkInterface, ProgressPayload, RemoteDictionary, RubySpan, ServiceStates,
+    SnifferState, SnifferStatePayload, SystemLogLevel, SystemMessage, TabSwitchModifier, Theme,
+    Tier, TranslationResult, TranslationView, TranslatorState, TranslatorStatePayload,
+    UpdateCheckResult, VersionInfo, WindowRect, ALL_TAB, CUSTOM_TAB, SYSTEM_TAB,
 };
 
 #[serde_as]

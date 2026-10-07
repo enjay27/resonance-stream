@@ -5,7 +5,7 @@ use crate::readability::{
 };
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
-use crate::ui_types::{Channel, SystemLogLevel};
+use crate::ui_types::{default_tab_limit, Channel, SystemLogLevel};
 use crate::utils::add_system_log;
 use leptos::ev::{click, keydown};
 use leptos::html::{Button, Div, Input};
@@ -279,9 +279,9 @@ pub fn NavBar() -> impl IntoView {
                                             <div class="flex items-center justify-between">
                                                 <span class="text-xs font-bold text-base-content/80">"최대 메시지 유지:"</span>
                                                 <input type="number" class="input input-xs input-bordered w-16 text-right font-mono bg-base-200 focus:border-success"
-                                                    prop:value=move || signals.config.tab_limits.get().get(db_key).copied().unwrap_or(if tab == Tab::Channel(Channel::World) { 200 } else { 1000 }).to_string()
+                                                    prop:value=move || signals.config.tab_limits.get().get(db_key).copied().unwrap_or_else(|| default_tab_limit(db_key)).to_string()
                                                     on:change=move |ev| {
-                                                        let val = event_target_value(&ev).parse::<usize>().unwrap_or(500);
+                                                        let val = event_target_value(&ev).parse::<usize>().unwrap_or_else(|_| default_tab_limit(db_key));
                                                         signals.config.set_tab_limits.update(|map| { map.insert(db_key.to_string(), val); });
                                                         actions.save_config.dispatch(());
                                                     }

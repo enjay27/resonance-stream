@@ -180,6 +180,7 @@ pub fn run() {
             restart_to_apply_update,
             sync_dictionary,
             get_dict_version,
+            get_dictionary_status,
             get_local_dictionary,
             save_local_dictionary,
             clear_chat_history,

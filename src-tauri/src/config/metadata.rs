@@ -12,6 +12,10 @@ pub struct AppMetadata {
     pub ignored_app_version: Option<String>,
     pub ignored_model_version: Option<String>,
     pub last_update_check: u64,
+    /// The highest revision of the signed model / dictionary metadata this copy accepted; a lower
+    /// one is a rollback and is refused. 0 before the first (and in a file from before this field).
+    #[serde(default)]
+    pub accepted_revision: u64,
 }
 
 impl Default for AppMetadata {
@@ -22,6 +26,7 @@ impl Default for AppMetadata {
             ignored_app_version: None,
             ignored_model_version: None,
             last_update_check: 0,
+            accepted_revision: 0,
         }
     }
 }
@@ -89,5 +94,30 @@ pub fn save_metadata(app: &AppHandle, metadata: &AppMetadata) {
                 format!("metadata.json was not saved ({e})"),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_from_before_the_accepted_revision_has_accepted_nothing() {
+        let old = r#"{"current_model_version":"1.1.0","current_dict_version":"1.0.6",
+            "ignored_app_version":null,"ignored_model_version":null,"last_update_check":0}"#;
+        let metadata: AppMetadata = serde_json::from_str(old).expect("an older file parses");
+        assert_eq!(metadata.accepted_revision, 0);
+        assert_eq!(AppMetadata::default().accepted_revision, 0);
+    }
+
+    #[test]
+    fn the_accepted_revision_survives_a_save_and_a_load() {
+        let metadata = AppMetadata {
+            accepted_revision: 7,
+            ..AppMetadata::default()
+        };
+        let text = serde_json::to_string_pretty(&metadata).unwrap();
+        let back: AppMetadata = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.accepted_revision, 7);
     }
 }

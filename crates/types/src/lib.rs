@@ -591,6 +591,30 @@ pub struct UpdateCheckResult {
     pub metadata_error: Option<String>,
 }
 
+impl UpdateCheckResult {
+    /// The result of a check whose model / dictionary metadata was refused (`error` says why): the
+    /// app's own update (`app_update_available`, `app`: from its own signed feed) is kept, and
+    /// nothing the refused metadata said is offered or passed on.
+    pub fn refused(app_update_available: bool, app: VersionInfo, error: String) -> Self {
+        Self {
+            app_update_available,
+            model_update_available: false,
+            dict_update_available: false,
+            remote_data: GistMetadata {
+                revision: 0,
+                app,
+                model: VersionInfo::default(),
+                dictionary: RemoteDictionary {
+                    version: String::new(),
+                    updated_at: String::new(),
+                    sha256: String::new(),
+                },
+            },
+            metadata_error: Some(error),
+        }
+    }
+}
+
 // --- Furigana ---
 
 /// A piece of a Japanese line for display: `text` as written, with its
@@ -763,6 +787,32 @@ mod tests {
         );
         let back: UpdateCheckResult = serde_json::from_str(&text).unwrap();
         assert_eq!(back.metadata_error.as_deref(), Some("signature refused"));
+    }
+
+    #[test]
+    fn a_refused_check_keeps_the_app_update_and_offers_no_model_or_dictionary() {
+        let announced = VersionInfo {
+            latest_version: "0.7.0".into(),
+            download_url: "https://example.com/app.exe".into(),
+            release_notes: "notes".into(),
+            sha256: String::new(),
+        };
+        let result = UpdateCheckResult::refused(true, announced, "no signature".into());
+        // The app's own update comes from its own signed feed and is unaffected.
+        assert!(result.app_update_available);
+        assert_eq!(result.remote_data.app.latest_version, "0.7.0");
+        // Nothing the unverified metadata said is offered or passed on.
+        assert!(!result.model_update_available);
+        assert!(!result.dict_update_available);
+        assert_eq!(result.remote_data.revision, 0);
+        assert_eq!(result.remote_data.model.latest_version, "");
+        assert_eq!(result.remote_data.model.download_url, "");
+        assert_eq!(result.remote_data.model.sha256, "");
+        assert_eq!(result.remote_data.dictionary.version, "");
+        assert_eq!(result.metadata_error.as_deref(), Some("no signature"));
+        // A refusal with no app update to announce.
+        let quiet = UpdateCheckResult::refused(false, VersionInfo::default(), "x".into());
+        assert!(!quiet.app_update_available);
     }
 
     #[test]

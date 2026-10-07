@@ -4,6 +4,10 @@ use parking_lot::Mutex;
 use resonance_core::download::{
     is_newer_version, BodyCap, BodyTooLarge, CONNECT_TIMEOUT, REMOTE_CALL_TIMEOUT,
 };
+use resonance_core::signed_metadata::{
+    accept_dictionary, accept_metadata, dictionary_refusal_line, refusal_line, signature_url,
+    trusted_metadata_keys, MetadataError,
+};
 use resonance_core::test_env::UpdateState;
 use resonance_core::text::Dictionary;
 use resonance_core::update_feed::{parse_feed_allowing, UpdateFeed};
@@ -12,22 +16,27 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
+/// The model's and the dictionary's metadata, signed (`metadata.yml` publishes it on the generated
+/// `metadata` branch; docs/decisions.md D-28). The gist stays for copies that predate this and is
+/// not a fallback: a fallback would defeat the signature.
 const METADATA_URL: &str =
-    "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/metadata.json";
+    "https://raw.githubusercontent.com/enjay27/resonance-stream/metadata/metadata.json";
 /// The update feed of the newest stable release (`release.yml` publishes it);
 /// the app learns about its own updates here, not from the gist.
 const FEED_URL: &str =
     "https://github.com/enjay27/resonance-stream/releases/latest/download/latest.json";
 /// A feed is a few lines of JSON plus release notes.
 const FEED_MAX_BYTES: usize = 256 * 1024;
-/// The metadata names three versions, a model and its hash. Generous: not measured, the host is
-/// out of reach of the session that set it.
+/// The metadata names three versions, a model and its hash. Generous.
 const METADATA_MAX_BYTES: usize = 64 * 1024;
+/// A minisign signature is a few hundred bytes.
+const SIGNATURE_MAX_BYTES: usize = 16 * 1024;
 /// The custom dictionary: a list of words. Generous (4 MiB), well above any list a person keeps.
 const DICT_MAX_BYTES: usize = 4 * 1024 * 1024;
-const DICT_URL: &str = "https://gist.githubusercontent.com/enjay27/4066e54b9c2ac6c923bf967e6d9a06c5/raw/custom_dict.json";
+const DICT_URL: &str =
+    "https://raw.githubusercontent.com/enjay27/resonance-stream/metadata/custom_dict.json";
 
-// --- 1. Structs matching the unified Gist JSON: shared with the UI ---
+// --- 1. Structs matching the published metadata JSON: shared with the UI ---
 pub use resonance_types::{GistMetadata, RemoteDictionary, UpdateCheckResult, VersionInfo};
 
 /// A client for the small calls (feed, metadata, dictionary): it gives up connecting, and gives up
@@ -63,6 +72,93 @@ static LAST_FEED: Mutex<Option<UpdateFeed>> = Mutex::new(None);
 /// The release the last update check announced, if there was one.
 pub fn announced_update() -> Option<UpdateFeed> {
     LAST_FEED.lock().clone()
+}
+
+/// The signed metadata the last check accepted. `sync_dictionary` checks the dictionary against it,
+/// so the UI cannot name another version or hash.
+static LAST_VERIFIED: Mutex<Option<GistMetadata>> = Mutex::new(None);
+
+/// GET `url`, up to `limit` bytes. `Ok(None)`: nothing is published there (404). `what` names the
+/// file in an error.
+async fn fetch_published(url: &str, limit: usize, what: &str) -> Result<Option<Vec<u8>>, String> {
+    let res = remote_client()?
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+    if res.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !res.status().is_success() {
+        return Err(format!("{what} returned: {}", res.status()));
+    }
+    read_capped(res, limit)
+        .await
+        .map(Some)
+        .map_err(|e| format!("{what}: {e}"))
+}
+
+/// The published metadata and its signature, checked. The outer `Err`: they could not be fetched
+/// (the network, a server error, no metadata file at all). The inner `Err`: they were fetched and
+/// refused (no signature, a bad one, a rollback).
+async fn fetch_verified_metadata(
+    accepted_revision: u64,
+) -> Result<Result<GistMetadata, MetadataError>, String> {
+    let url = crate::test_env::metadata_url().unwrap_or(METADATA_URL);
+    let body = fetch_published(url, METADATA_MAX_BYTES, "Metadata")
+        .await?
+        .ok_or_else(|| "Metadata: nothing is published at the metadata address".to_string())?;
+    let signature = fetch_published(
+        &signature_url(url),
+        SIGNATURE_MAX_BYTES,
+        "Metadata signature",
+    )
+    .await?
+    .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_string());
+    let keys = trusted_metadata_keys(crate::test_env::metadata_trust_key());
+    Ok(accept_metadata(
+        &body,
+        signature.as_deref(),
+        &keys,
+        accepted_revision,
+    ))
+}
+
+/// A publication that verified: remembered as the highest accepted revision, and kept for
+/// `sync_dictionary`. The revision is stored once the metadata's signature has held -- the
+/// dictionary is checked later, at the sync, and a mismatch there refuses only the dictionary.
+fn accept_verified(app: &AppHandle, verified: &GistMetadata) {
+    let metadata = crate::config::load_metadata(app);
+    if verified.revision > metadata.accepted_revision {
+        crate::config::save_metadata(
+            app,
+            &crate::config::AppMetadata {
+                accepted_revision: verified.revision,
+                ..metadata
+            },
+        );
+    }
+    *LAST_VERIFIED.lock() = Some(verified.clone());
+}
+
+/// The metadata the last check accepted, or a fresh check when there was none (the test bridge
+/// syncs without one).
+async fn verified_metadata(app: &AppHandle) -> Result<GistMetadata, String> {
+    if let Some(verified) = LAST_VERIFIED.lock().clone() {
+        return Ok(verified);
+    }
+    let accepted = crate::config::load_metadata(app).accepted_revision;
+    match fetch_verified_metadata(accepted).await? {
+        Ok(verified) => {
+            accept_verified(app, &verified);
+            Ok(verified)
+        }
+        Err(refused) => {
+            let line = refusal_line(&refused);
+            inject_system_message(app, SystemLogLevel::Error, "Metadata", line.clone());
+            Err(line)
+        }
+    }
 }
 
 /// Reads the release feed. `Ok(None)`: no stable release exists yet (404).
@@ -107,23 +203,16 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
             metadata_error: None,
         });
     }
-    let response = remote_client()?
-        .get(crate::test_env::metadata_url().unwrap_or(METADATA_URL))
-        .send()
-        .await
-        .map_err(|e| format!("Network error: {}", e))?;
-    let body = read_capped(response, METADATA_MAX_BYTES)
-        .await
-        .map_err(|e| format!("Metadata: {e}"))?;
-    let mut remote_data: GistMetadata =
-        serde_json::from_slice(&body).map_err(|e| format!("JSON parsing error: {}", e))?;
-
     let metadata = crate::config::load_metadata(&app);
     let current_app_version = app.package_info().version.to_string();
 
-    // App Check: from the release feed, not the gist (whose `app` entry only
-    // serves copies that predate this). A feed that cannot be read is no
-    // update -- never a reason to fail the model / dictionary check.
+    // The model / dictionary metadata first: fetched, then checked against the signature. A fetch
+    // that fails is an error as before; a refusal is not (see below).
+    let verdict = fetch_verified_metadata(metadata.accepted_revision).await?;
+
+    // App Check: from the release feed (its own signed channel), not from the metadata. A feed that
+    // cannot be read is no update -- never a reason to fail the model / dictionary check, and a
+    // refused metadata does not touch it either.
     let mut feed_error = None;
     let feed = match fetch_update_feed().await {
         Ok(feed) => feed,
@@ -134,7 +223,7 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
         }
     };
     *LAST_FEED.lock() = feed.clone();
-    remote_data.app = feed
+    let app_info = feed
         .as_ref()
         .map(|feed| VersionInfo {
             latest_version: feed.version.clone(),
@@ -150,7 +239,7 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
         .as_ref()
         .is_some_and(|feed| is_newer_version(&feed.version, &current_app_version));
     if let Some(ignored) = &metadata.ignored_app_version {
-        if ignored == &remote_data.app.latest_version {
+        if ignored == &app_info.latest_version {
             app_update_available = false;
         }
     }
@@ -161,6 +250,26 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
             .filter(|_| app_update_available)
             .map(|feed| feed.version.as_str()),
     ));
+
+    // A bad or missing signature, or a rollback: no model or dictionary update is offered, what is
+    // installed stays, and the system log says why. The UI gets the reason in `metadata_error`.
+    let mut remote_data = match verdict {
+        Ok(verified) => {
+            accept_verified(&app, &verified);
+            verified
+        }
+        Err(refused) => {
+            *LAST_VERIFIED.lock() = None;
+            let line = refusal_line(&refused);
+            inject_system_message(&app, SystemLogLevel::Error, "Metadata", line.clone());
+            return Ok(UpdateCheckResult::refused(
+                app_update_available,
+                app_info,
+                line,
+            ));
+        }
+    };
+    remote_data.app = app_info;
 
     // Model Check
     let mut model_update_available =
@@ -197,28 +306,46 @@ fn install_dictionary(app: &AppHandle, dict: Dictionary) {
     }
 }
 
+/// Fetches the custom dictionary, checks it against the signed metadata (its SHA-256 is named
+/// there) and installs it. `version` is what the UI believes it is syncing; what is recorded as
+/// installed is the verified metadata's version, so a UI (or a caller of the bridge) cannot name
+/// another one.
 #[tauri::command]
 pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, String> {
     // 1. Resolve Local Path
     let dict_path = dictionary_path(&app);
 
-    // 2. Fetch from Remote
-    let response = remote_client()?
-        .get(crate::test_env::dictionary_url().unwrap_or(DICT_URL))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let body = read_capped(response, DICT_MAX_BYTES)
-        .await
-        .map_err(|e| format!("Dictionary: {e}"))?;
+    // 2. What the signed metadata says the dictionary is
+    let verified = verified_metadata(&app).await?;
+    if verified.dictionary.version != version {
+        log::warn!(
+            "[Dictionary] The UI asked to sync version {:?}; the verified metadata has {:?}",
+            version,
+            verified.dictionary.version
+        );
+    }
+
+    // 3. Fetch from Remote
+    let body = fetch_published(
+        crate::test_env::dictionary_url().unwrap_or(DICT_URL),
+        DICT_MAX_BYTES,
+        "Dictionary",
+    )
+    .await?
+    .ok_or_else(|| "Dictionary: nothing is published at the dictionary address".to_string())?;
+
+    // The named file, and one the app can read: otherwise nothing is saved.
+    if let Err(refused) = accept_dictionary(&body, &verified) {
+        let line = dictionary_refusal_line(&refused);
+        inject_system_message(&app, SystemLogLevel::Error, "Metadata", line.clone());
+        return Err(line);
+    }
     let json_content =
         String::from_utf8(body).map_err(|_| "The dictionary is not text".to_string())?;
-
-    // Validate before saving: a dictionary that does not parse is rejected
     let dict = Dictionary::from_json_str(&json_content)
-        .map_err(|e| format!("Invalid dictionary received from Gist: {}", e))?;
+        .map_err(|e| format!("Invalid dictionary received: {}", e))?;
 
-    // 3. Save Locally
+    // 4. Save Locally
     fs::create_dir_all(dict_path.parent().unwrap()).map_err(|e| e.to_string())?;
     resonance_core::download::write_atomic(&dict_path, json_content.as_bytes())
         .map_err(|e| e.to_string())?;
@@ -239,11 +366,11 @@ pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, 
     );
     println!(
         "Dictionary successfully synchronized. version {:?}",
-        version
+        verified.dictionary.version
     );
 
     let mut metadata = crate::config::load_metadata(&app);
-    metadata.current_dict_version = version;
+    metadata.current_dict_version = verified.dictionary.version;
     crate::config::save_metadata(&app, &metadata);
 
     Ok("Dictionary updated and reloaded!".to_string())

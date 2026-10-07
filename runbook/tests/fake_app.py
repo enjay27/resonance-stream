@@ -66,7 +66,9 @@ notebook does for the new version, are never parsed). Environment:
 """
 from __future__ import annotations
 
+import base64
 import datetime
+import hashlib
 import http.client
 import json
 import os
@@ -86,7 +88,7 @@ from pathlib import Path
 
 SWITCHES = {"fresh", "assume-setup-done", "no-capture", "no-translator", "no-update-check", "no-popups",
             "no-window-state", "print-env"}
-VALUES = {"data-dir", "feed-url", "metadata-url", "dictionary-url", "status-file", "log-file", "bridge-url", "llama-url"}
+VALUES = {"data-dir", "feed-url", "metadata-url", "metadata-trust-key", "dictionary-url", "status-file", "log-file", "bridge-url", "llama-url"}
 
 
 def parse(argv: list[str]) -> dict:
@@ -621,16 +623,90 @@ class App:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
 
+    # -- the signed metadata (downloader/gist.rs, core signed_metadata.rs, as understood). The stand-in cannot check minisign: it reads the
+    #    dry-run scheme of `mockfeed.MetadataSigner` (FAKESIG: key id, SHA-256 of the body, revision), with the real app's refusal texts
+    def read_text_url(self, url: str) -> str | None:
+        """The body at `url`; None for a 404."""
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:  # noqa: S310 -- local mock
+                return r.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            raise
+
+    def accepted_revision(self) -> int:
+        path = self.data_path("config", "metadata.json")
+        try:
+            return int(json.loads(path.read_text(encoding="utf-8")).get("accepted_revision", 0)) if path else 0
+        except (OSError, ValueError, AttributeError):
+            return 0
+
+    def remember_revision(self, revision: int) -> None:
+        path = self.data_path("config", "metadata.json")
+        if path is None or revision <= self.accepted_revision():
+            return
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            saved = {"current_model_version": "0.0.0", "current_dict_version": "0.0.0", "ignored_app_version": None,
+                     "ignored_model_version": None, "last_update_check": 0}
+        saved["accepted_revision"] = revision
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(saved), encoding="utf-8")
+
+    def verify_metadata(self) -> tuple[dict | None, str]:
+        """(the metadata, "") when it is signed by the trusted key for its revision and not older than the accepted one, else (None, why)."""
+        url = self.flags.get("metadata-url")
+        if not url:
+            return None, "no --metadata-url"
+        body = self.read_text_url(url)
+        if body is None:
+            return None, "Metadata: nothing is published at the metadata address"
+        sig = self.read_text_url(url + ".sig")
+        if sig is None:
+            return None, "no signature is published for the metadata"
+        try:
+            metadata = json.loads(body)
+            revision = int(metadata["revision"])
+            key_id = base64.b64decode(self.flags.get("metadata-trust-key", "")).decode().splitlines()[1]
+            tag, signer, digest, signed_rev = base64.b64decode(sig.strip()).decode().splitlines()[:4]
+        except (ValueError, KeyError, IndexError, TypeError):
+            return None, "the metadata signature was refused: the update signature is malformed"
+        if tag != "FAKESIG" or signer != key_id or digest != hashlib.sha256(body.encode("utf-8")).hexdigest():
+            return None, "the metadata signature was refused: the update is not signed by a trusted key"
+        if int(signed_rev) != revision:
+            return None, f"the metadata signature was refused: the update is signed for version {signed_rev}, not the announced {revision}"
+        if revision < self.accepted_revision():
+            return None, f"the metadata is revision {revision}, older than the revision {self.accepted_revision()} already accepted"
+        return metadata, ""
+
+    def refuse(self, why: str) -> None:
+        self.event("system-event", {"pid": 0, "level": "error", "source": "Metadata",
+                                    "message": f"Model and dictionary updates were refused: {why}. The installed model and dictionary are kept."})
+
     def sync_dictionary(self, version: str) -> str | None:
         """`sync_dictionary`: fetch, validate, save, install, remember the version. The error text is the ack's."""
         url = self.flags.get("dictionary-url")
         if not url:
             return "no --dictionary-url: the stand-in only knows the stand-in server"
         try:
+            metadata, why = self.verify_metadata()
+            if metadata is None:
+                self.refuse(why)
+                return f"Model and dictionary updates were refused: {why}. The installed model and dictionary are kept."
+            self.remember_revision(int(metadata["revision"]))
             with urllib.request.urlopen(url, timeout=10) as r:  # noqa: S310 -- local mock
                 text = r.read().decode("utf-8")
         except (OSError, ValueError, http.client.HTTPException) as e:
             return str(e)
+        named = str(metadata.get("dictionary", {}).get("sha256", "")).lower()
+        found = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if named != found:
+            line = (f"The dictionary was refused: the dictionary does not match the signed metadata (expected {named}, got {found}). "
+                    "The installed dictionary is kept. A file published a moment ago can take a few minutes to reach every server; try again later.")
+            self.event("system-event", {"pid": 0, "level": "error", "source": "Metadata", "message": line})
+            return line
         try:
             terms = self.parse_dictionary(text)
         except ValueError as e:
@@ -638,7 +714,7 @@ class App:
         self.save_dictionary_file(text)
         if os.environ.get("FAKE_APP_DICT_BUG") != "sync-not-installed":  # a bug to catch: used only after a restart
             self.dictionary = terms
-        self.dict_version = version
+        self.dict_version = str(metadata.get("dictionary", {}).get("version", version))
         return None
 
     def save_local_dictionary(self, content: str) -> str | None:
@@ -1055,13 +1131,17 @@ class App:
     def check(self) -> str | None:
         """Returns the announced download url when a newer version is on offer."""
         try:
-            metadata = urllib.request.urlopen(self.flags["metadata-url"], timeout=5).read()  # noqa: S310 -- local
+            verified, why = self.verify_metadata()
         except (OSError, KeyError, ValueError):
             self.log("check failed: metadata")
             return None
-        # the UI's silent dictionary update (hydration.rs): only when auto-sync is on, whatever the gist announces
+        if verified is None:  # refused: no model or dictionary update is offered; the app's own update below is unaffected
+            self.refuse(why)
+        else:
+            self.remember_revision(int(verified["revision"]))
+        # the UI's silent dictionary update (hydration.rs): only when auto-sync is on, whatever the metadata announces
         try:
-            announced = json.loads(metadata)["dictionary"]["version"]
+            announced = verified["dictionary"]["version"] if verified is not None else None
         except (ValueError, KeyError, TypeError):
             announced = None
         if announced and announced != self.dict_version and (self.auto_sync_dict or os.environ.get("FAKE_APP_DICT_BUG") == "auto-always"):

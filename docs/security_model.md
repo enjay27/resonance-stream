@@ -22,7 +22,7 @@ So a flaw that lets any of those inputs change what runs, runs as administrator.
 | Game server bytes on TCP 5003 (and anyone who can put packets on the path) | untrusted input |
 | The update feed `latest.json` on this repo's GitHub releases | untrusted transport, authenticated by signature |
 | The metadata gist (model URL / hash / version, custom dictionary) | untrusted transport, **not signed** (the copies of the app that exist today read it; the next app version reads the signed `metadata` branch instead, D-28) |
-| The `metadata` branch of this repo (the signed model / dictionary metadata, from `metadata/` on `main`) | untrusted transport, authenticated by signature (written by `metadata.yml` on a pushed tag `metadata-v<N>`; read by the app from the next version on: S3b-2 step M3) |
+| The `metadata` branch of this repo (the signed model / dictionary metadata, from `metadata/` on `main`) | untrusted transport, authenticated by signature (written by `metadata.yml` on a pushed tag `metadata-v<N>`; read by the app from M3b on) |
 | The AI-server zip on this repo's releases (`v0.2.0` asset) | pinned by a SHA-256 constant in code |
 | Another process of the same Windows user | **not trusted**, but today it can write where the app executes from |
 | A tester running the bridge | trusted, but only in a `test-env` build |
@@ -71,7 +71,7 @@ The zip pin protects the download, not the files later on disk. A process of the
 |---|---|
 | `download_model` takes URL and SHA-256 **from the UI, which got them from the gist**; an empty hash is refused (`model.rs:57-64`) | confirmed |
 | The download is checked for length and SHA-256 against that hash (`model.rs:123`); an installed model with a matching hash is not downloaded again (`:76-80`) | confirmed |
-| The hash and the URL come from the same unsigned source, so the check protects against corruption, **not against a tampered gist** | confirmed reading; gap W-8 (A-6.3). Being closed (D-28): the verifier (`signed_metadata.rs`) and the signing workflow (`metadata.yml`) exist; **the app does not use them until M3**, so today's copies still trust the gist |
+| The hash and the URL come from the same unsigned source, so the check protects against corruption, **not against a tampered gist** | confirmed reading; gap W-8 (A-6.3). Being closed (D-28): the verifier (`signed_metadata.rs`) and the signing workflow (`metadata.yml`) exist; **the app reads the signed `metadata` branch from M3b on** (a bad or missing signature, a rollback or a dictionary that is not the named file is refused and logged; `gist.rs`), but copies built before that still trust the gist |
 | The signing workflow runs only for a pushed tag `metadata-v<N>` (never for a merge: `claude/*` PRs auto-merge) and uses the same secret as `release.yml`. A workflow file in a tag's own commit is the one that runs, so anyone who can push a tag could run a changed copy with the secret: the same exposure as releases; limiting the secret to an Environment that only tags `metadata-v*` / `v*` may use closes it (a repository setting, optional) | confirmed reading; known |
 | A model file is parsed by llama.cpp, which is not sandboxed | estimated |
 | The dictionary is parsed as typed JSON (`Dictionary::from_json_str`, invalid input refused: `gist.rs:181,233`); its terms are shielded behind placeholders in the prompt and put back in the answer | confirmed |
@@ -102,6 +102,7 @@ The zip pin protects the download, not the files later on disk. A process of the
 | Compiled only with the `test-env` feature; a stable exe holds neither the bridge nor its MQTT client (release workflow test: "stable release never mentions test-env", `rc-lib.test.sh`) | confirmed |
 | Connects only to `mqtt://127.0.0.1`, `localhost` or `[::1]` (`core/test_env.rs:222,372`) | confirmed |
 | `--llama-url`, `--metadata-url`, `--feed-url`, `--dictionary-url` accept only `https://` or loopback `http://` (`test_env.rs:226,230`); a downloaded exe must still carry a valid signature even then | confirmed |
+| `--metadata-trust-key` makes a test run trust one throwaway key for the signed metadata **instead of** the built-in keys. Like every flag it is read only in a debug or `test-env` build (`GATE_OPEN`), and `release.yml` never names `test-env` (pinned in `rc-lib.test.sh`) | confirmed reading |
 | Commands are a **fixed allow-list** (`Command` in `core/bridge.rs`); an unknown name is refused with an error | confirmed |
 | An answer over 16 MiB becomes an error ack (`fit_ack`), not a dropped connection | confirmed (PR #203) |
 
@@ -111,7 +112,7 @@ The zip pin protects the download, not the files later on disk. A process of the
 |---|---|---|---|
 | T-1 | A hostile host serves a fake update | rejected: HTTPS, announced release only, minisign with version binding | none known |
 | T-2 | A process of the same user replaces `llama-server.exe` or a DLL | runs elevated at the next translator start | **W-2** (checked before spawn since S3a; the check-to-spawn window stays open) |
-| T-3 | The metadata gist is changed to point at another model URL and hash | accepted by today's copies: both come from the gist; refused by the next app version (D-28, M3) | **W-8** |
+| T-3 | The metadata gist is changed to point at another model URL and hash | accepted by copies built before M3b: both come from the gist; refused by the app from M3b on (D-28) | **W-8** |
 | T-4 | An update swap fails halfway (antivirus, lock) | the app is left without an exe | **W-1** |
 | T-5 | The app is killed while extracting the AI server | the half-extracted folder counts as installed | **W-3** |
 | T-6 | An on-path attacker sends crafted game frames | decoder is clamped and property-tested; zstd window can reserve memory | A-1.3 |

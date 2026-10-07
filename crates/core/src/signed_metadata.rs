@@ -181,6 +181,19 @@ pub fn verify_dictionary(dictionary: &[u8], metadata: &GistMetadata) -> Result<(
     }
 }
 
+/// The system-log line for a dictionary that was refused although the metadata was accepted. A hash
+/// mismatch is often only timing -- a file published a moment ago can still be an old copy on some
+/// server -- so it says to try again later.
+pub fn dictionary_refusal_line(error: &MetadataError) -> String {
+    let retry = match error {
+        MetadataError::DictionaryDiffers { .. } => {
+            " A file published a moment ago can take a few minutes to reach every server; try again later."
+        }
+        _ => "",
+    };
+    format!("The dictionary was refused: {error}. The installed dictionary is kept.{retry}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,6 +461,27 @@ mod tests {
         ));
         assert!(line.contains("signature was refused"), "{line}");
         assert!(line.contains("not signed by a trusted key"), "{line}");
+    }
+
+    #[test]
+    fn the_log_line_for_a_refused_dictionary_keeps_the_installed_one_and_advises_a_retry_for_a_mismatch(
+    ) {
+        let differs = MetadataError::DictionaryDiffers {
+            expected: "aa".into(),
+            found: "bb".into(),
+        };
+        let line = dictionary_refusal_line(&differs);
+        assert!(line.contains(&differs.to_string()), "{line}");
+        assert!(line.contains("installed dictionary is kept"), "{line}");
+        // A file published a moment ago can still be an old copy on some server: say to try again.
+        assert!(line.contains("try again"), "{line}");
+        // A dictionary that is the named file but unreadable is not a timing matter.
+        let unreadable = dictionary_refusal_line(&MetadataError::DictionaryUnreadable("x".into()));
+        assert!(
+            unreadable.contains("installed dictionary is kept"),
+            "{unreadable}"
+        );
+        assert!(!unreadable.contains("try again"), "{unreadable}");
     }
 
     #[test]

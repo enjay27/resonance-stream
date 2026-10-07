@@ -18,7 +18,7 @@ model:  "번역<end_of_turn>"
 final:  "번역"
 
 model:  "<start_of_turn>model\n번역</end_of_turn><eos>"
-final:  "model 번역"
+final:  "번역"
 
 model:  "안녕 ! 잘 가 ~ 정말 ?"
 final:  "안녕! 잘 가~ 정말?"

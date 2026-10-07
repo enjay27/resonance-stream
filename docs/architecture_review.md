@@ -377,7 +377,7 @@ Mostly **reported** (a review agent estimated from reading the code); nothing wa
 - **Fix:** shield any `[P<n>]` already present in the input like the other literals so numbers cannot clash; the golden snapshot then changes on purpose.
 - **Severity:** Low · **Effort:** Small (a task card exists)
 
-### W-12 A leaked `<start_of_turn>model` leaves the word "model" (confirmed, in the golden table)
+### W-12 A leaked `<start_of_turn>model` leaves the word "model" (confirmed; **fixed 2026-10-07, S5c**: the whole header goes, so the output is `번역`)
 
 - **Repro (confirmed):** model output `"<start_of_turn>model\n번역</end_of_turn><eos>"` post-processes to `"model 번역"`: the tag is removed but the role word stays.
 - **Fix:** decide whether to remove a leaked role header as a whole (a behaviour decision), then update the golden.

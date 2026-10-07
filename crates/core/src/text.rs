@@ -13,6 +13,10 @@ lazy_static! {
     static ref RECRUIT_PATTERN: Regex = Regex::new(r"@[A-Za-z0-9]+").unwrap();
     static ref NUM_UNIT_PATTERN: Regex = Regex::new(r"(\d+)(種|人|周|回)").unwrap();
     static ref THINK_PATTERN: Regex = Regex::new(r"(?s)<think>.*?</think>\s*").unwrap();
+    /// A turn header the model wrote out: the tag and the role word that follows
+    /// it (`<start_of_turn>model` + newline), which is not part of the translation.
+    static ref ROLE_HEADER_PATTERN: Regex =
+        Regex::new(r"<start_of_turn>\s*(?:model|user)(?:\s+|$)").unwrap();
     static ref TURN_TAG_PATTERN: Regex =
         Regex::new(r"</?end_of_turn>|</?start_of_turn>|<bos>|<eos>").unwrap();
     static ref SPACE_BEFORE_PUNCT: Regex = Regex::new(r"\s+([.!?,~])").unwrap();
@@ -308,7 +312,9 @@ pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
     // 1. Strip <think> tags
     let mut final_text = THINK_PATTERN.replace_all(translated, "").to_string();
 
-    // 2. Strip leaked model turn tokens (</end_of_turn> etc.)
+    // 2. Strip leaked model turn tokens (</end_of_turn> etc.), a leaked role
+    // header whole first so its word does not stay behind
+    final_text = ROLE_HEADER_PATTERN.replace_all(&final_text, "").to_string();
     final_text = TURN_TAG_PATTERN.replace_all(&final_text, "").to_string();
 
     // Restore shielded words in one pass. Matching the whole `[P<n>]` token
@@ -1027,6 +1033,40 @@ mod tests {
         assert_eq!(
             shield.replacements.get("[P1]").map(String::as_str),
             Some("딜러")
+        );
+    }
+
+    fn restored(output: &str) -> String {
+        let shield = preprocess_text("", &Dictionary::default(), None);
+        postprocess_text(output, &shield)
+    }
+
+    #[test]
+    fn a_leaked_role_header_goes_whole_not_just_its_tag() {
+        // W-12: only the tag used to go, and the role word stayed ("model 번역").
+        for (leaked, want) in [
+            ("<start_of_turn>model\n번역</end_of_turn><eos>", "번역"),
+            ("<start_of_turn>model\r\n번역", "번역"),
+            ("<start_of_turn>user\n안녕하세요", "안녕하세요"),
+            ("<start_of_turn>model 번역", "번역"),
+            ("<start_of_turn>model", ""),
+            (
+                "번역<end_of_turn>\n<start_of_turn>model\n두 번째",
+                "번역 두 번째",
+            ),
+        ] {
+            assert_eq!(restored(leaked), want, "output {leaked:?}");
+        }
+    }
+
+    #[test]
+    fn a_word_that_only_starts_like_a_role_stays() {
+        // The word goes only as the header: a tag followed by "modeling" is
+        // still just a stray tag.
+        assert_eq!(restored("<start_of_turn>modeling 번역"), "modeling 번역");
+        assert_eq!(
+            restored("a model city, the user's"),
+            "a model city, the user's"
         );
     }
 

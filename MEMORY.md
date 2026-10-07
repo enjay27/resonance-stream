@@ -14,7 +14,7 @@
 
 **Open decisions (Kade).** K8 `<bos>` count; K16 how 一人 / 二人 / 一人前 are read; what a leaked `<start_of_turn>model` should become; the update-check result (O-1..O-5 in [`docs/decisions.md`](docs/decisions.md)).
 **Known defects, not fixed.** A `[P0]` typed in chat collides with a real placeholder; a leaked `<start_of_turn>model` leaves the word "model"; six mutation gaps in `text.rs` (`TranslationCache` eviction order, `is_empty`, `Dictionary` accessors). Pinned by golden tests; see W-11, W-12, A-2.4 in the review.
-**Top risks (review).** The self-update has no rollback (W-1); the admin app's `llama-server.exe` is now hash-checked before spawn (W-2, S3a; the check-to-spawn window is open); chat was not archived on some paths (W-4, fixed by S2a, PR open). Stages S1-S3.
+**Top risks (review), after S1-S3a, S2a, S2c.** Done: update rollback (W-1), `.part` extraction (W-3), panic log (W-5), server-file hashes (W-2; the check-to-spawn window is open), chat archived on arrival (W-4, PR open). Left: S2b settings (W-7), S2d `netsh` thread (W-6), S3b metadata trust (W-8), S3c webview (W-9), S4-S7.
 
 ## Where the detail is
 

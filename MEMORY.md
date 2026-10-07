@@ -4,9 +4,9 @@
 
 ## Now — 2026-10-07
 
-**New session? Start with [`.memory/sessions/2026-10-07-architecture-roadmap-handoff.md`](.memory/sessions/2026-10-07-architecture-roadmap-handoff.md).**
+**New session? Start with [`.memory/sessions/2026-10-07-signed-metadata-and-open-items-handoff.md`](.memory/sessions/2026-10-07-signed-metadata-and-open-items-handoff.md)** (the earlier handoff is background).
 
-**Where things stand.** Roadmap stages S0-S6 and the signed metadata (M1-M3) are done and merged (#207-#245); the before/after is [`docs/refactoring_report.md`](docs/refactoring_report.md), the stages and the open items found after S6 (N-1 to N-5) are in [`.memory/roadmap/refactor.md`](.memory/roadmap/refactor.md). **Real window (Kade, 2026-10-07):** S6 and the signed first-run path confirmed; not yet the wizard's refusal line, the update check (O-3), or the new dictionary terms in real chat. **Next:** N-1 to N-6 in the roadmap, one PR at a time (gist untouched); the CSP PR into `rc` is Kade's to merge and test; S7 and hy-mt2 wait for his inputs (roadmap). One PR at a time.
+**Where things stand.** Roadmap stages S0-S6 and the signed metadata (M1-M3) are done and merged (#207-#249); the before/after is [`docs/refactoring_report.md`](docs/refactoring_report.md), the stages and the open items found after S6 (N-1 to N-5) are in [`.memory/roadmap/refactor.md`](.memory/roadmap/refactor.md). **Real window (Kade, 2026-10-07):** S6 and the signed first-run path confirmed; not yet the wizard's refusal line, the update check (O-3), or the new dictionary terms in real chat. **Next:** N-4, N-6, N-1, N-2, N-5 (N-3 done, #249), one PR at a time (gist untouched); the CSP PR #248 into `rc` is Kade's to merge and test; S7 and hy-mt2 wait for his inputs (roadmap). One PR at a time.
 
 **Written but not verified**
 - Smoke runs on `main` at #208, #226, #230, #236 and #241 (2026-10-06/07) all ended green, all eight pipelines, so rows like `CS-restart-nodup`, `CP-big-ack`, `CP-fav-*`, popups, download-integrity and `TS-meta-*` are read as passing. **Only the step results were read, not the per-row values**: the K8 `<bos>` count (moot, D-29), the K16 一人 reading and the `TS-meta-*` values are Kade's to read from the uploaded `bridge-smoke-logs`. Whether the Node broker (aedes) has a packet limit of its own is open.

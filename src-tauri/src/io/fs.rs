@@ -91,6 +91,7 @@ pub async fn export_chat_log(
 
 #[tauri::command]
 pub fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    resonance_core::download::check_open_url(&url)?;
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| e.to_string())

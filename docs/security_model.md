@@ -80,8 +80,8 @@ The zip pin protects the download, not the files later on disk. A process of the
 | Check | Status |
 |---|---|
 | `"csp": null`, `"withGlobalTauri": true` (`tauri.conf.json:23,12`) | confirmed gap W-9 (A-6.6) |
-| `capabilities/*.json` still grants `shell:allow-spawn`, `shell:allow-execute` and a sidecar `bin/translator` | confirmed present; whether anything uses them not checked |
-| `open_browser(url)` hands any string to the opener (`io/fs.rs:93-97`) | confirmed gap W-9 |
+| `capabilities/default.json` granted `shell:allow-spawn`, `shell:allow-execute` (a sidecar `bin/translator` that does not exist) and `opener:default` | **removed in S3c-1**: nothing in Rust or the ui used the shell plugin (its init and dependency are gone too) or the opener's JS API; `open_browser` is a Rust command and needs no webview permission |
+| `open_browser(url)` handed any string to the opener (`io/fs.rs`) | **closed in S3c-1**: `check_open_url` accepts only a plain https page (host present, no space, control character or backslash) |
 | No `inner_html` on chat text was found | reported |
 
 ### 3.6 Local state
@@ -114,7 +114,7 @@ The zip pin protects the download, not the files later on disk. A process of the
 | T-5 | The app is killed while extracting the AI server | the half-extracted folder counts as installed | **W-3** |
 | T-6 | An on-path attacker sends crafted game frames | decoder is clamped and property-tested; zstd window can reserve memory | A-1.3 |
 | T-7 | A player writes control tokens or `[P<n>]` in chat | tokens are stripped; `[P<n>]` collides | W-11 |
-| T-8 | A page of the webview is hijacked | no CSP, any URL can be opened, leftover shell permissions | **W-9** |
+| T-8 | A page of the webview is hijacked | no CSP (S3c-2, waits on a Windows test); any URL can be opened and leftover shell permissions (both closed, S3c-1) | **W-9** |
 | T-9 | A hung remote host blocks start-up | no timeout on gist / dictionary fetches | W-8 |
 
 ## 5. Rules for new code
@@ -138,12 +138,12 @@ In order of risk; each item is a stage in the roadmap (`.memory/roadmap/refactor
 | W-3 non-atomic extraction | extract to `.part`, then rename | S1b |
 | W-2 unchecked server exe and DLLs | ~~per-file SHA-256 pins verified just before spawn~~ done (S3a); a locked folder ACL remains an option for the window between check and spawn | S3a |
 | W-8 unsigned metadata, no timeouts | minisign check of the gist metadata with the built-in keys; timeouts and size caps | S3b |
-| W-9 webview | CSP, remove unused shell permissions, `open_browser` only `https` | S3c |
+| W-9 webview | ~~remove unused shell permissions, `open_browser` only `https`~~ done (S3c-1); CSP open (S3c-2) | S3c |
 | A-1.3 zstd window | `set_max_window_size` | with S4 or S5 |
 
 ## 7. Not verified
 
 - Nothing in sections 3 and 4 was exploited; "mitigated" means a check exists in code.
 - Items marked **reported** were read by a review agent and not checked by hand.
-- Not checked: whether `config.log_level` reaches the backend logger, the write permissions of the NSIS install folder, whether anything uses the `shell:allow-*` capabilities, and the firewall rule's scope.
+- Not checked: whether `config.log_level` reaches the backend logger, the write permissions of the NSIS install folder, and the firewall rule's scope.
 - The windows-only code (`src-tauri/`) was read, not run, in this review.

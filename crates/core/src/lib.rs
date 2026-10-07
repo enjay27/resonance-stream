@@ -14,6 +14,7 @@ pub mod log_throttle;
 pub mod paste;
 pub mod protocol;
 pub mod replay;
+pub mod server_pins;
 pub mod sniffer_net;
 pub mod test_env;
 pub mod text;

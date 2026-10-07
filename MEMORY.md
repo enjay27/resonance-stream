@@ -8,6 +8,8 @@
 
 **Where things stand.** Roadmap stages S0-S6 and the signed metadata (M1-M3) are done and merged (#207-#249); the before/after is [`docs/refactoring_report.md`](docs/refactoring_report.md), the stages and the open items found after S6 (N-1 to N-5) are in [`.memory/roadmap/refactor.md`](.memory/roadmap/refactor.md). **Real window (Kade, 2026-10-07):** S6 and the signed first-run path confirmed; not yet the wizard's refusal line, the update check (O-3), or the new dictionary terms in real chat. **Next:** N-2, N-5 (N-3, N-4, N-6, N-1 done; N-6 = the settings line "v1.0.8 · 서명 리비전 N · 게시본과 같음/직접 수정됨/확인 불가", not yet seen in a real window), one PR at a time (gist untouched); the CSP PR #248 into `rc` is Kade's to merge and test; S7 and hy-mt2 wait for his inputs (roadmap). One PR at a time.
 
+**Claude config refactor** (plan: `enjay27/claude-skills` `docs/refactor-plan.md` §4). R1 done: release, runbook, app and ui rules moved verbatim to `.claude/rules/` + `release` skill. Next R2, R3, R4.
+
 **Written but not verified**
 - Smoke runs on `main` at #208, #226, #230, #236 and #241 (2026-10-06/07) all ended green, all eight pipelines, so rows like `CS-restart-nodup`, `CP-big-ack`, `CP-fav-*`, popups, download-integrity and `TS-meta-*` are read as passing. **Only the step results were read, not the per-row values**: the K8 `<bos>` count (moot, D-29), the K16 一人 reading and the `TS-meta-*` values are Kade's to read from the uploaded `bridge-smoke-logs`. Whether the Node broker (aedes) has a packet limit of its own is open.
 - reqwest 0.12 on Kade's PC: translation, dictionary sync and favorites work; the model download was skipped and the update dialog did not show (up to date, or broken? read the system log's update line).

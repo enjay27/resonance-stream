@@ -13,7 +13,7 @@ on this page.
 | `crates/core/` `crates/llama/` `crates/types/` | **core** — packet → chat pipeline, protocol decoding, translation text processing; llama-server HTTP client; DTOs shared by app and ui | any OS | `just core-check` |
 | `src/` | **ui** — Leptos 0.8 CSR frontend (wasm); pure modules unit-tested on the host | any OS | `just ui-check` |
 | `src-tauri/` | **app** — Tauri 2 backend: sockets, translator server, downloader, windows, tray | **Windows only** | `just app-check` (Windows) · `just app-cross-check` (Linux, compile only) |
-| `runbook/` | **runbook** — Jupyter notebooks + Python helpers that Kade runs by hand on Windows (`runbook/README.md`) | any OS (dry runs) | **none — treated as docs** (see *The runbook is docs*) |
+| `runbook/` | **runbook** — Jupyter notebooks + Python helpers that Kade runs by hand on Windows (`runbook/README.md`) | any OS (dry runs) | **none — treated as docs** (see `.claude/rules/runbook.md`) |
 
 `just check` runs `fmt-check`, then every gate the current OS can run (`pip install
 rust-just` or `cargo install just`). On Linux the app gate is a **compile-only**
@@ -43,12 +43,12 @@ the app owns the file and the real defaults, the ui re-exports the same type). U
   app started is ever killed. Pre/post-processing in `crates/core/src/text.rs`.
 - **Remote metadata:** a public gist (`downloader/gist.rs`) carries model/dictionary
   versions and the custom dictionary; the app's own update comes from the newest stable
-  release's `latest.json` (see *Stable releases*), checked against signing keys built into
+  release's `latest.json` (see the `release` skill, *Stable releases*), checked against signing keys built into
   the app. The gist's `app` entry is ignored by the app and kept only for copies that
   predate the signed updater (the 0.6.0 bridge release). Public URLs, not secrets.
 - **Packaging:** `package.bat` → `cargo tauri build` → NSIS installer in `dist/`.
   Test builds: a merge into `rc` publishes a plain exe as a GitHub prerelease (see
-  *Release candidates*). The app version is `[workspace.package] version` in `Cargo.toml`.
+  the `release` skill, *Release candidates*). The app version is `[workspace.package] version` in `Cargo.toml`.
 
 ---
 
@@ -106,36 +106,6 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
 
 ---
 
-## Conventions (app crate)
-
-- **Tauri commands are `pub` and reach `generate_handler!` through the crate-root
-  `pub use <module>::*`.** A new command module needs both. A private `use` of the same
-  name in a module shadows its glob re-export (rustc warns) — the item then silently
-  stops being exported; call it by path instead.
-
-- **Favorites change only through `save_favorites`** (`FavoritesState`, then the
-  `favorites-changed` event reaches every window); `save_config` keeps the stored ones and
-  ignores the ones in its payload. A popup window (`open_popup`) saves only what it owns,
-  never the whole config -- its copy of the settings may be older than the main window's.
-
-## Conventions (ui crate)
-
-- **State lives in `AppSignals` (context), not in component locals**, when more than one
-  component touches it. Components read it with `use_context::<AppSignals>()` and reach a
-  signal through its group: `signals.config` (settings), `.service`, `.setup`, `.updates`,
-  `.chat`, `.ui`. A new signal goes in the group it describes.
-- **A component under `<Show>` is re-created each time it shows.** State that must
-  survive closing a modal (typed input, an `Action`'s last result) is created by the
-  parent outside the `<Show>` and passed down as props — see `components/settings/`.
-- Helpers that need many signals take `signals: AppSignals` and destructure only the
-  fields they use (`let ChatSignals { a, set_b, .. } = signals.chat;`).
-- **A setting that lives in `config.json` is a field of `AppConfig` (`crates/types`) and a
-  signal of `signals.config` (`ConfigSignals`, named like the field).** Adding one means adding
-  it to `AppConfig` (with its default and a value in `app_config_full.json`) and to
-  `ConfigSignals` -- `to_config` / `apply` list every field, so forgetting is a compile
-  error. Its load-time quirks (a saved value that is
-  clamped or replaced) live in `apply`, not in `hydration.rs`.
-
 ## Guardrails
 
 - **Plan first.** Do not modify modules, components, manifests or CI on the first turn
@@ -152,15 +122,7 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
   test that reproduces the bug. Pure logic is tested in `crates/core` (or the ui's pure
   modules), so it runs on every OS. If a change cannot be unit-tested (Tauri/Windows
   glue), say so in the commit body. `just coverage` shows what the tests do not reach.
-- **The runbook is docs.** `runbook/` -- the Jupyter notebooks Kade runs by hand on his
-  Windows PC, their helpers, dry-run tests and fixtures -- changes no app logic, so it is
-  treated like a doc: **no CI job checks it** (do not add one), **no gate** for it in the
-  table, no test-first requirement, no `NOT VERIFIED` line for it. A PR that only touches
-  `runbook/` (and memory) is an ordinary `claude/*` PR; CI still runs on it, because
-  auto-merge needs a green run, but nothing in CI tests the runbook. A courtesy, not a gate:
-  after changing its helpers run `cd runbook && python -m pytest -q` (about 3 minutes).
-  The runbook's real proof is Kade's run on Windows, and the report he pastes back says
-  what is broken. Fix a notebook in the same PR as the code change it follows.
+- **The runbook is docs**: no CI job, no gate, no test-first requirement for `runbook/`; the full rule is `.claude/rules/runbook.md`.
 - **Auto-correction restraint.** Self-correct at most **2** times, then stop and ask.
 - **Never report a gate as passed when it could not run.** A Linux session cannot
   build `src-tauri/`; say so, and leave it to the Windows CI job.
@@ -243,76 +205,10 @@ git add -A && git commit
 - Merges made by the workflow use `GITHUB_TOKEN`, which does not start a `push` run on
   `main`; the PR's own run is the gate.
 
-### Test branches (`test/*`)
+### Test branches, release candidates, stable releases
 
-The runbook lives on `main`, in `runbook/` (see *The runbook is docs*); the old
-`test/w1-*` branches are an archive and get no updates. A `test/<job>` branch is now only
-for a **throw-away** experiment on Kade's Windows PC that does not belong in `main`.
-**It is never merged into `main` and never opens a release**: cut it from `main`, push it,
-and Kade checks it out. No PR is needed; if one is opened into `main`,
-`.github/workflows/test-branch-guard.yml` fails it (helper `branch-guard.sh`, tested in CI).
-A finding from a run becomes a normal task on a `claude/*` branch, test first when it is
-app logic; the `test/*` branch itself stays out of `main`'s history.
-
-### Release candidates (`rc`)
-
-A change that needs a run on Kade's Windows PC before `main` goes through `rc`:
-
-1. Work on `candidate/<feature>` (from `main`), gate green, push. Open a PR **into `rc`**
-   -- Kade or another maintainer merges it by hand (auto-merge never touches it).
-2. The merge starts `.github/workflows/release-candidate.yml`: CI's gates, then a
-   Windows build of the plain exe (`tauri build --no-bundle`, no installer). **No real-app
-   smoke test runs here**, and none runs on a pull request either: it is slow, and it starts
-   only from a pushed release tag (`release.yml`; `rc-lib.test.sh` pins that). Then a
-   GitHub **prerelease** `v<version>-rc.<feature>` (`.2`, `.3` ... for a repeat
-   build of the same branch) with the exe, `SHA256SUMS.txt`, and Korean notes: how to
-   run it, the merged PR's description, the commits not yet on `main`, and their
-   `NOT VERIFIED` lines. Only the newest 5 candidates (and their tags) are kept.
-   Tag / notes logic: `.github/scripts/rc-lib.sh`, tested by `rc-lib.test.sh` (CI).
-3. After Kade's test, the **same branch** goes to `main` in its own PR. `rc` is never
-   merged into `main`; it is kept current by merging `main` into it.
-
-Prereleases never become "Latest", and the app's update check reads the gist, not
-GitHub releases, so users never see a candidate. The candidate exe shares the
-installed app's data folder (same identifier): config, model, chat logs.
-
-### Stable releases (signed plain exe)
-
-An app update is installed only if one of the keys built into the app
-(`TRUSTED_UPDATE_KEYS`, `crates/core/src/update_signature.rs`) signed it for the
-announced version -- so a stable release is built and signed by
-`.github/workflows/release.yml`, never by hand: bump `[workspace.package] version`, write
-`release-notes/v<version>.md` (copy `release-notes/TEMPLATE.md`), merge to `main`, then
-push the tag `v<version>` on it. The workflow gates, runs the same
-real-app smoke test -- the only place it runs -- on a separate test-flag build of that commit
-(the shipped exe has no bridge; a red row stops the publish), builds
-the plain exe, signs it with the `TAURI_SIGNING_PRIVATE_KEY` secret, checks the
-signature the way the app will (`examples/verify_update.rs`) and publishes the exe,
-`<exe>.sig` and `latest.json` (the update feed). The private keys are never
-committed; the backup key stays offline. Tag / feed helpers:
-`.github/scripts/release-lib.sh` (tests in CI).
-
-**Never publish a stable release by hand.** Every installed app reads
-`releases/latest/download/latest.json`; a hand-made release (no `latest.json`, another
-exe) or a candidate that is not a prerelease becomes "latest" and updates silently stop
--- the app just finds no update. `release.yml` reads the live feed back after publishing,
-and `release-feed-check.yml` watches it (daily, and when a person publishes, edits or
-deletes a release); both run `.github/scripts/check-release-feed.sh`. A red run means
-users get no update: delete the hand-made release or mark it prerelease, then run the
-workflow again.
-
-**Release notes: simple for users, detailed for maintainers.** `release-notes/v<version>.md`
-has two layers. Above the line `## 개발자용 상세` is the **user summary**: a few plain
-lines (about 10, at most 12) in Korean, in everyday words -- no commit subjects, PR
-numbers, file or function names, no English. It is what the app's update dialog shows
-(`latest.json`'s `notes`) and the top of the release page. Below that line is the
-**maintainer detail** (technical, any length, English is fine); the release page puts it,
-with the commit list since the previous stable tag, in one collapsed block, and the app
-never shows it. `release.yml` refuses to start without the file, or when the summary is
-empty, over 12 lines, has a line without Korean, or still has the `<<작성>>` placeholder
-(`release_notes_problem`, tested in `release-lib.test.sh`). The update dialog's notes box
-also scrolls past a fixed height, so a long note can never push its buttons off screen.
-Candidate (`rc`) notes are for the tester and keep their own format.
+The procedure is the `release` skill (`.claude/skills/release/SKILL.md`); the rules for release
+files (never publish a stable release by hand, release notes) are in `.claude/rules/release.md`.
 
 ### Never commit
 - Secrets, `.env`.

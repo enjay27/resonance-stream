@@ -17,7 +17,8 @@ use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorState};
 use self::core::server_url;
 use resonance_core::history::ArchiveTarget;
 use resonance_core::text::{
-    preprocess_text, translate_masked, TranslationCache, TRANSLATION_CACHE_SIZE,
+    nicknames_in, preprocess_with_nicknames, translate_masked, TranslationCache,
+    TRANSLATION_CACHE_SIZE,
 };
 use resonance_core::workers::{translation_is_stale, ServerSupervisor, SupervisorAction};
 use resonance_llama::translate_text;
@@ -399,14 +400,12 @@ fn process_translation_job(
         return JobResult::Skipped;
     }
 
-    // 1. Preprocess. The nickname lock is held only for this step: the
-    // sniffer needs it for every Japanese nickname, and must not wait for
-    // the HTTP round trip below.
+    // 1. Preprocess. The nickname lock is held only to pick the names this message
+    // contains: the sniffer needs it for every Japanese nickname, and must wait neither
+    // for the rest of the shielding nor for the HTTP round trip below.
     let dict = state.dictionary.read().clone();
-    let shield = {
-        let nick_cache = state.nickname_cache.lock();
-        preprocess_text(&chat.message, &dict, Some(&nick_cache))
-    };
+    let nicknames = nicknames_in(&chat.message, &state.nickname_cache.lock());
+    let shield = preprocess_with_nicknames(&chat.message, &dict, &nicknames);
 
     // 2. HTTP Request (Blocking), unless this line was translated before;
     // 3. Postprocess

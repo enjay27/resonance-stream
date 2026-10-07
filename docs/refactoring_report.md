@@ -85,9 +85,9 @@ Legend: ✅ solved · 🟡 partly, or in another way · ⏸ left out on purpose 
 | W-9 Webview | shell and opener permissions nobody used; `open_browser` took any URL | 8 -> 5 permissions, the shell plugin removed, `open_browser` opens only `https` (#221) | 🟡 the CSP is **not started**: a wrong one blanks the window, so it goes through `rc` and needs a test on Windows |
 | W-10 Sniffer races | a failed socket setup showed nothing; two captures could overlap | every setup failure is an `Error` state; a dead capture stops the watchdog from talking over it (#224, #226) | ✅ ❓ |
 | W-11, W-12 Text bugs | `딜러딜러`, `model 번역` | `[P0]딜러`, `번역` (section 2; #228, #229) | ✅ |
-| P-1 List never shrinks | the display limit stayed raised after scrolling up | back at the bottom it is cut to one page (#232) | ✅ ❓ |
-| P-2 Per-row scroll effect | one effect per row | one `rows_changed` signal (#234) | ✅ ❓ |
-| P-3 Furigana per row | one backend call per row | rows asking within 50 ms share one call (#233) | ✅ ❓ |
+| P-1 List never shrinks | the display limit stayed raised after scrolling up | back at the bottom it is cut to one page (#232) | ✅ (confirmed in a real window, 2026-10-07) |
+| P-2 Per-row scroll effect | one effect per row | one `rows_changed` signal (#234) | ✅ (confirmed in a real window, 2026-10-07) |
+| P-3 Furigana per row | one backend call per row | rows asking within 50 ms share one call (#233) | ✅ (confirmed in a real window, 2026-10-07) |
 | P-4 Block events under the lock | emitted while holding the history lock | emitted after it is released; still one event per row (#230) | 🟡 |
 | P-5 Parser `unknown_fields` | built and thrown away | not changed (microseconds against LLM latency) | ⏸ |
 | P-6 Preprocessing under a lock | the whole dictionary scan under the nickname lock | the lock is held only to pick the names (#231) | ✅ |
@@ -154,13 +154,14 @@ The new checks cost lines in the places that cross a trust boundary, which is wh
 | Webview CSP (W-9) | not started; goes through `rc` and a test on Windows | Medium | Small |
 | Server files | the window between the hash check and the spawn (an ACL would close it) | Low to Medium | Medium |
 | Installed copies | 0.6.x reads the unsigned gist until it is updated | Medium | - |
-| Not seen in a real window | every S6 change, the wizard's error line, a running app fetching revision 2 from `raw.githubusercontent.com` | Medium | Small |
+| Not seen in a real window | the wizard's refusal line, the update check, how the new dictionary terms read in real chat (S6 and the signed first-run path were confirmed by the maintainer on 2026-10-07) | Low | Small |
 | Smoke evidence | only step results were read; the row values (K8, K16) are unread | Low | Small |
 | `types` | one 1,423-line file | Low | Small |
 | Capture corpus (S7) | waits for a real capture | Low | Small |
 | Class trees in the dictionary | eight trees where the cheat sheet and the dictionary still disagree (月影 氷牙 霜天 狼弓 鷹弓 剛身 威咲 森癒) | Low | Small |
 | Cheat sheet vs dictionary | two hand-maintained copies of the same names, with nothing linking them: the cause of the eight trees above (roadmap N-3) | Low | Small |
 | Dictionary matching | a term matches anywhere inside a word; only one-character keys are guarded by a test (N-4) | Low | Small |
+| Dictionary in use | only the editor's badge shows the dictionary version; nothing shows the signed revision or whether the file was edited (roadmap N-6) | Low | Small |
 | Sync button | the settings "update dictionary" button shows no result; success and failure are only in the system log (N-1) | Low | Small |
 | `sync_dictionary` | still takes a `version` argument it ignores (N-2) | Low | Small |
 | `download_model` (M4) | still takes its URL and hash from the UI; they come from verified metadata, but the backend does not enforce it (N-5) | Low to Medium | Small |
@@ -172,7 +173,7 @@ The new checks cost lines in the places that cross a trust boundary, which is wh
 - **Safety net:** +134 gate tests and +18 UI tests, 8 mutation gaps closed, golden tests kept, and the gate still takes about two minutes. The share of Rust that only Windows CI can run fell from 16.1% to 15.0%.
 - **What did not improve, and was not meant to:** the size and complexity of the big views and the thread bodies; `types` is still one file.
 - **What was left out had a reason:** P-5 (microseconds), R-9 (no hurry), the windowed list (not needed), UI click automation (a decision), the CSP (a wrong one blanks the window, so it needs a Windows test first).
-- **The honest gap:** this is verified on Linux and in Windows CI. The real windows were not looked at (section 6).
+- **The honest gap:** this is verified on Linux and in Windows CI, and by the maintainer in a real window for S6 and the signed first-run path (2026-10-07). What is still unseen is in section 6.
 
 ## 8. Method and limits
 
@@ -182,7 +183,7 @@ The new checks cost lines in the places that cross a trust boundary, which is wh
 - **Mutation:** `cargo mutants -p resonance-core --file crates/core/src/text.rs` on `e97e36c`. The "before" figures are the review's own measurement from the weekly mutation job added in PR #202.
 - **CI time:** one PR run before (`claude/bridge-packet-limit`) and one after (`claude/dict-season3`); a single measurement each, so only "about the same" is claimed.
 - **Real app:** `bridge-smoke` was dispatched on `main` five times (all eight pipelines green: runs 37545082187, 37567018818, 37573382046, 37588905867, 37613640483); only step results were read.
-- **NOT VERIFIED:** the app's own tests (Windows CI only); the real update swap, extraction, locked-file and downgrade paths; the real firewall and capture failures; every UI change in `cargo tauri dev` (administrator); a running app fetching the signed metadata from GitHub; the CSP (not written).
+- **NOT VERIFIED:** the app's own tests (Windows CI only); the real update swap, extraction, locked-file and downgrade paths; the real firewall and capture failures; the wizard's refusal line and the update check in a real window; the CSP (a candidate PR into `rc`, not yet tested). Confirmed by the maintainer on 2026-10-07 in `cargo tauri dev`: S6a to S6d, the compact-mode click, and the first-run wizard with the real signed metadata.
 
 ## 9. Follow-up after the roadmap (2026-10-07)
 

@@ -8,7 +8,8 @@ One Cargo workspace in five crates, three parts, plus the runbook (treated as do
 **Which part you touch decides which gate applies** -- the most important thing on this page.
 
 Follow the `kade-workflow` skill (plan first, test first, gates, commit and PR style, context
-budget). Where it and this file differ, this file wins. Current state: @MEMORY.md
+budget). Where it and this file differ, this file wins. Current state: open issues by label
+(`status:now|next`, `verify:needs-kade|not-verified`), index @MEMORY.md
 
 | tree | part | builds on | gate |
 |---|---|---|---|
@@ -76,7 +77,7 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
 0. **Test first.** New behaviour or a bug fix has its failing unit test before its code.
 1. **Run the gate for every part touched** (table above). `cargo fmt` is part of it.
 2. **Behaviour check where a gate cannot see it.** UI changes: `.claude/rules/ui.md`.
-3. **Update `MEMORY.md` *Now*** (≤ 40 lines, 6 KB, 200 characters a line: `memory-check.sh`); detail in `.memory/`.
+3. **Record state on the issue** (`status:` / `verify:` labels; a follow-up gets an issue); `MEMORY.md` only for what has none.
 4. **Push the branch and open the PR**; CI merges it when green.
 
 ## Version Control

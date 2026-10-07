@@ -12,7 +12,7 @@ it; the history is in git and `sessions/`.
 | `roadmap/` | what is next, with the check that proves it done; facts with a number | one file per workstream |
 | `sessions/` | dated write-ups `YYYY-MM-DD-<topic>.md`, **including wrong turns** | append-only; flat folder; **no new handoff files** (below) |
 
-**No handoff files (from 2026-10-08).** A session ends by updating *Now*; wrong turns go in the PR's *Wrong turns*,
+**No handoff files (from 2026-10-08).** A session ends by updating the issues' labels (*Now* only for what has no issue); wrong turns go in the PR's *Wrong turns*,
 and the `session-handoff` skill gives Kade the starter prompt for the next session. The handoffs already in
 `sessions/` stay as history.
 

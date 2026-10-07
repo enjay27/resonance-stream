@@ -104,6 +104,7 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
                     sha256: String::new(),
                 },
             },
+            metadata_error: None,
         });
     }
     let response = remote_client()?
@@ -178,6 +179,7 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
         model_update_available,
         dict_update_available,
         remote_data,
+        metadata_error: None,
     })
 }
 

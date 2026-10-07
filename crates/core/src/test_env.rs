@@ -10,6 +10,7 @@
 //! dashes as underscores (`--no-capture` -> `RESONANCE_TEST_NO_CAPTURE`). A flag
 //! on the command line wins over its variable.
 
+use crate::update_signature::is_public_key;
 use std::fmt;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -31,7 +32,7 @@ enum Kind {
 }
 
 /// Every flag, in the order `TestEnv::set_flags` lists them.
-const FLAGS: [(&str, Kind); 17] = [
+const FLAGS: [(&str, Kind); 18] = [
     ("data-dir", Kind::Value),
     ("fresh", Kind::Switch),
     ("assume-setup-done", Kind::Switch),
@@ -42,6 +43,7 @@ const FLAGS: [(&str, Kind); 17] = [
     ("no-window-state", Kind::Switch),
     ("feed-url", Kind::Value),
     ("metadata-url", Kind::Value),
+    ("metadata-trust-key", Kind::Value),
     ("dictionary-url", Kind::Value),
     ("status-file", Kind::Value),
     ("log-file", Kind::Value),
@@ -69,6 +71,9 @@ pub struct TestEnv {
     pub feed_url: Option<String>,
     /// Read the gist metadata from here instead of the public gist.
     pub metadata_url: Option<String>,
+    /// Trust this minisign public key (base64) for the signed metadata instead of the keys built into
+    /// the app, so a mock server's throwaway key can sign it. Test builds only, like every flag.
+    pub metadata_trust_key: Option<String>,
     /// Read the custom dictionary (`sync_dictionary`) from here instead of the public gist.
     pub dictionary_url: Option<String>,
     /// Write a JSON status file (start, ready, update state) here.
@@ -103,6 +108,7 @@ impl TestEnv {
             self.no_window_state,
             self.feed_url.is_some(),
             self.metadata_url.is_some(),
+            self.metadata_trust_key.is_some(),
             self.dictionary_url.is_some(),
             self.status_file.is_some(),
             self.log_file.is_some(),
@@ -155,6 +161,12 @@ impl TestEnv {
                 }
                 self.llama_url = Some(base);
             }
+            "metadata-trust-key" => {
+                if !is_public_key(&value) {
+                    return Err(TestEnvError::BadTrustKey { key: value });
+                }
+                self.metadata_trust_key = Some(value);
+            }
             "feed-url" | "metadata-url" | "dictionary-url" => {
                 if !is_test_url_allowed(&value) {
                     return Err(TestEnvError::BadUrl {
@@ -194,6 +206,8 @@ pub enum TestEnvError {
     BadBridgeUrl { url: String },
     /// A feed / metadata URL that is neither `https` nor local `http`.
     BadUrl { flag: String, url: String },
+    /// A `--metadata-trust-key` that is not a base64 minisign public key.
+    BadTrustKey { key: String },
     /// A `--llama-url` that is not `http://` to this machine with a port.
     BadLlamaUrl { url: String },
 }
@@ -224,6 +238,10 @@ impl fmt::Display for TestEnvError {
             Self::BadLlamaUrl { url } => write!(
                 f,
                 "--llama-url {url:?}: only http://127.0.0.1:PORT / localhost / [::1], with a port and no path"
+            ),
+            Self::BadTrustKey { key } => write!(
+                f,
+                "--metadata-trust-key {key:?}: not a base64 minisign public key (the text of a .pub file from `tauri signer`)"
             ),
             Self::BadUrl { flag, url } => write!(
                 f,
@@ -503,6 +521,7 @@ impl TestEnv {
             switch(self.no_window_state, "no-window-state"),
             value(self.feed_url.clone(), "feed-url"),
             value(self.metadata_url.clone(), "metadata-url"),
+            value(self.metadata_trust_key.clone(), "metadata-trust-key"),
             value(self.dictionary_url.clone(), "dictionary-url"),
             value(path(&self.status_file), "status-file"),
             value(path(&self.log_file), "log-file"),
@@ -722,6 +741,58 @@ mod tests {
         assert_eq!(
             env.restart_args(),
             ["--dictionary-url=https://example.com/custom_dict.json"]
+        );
+    }
+
+    // A throwaway public key (see signed_metadata's tests): it signs nothing real.
+    const TEST_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEyM0EzNEMxRkU1RjEzNTUKUldSVkUxLyt3VFE2RWxFcjNsMzhMVGJIekpzTDMwVWlDZktzM3VQelZZS2o4eHJlcWpXajRCUncK";
+
+    #[test]
+    fn a_metadata_trust_key_is_a_public_key_and_is_passed_on_a_restart() {
+        let env = ok(&["--metadata-trust-key", TEST_KEY]);
+        assert_eq!(env.metadata_trust_key.as_deref(), Some(TEST_KEY));
+        assert_eq!(env.set_flags(), ["metadata-trust-key"]);
+        assert_eq!(
+            env.restart_args(),
+            [format!("--metadata-trust-key={TEST_KEY}")]
+        );
+        // The variable works like every other value flag.
+        let env = run(&[], &[("RESONANCE_TEST_METADATA_TRUST_KEY", TEST_KEY)]).expect("parses");
+        assert_eq!(env.metadata_trust_key.as_deref(), Some(TEST_KEY));
+        // A typo must not silently leave the real keys in charge of the wrong test.
+        assert_eq!(
+            run(&["--metadata-trust-key", "not-a-key"], &[]),
+            Err(TestEnvError::BadTrustKey {
+                key: "not-a-key".into()
+            })
+        );
+        assert_eq!(
+            run(&["--metadata-trust-key"], &[]),
+            Err(TestEnvError::MissingValue("metadata-trust-key".into()))
+        );
+    }
+
+    #[test]
+    fn the_trust_key_comes_after_the_metadata_url_in_the_flag_order() {
+        let env = ok(&[
+            "--metadata-trust-key",
+            TEST_KEY,
+            "--dictionary-url",
+            "https://example.com/d.json",
+            "--metadata-url",
+            "https://example.com/m.json",
+        ]);
+        assert_eq!(
+            env.set_flags(),
+            ["metadata-url", "metadata-trust-key", "dictionary-url"]
+        );
+        assert_eq!(
+            env.restart_args(),
+            [
+                "--metadata-url=https://example.com/m.json".to_string(),
+                format!("--metadata-trust-key={TEST_KEY}"),
+                "--dictionary-url=https://example.com/d.json".to_string(),
+            ]
         );
     }
 

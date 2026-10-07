@@ -584,6 +584,11 @@ pub struct UpdateCheckResult {
     pub model_update_available: bool,
     pub dict_update_available: bool,
     pub remote_data: GistMetadata,
+    /// Why the model and dictionary metadata was refused (a missing or bad signature, an older
+    /// revision): when it is set, `remote_data`'s model and dictionary are empty and no model or
+    /// dictionary update is offered. `None` for a normal check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_error: Option<String>,
 }
 
 // --- Furigana ---
@@ -732,6 +737,32 @@ mod tests {
         let msg: ChatMessage = serde_json::from_str(old).expect("old line must parse");
         assert_eq!((msg.pid, msg.uid, msg.message.as_str()), (3, 9, "hi"));
         assert_eq!((msg.class_id, msg.level, msg.sequence_id), (0, 0, 0));
+    }
+
+    #[test]
+    fn an_update_check_result_names_why_the_metadata_was_refused_only_when_it_was() {
+        // A result from before the field (and a normal one) has none, and says nothing about it on the wire.
+        let plain = r#"{"app_update_available":false,"model_update_available":false,"dict_update_available":false,
+            "remote_data":{"model":{"latest_version":"1","download_url":"","release_notes":"","sha256":""},
+                           "dictionary":{"version":"1","updated_at":""}}}"#;
+        let result: UpdateCheckResult =
+            serde_json::from_str(plain).expect("an older result parses");
+        assert_eq!(result.metadata_error, None);
+        assert!(!serde_json::to_string(&result)
+            .unwrap()
+            .contains("metadata_error"));
+
+        let refused = UpdateCheckResult {
+            metadata_error: Some("signature refused".into()),
+            ..result
+        };
+        let text = serde_json::to_string(&refused).unwrap();
+        assert!(
+            text.contains(r#""metadata_error":"signature refused""#),
+            "{text}"
+        );
+        let back: UpdateCheckResult = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.metadata_error.as_deref(), Some("signature refused"));
     }
 
     #[test]

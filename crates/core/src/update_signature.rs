@@ -115,6 +115,12 @@ pub fn verify_update(
     }
 }
 
+/// Is `key_b64` a base64 minisign public key? (A test run names a key on its command line; a typo
+/// must be an error, not a key that is skipped.)
+pub fn is_public_key(key_b64: &str) -> bool {
+    decode_text(key_b64).is_some_and(|text| PublicKey::decode(&text).is_ok())
+}
+
 /// The text inside a base64 blob (`tauri signer` base64-encodes the `.sig`
 /// and `.pub` files whole).
 fn decode_text(base64_text: &str) -> Option<String> {
@@ -135,6 +141,22 @@ fn same_version(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_public_key_is_told_from_text_that_is_not_one() {
+        assert!(is_public_key(KEY_A));
+        assert!(is_public_key(&format!("  {KEY_A}\n")));
+        for bad in [
+            "",
+            "not base64!",
+            "aGVsbG8=",
+            "dW50cnVzdGVkIGNvbW1lbnQ6IHg=",
+        ] {
+            assert!(!is_public_key(bad), "{bad:?}");
+        }
+        // The built-in keys are keys.
+        assert!(TRUSTED_UPDATE_KEYS.iter().all(|key| is_public_key(key)));
+    }
 
     // Generated once with the `minisign` crate (what `tauri signer` uses);
     // throwaway keys that sign nothing real. DATA is what was signed.

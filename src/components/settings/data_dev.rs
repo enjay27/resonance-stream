@@ -1,4 +1,4 @@
-use crate::dictionary_status::status_line;
+use crate::dictionary_status::{status_line, SyncOutcome};
 use crate::store::{AppActions, AppSignals};
 use crate::tauri_bridge::invoke;
 use crate::ui_types::{DictionaryStatus, LogLevel, NetworkInterface};
@@ -12,7 +12,7 @@ use wasm_bindgen::JsValue;
 #[component]
 pub fn DataDevSection(
     interfaces: ReadSignal<Vec<NetworkInterface>>,
-    sync_dict_action: Action<(), String>,
+    sync_dict_action: Action<(), SyncOutcome>,
     save_chat_action: Action<(), String>,
 ) -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
@@ -51,6 +51,17 @@ pub fn DataDevSection(
                         <span class="text-[9px] opacity-60" data-testid="dictionary-status">
                             {move || dictionary_status.get().map(|status| status_line(&status)).unwrap_or_default()}
                         </span>
+                        // How the last sync ended, and why when it did not work.
+                        <Show when=move || !is_syncing.get() && sync_result.get().is_some()>
+                            <span
+                                class="text-[9px] break-words"
+                                class:text-success=move || sync_result.get().is_some_and(|o| o.ok)
+                                class:text-error=move || sync_result.get().is_some_and(|o| !o.ok)
+                                data-testid="dictionary-sync-result"
+                            >
+                                {move || sync_result.get().map(|o| o.text).unwrap_or_default()}
+                            </span>
+                        </Show>
                     </div>
                     <button class="btn btn-xs btn-outline relative"
                         class:btn-success=move || signals.service.dict_update_available.get()

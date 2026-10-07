@@ -22,7 +22,9 @@ pub enum MetadataError {
     NotJson(String),
     /// The file has no `revision` (a positive whole number): it is not a signed metadata file.
     NoRevision,
-    /// The signature is missing, malformed, from another key, or for another revision.
+    /// No signature was published next to the metadata (its `.sig` is not there).
+    NoSignature,
+    /// The signature is malformed, from another key, or for another revision.
     Signature(UpdateSignatureError),
     /// A correctly signed file, but older than one the app already accepted.
     Older { found: u64, accepted: u64 },
@@ -39,6 +41,7 @@ impl fmt::Display for MetadataError {
         match self {
             Self::NotJson(why) => write!(f, "the metadata is not readable JSON ({why})"),
             Self::NoRevision => write!(f, "the metadata names no revision, so it cannot be a signed file"),
+            Self::NoSignature => write!(f, "no signature is published for the metadata"),
             Self::Signature(why) => write!(f, "the metadata signature was refused: {why}"),
             Self::Older { found, accepted } => write!(
                 f,
@@ -98,9 +101,49 @@ pub fn verify_published(
     accepted_revision: u64,
 ) -> Result<GistMetadata, MetadataError> {
     let verified = verify_metadata(metadata, signature_b64, trusted_keys, accepted_revision)?;
-    verify_dictionary(dictionary, &verified)?;
-    check_dictionary_reads(dictionary)?;
+    accept_dictionary(dictionary, &verified)?;
     Ok(verified)
+}
+
+/// Where the signature of the metadata at `metadata_url` is read from: next to it, with `.sig`
+/// added (what `metadata.yml` publishes).
+pub fn signature_url(metadata_url: &str) -> String {
+    format!("{metadata_url}.sig")
+}
+
+/// [`verify_metadata`] for a signature that may not have been published at all (`None`).
+pub fn accept_metadata(
+    body: &[u8],
+    signature_b64: Option<&str>,
+    trusted_keys: &[&str],
+    accepted_revision: u64,
+) -> Result<GistMetadata, MetadataError> {
+    let signature_b64 = signature_b64.ok_or(MetadataError::NoSignature)?;
+    verify_metadata(body, signature_b64, trusted_keys, accepted_revision)
+}
+
+/// A dictionary the (already verified) `metadata` names, which the app can also read.
+pub fn accept_dictionary(dictionary: &[u8], metadata: &GistMetadata) -> Result<(), MetadataError> {
+    verify_dictionary(dictionary, metadata)?;
+    check_dictionary_reads(dictionary)
+}
+
+/// The keys a metadata signature is checked against: the ones built into the app, or -- in a test
+/// run that names one (`--metadata-trust-key`) -- that key alone. It replaces the app keys and does
+/// not add to them, so a test can also show that a publication signed by the real key is refused.
+pub fn trusted_metadata_keys(test_key: Option<&str>) -> Vec<&str> {
+    match test_key {
+        Some(key) => vec![key],
+        None => TRUSTED_UPDATE_KEYS.to_vec(),
+    }
+}
+
+/// The system-log line for a publication that was refused: what was not updated, why, and that the
+/// copy already installed is left alone.
+pub fn refusal_line(error: &MetadataError) -> String {
+    format!(
+        "Model and dictionary updates were refused: {error}. The installed model and dictionary are kept."
+    )
 }
 
 /// Can the app read these bytes as its dictionary (text, and the categorised JSON)?
@@ -317,6 +360,94 @@ mod tests {
             check_dictionary_reads(not_a_dictionary),
             Err(MetadataError::DictionaryUnreadable(_))
         ));
+    }
+
+    #[test]
+    fn the_signature_is_read_from_next_to_the_metadata() {
+        assert_eq!(
+            signature_url("https://raw.githubusercontent.com/o/r/metadata/metadata.json"),
+            "https://raw.githubusercontent.com/o/r/metadata/metadata.json.sig"
+        );
+        // A test run points the metadata at a mock server; the signature follows it.
+        assert_eq!(
+            signature_url("http://127.0.0.1:8099/metadata.json"),
+            "http://127.0.0.1:8099/metadata.json.sig"
+        );
+    }
+
+    #[test]
+    fn metadata_with_no_signature_published_is_refused() {
+        // The `.sig` was not there (404): the same refusal as a bad one, with its own reason.
+        assert_eq!(
+            accept_metadata(BODY, None, &[KEY_A], 0).unwrap_err(),
+            MetadataError::NoSignature
+        );
+        assert_eq!(
+            accept_metadata(BODY, Some(SIG_7_A), &[KEY_A], 0)
+                .unwrap()
+                .revision,
+            7
+        );
+        assert!(matches!(
+            accept_metadata(BODY, Some(SIG_7_B), &[KEY_A], 0),
+            Err(MetadataError::Signature(_))
+        ));
+    }
+
+    #[test]
+    fn a_dictionary_is_accepted_only_when_it_is_the_named_file_and_reads() {
+        let metadata = verify_metadata(BODY, SIG_7_A, &[KEY_A], 0).unwrap();
+        assert_eq!(accept_dictionary(DICT, &metadata), Ok(()));
+        assert!(matches!(
+            accept_dictionary(b"{}", &metadata),
+            Err(MetadataError::DictionaryDiffers { .. })
+        ));
+        // The right hash, but not a dictionary the app can read.
+        let mut other = metadata.clone();
+        other.dictionary.sha256 = Sha256::digest(b"[1, 2, 3]")
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert!(matches!(
+            accept_dictionary(b"[1, 2, 3]", &other),
+            Err(MetadataError::DictionaryUnreadable(_))
+        ));
+    }
+
+    #[test]
+    fn a_test_key_replaces_the_app_keys_and_never_adds_to_them() {
+        assert_eq!(trusted_metadata_keys(None), TRUSTED_UPDATE_KEYS);
+        // With a test key only that key counts: a publication signed by the real key is refused then.
+        assert_eq!(trusted_metadata_keys(Some(KEY_A)), [KEY_A]);
+        assert!(!trusted_metadata_keys(Some(KEY_A)).contains(&TRUSTED_UPDATE_KEYS[0]));
+    }
+
+    #[test]
+    fn the_log_line_says_what_was_refused_why_and_that_the_installed_copy_stays() {
+        let line = refusal_line(&MetadataError::NoSignature);
+        assert!(line.contains("model"), "{line}");
+        assert!(line.contains("dictionary"), "{line}");
+        assert!(
+            line.contains(&MetadataError::NoSignature.to_string()),
+            "{line}"
+        );
+        assert!(line.contains("kept"), "{line}");
+        // The reason differs, so the line does.
+        let older = refusal_line(&MetadataError::Older {
+            found: 1,
+            accepted: 2,
+        });
+        assert_ne!(line, older);
+        assert!(older.contains("revision 1"), "{older}");
+    }
+
+    #[test]
+    fn the_log_line_for_a_bad_signature_carries_the_reason_the_signature_gave() {
+        let line = refusal_line(&MetadataError::Signature(
+            UpdateSignatureError::NotSignedByTrustedKey,
+        ));
+        assert!(line.contains("signature was refused"), "{line}");
+        assert!(line.contains("not signed by a trusted key"), "{line}");
     }
 
     #[test]

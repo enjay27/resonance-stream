@@ -37,7 +37,7 @@ rollback guard on; a bad or missing signature refuses the update and keeps the l
 untouched for installed 0.6.x copies. Sources are `metadata/metadata.json` and `metadata/custom_dict.json` (Kade's gist content). The dictionary has no
 signature of its own: the signed metadata carries its SHA-256.
 
-**Kade's first publish is the next thing, and it is his:** `git tag metadata-v1 <commit of main> && git push origin metadata-v1`. Then he checks Actions >
+**UPDATE (later the same day): `metadata-v1` is published and verified (see MEMORY.md); the tag must sit on a commit that already has `.github/workflows/metadata.yml` (#238 or later), or nothing runs. M3 is split M3a/M3b/M3c, Kade approved the plan; the paragraph below is the original note.** **Kade's first publish was the next thing, and it was his:** `git tag metadata-v1 <commit of main> && git push origin metadata-v1`. Then he checks Actions >
 Metadata is green and the `metadata` branch holds `metadata.json`, `metadata.json.sig`, `custom_dict.json`, `README.md`. **Open unknown:** `tauri signer sign`
 on a `.json` file was never run (it is the release workflow's command, and signs any file). If the run is red, read the failed step first. **Do not start M3
 before he says it worked.**

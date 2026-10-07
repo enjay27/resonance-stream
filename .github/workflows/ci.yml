@@ -63,6 +63,8 @@ jobs:
         run: |
           bash .github/scripts/claude-md-check.test.sh
           bash .github/scripts/claude-md-check.sh
+      - name: context-guard hook (vendored from enjay27/claude-skills)
+        run: node --test .claude/hooks/context-guard.test.cjs
 
   app:
     name: app gate (Windows)

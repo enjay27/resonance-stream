@@ -4915,7 +4915,6 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "serde_with",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -4927,6 +4926,7 @@ version = "0.6.1"
 dependencies = [
  "serde",
  "serde_json",
+ "serde_with",
 ]
 
 [[package]]

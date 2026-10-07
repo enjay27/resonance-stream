@@ -11,7 +11,7 @@ Numbers are **measured** on 2026-10-06 on `main` unless marked otherwise.
 |---|---|---|---|---|
 | 1 | **Unit tests** (`#[test]`: core 385, types 49, llama 61, ui 157, app 21) | logic errors in pure code | next to the code (`mod tests`) and in `tests/` | every PR (`just core-check`, `just ui-check`; the app's 21 only in Windows CI) |
 | 2 | **Property tests** (`proptest`) | panics and wrong output on random or damaged bytes and text; frames independent of how TCP cut the stream | `crates/core/tests/properties.rs` | with `just core-check` |
-| 3 | **Wire-format and config-parity fixtures** | a renamed field (a protocol change); a setting added to only one of the two `AppConfig` types | `crates/types/tests/wire_format.rs`, `crates/types/testdata/app_config_full.json` (round-tripped by the ui's and the app's `AppConfig`) | with the unit tests |
+| 3 | **Wire-format and config-parity fixtures** | a renamed field (a protocol change); a setting added without a value in the fixture, or one the type does not read or write | `crates/types/tests/wire_format.rs`, `crates/types/testdata/app_config_full.json` (round-tripped by the one `AppConfig`, `crates/types/src/app_config.rs`) | with the unit tests |
 | 4 | **Golden (snapshot) tests** (`insta`, 8 snapshots) | an accidental change to shielding, restoring, the prompt, emotes or romaji | `crates/core/tests/golden_text.rs`, `crates/core/tests/snapshots/` | with `just core-check` |
 | 5 | **Capture replay** | the decoder and pipeline on a recorded packet stream | `crates/core/tests/capture_replay.rs` and `fixtures/` | with `just core-check` |
 | 6 | **llama client tests** against a fake server | the `/completion` and `/health` client, scenarios | `crates/llama/tests/` (`llama.rs`, `scenarios.rs`, `capture.rs`, `support/`) | with `just core-check` |
@@ -105,7 +105,7 @@ A pull request does not run the smoke test (Kade's rule, 2026-10-06): a bridge o
 
 1. **Test first.** The failing test comes before the code, and you see it fail for the right reason. A bug fix starts with a test that reproduces the bug. New pure logic goes in `crates/core`.
 2. **A golden diff is read, not accepted.** A snapshot records today's behaviour, not a claim that it is the best answer. Pinned known defects (`[P0]` collision, a leftover "model") change on purpose when fixed.
-3. **A new setting** goes into both `AppConfig` types and the `app_config_full.json` fixture with the same name.
+3. **A new setting** goes into `AppConfig` (`crates/types`), the `app_config_full.json` fixture and `ConfigSignals` with the same name.
 4. **A new bridge command** needs: a core `Command` variant and parse tests (red first), one match arm in `bridge/live.rs`, a stand-in model with a bug switch, rows in a pipeline, and the README line.
 5. **A new pipeline row** is shown red by a stand-in bug switch before it is trusted.
 6. **Never skip, disable or edit a test to get green.** Never report a gate as passed when it could not run; name it in the commit (`NOT VERIFIED: ...`).
@@ -135,7 +135,7 @@ A pull request does not run the smoke test (Kade's rule, 2026-10-06): a bridge o
 | a pure function (decoding, text, history, worker decision, download check) | `crates/core` unit test; if its output is a table of strings, a golden test |
 | anything read from outside bytes or text | add a property test beside the existing ones |
 | a DTO that crosses the Tauri boundary | `crates/types/tests/wire_format.rs` |
-| a settings field | the two `AppConfig` types and `app_config_full.json` |
+| a settings field | `AppConfig` (`crates/types`) and `app_config_full.json` |
 | a pure ui module (`chat_view`, `favorites`, ...) | a unit test in the module (runs on the host) |
 | a view's look | the `ui-preview` skill (screenshot) |
 | Tauri / Windows glue that cannot be unit-tested | say so in the commit body; add a bridge pipeline row if the real exe can show it |

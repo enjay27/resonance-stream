@@ -65,7 +65,9 @@ pub fn run() {
             app.manage(AppState {
                 config: RwLock::new(config.clone()),
                 config_lock: Mutex::new(()),
-                chat_history: Mutex::new(ChatHistory::new(config.channel_limits())),
+                chat_history: Mutex::new(ChatHistory::new(
+                    resonance_core::history::ChannelLimits::new(&config.tab_limits),
+                )),
                 system_history: Mutex::new(VecDeque::with_capacity(200)),
                 next_pid: 1.into(),
                 nickname_cache: Mutex::new(std::collections::HashMap::new()),
@@ -100,7 +102,7 @@ pub fn run() {
             // pids continue after them so the list stays in order.
             let mut restored = resonance_core::history::load_recent(
                 &crate::io::chat_logs_dir(&handle),
-                &config.channel_limits(),
+                &resonance_core::history::ChannelLimits::new(&config.tab_limits),
             );
             // Each row has the blocked flag it was saved with; the block list may have changed since.
             resonance_core::history::apply_block_list(&mut restored, |uid| {

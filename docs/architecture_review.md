@@ -157,7 +157,7 @@ graft/                            generated code cards (gitignored)
 
 Mostly **reported** (a review agent estimated from reading the code); nothing was benchmarked. Only P-1 can be felt, and only in long sessions.
 
-### P-1 The chat list never shrinks after scrolling up
+### P-1 The chat list never shrinks after scrolling up (**fixed 2026-10-07, S6a**: back at the bottom the list is cut to the first page again)
 
 - **Where:** `src/components/chat_container.rs:16` (`display_limit`, starts at 50), `:26` (reset only on tab or search change), `:160` (`+= 50` on every scroll within 50 px of the top).
 - **Evidence (confirmed):** the limit only grows, and returning to the bottom does not shrink it. The "all" tab's limit is the sum of the channel limits (reported: 3,200 by default).

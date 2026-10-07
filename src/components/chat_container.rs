@@ -1,4 +1,4 @@
-use crate::chat_view::{newest_matching, ChatFilter, Tab};
+use crate::chat_view::{newest_matching, next_display_limit, ChatFilter, Tab, DISPLAY_PAGE};
 use crate::components::ChatRow;
 use crate::store::AppSignals;
 use crate::ui_types::{SystemLogLevel, SystemMessage};
@@ -12,8 +12,8 @@ pub fn ChatContainer() -> impl IntoView {
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
     let chat_container_ref = NodeRef::<html::Div>::new();
 
-    // Start by only rendering the last 50 messages to keep the DOM blazing fast
-    let (display_limit, set_display_limit) = signal(50);
+    // Start by only rendering the last page of messages to keep the DOM blazing fast
+    let (display_limit, set_display_limit) = signal(DISPLAY_PAGE);
 
     // DRAG TO SCROLL STATE ---
     let (is_dragging, set_is_dragging) = signal(false);
@@ -23,7 +23,7 @@ pub fn ChatContainer() -> impl IntoView {
     Effect::new(move |_| {
         signals.config.active_tab.track();
         signals.chat.search_term.track();
-        set_display_limit.set(50);
+        set_display_limit.set(DISPLAY_PAGE);
     });
 
     // --- FILTERED VIEW LOGIC ---
@@ -155,9 +155,11 @@ pub fn ChatContainer() -> impl IntoView {
                     let scroll_top = el.scroll_top();
                     let at_bottom = el.scroll_height() - scroll_top - el.client_height() < 15;
 
-                    // --- LOAD OLDER MESSAGES IF SCROLLED TO TOP ---
-                    if scroll_top < 50 {
-                        set_display_limit.update(|limit| *limit += 50);
+                    // --- LOAD OLDER MESSAGES AT THE TOP, DROP THEM AGAIN AT THE BOTTOM ---
+                    let limit = display_limit.get_untracked();
+                    let next = next_display_limit(limit, scroll_top, at_bottom);
+                    if next != limit {
+                        set_display_limit.set(next);
                     }
 
                     if signals.config.active_tab.get_untracked() == Tab::System.label() {

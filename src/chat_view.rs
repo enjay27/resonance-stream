@@ -397,6 +397,27 @@ pub fn is_muted(m: &ChatMessage, min_level: u64) -> bool {
     m.is_blocked || (m.channel == Channel::World && m.level < min_level)
 }
 
+/// Rows the list shows to start with, and the number each scroll to the top adds.
+pub const DISPLAY_PAGE: usize = 50;
+
+/// How close to the top (in px) a scroll counts as reaching it.
+pub const LOAD_MORE_ZONE: i32 = 50;
+
+/// How many rows the list shows after a scroll event: one more page on reaching the top, and back to
+/// the first page once the view is at the bottom again (P-1: the limit only ever grew, so the longer
+/// the overlay stayed open the more rows the page held). At the bottom the older pages are not on
+/// screen, so dropping them is invisible; a list shorter than the window is at the bottom too, and has
+/// nothing older to load.
+pub fn next_display_limit(limit: usize, scroll_top: i32, at_bottom: bool) -> usize {
+    if at_bottom {
+        DISPLAY_PAGE
+    } else if scroll_top < LOAD_MORE_ZONE {
+        limit + DISPLAY_PAGE
+    } else {
+        limit
+    }
+}
+
 /// The newest `limit` items accepted by `keep`, oldest first -- walking
 /// from the newest end, so a short page of a long list stops early.
 pub fn newest_matching<T>(
@@ -647,6 +668,32 @@ mod tests {
     }
 
     use std::collections::BTreeMap;
+
+    #[test]
+    fn scrolling_to_the_top_loads_one_more_page() {
+        assert_eq!(next_display_limit(50, 10, false), 100);
+        assert_eq!(next_display_limit(150, 49, false), 200);
+        assert_eq!(
+            next_display_limit(150, LOAD_MORE_ZONE, false),
+            150,
+            "50 px is not the top"
+        );
+    }
+
+    #[test]
+    fn scrolling_in_the_middle_keeps_the_limit() {
+        assert_eq!(next_display_limit(150, 300, false), 150);
+    }
+
+    #[test]
+    fn coming_back_to_the_bottom_drops_the_older_pages_again() {
+        // P-1: the limit used to grow for as long as the overlay was open.
+        assert_eq!(next_display_limit(300, 4000, true), DISPLAY_PAGE);
+        assert_eq!(next_display_limit(DISPLAY_PAGE, 4000, true), DISPLAY_PAGE);
+        // A list shorter than the window is at the bottom and near the top at once:
+        // the bottom wins, there is nothing older to load.
+        assert_eq!(next_display_limit(300, 0, true), DISPLAY_PAGE);
+    }
 
     #[test]
     fn newest_matching_returns_the_last_page_in_order() {

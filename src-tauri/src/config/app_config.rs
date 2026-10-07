@@ -214,20 +214,23 @@ fn apply_config(
         &config.network_interface,
         config.init_done,
     );
-    if sniffer != WorkerChange::Keep {
-        // Drop the old Sender (Instantly kills the socket and watchdog threads)
-        *state.sniffer_tx.lock() = None;
-
-        // Restart the sniffer bound to the newly selected interface
-        if sniffer == WorkerChange::Restart {
+    // On a thread of its own: the old capture is waited for (a fraction of a second), and this runs
+    // under the config lock of a settings save.
+    match sniffer {
+        WorkerChange::Keep => {}
+        WorkerChange::Restart => {
             inject_system_message(
                 &app,
                 SystemLogLevel::Info,
                 "Sniffer",
                 "Network adapter changed. Restarting sniffer...",
             );
-            let tx = crate::services::sniffer::start_sniffer_worker(app.clone());
-            *state.sniffer_tx.lock() = Some(tx);
+            // The old capture ends, then a sniffer bound to the newly selected interface starts.
+            crate::services::owner::Services::restart_sniffer_in_background(&app);
+        }
+        WorkerChange::Start | WorkerChange::Stop => {
+            // Before the setup is done: the old capture is dropped and nothing starts yet.
+            crate::services::owner::Services::stop_sniffer_in_background(&app);
         }
     }
 

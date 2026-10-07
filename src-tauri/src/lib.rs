@@ -75,7 +75,6 @@ pub fn run() {
                 services: Default::default(),
                 translation_ledger: Mutex::new(Default::default()),
                 data_factory_tx: Mutex::new(None),
-                sniffer_tx: Mutex::new(None),
                 service_states: Mutex::new(Default::default()),
                 blocked_users: Mutex::new(config.blocked_users.clone()),
                 shortcuts: Mutex::new(shortcut::GlobalShortcuts {

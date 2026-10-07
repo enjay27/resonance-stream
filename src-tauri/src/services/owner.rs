@@ -4,17 +4,25 @@
 //! rules (an old worker is dropped before a new one starts, a stopped worker is retired) live in one
 //! place instead of four slightly different copies.
 //!
-//! The translator is here; the sniffer follows (it needs the wait for the old capture thread).
+//! A sniffer restart waits for the old capture thread to end before the new one starts (they used to
+//! overlap, each with its own pipeline, so a chat packet in the overlap could be shown twice).
 
+use crate::services::sniffer::{start_sniffer_worker, SnifferHandle};
 use crate::services::translator::{self, TranslationJob};
+use crate::{inject_system_message, AppState, SystemLogLevel};
 use crossbeam_channel::Sender;
 use parking_lot::Mutex;
-use tauri::AppHandle;
+use resonance_core::workers::SNIFFER_STOP_WAIT;
+use std::thread;
+use tauri::{AppHandle, Manager};
 
 #[derive(Default)]
 pub struct Services {
     /// The running translator's job queue, or `None`. Dropping it ends the worker.
     translator: Mutex<Option<Sender<TranslationJob>>>,
+    /// The running sniffer, or `None`. Held for the whole of a restart, so two starts and restarts
+    /// never interleave.
+    sniffer: Mutex<Option<SnifferHandle>>,
 }
 
 impl Services {
@@ -54,5 +62,63 @@ impl Services {
     /// A handle to the running translator's queue, for the sniffer's per-message dispatch.
     pub fn translator_sender(&self) -> Option<Sender<TranslationJob>> {
         self.translator.lock().clone()
+    }
+
+    /// Starts the sniffer unless a live one runs (idempotent). Returns whether it started; `false`
+    /// means a capture is already active. A handle that never started (no firewall rule) or died is
+    /// not alive and is replaced.
+    pub fn start_sniffer(&self, app: &AppHandle) -> bool {
+        let mut slot = self.sniffer.lock();
+        if slot.as_ref().is_some_and(SnifferHandle::is_alive) {
+            return false;
+        }
+        *slot = Some(start_sniffer_worker(app.clone()));
+        true
+    }
+
+    /// Stops the sniffer, if any, and waits (bounded) until its capture thread has ended. Under the
+    /// sniffer lock; the caller holds `slot`.
+    fn stop_sniffer_in(slot: &mut Option<SnifferHandle>, app: &AppHandle) {
+        if let Some(old) = slot.take() {
+            if !old.stop_and_wait(SNIFFER_STOP_WAIT) {
+                inject_system_message(
+                    app,
+                    SystemLogLevel::Warning,
+                    "Sniffer",
+                    format!(
+                        "The previous capture did not stop within {} s; going on anyway.",
+                        SNIFFER_STOP_WAIT.as_secs()
+                    ),
+                );
+            }
+        }
+    }
+
+    /// Stops the sniffer and starts a fresh one once the old capture thread has really ended.
+    /// Blocks for as long as that takes (a fraction of a second; at most `SNIFFER_STOP_WAIT`), so
+    /// call it off the main thread -- see [`Services::restart_sniffer_in_background`].
+    pub fn restart_sniffer(&self, app: &AppHandle) {
+        let mut slot = self.sniffer.lock();
+        Self::stop_sniffer_in(&mut slot, app);
+        *slot = Some(start_sniffer_worker(app.clone()));
+    }
+
+    /// Stops the sniffer and leaves it stopped (an adapter change before the setup is done).
+    pub fn stop_sniffer(&self, app: &AppHandle) {
+        let mut slot = self.sniffer.lock();
+        Self::stop_sniffer_in(&mut slot, app);
+    }
+
+    /// [`Services::restart_sniffer`] on a thread of its own: for a Tauri command or a settings save,
+    /// which must not wait.
+    pub fn restart_sniffer_in_background(app: &AppHandle) {
+        let app = app.clone();
+        thread::spawn(move || app.state::<AppState>().services.restart_sniffer(&app));
+    }
+
+    /// [`Services::stop_sniffer`] on a thread of its own.
+    pub fn stop_sniffer_in_background(app: &AppHandle) {
+        let app = app.clone();
+        thread::spawn(move || app.state::<AppState>().services.stop_sniffer(&app));
     }
 }

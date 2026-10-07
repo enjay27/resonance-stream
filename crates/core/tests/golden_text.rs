@@ -219,13 +219,12 @@ fn nicknames_become_romaji() {
     insta::assert_snapshot!(table);
 }
 
-/// KNOWN DEFECT, recorded as it is today: chat text that already reads `[P0]`
-/// is not told apart from the placeholder the shield issues, so the player's own
-/// `[P0]` comes back as the first shielded term (here `딜러` twice). The fix is a
-/// separate change (it changes behaviour); when it lands, this snapshot is the
-/// one that should change.
+/// Chat text that already reads `[P0]` (W-11) is shielded like any other literal
+/// and comes back as typed: the player's `[P0]` is not mistaken for the placeholder
+/// the shield issues for a dictionary term. Until 2026-10-07 this snapshot recorded
+/// the collision (`딜러딜러`); it changed on purpose.
 #[test]
-fn a_placeholder_typed_in_chat_collides_with_a_real_one_known_defect() {
+fn a_placeholder_typed_in_chat_keeps_its_own_text() {
     let dict = dictionary(&[("火力", "딜러")]);
     let mut table = String::new();
     for line in ["[P0]火力", "火力[P0]", "[P1]火力"] {

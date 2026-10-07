@@ -147,6 +147,14 @@ pub fn metadata_url() -> Option<&'static str> {
         .and_then(|active| active.env.metadata_url.as_deref())
 }
 
+/// `--metadata-trust-key`: the one public key the signed metadata is checked against in this run, in
+/// place of the keys built into the app. Always `None` in a normal run (the flags are not read there).
+pub fn metadata_trust_key() -> Option<&'static str> {
+    ACTIVE
+        .get()
+        .and_then(|active| active.env.metadata_trust_key.as_deref())
+}
+
 /// `--dictionary-url`: where the custom dictionary is read from (`sync_dictionary`).
 pub fn dictionary_url() -> Option<&'static str> {
     ACTIVE

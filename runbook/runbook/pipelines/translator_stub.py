@@ -29,6 +29,20 @@ And two runs with the update check on (the gist announces a newer dictionary), `
   TS-dict-auto-off  the update check ran and nothing was synced (no request for the dictionary): the default syncs nothing at start
   TS-dict-auto-on   with `auto_sync_latest_dict` on the dictionary is fetched at start-up
 
+The dictionary and the model's metadata are signed (`metadata.yml` publishes them; the app trusts only its built-in keys). The stand-in
+server signs with a throwaway key (`mockfeed.MetadataSigner`, made with `tauri signer`) and the app is told to trust that key alone
+(`--metadata-trust-key`), so the app's real verifier judges every case. The update check is on, `auto_sync_latest_dict` on, the feed
+announces a newer app:
+
+  TS-meta-accepted  a good publication is accepted: the dictionary is fetched and the revision is remembered in `metadata.json`
+  TS-meta-unsigned  no `.sig` is published: nothing is synced, no `custom_dict.json`, an Error line in the system log, and the app update is
+                    still announced
+  TS-meta-wrong-key the signature is from another key: refused the same way
+  TS-meta-tampered  the metadata changed after it was signed: refused the same way
+  TS-meta-replay    the app has accepted revision 5 and is shown a correctly signed revision 3: refused as a rollback
+  TS-meta-hash      the metadata is good but the dictionary served is not the one it names: `sync-dictionary` fails, nothing is saved, the
+                    dictionary in use is kept; served right again, the same sync works
+
 Three more runs of their own:
 
   TS-later-wait / TS-later-catchup  translation off (`use_translation` false), five Japanese lines are said, then `start-translator` with
@@ -77,6 +91,7 @@ class TranslatorStub:
         self._serves: list[bridge.Serve] = []
         self._stubs: list[LlamaStub] = []
         self._servers: list[mockfeed.MockServer] = []
+        self._signers: dict[str, mockfeed.MetadataSigner] = {}
 
     def run(self, key_path: str | None = None, password: str | None = None) -> None:
         """(`key_path` and `password` are for the pipelines that sign; this one ignores them.)"""
@@ -94,6 +109,18 @@ class TranslatorStub:
             serve.stop()
         self._serves.clear()
         return mockfeed.stop_copies(folder)
+
+    def signer(self, name: str = "good") -> mockfeed.MetadataSigner:
+        """A throwaway metadata key of this run (made once per name)."""
+        if name not in self._signers:
+            self._signers[name] = mockfeed.MetadataSigner(self.runs / "signing" / name, name)
+        return self._signers[name]
+
+    def signed_server(self, foreign: bool = False) -> mockfeed.MockServer:
+        """A stand-in GitHub whose metadata is signed by this run's key (`foreign`: it also has a second key, for a wrong-key case)."""
+        server = mockfeed.MockServer(signer=self.signer(), foreign_signer=self.signer("foreign") if foreign else None).start()
+        self._servers.append(server)
+        return server
 
     def replay(self, events: bridge.Serve, path: Path, lines: list[str]) -> None:
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -203,6 +230,11 @@ class TranslatorStub:
         self.dictionary_round()
         self.auto_sync_round(False)
         self.auto_sync_round(True)
+        self.refused_round("TS-meta-unsigned", "no signature published", mode="no-signature", want="no signature is published")
+        self.refused_round("TS-meta-wrong-key", "a signature from another key", mode="wrong-key", want="signature was refused")
+        self.refused_round("TS-meta-tampered", "metadata changed after it was signed", mode="tampered", want="signature was refused")
+        self.refused_round("TS-meta-replay", "an older revision than one already accepted", revision=3, accepted=5, want="older than the revision 5")
+        self.hash_round()
 
     def launch(self, label: str, exe: Path, stub: LlamaStub, config: dict | None = None, extra: tuple[str, ...] = ()) -> bridge.Serve | None:
         """Starts the app on its own folder, at `stub`; writes `config` first when given. None when it never says app-started."""
@@ -293,10 +325,10 @@ class TranslatorStub:
         """`sync-dictionary` and `save-local-dictionary`, seen from what the translator sends and shows."""
         stub = LlamaStub().start()
         self._stubs.append(stub)
-        server = mockfeed.MockServer().start()
-        self._servers.append(server)
+        server = self.signed_server()
         exe = updater.fresh_copy(self.exe, self.runs, "dict")
-        events = self.launch("dict", exe, stub, {"init_done": True, "use_translation": True}, extra=("--dictionary-url", server.dictionary_url))
+        events = self.launch("dict", exe, stub, {"init_done": True, "use_translation": True},
+                             extra=(*server.metadata_flags(), "--dictionary-url", server.dictionary_url))
         rows = ("TS-dict-before", "TS-dict-sync", "TS-dict-local", "TS-dict-bad")
         if events is None:
             self.rec.auto(rows[0], "the dictionary run started", False, "no app-started event in 120 s")
@@ -348,8 +380,8 @@ class TranslatorStub:
         check = "TS-dict-auto-on" if auto else "TS-dict-auto-off"
         title = ("with auto_sync_latest_dict on the dictionary is fetched at start-up" if auto
                  else "with auto_sync_latest_dict off (the default) nothing is synced at start-up")
-        server = mockfeed.MockServer().start()
-        self._servers.append(server)
+        server = self.signed_server()
+        server.revision = 4
         label = "auto-on" if auto else "auto-off"
         exe = updater.fresh_copy(self.exe, self.runs, label)
         data = exe.parent / "data"
@@ -358,8 +390,8 @@ class TranslatorStub:
         events = bridge.Serve(exe.parent / f"{label}-events.jsonl")
         self._serves.append(events)
         args = mockfeed.flag_args(data, exe.parent / f"{label}-status.json", log_file=exe.parent / f"{label}.log", fresh=False,
-                                  feed_url=server.feed_url, metadata_url=server.metadata_url, dictionary_url=server.dictionary_url,
-                                  extra=("--bridge-url", events.url))
+                                  feed_url=server.feed_url, metadata_url=server.metadata_url, metadata_trust_key=server.signer.public_key,
+                                  dictionary_url=server.dictionary_url, extra=("--bridge-url", events.url))
         mockfeed.start_app(exe, args)
         if not bridge.wait_started(events, exe.parent / f"{label}.log", label=f"the app ({label})"):
             self.rec.auto(check, title, False, "no app-started event in 120 s")
@@ -378,6 +410,101 @@ class TranslatorStub:
         ok = checked and (asked >= 1 if auto else asked == 0 and not invoked)
         self.rec.auto(check, title, ok, f"the update check ran: {checked}; the dictionary was asked for {asked} time(s); "
                                         f"the UI invoked sync_dictionary {len(invoked)} time(s)")
+        if auto:
+            kept = self.accepted_revision(data)
+            self.rec.auto("TS-meta-accepted", "a good publication is accepted: the revision is remembered", ok and kept == server.revision,
+                          f"the dictionary was asked for {asked} time(s); metadata.json holds accepted_revision {kept} (the server's: {server.revision})")
+        self.leave(events)
+
+    @staticmethod
+    def accepted_revision(data: Path) -> int | None:
+        """`accepted_revision` in the app's `metadata.json` (None while it is missing or unreadable)."""
+        try:
+            return int(json.loads((data / "config" / "metadata.json").read_text(encoding="utf-8")).get("accepted_revision", 0))
+        except (OSError, ValueError, AttributeError):
+            return None
+
+    @staticmethod
+    def logged(events: bridge.Serve, source: str, level: str, containing: str) -> str | None:
+        """The first system-log line from `source` at `level` that holds `containing`, else None."""
+        for m in events.events():
+            payload = m["message"].get("payload") if isinstance(m["message"], dict) else None
+            if (m["topic"] == "rs/app/event/system-event" and isinstance(payload, dict) and payload.get("source") == source
+                    and str(payload.get("level", "")).lower() == level and containing in str(payload.get("message", ""))):
+                return str(payload["message"])
+        return None
+
+    def refused_round(self, row: str, title: str, *, mode: str = "ok", revision: int = 4, accepted: int | None = None, want: str) -> None:
+        """The update check on and `auto_sync_latest_dict` on, the publication broken in one way: it must be refused -- no dictionary is
+        fetched or saved, the system log has an Error line from `Metadata` that says why (`want`), the remembered revision is as it was --
+        while the feed's app update is still announced."""
+        server = self.signed_server(foreign=mode == "wrong-key")
+        server.metadata_mode, server.revision = mode, revision
+        exe = updater.fresh_copy(self.exe, self.runs, row)
+        data = exe.parent / "data"
+        (data / "config").mkdir(parents=True, exist_ok=True)
+        (data / "config" / "config.json").write_text(json.dumps({"init_done": True, "auto_sync_latest_dict": True}), encoding="utf-8")
+        if accepted is not None:
+            (data / "config" / "metadata.json").write_text(json.dumps({
+                "current_model_version": "0.0.0", "current_dict_version": "0.0.0", "ignored_app_version": None,
+                "ignored_model_version": None, "last_update_check": 0, "accepted_revision": accepted}), encoding="utf-8")
+        events = bridge.Serve(exe.parent / f"{row}-events.jsonl")
+        self._serves.append(events)
+        status = exe.parent / f"{row}-status.json"
+        args = mockfeed.flag_args(data, status, log_file=exe.parent / f"{row}.log", fresh=False, feed_url=server.feed_url,
+                                  metadata_url=server.metadata_url, metadata_trust_key=server.signer.public_key,
+                                  dictionary_url=server.dictionary_url, extra=("--bridge-url", events.url))
+        mockfeed.start_app(exe, args)
+        if not bridge.wait_started(events, exe.parent / f"{row}.log", label=f"the app ({row})"):
+            self.rec.auto(row, title, False, "no app-started event in 120 s")
+            return
+        deadline = time.monotonic() + WAIT_S
+        error = None
+        while time.monotonic() < deadline and error is None:
+            error = self.logged(events, "Metadata", "error", want)
+            time.sleep(0.5)
+        announced = mockfeed.wait_status(status, lambda st: mockfeed.update_kind(st.get("update"))[0] == "available", timeout=WAIT_S)
+        time.sleep(2)  # a dictionary fetch that should not happen would have started by now
+        asked = server.hits.count("GET /custom_dict.json")
+        on_disk = (data / "data" / "custom_dict.json").exists()
+        kept = self.accepted_revision(data)
+        ok = error is not None and asked == 0 and not on_disk and announced is not None and (kept or 0) == (accepted or 0)
+        self.rec.auto(row, f"{title}: refused, nothing synced, an Error line, the app update still announced", ok,
+                      f"Error line {error!r} (wanted one holding {want!r}); the dictionary was asked for {asked} time(s); custom_dict.json on disk: "
+                      f"{on_disk}; accepted_revision {kept}; app update announced: {announced is not None}")
+        self.leave(events)
+
+    def hash_round(self) -> None:
+        """Good metadata, but the dictionary served is not the file it names (a stale copy on a cache, say): `sync-dictionary` refuses it."""
+        stub = LlamaStub().start()
+        self._stubs.append(stub)
+        server = self.signed_server()
+        exe = updater.fresh_copy(self.exe, self.runs, "meta-hash")
+        events = self.launch("meta-hash", exe, stub, {"init_done": True, "use_translation": True},
+                             extra=(*server.metadata_flags(), "--dictionary-url", server.dictionary_url))
+        if events is None:
+            self.rec.auto("TS-meta-hash", "the hash run started", False, "no app-started event in 120 s")
+            return
+        on_disk = exe.parent / "data" / "data" / "custom_dict.json"
+        server.dictionary_override = '{"term": {"ボス": "evil"}}'
+        try:
+            events.send("sync-dictionary", {"version": "dict-v1"}, timeout=30)
+            refused, detail = False, "the app took a dictionary that is not the signed one"
+        except RuntimeError as e:
+            refused, detail = "does not match" in str(e), str(e)
+        error = self.logged(events, "Metadata", "error", "does not match")
+        saved = on_disk.exists()
+        server.dictionary_override = None
+        try:
+            events.send("sync-dictionary", {"version": "dict-v1"}, timeout=30)
+            again = on_disk.exists() and on_disk.read_text(encoding="utf-8") == server.dictionary_text
+            again_detail = "synced"
+        except RuntimeError as e:
+            again, again_detail = False, str(e)
+        self.rec.auto("TS-meta-hash", "a dictionary that is not the signed one is refused (nothing saved); served right, the same sync works",
+                      refused and error is not None and not saved and again,
+                      f"first sync: {detail}; Error line {error!r}; saved after it: {saved}; second sync: {again_detail}, "
+                      f"file holds the served dictionary: {again}")
         self.leave(events)
 
     def slow_round(self) -> None:

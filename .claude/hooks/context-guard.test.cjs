@@ -39,39 +39,65 @@ test("no usage yet means no answer", () => {
   assert.strictEqual(g.contextTokens(user + "\n"), null);
 });
 
-test("window size: configured, default, and 1M inferred", () => {
-  assert.strictEqual(g.windowSize(50000, { CLAUDE_CONTEXT_WINDOW: "1000000" }), 1000000);
-  assert.strictEqual(g.windowSize(150000, {}), 200000);
-  assert.strictEqual(g.windowSize(469000, {}), 1000000);
+test("window size: configured, else 1M (the default window of current Claude models)", () => {
+  assert.strictEqual(g.windowSize({ CLAUDE_CONTEXT_WINDOW: "200000" }), 200000);
+  assert.strictEqual(g.windowSize({}), 1000000);
+  assert.strictEqual(g.windowSize({ CLAUDE_CONTEXT_WINDOW: "junk" }), 1000000);
 });
 
-test("levels", () => {
-  assert.strictEqual(g.levelFor(59, 60, 80), 0);
-  assert.strictEqual(g.levelFor(60, 60, 80), 1);
-  assert.strictEqual(g.levelFor(80, 60, 80), 2);
+test("thresholds: 200k / 400k tokens, never later than 40% / 60% of the window", () => {
+  assert.deepStrictEqual(g.thresholds(1000000, {}), { warn: 200000, handoff: 400000 });
+  assert.deepStrictEqual(g.thresholds(200000, {}), { warn: 80000, handoff: 120000 });
+  assert.deepStrictEqual(g.thresholds(500000, {}), { warn: 200000, handoff: 300000 });
+  assert.deepStrictEqual(
+    g.thresholds(1000000, { CONTEXT_WARN_TOKENS: "150000", CONTEXT_HANDOFF_TOKENS: "300000" }),
+    { warn: 150000, handoff: 300000 },
+  );
+  assert.deepStrictEqual(
+    g.thresholds(1000000, { CONTEXT_WARN_PCT: "10", CONTEXT_HANDOFF_PCT: "20" }),
+    { warn: 100000, handoff: 200000 },
+  );
+});
+
+test("levels, in tokens", () => {
+  assert.strictEqual(g.levelFor(199999, 200000, 400000), 0);
+  assert.strictEqual(g.levelFor(200000, 200000, 400000), 1);
+  assert.strictEqual(g.levelFor(400000, 200000, 400000), 2);
 });
 
 const prompt = { hook_event_name: "UserPromptSubmit", session_id: "s1" };
 
-test("quiet below the warning line", () => {
-  assert.strictEqual(g.decide(prompt, entry(0, 100000), 0, {}), null);
+test("quiet below 200k in a 1M session (the old 200k guess warned at 120k here)", () => {
+  assert.strictEqual(g.decide(prompt, entry(0, 149000), 0, {}), null);
 });
 
-test("warns once at 60%, then stays quiet at the same level", () => {
-  const text = entry(0, 125000); // 126k of 200k = 63%
+test("warns once at 200k, then stays quiet at the same level", () => {
+  const text = entry(0, 209000); // 210k of 1M
   const first = g.decide(prompt, text, 0, {});
   assert.strictEqual(first.level, 1);
-  assert.match(first.output.hookSpecificOutput.additionalContext, /63% \(126k of 200k tokens\)/);
-  assert.strictEqual(first.output.systemMessage, "Context 63% used");
+  assert.match(first.output.hookSpecificOutput.additionalContext, /210k tokens \(21% of 1M\)/);
+  assert.match(first.output.hookSpecificOutput.additionalContext, /warning line 200k/);
+  assert.match(first.output.hookSpecificOutput.additionalContext, /recommended at 400k/);
+  assert.strictEqual(first.output.systemMessage, "Context 210k tokens (21%) used");
   assert.strictEqual(g.decide(prompt, text, 1, {}), null);
 });
 
-test("recommends a handoff at 80% even after the 60% warning", () => {
-  const out = g.decide(prompt, entry(0, 165000), 1, {});
+test("recommends a handoff at 400k even after the warning", () => {
+  const out = g.decide(prompt, entry(0, 409000), 1, {});
   assert.strictEqual(out.level, 2);
+  assert.match(out.output.hookSpecificOutput.additionalContext, /past the 400k handoff line/);
   assert.match(out.output.hookSpecificOutput.additionalContext, /recommend a handoff/);
   assert.match(out.output.hookSpecificOutput.additionalContext, /session-handoff/);
-  assert.strictEqual(out.output.systemMessage, "Context 83% used: handoff recommended");
+  assert.strictEqual(out.output.systemMessage, "Context 410k tokens (41%) used: handoff recommended");
+});
+
+test("a 200k window warns at 40% and recommends the handoff at 60%", () => {
+  const env = { CLAUDE_CONTEXT_WINDOW: "200000" };
+  assert.strictEqual(g.decide(prompt, entry(0, 78000), 0, env), null); // 79k: just under 80k
+  const warn = g.decide(prompt, entry(0, 89000), 0, env);
+  assert.strictEqual(warn.level, 1);
+  assert.match(warn.output.hookSpecificOutput.additionalContext, /90k tokens \(45% of 200k\)/);
+  assert.strictEqual(g.decide(prompt, entry(0, 124000), 1, env).level, 2);
 });
 
 test("re-arms silently when usage drops after a compaction", () => {
@@ -80,7 +106,7 @@ test("re-arms silently when usage drops after a compaction", () => {
 });
 
 test("custom thresholds", () => {
-  const out = g.decide(prompt, entry(0, 99000), 0, { CONTEXT_WARN_PCT: "40", CONTEXT_HANDOFF_PCT: "50" });
+  const out = g.decide(prompt, entry(0, 99000), 0, { CONTEXT_WARN_TOKENS: "50000", CONTEXT_HANDOFF_TOKENS: "90000" });
   assert.strictEqual(out.level, 2);
 });
 
@@ -94,15 +120,15 @@ test("after compaction, SessionStart tells Claude to offer a handoff", () => {
 test("end to end through stdin, with state kept between prompts", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cg-"));
   const transcript = path.join(dir, "t.jsonl");
-  fs.writeFileSync(transcript, [user, entry(0, 125000)].join("\n") + "\n");
+  fs.writeFileSync(transcript, [user, entry(0, 209000)].join("\n") + "\n");
   const input = JSON.stringify({ ...prompt, session_id: "e2e", transcript_path: transcript, scratchpad_dir: dir });
   const run = () => execFileSync(process.execPath, [path.join(__dirname, "context-guard.cjs")], { input, encoding: "utf8" });
 
   const first = JSON.parse(run());
-  assert.strictEqual(first.systemMessage, "Context 63% used");
+  assert.strictEqual(first.systemMessage, "Context 210k tokens (21%) used");
   assert.strictEqual(run(), ""); // same level: quiet
 
-  fs.appendFileSync(transcript, entry(0, 170000) + "\n");
+  fs.appendFileSync(transcript, entry(0, 450000) + "\n");
   assert.match(JSON.parse(run()).systemMessage, /handoff recommended/);
 });
 

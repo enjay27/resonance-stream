@@ -19,7 +19,9 @@ use crate::protocol::types::{AppState, SnifferState, SystemLogLevel};
 use crossbeam_channel::Sender;
 use resonance_core::capture::{ChatPipeline, PipelineAction};
 use resonance_core::text::{contains_japanese, convert_to_romaji};
-use resonance_core::workers::read_error_backoff;
+use resonance_core::workers::{
+    read_error_backoff, watchdog_check, WatchdogVerdict, WATCHDOG_LIMIT_SECS, WATCHDOG_TICK,
+};
 
 // --- GLOBAL STATE ---
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
@@ -268,22 +270,18 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
 fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
     thread::spawn(move || {
         loop {
-            match rx.recv_timeout(Duration::from_secs(5)) {
+            match rx.recv_timeout(WATCHDOG_TICK) {
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 _ => {}
             }
 
             let last = LAST_TRAFFIC_TIME.load(Ordering::Relaxed);
-            if last == 0 {
-                continue;
-            }
-
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
 
-            if now.saturating_sub(last) > 15 {
+            if watchdog_check(last, now) == WatchdogVerdict::Stalled {
                 // If it was previously active, throw the error state
                 // A full-tunnel VPN hides the chat from every adapter: say so.
                 let vpn = network::vpn_in_the_way();
@@ -293,10 +291,10 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
                     "Sniffer",
                     match &vpn {
                         Some(name) => format!(
-                            "Watchdog: No game traffic for 15s. The default route runs through a VPN adapter ({name}); \
+                            "Watchdog: No game traffic for {WATCHDOG_LIMIT_SECS}s. The default route runs through a VPN adapter ({name}); \
                              turn the VPN off or exclude the game from it."
                         ),
-                        None => "Watchdog: No game traffic for 15s.".to_string(),
+                        None => format!("Watchdog: No game traffic for {WATCHDOG_LIMIT_SECS}s."),
                     },
                 );
 
@@ -313,7 +311,7 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
                 );
                 IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
 
-                // Kick the watchdog so we wait another 15s before checking again
+                // Kick the watchdog so we wait another WATCHDOG_LIMIT_SECS before speaking again
                 feed_watchdog();
             }
         }

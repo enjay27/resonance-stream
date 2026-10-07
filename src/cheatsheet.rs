@@ -767,26 +767,6 @@ mod tests {
     /// the `型` the dictionary writes after it (`雷刃` / `雷刃型`). Empty a line when it is settled: the test
     /// fails while a name is listed here and no longer needs to be.
     const KNOWN_DISAGREEMENTS: &[(&str, &str)] = &[
-        // Class trees where the dictionary has another Korean name than the cheat sheet (Kade has not
-        // said which is right; 光砕 / 光盾 he settled for the cheat sheet).
-        ("月影", "dictionary: 월광의 낫"),
-        ("氷牙", "dictionary: 스피어"),
-        ("霜天", "dictionary: 레이"),
-        ("狼弓", "dictionary: 야수 조련사"),
-        ("鷹弓", "dictionary: 맹금 조련사"),
-        ("剛身", "dictionary: 암석 방패"),
-        (
-            "威咲",
-            "dictionary: 숲의 심판; the cheat sheet's 심판 is the short form",
-        ),
-        (
-            "イサキ",
-            "the fan name of 威咲: not in the dictionary, decided with it",
-        ),
-        (
-            "森癒",
-            "dictionary: 숲의 치유; the cheat sheet's 치유 is the short form",
-        ),
         // Short forms that would mean something else, or hit ordinary words, as dictionary terms.
         (
             "ティナ",

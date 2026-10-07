@@ -1,7 +1,7 @@
 //! Which chat messages a view shows. Pure functions, so they are tested on
 //! the host (`cargo test -p resonance-stream-ui`) without a browser.
 
-use crate::ui_types::{Channel, ChatMessage};
+use crate::ui_types::{default_tab_limit, Channel, ChatMessage};
 use std::collections::{HashMap, VecDeque};
 
 pub use crate::ui_types::{ALL_TAB, CUSTOM_TAB, SYSTEM_TAB};
@@ -146,7 +146,7 @@ impl Tab {
 }
 
 /// How many messages a tab keeps. Channel tabs have their own limit
-/// (right-click menu; unset: WORLD 200, others 1000). The all-tab and the
+/// (right-click menu; unset: `default_tab_limit`). The all-tab and the
 /// custom tab have no input of their own: the all-tab holds as many as all
 /// channel limits together (2000 when none is set), the custom tab as many
 /// as its selected channels together.
@@ -155,11 +155,7 @@ pub fn tab_limit(limits: &HashMap<String, usize>, key: &str, custom_filters: &[S
         limits
             .get(key)
             .copied()
-            .unwrap_or(if key == Channel::World.as_str() {
-                200
-            } else {
-                1000
-            })
+            .unwrap_or_else(|| default_tab_limit(key))
     };
     let limit = match key {
         ALL_TAB => {
@@ -689,13 +685,13 @@ mod tests {
         let l = limits(&[("PARTY", 50), ("LOCAL", 30), ("전체", 999), ("커스텀", 999)]);
         let custom = vec!["PARTY".to_string(), "WORLD".to_string()];
         assert_eq!(tab_limit(&l, "PARTY", &custom), 50);
-        assert_eq!(tab_limit(&l, "WORLD", &custom), 200); // unset: menu default
+        assert_eq!(tab_limit(&l, "WORLD", &custom), 500); // unset: menu default
         assert_eq!(tab_limit(&l, "GUILD", &custom), 1000);
         // All-tab: every set channel limit together; its own entry is ignored.
         assert_eq!(tab_limit(&l, ALL_TAB, &custom), 80);
         assert_eq!(tab_limit(&HashMap::new(), ALL_TAB, &custom), 2000);
         // Custom: its selected channels together.
-        assert_eq!(tab_limit(&l, CUSTOM_TAB, &custom), 250);
+        assert_eq!(tab_limit(&l, CUSTOM_TAB, &custom), 550);
         assert_eq!(tab_limit(&l, CUSTOM_TAB, &[]), 1); // never 0: keeps the newest
     }
 

@@ -5,7 +5,7 @@ use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use resonance_types::{
     default_catch_up_limit, default_favorite_messages, Channel, ComputeMode, FavoriteMessage,
-    FavoriteTab, LogLevel, TabSwitchModifier, Theme, Tier, TranslationView, ALL_TAB, CUSTOM_TAB,
+    FavoriteTab, LogLevel, TabSwitchModifier, Theme, Tier, TranslationView, ALL_TAB,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -62,7 +62,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub tab_switch_key: String, // e.g., "Tab", "ArrowRight", etc.
     /// Messages each tab keeps (keys: channel names, `ALL_TAB`, `CUSTOM_TAB`).
-    #[serde(default = "default_tab_limits")]
+    #[serde(default = "resonance_types::default_tab_limits")]
     pub tab_limits: std::collections::HashMap<String, usize>,
     /// Channels not written to the chat archive.
     #[serde(default = "default_archive_ignored_channels")]
@@ -87,21 +87,6 @@ pub struct AppConfig {
 
 fn default_spacing() -> u32 {
     4
-}
-
-fn default_tab_limits() -> std::collections::HashMap<String, usize> {
-    [
-        (Channel::World.as_str(), 200), // World gets a small limit
-        (Channel::Local.as_str(), 500),
-        (Channel::Party.as_str(), 1000), // Party/Guild get huge limits
-        (Channel::Guild.as_str(), 1000),
-        (Channel::Beginner.as_str(), 500),
-        (ALL_TAB, 1000),
-        (CUSTOM_TAB, 1000),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_string(), v))
-    .collect()
 }
 
 fn default_archive_ignored_channels() -> Vec<String> {
@@ -147,7 +132,7 @@ impl Default for AppConfig {
             auto_sync_latest_dict: false,
             tab_switch_modifier: TabSwitchModifier::default(),
             tab_switch_key: "Tab".to_string(),
-            tab_limits: default_tab_limits(),
+            tab_limits: resonance_types::default_tab_limits(),
             archive_ignored_channels: default_archive_ignored_channels(),
             message_spacing: default_spacing(),
             favorite_messages: default_favorite_messages(),

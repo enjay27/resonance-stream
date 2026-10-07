@@ -15,7 +15,7 @@ Measured 2026-10-06 on `main` `1478528` (right after PR #203). Evidence, numbers
 
 ## Decisions (2026-10-06, Kade)
 
-- **D-1** Local and Beginner tab-limit default is **1000** (`default_tab_limits` 500 -> 1000 for those two; defined once, S2c).
+- **D-1** Local and Beginner tab-limit default is **1000** (`default_tab_limits` 500 -> 1000 for those two; defined once, S2c). **Extended by Kade 2026-10-07:** WORLD's default is **500** (was 200), the invalid-input fallback of the settings box is the tab's default; one definition, `resonance_types::default_channel_limit` / `default_tab_limit` / `default_tab_limits`.
 - **D-2** `MEMORY.md` is limited to **40 lines and 6 KB** (the size is my recommendation, accepted) - S0a.
 - **D-3** Smoke steps keep running after one fails, **but a release is blocked unless every step succeeds** - S0b.
 
@@ -30,7 +30,7 @@ Order: biggest risk first (losing the app or data) -> silent drops -> trust boun
 - **S1 Do not lose the app or data** (W-1, R-6, W-3, W-5)
   - ~~S1a `install_swap` to core, rename back when the second rename fails~~ **done 2026-10-06** (`resonance_core::download::install_swap`, four temp-dir tests; `restart_to_apply_update` calls it). The real swap on Windows is unseen. ~~S1b extract the AI server into `.part`, then rename~~ **done 2026-10-06** (`part_path` + `publish_dir` in core, three tests; `download_ai_server` builds `ai-server.part` and publishes it; an install broken by an old version, exe present but DLLs missing, is not detected). ~~S1c remove the export timestamp `unwrap`, add a panic hook and a log file~~ **done 2026-10-06** (`resonance_core::crash_log`: `unix_to_utc`, `panic_report`, `append_capped`, six tests; `src-tauri/src/panic_hook.rs` writes `<data>/logs/panic.log`, capped 256 KiB + `.1`). **Not done:** the general rolling `logs/app.log` (A-8.1 second half) and the release log level (A-8.3); a panic before the data folder is known is only printed.
 - **S2 Stop silent drops** (W-4, W-7, W-6, R-4)
-  - S2a archive on arrival. S2b settings: backup on read failure, `apply_config` returns a `Result`, `write_atomic` everywhere, `config_version`. S2c channel-limit defaults in `types` (**1000** for Local and Beginner). S2d `start_sniffer_command` / `ensure_firewall_rule_command` async, one firewall check.
+  - S2a archive on arrival. S2b settings: backup on read failure, `apply_config` returns a `Result`, `write_atomic` everywhere, `config_version`. ~~S2c channel-limit defaults in `types`~~ **done 2026-10-07** (WORLD 500, all others 1000; only new configs and unset keys change, saved `tab_limits` keep their numbers; the all-tab's 2000 fallback while the config is not loaded is untouched). S2d `start_sniffer_command` / `ensure_firewall_rule_command` async, one firewall check.
 - **S3 Trust boundary of the administrator app** (W-2, W-8, W-9)
   - ~~S3a per-file SHA-256 check of the server exe and DLLs before spawn~~ **done 2026-10-07** (Kade: pins in the app, refuse and notify; `resonance_core::server_pins`, table from `.github/scripts/ai-server-pins.py`; extra `.exe`/`.dll` refused too). Open: check-to-spawn window (ACL), and what the real app shows on a mismatch. S3b minisign check of gist metadata, timeouts and size limits. S3c CSP, unused shell permissions removed, `open_browser` only `https`.
 - **S4 Service-lifetime owner** (R-1, R-2, R-3, W-10) - `sniffer_change` table and watchdog decisions in core (fake clock), the 2-second duplicate window in core, then a `Services` owner.

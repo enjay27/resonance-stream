@@ -675,6 +675,35 @@ pub fn is_popup_label(label: &str) -> bool {
     label.starts_with(POPUP_LABEL_PREFIX)
 }
 
+/// How many messages a channel's tab keeps (and the backend keeps and reloads) when the
+/// config holds no number for it: WORLD is the busy one, so it keeps fewer. The one place
+/// this is decided -- the backend, the chat view, the settings input and a new config all ask here.
+pub fn default_channel_limit(channel: Channel) -> usize {
+    match channel {
+        Channel::World => 500,
+        _ => 1000,
+    }
+}
+
+/// [`default_channel_limit`] for a tab's key in `tab_limits`: the channel's own default, and
+/// 1000 for anything that is no channel (it is not read as WORLD).
+pub fn default_tab_limit(key: &str) -> usize {
+    Channel::ALL
+        .into_iter()
+        .find(|channel| channel.as_str() == key)
+        .map_or(1000, default_channel_limit)
+}
+
+/// `tab_limits` of a new config: every channel's default, and the all-tab and custom tab
+/// (which have no input of their own) at 1000.
+pub fn default_tab_limits() -> HashMap<String, usize> {
+    Channel::ALL
+        .into_iter()
+        .map(|channel| (channel.as_str().to_string(), default_channel_limit(channel)))
+        .chain([(ALL_TAB.to_string(), 1000), (CUSTOM_TAB.to_string(), 1000)])
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -707,6 +736,43 @@ mod tests {
             assert_eq!(channel.as_str(), name);
             assert_eq!(Channel::from_name(name), channel);
         }
+    }
+
+    #[test]
+    fn every_channel_has_one_default_limit_and_world_is_the_small_one() {
+        // Decided by Kade 2026-10-07: WORLD 500, every other channel 1000.
+        assert_eq!(default_channel_limit(Channel::World), 500);
+        for channel in [
+            Channel::Local,
+            Channel::Party,
+            Channel::Guild,
+            Channel::Beginner,
+        ] {
+            assert_eq!(default_channel_limit(channel), 1000, "{channel:?}");
+        }
+    }
+
+    #[test]
+    fn a_tab_key_gets_its_channels_default_and_anything_else_1000() {
+        assert_eq!(default_tab_limit("WORLD"), 500);
+        assert_eq!(default_tab_limit("GUILD"), 1000);
+        assert_eq!(default_tab_limit(ALL_TAB), 1000);
+        assert_eq!(default_tab_limit("SOMETHING"), 1000); // not read as WORLD
+    }
+
+    #[test]
+    fn a_new_config_gets_the_default_limits_for_every_tab() {
+        let limits = default_tab_limits();
+        assert_eq!(limits.len(), Channel::ALL.len() + 2);
+        for channel in Channel::ALL {
+            assert_eq!(
+                limits[channel.as_str()],
+                default_channel_limit(channel),
+                "{channel:?}"
+            );
+        }
+        assert_eq!(limits[ALL_TAB], 1000);
+        assert_eq!(limits[CUSTOM_TAB], 1000);
     }
 
     #[test]

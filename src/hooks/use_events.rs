@@ -6,6 +6,7 @@ use crate::ui_types::{
     ChatMessage, ServiceStates, SnifferState, SnifferStatePayload, SystemMessage,
     TranslationResult, TranslatorState, TranslatorStatePayload,
 };
+use crate::view_signals::ChatSignals;
 use leptos::logging::log;
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
@@ -165,23 +166,28 @@ fn create_packet_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
 fn create_translation_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
     Closure::wrap(Box::new(move |event_obj: JsValue| {
         if let Some(payload) = payload::<TranslationResult>(event_obj) {
-            // Find the existing message by PID and update its signal.
-            // Only this row re-renders; the list itself is untouched.
-            let row = signals
-                .chat
-                .chat
-                .with_untracked(|store| store.get(payload.pid).cloned());
-            match row {
-                Some(chat_rw) => chat_rw.update(|c| c.translated = Some(payload.translated)),
-                // The row is not here yet: its history is still being fetched.
-                // Keep the text; hydration applies it after the merge.
-                None => signals
-                    .chat
-                    .set_chat
-                    .update(|store| store.hold_translation(payload.pid, payload.translated)),
-            }
+            land_translation(&signals.chat, payload);
         }
     }) as Box<dyn FnMut(JsValue)>)
+}
+
+/// Puts a translation into its row. Only this row re-renders; the list itself is untouched, so the
+/// list is told (`rows_changed`) that a row may have grown.
+fn land_translation(chat: &ChatSignals, result: TranslationResult) {
+    let row = chat
+        .chat
+        .with_untracked(|store| store.get(result.pid).cloned());
+    match row {
+        Some(chat_rw) => {
+            chat_rw.update(|c| c.translated = Some(result.translated));
+            chat.set_rows_changed.update(|n| *n += 1);
+        }
+        // The row is not here yet: its history is still being fetched.
+        // Keep the text; hydration applies it after the merge.
+        None => chat
+            .set_chat
+            .update(|store| store.hold_translation(result.pid, result.translated)),
+    }
 }
 
 fn create_system_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
@@ -227,13 +233,19 @@ fn create_update_message_handler(signals: AppSignals) -> Closure<dyn FnMut(JsVal
         let Some(updated_msg) = payload::<ChatMessage>(event_obj) else {
             return;
         };
-        // Find the existing signal by PID and completely overwrite its value
-        signals.chat.chat.with_untracked(|store| {
-            if let Some(chat_rw) = store.get(updated_msg.pid) {
-                chat_rw.set(updated_msg);
-            }
-        });
+        land_message_update(&signals.chat, updated_msg);
     }) as Box<dyn FnMut(JsValue)>)
+}
+
+/// Overwrites the row of a message the backend changed (blocked, translated), if it is in the list.
+fn land_message_update(chat: &ChatSignals, updated: ChatMessage) {
+    let row = chat
+        .chat
+        .with_untracked(|store| store.get(updated.pid).cloned());
+    if let Some(chat_rw) = row {
+        chat_rw.set(updated);
+        chat.set_rows_changed.update(|n| *n += 1);
+    }
 }
 
 fn create_firewall_missing_handler(signals: AppSignals) -> Closure<dyn FnMut(JsValue)> {
@@ -244,4 +256,86 @@ fn create_firewall_missing_handler(signals: AppSignals) -> Closure<dyn FnMut(JsV
         // 2. Make sure it starts on Step 0 (the Firewall Agreement page)
         signals.setup.set_wizard_step.set(0);
     }) as Box<dyn FnMut(JsValue)>)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui_types::Channel;
+    use std::collections::HashMap;
+
+    fn with_row(signals: &AppSignals, pid: u64) -> ArcRwSignal<ChatMessage> {
+        let row = ArcRwSignal::new(ChatMessage {
+            pid,
+            message: "こんにちは".into(),
+            ..Default::default()
+        });
+        signals.chat.set_chat.update(|store| {
+            store.add(pid, Channel::World, row.clone(), &[], &HashMap::new());
+        });
+        row
+    }
+
+    fn result(pid: u64, text: &str) -> TranslationResult {
+        TranslationResult {
+            pid,
+            translated: text.into(),
+        }
+    }
+
+    #[test]
+    fn a_translation_for_a_row_in_the_list_fills_it_and_says_a_row_changed() {
+        let signals = AppSignals::new();
+        let row = with_row(&signals, 7);
+        assert_eq!(signals.chat.rows_changed.get_untracked(), 0);
+        land_translation(&signals.chat, result(7, "안녕하세요"));
+        assert_eq!(
+            row.get_untracked().translated.as_deref(),
+            Some("안녕하세요")
+        );
+        assert_eq!(signals.chat.rows_changed.get_untracked(), 1);
+    }
+
+    #[test]
+    fn a_translation_for_a_row_not_here_yet_is_held_and_changes_no_row() {
+        let signals = AppSignals::new();
+        land_translation(&signals.chat, result(9, "나중에"));
+        assert_eq!(signals.chat.rows_changed.get_untracked(), 0);
+        // Its row arrives later (the history merge): only then is the held text handed out.
+        with_row(&signals, 9);
+        let held = signals
+            .chat
+            .set_chat
+            .try_update(|store| store.take_held_translations());
+        assert_eq!(held, Some(vec![(9, "나중에".to_string())]));
+    }
+
+    #[test]
+    fn an_updated_message_replaces_its_row_and_says_a_row_changed() {
+        let signals = AppSignals::new();
+        let row = with_row(&signals, 3);
+        land_message_update(
+            &signals.chat,
+            ChatMessage {
+                pid: 3,
+                is_blocked: true,
+                ..Default::default()
+            },
+        );
+        assert!(row.get_untracked().is_blocked);
+        assert_eq!(signals.chat.rows_changed.get_untracked(), 1);
+    }
+
+    #[test]
+    fn an_update_for_a_message_that_is_not_in_the_list_changes_nothing() {
+        let signals = AppSignals::new();
+        land_message_update(
+            &signals.chat,
+            ChatMessage {
+                pid: 99,
+                ..Default::default()
+            },
+        );
+        assert_eq!(signals.chat.rows_changed.get_untracked(), 0);
+    }
 }

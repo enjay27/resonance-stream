@@ -166,7 +166,7 @@ Mostly **reported** (a review agent estimated from reading the code); nothing wa
 - **Proposal:** reset the limit to 50 when the view returns to the bottom (small). To go further, see the windowed list in A-4.2.
 - **Severity:** Low · **Effort:** Small
 
-### P-2 Every row runs its own scroll-correction effect
+### P-2 Every row runs its own scroll-correction effect (**fixed 2026-10-07, S6c**: the list watches one `rows_changed` signal)
 
 - **Where:** `chat_row.rs:48-62` (reported).
 - **Evidence:** each translated row schedules a `request_animation_frame` and a `get_element_by_id`. A tab switch or hydration repeats this N times.

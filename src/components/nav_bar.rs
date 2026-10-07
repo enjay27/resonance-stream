@@ -99,7 +99,7 @@ pub fn NavBar() -> impl IntoView {
     // ==========================================
     // GLOBAL KEYBOARD SHORTCUT (Ctrl+F)
     // ==========================================
-    window_event_listener(keydown, move |ev| {
+    crate::utils::window_listener(keydown, move |ev| {
         if (ev.ctrl_key() || ev.meta_key()) && ev.key().to_lowercase() == "f" {
             ev.prevent_default();
             set_is_search_open.set(true);
@@ -141,7 +141,7 @@ pub fn NavBar() -> impl IntoView {
     // ==========================================
     // CLICK-OUTSIDE TO CLOSE LISTENERS
     // ==========================================
-    window_event_listener(click, move |ev| {
+    crate::utils::window_listener(click, move |ev| {
         let target = event_target::<Node>(&ev);
 
         // 1. Close Right-Click Menu

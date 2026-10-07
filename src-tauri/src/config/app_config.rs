@@ -3,7 +3,9 @@ use parking_lot::Mutex;
 use resonance_core::config_migration::{migrate_config, to_file_text, Migrated, CONFIG_VERSION};
 use resonance_core::download::{keep_bad_copy, keep_copy, read_text_retrying, write_atomic};
 use resonance_core::history::ChannelLimits;
-use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
+use resonance_core::workers::{
+    sniffer_change, translator_change, TranslatorSettings, WorkerChange,
+};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -207,12 +209,17 @@ fn apply_config(
     }
 
     // --- MANAGE THE SNIFFER THREAD (NETWORK ADAPTER CHANGE) ---
-    if old_config.network_interface != config.network_interface {
+    let sniffer = sniffer_change(
+        &old_config.network_interface,
+        &config.network_interface,
+        config.init_done,
+    );
+    if sniffer != WorkerChange::Keep {
         // Drop the old Sender (Instantly kills the socket and watchdog threads)
         *state.sniffer_tx.lock() = None;
 
         // Restart the sniffer bound to the newly selected interface
-        if config.init_done {
+        if sniffer == WorkerChange::Restart {
             inject_system_message(
                 &app,
                 SystemLogLevel::Info,

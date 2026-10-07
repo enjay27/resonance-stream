@@ -1,0 +1,155 @@
+name: Bridge smoke test
+
+# Builds the candidate exe (the same command as release-candidate.yml, test flags on)
+# on a Windows runner and drives it over the test bridge, with nobody at the keyboard:
+# `replay-chat` (the whole pipeline from replayed lines to `packet-event`) and
+# `window-restore` (K18, real window geometry) and `capture-spike` (the sniffer against traffic this machine sends). It answers one question first: does the
+# hosted runner give the app an elevated, interactive session with a WebView2 window?
+# The "session" step prints what it finds, and the logs of both runs are uploaded.
+#
+# It is slow (~20 min), so it runs only where a red row has to stop something: `release.yml` calls it (`workflow_call`, no input:
+# it builds a test-env exe of the tagged commit; the shipped exe has no bridge, so it cannot be driven) when a release tag is pushed.
+# No pull request, no push to a branch and no release candidate starts it (`rc-lib.test.sh` pins that). `workflow_dispatch` is a
+# manual run on a branch, for looking into a red row. Every step is a gate: a failing row fails the job (nothing here is
+# continue-on-error; the eight pipelines passed on the hosted runner, 2026-10-06). The eight pipeline steps are independent
+# (each has its own data folder), so one red step no longer hides the rest: they run unless the run is cancelled
+# (`if: ${{ !cancelled() }}`) and the job still ends red, which blocks `release.yml` (decision D-3). Setup and build steps
+# are not guarded: without an exe there is nothing to run.
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      exe-artifact:
+        description: 'Name of an artifact of this run that holds resonance-stream.exe built with --features test-env (empty: build it here)'
+        type: string
+        required: false
+        default: ''
+
+concurrency:
+  group: bridge-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  smoke:
+    name: bridge smoke (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.exe-artifact == ''
+        with:
+          targets: wasm32-unknown-unknown
+      # Release builds share the candidate's cache, but only rc saves it.
+      - uses: Swatinem/rust-cache@v2
+        if: inputs.exe-artifact == ''
+        with:
+          shared-key: release-candidate
+          save-if: false
+          cache-bin: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+        if: inputs.exe-artifact == ''
+      - uses: taiki-e/install-action@v2
+        if: inputs.exe-artifact == ''
+        with:
+          tool: trunk
+      - name: Build the test exe
+        if: inputs.exe-artifact == ''
+        run: npx --yes @tauri-apps/cli@2 build --no-bundle --features test-env
+
+      - name: Take the exe the calling job built
+        if: inputs.exe-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.exe-artifact }}
+          path: target/release
+
+      - name: Session (what the runner gives the app)
+        shell: pwsh
+        run: |
+          $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $admin = (New-Object Security.Principal.WindowsPrincipal $id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          "user: $($id.Name)  elevated: $admin  session id: $([Diagnostics.Process]::GetCurrentProcess().SessionId)"
+          $wv = Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue
+          "WebView2 runtime: $($wv.pv)"
+          Add-Type -AssemblyName System.Windows.Forms
+          "screen: $([Windows.Forms.Screen]::PrimaryScreen.WorkingArea)"
+
+      - name: Bridge unit tests
+        working-directory: runbook/bridge
+        run: |
+          npm ci
+          npm test
+
+      - name: replay-chat over the bridge
+        if: ${{ !cancelled() }}
+        run: >
+          node runbook/bridge/cli.mjs run replay-chat
+          --exe target/release/resonance-stream.exe
+          --work "$env:RUNNER_TEMP/bridge-replay"
+
+      - name: window-restore over the bridge
+        if: ${{ !cancelled() }}
+        working-directory: runbook
+        run: python -m runbook.run window-restore --exe ../target/release/resonance-stream.exe
+
+      # Does the sniffer see chat that this same machine sends? Tried on the LAN address and on 127.0.0.1. The runner is
+      # disposable, so it may make the firewall rule the app wants for the copy it starts.
+      - name: capture-spike over the bridge
+        if: ${{ !cancelled() }}
+        working-directory: runbook
+        run: python -m runbook.run capture-spike --exe ../target/release/resonance-stream.exe --add-firewall-rule
+
+      # What the backend does with chat lines: dedupe, block list, chat log (`replay-chat` + the chat commands).
+      - name: chat-rules over the bridge
+        if: ${{ !cancelled() }}
+        working-directory: runbook
+        run: python -m runbook.run chat-rules --exe ../target/release/resonance-stream.exe
+
+      # What survives a restart: chat log, block list, pids.
+      - name: persistence over the bridge
+        if: ${{ !cancelled() }}
+        working-directory: runbook
+        run: python -m runbook.run persistence --exe ../target/release/resonance-stream.exe
+
+      # The model download's rules against a local mock server.
+      - name: download-integrity over the bridge
+        if: ${{ !cancelled() }}
+        working-directory: runbook
+        run: python -m runbook.run download-integrity --exe ../target/release/resonance-stream.exe
+
+      # The translate path against a stand-in llama-server.
+      - name: translator-stub over the bridge
+        if: ${{ !cancelled() }}
+        working-directory: runbook
+        run: python -m runbook.run translator-stub --exe ../target/release/resonance-stream.exe
+
+      # The popup windows (real windows on the runner).
+      - name: popups over the bridge
+        if: ${{ !cancelled() }}
+        working-directory: runbook
+        run: python -m runbook.run popups --exe ../target/release/resonance-stream.exe
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-smoke-logs
+          path: |
+            ${{ runner.temp }}/bridge-replay/**
+            runbook/runs/**
+          if-no-files-found: warn
+          retention-days: 7

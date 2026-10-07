@@ -9,9 +9,11 @@ edition = "2021"
 
 [features]
 # Honour the test flags (--data-dir, --status-file, ...; see
-# `.memory/roadmap/test-run-parameters.md`) in a release build. Debug builds
-# always do. Only release candidates are built with it; stable releases never.
-test-env = []
+# `.memory/roadmap/test-run-parameters.md`) in a release build, and carry the test
+# bridge (`bridge/`, with its MQTT client). Debug builds honour the flags without it
+# but need the feature for the bridge. Only release candidates are built with it;
+# stable releases never.
+test-env = ["dep:rumqttc"]
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -29,12 +31,11 @@ resonance-llama = { path = "../crates/llama" }
 resonance-types = { path = "../crates/types" }
 tauri = { version = "2", features = ["unstable", "tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
-tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Test bridge client (loopback MQTT, see `bridge.rs`); no TLS: it never leaves the machine.
-rumqttc = { version = "0.25", default-features = false }
-reqwest = { version = "0.11", features = ["stream", "json", "blocking", "rustls-tls"] }
+# Test bridge client (loopback MQTT, see `bridge/`), only with the `test-env` feature; no TLS: it never leaves the machine.
+rumqttc = { version = "0.25", default-features = false, optional = true }
+reqwest = { version = "0.12", features = ["stream", "json", "blocking", "rustls-tls"] }
 futures-util = "0.3"
 # Per-chunk download timeouts (already in the tree through reqwest and tauri).
 tokio = { version = "1", default-features = false, features = ["time"] }

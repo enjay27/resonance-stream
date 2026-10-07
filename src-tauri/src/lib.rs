@@ -12,6 +12,7 @@ pub mod config;
 pub mod events;
 pub mod io;
 pub mod logging;
+pub mod panic_hook;
 pub mod protocol;
 pub mod services;
 pub mod shortcut;
@@ -36,6 +37,7 @@ pub fn run() {
     // The test flags first: they may move the data folders and name the log file.
     test_env::init();
     logging::init_logger(test_env::log_file());
+    panic_hook::install();
 
     // A popup is placed by `show_popup`, hidden, just before it is shown: the
     // plugin restoring it at creation would show it first at the default place.
@@ -51,25 +53,29 @@ pub fn run() {
         .on_window_event(window::on_window_event)
         .setup(|app| {
             let handle = app.handle().clone();
+            if let Ok(data_dir) = app_dirs::data(&handle) {
+                panic_hook::set_log_dir(&data_dir);
+            }
             window::prewarm_popups(handle.clone());
             // --- STATE FIRST: everything below logs through it and reads its config ---
             let mut config = read_config_file(&handle);
             config.init_done = test_env::init_done_for_run(config.init_done);
             let dictionary = resonance_core::text::Dictionary::load(&dictionary_path(&handle));
+            let load_notice = take_load_notice();
             app.manage(AppState {
                 config: RwLock::new(config.clone()),
                 config_lock: Mutex::new(()),
-                chat_history: Mutex::new(ChatHistory::new(config.channel_limits())),
+                chat_history: Mutex::new(ChatHistory::new(
+                    resonance_core::history::ChannelLimits::new(&config.tab_limits),
+                )),
                 system_history: Mutex::new(VecDeque::with_capacity(200)),
                 next_pid: 1.into(),
                 nickname_cache: Mutex::new(std::collections::HashMap::new()),
                 dictionary: RwLock::new(Arc::new(dictionary)),
-                translator_tx: Mutex::new(None),
+                services: Default::default(),
                 translation_ledger: Mutex::new(Default::default()),
                 data_factory_tx: Mutex::new(None),
-                sniffer_tx: Mutex::new(None),
                 service_states: Mutex::new(Default::default()),
-                blocked_users: Mutex::new(config.blocked_users.clone()),
                 shortcuts: Mutex::new(shortcut::GlobalShortcuts {
                     tab_modifier: config.tab_switch_modifier,
                     tab_key: config.tab_switch_key.clone(),
@@ -78,15 +84,28 @@ pub fn run() {
             });
             let state = app.state::<AppState>();
 
+            // Before anything that emits, so the bridge hears all of it: the translator's first states, the first system
+            // messages (it queues until connected). Its commands wait for `mark_ready` below.
+            bridge::start(&handle);
+
+            // What the start-up read found wrong with config.json (the state did not exist to log it).
+            if let Some(notice) = load_notice {
+                inject_system_message(&handle, SystemLogLevel::Error, "Settings", notice);
+            }
+
             // Old daily logs past the retention setting go before the reload.
             crate::io::prune_chat_logs(&handle);
 
             // Chat saved by earlier runs (daily chat logs), newest last; new
             // pids continue after them so the list stays in order.
-            let restored = resonance_core::history::load_recent(
+            let mut restored = resonance_core::history::load_recent(
                 &crate::io::chat_logs_dir(&handle),
-                &config.channel_limits(),
+                &resonance_core::history::ChannelLimits::new(&config.tab_limits),
             );
+            // Each row has the blocked flag it was saved with; the block list may have changed since.
+            resonance_core::history::apply_block_list(&mut restored, |uid| {
+                config.blocked_users.contains_key(&uid)
+            });
             state.next_pid.fetch_max(
                 restored.len() as u64 + 1,
                 std::sync::atomic::Ordering::SeqCst,
@@ -126,12 +145,7 @@ pub fn run() {
 
             // --- START AI IF NEEDED ---
             if config.use_translation {
-                let model_path = crate::get_model_path(&handle);
-                *state.translator_tx.lock() =
-                    Some(crate::services::translator::start_translator_worker(
-                        handle.clone(),
-                        model_path,
-                    ));
+                state.services.start_translator(&handle);
             }
 
             // --- START THE CHAT ARCHIVE (each tab decides what it takes) ---
@@ -140,13 +154,10 @@ pub fn run() {
 
             crate::tray::setup_tray(app)?;
 
-            // Before anything that emits, so the bridge hears it (it queues until connected).
-            bridge::start(&handle);
             test_env::mark_ready(&handle);
             crate::services::sniffer::replay::start(handle.clone());
             Ok(())
         })
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())

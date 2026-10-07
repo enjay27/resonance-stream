@@ -10,6 +10,7 @@
 //! dashes as underscores (`--no-capture` -> `RESONANCE_TEST_NO_CAPTURE`). A flag
 //! on the command line wins over its variable.
 
+use crate::update_signature::is_public_key;
 use std::fmt;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -31,7 +32,7 @@ enum Kind {
 }
 
 /// Every flag, in the order `TestEnv::set_flags` lists them.
-const FLAGS: [(&str, Kind); 15] = [
+const FLAGS: [(&str, Kind); 18] = [
     ("data-dir", Kind::Value),
     ("fresh", Kind::Switch),
     ("assume-setup-done", Kind::Switch),
@@ -42,10 +43,13 @@ const FLAGS: [(&str, Kind); 15] = [
     ("no-window-state", Kind::Switch),
     ("feed-url", Kind::Value),
     ("metadata-url", Kind::Value),
+    ("metadata-trust-key", Kind::Value),
+    ("dictionary-url", Kind::Value),
     ("status-file", Kind::Value),
     ("log-file", Kind::Value),
     ("replay-chat", Kind::Value),
     ("bridge-url", Kind::Value),
+    ("llama-url", Kind::Value),
     ("print-env", Kind::Switch),
 ];
 
@@ -67,6 +71,11 @@ pub struct TestEnv {
     pub feed_url: Option<String>,
     /// Read the gist metadata from here instead of the public gist.
     pub metadata_url: Option<String>,
+    /// Trust this minisign public key (base64) for the signed metadata instead of the keys built into
+    /// the app, so a mock server's throwaway key can sign it. Test builds only, like every flag.
+    pub metadata_trust_key: Option<String>,
+    /// Read the custom dictionary (`sync_dictionary`) from here instead of the public gist.
+    pub dictionary_url: Option<String>,
     /// Write a JSON status file (start, ready, update state) here.
     pub status_file: Option<PathBuf>,
     /// Also write the log here (a release exe has no console).
@@ -77,6 +86,9 @@ pub struct TestEnv {
     /// Connect to this local MQTT broker (`mqtt://127.0.0.1:1883`) and publish
     /// what the app does / obey what the test publishes (see [`bridge_addr`]).
     pub bridge_url: Option<String>,
+    /// Use the llama-server that answers here (`http://127.0.0.1:PORT`) instead of starting one: a stand-in
+    /// that needs no model and no GPU. Local http only, with a port; stored without a trailing slash.
+    pub llama_url: Option<String>,
     /// Print the resolved settings as JSON and exit.
     pub print_env: bool,
 }
@@ -96,10 +108,13 @@ impl TestEnv {
             self.no_window_state,
             self.feed_url.is_some(),
             self.metadata_url.is_some(),
+            self.metadata_trust_key.is_some(),
+            self.dictionary_url.is_some(),
             self.status_file.is_some(),
             self.log_file.is_some(),
             self.replay_chat.is_some(),
             self.bridge_url.is_some(),
+            self.llama_url.is_some(),
             self.print_env,
         ];
         FLAGS
@@ -135,17 +150,34 @@ impl TestEnv {
                 }
                 self.bridge_url = Some(value);
             }
-            "feed-url" | "metadata-url" => {
+            "llama-url" => {
+                let base = value.trim_end_matches('/').to_string();
+                // Local http with a port, and no path: the app appends /health and /completion itself.
+                let ok = is_local_http_url(&base)
+                    && split_authority(&base).is_some_and(|(_, _, port)| port.is_some())
+                    && base.matches('/').count() == 2;
+                if !ok {
+                    return Err(TestEnvError::BadLlamaUrl { url: value });
+                }
+                self.llama_url = Some(base);
+            }
+            "metadata-trust-key" => {
+                if !is_public_key(&value) {
+                    return Err(TestEnvError::BadTrustKey { key: value });
+                }
+                self.metadata_trust_key = Some(value);
+            }
+            "feed-url" | "metadata-url" | "dictionary-url" => {
                 if !is_test_url_allowed(&value) {
                     return Err(TestEnvError::BadUrl {
                         flag: name.to_string(),
                         url: value,
                     });
                 }
-                if name == "feed-url" {
-                    self.feed_url = Some(value);
-                } else {
-                    self.metadata_url = Some(value);
+                match name {
+                    "feed-url" => self.feed_url = Some(value),
+                    "metadata-url" => self.metadata_url = Some(value),
+                    _ => self.dictionary_url = Some(value),
                 }
             }
             _ => unreachable!("not a value flag: {name}"),
@@ -174,6 +206,10 @@ pub enum TestEnvError {
     BadBridgeUrl { url: String },
     /// A feed / metadata URL that is neither `https` nor local `http`.
     BadUrl { flag: String, url: String },
+    /// A `--metadata-trust-key` that is not a base64 minisign public key.
+    BadTrustKey { key: String },
+    /// A `--llama-url` that is not `http://` to this machine with a port.
+    BadLlamaUrl { url: String },
 }
 
 impl fmt::Display for TestEnvError {
@@ -198,6 +234,14 @@ impl fmt::Display for TestEnvError {
             Self::BadBridgeUrl { url } => write!(
                 f,
                 "--bridge-url {url:?}: only mqtt://127.0.0.1 / localhost / [::1], with an optional port"
+            ),
+            Self::BadLlamaUrl { url } => write!(
+                f,
+                "--llama-url {url:?}: only http://127.0.0.1:PORT / localhost / [::1], with a port and no path"
+            ),
+            Self::BadTrustKey { key } => write!(
+                f,
+                "--metadata-trust-key {key:?}: not a base64 minisign public key (the text of a .pub file from `tauri signer`)"
             ),
             Self::BadUrl { flag, url } => write!(
                 f,
@@ -477,9 +521,12 @@ impl TestEnv {
             switch(self.no_window_state, "no-window-state"),
             value(self.feed_url.clone(), "feed-url"),
             value(self.metadata_url.clone(), "metadata-url"),
+            value(self.metadata_trust_key.clone(), "metadata-trust-key"),
+            value(self.dictionary_url.clone(), "dictionary-url"),
             value(path(&self.status_file), "status-file"),
             value(path(&self.log_file), "log-file"),
             value(self.bridge_url.clone(), "bridge-url"),
+            value(self.llama_url.clone(), "llama-url"),
         ]
         .into_iter()
         .flatten()
@@ -658,6 +705,7 @@ mod tests {
             "--feed-url",
             "https://example.com/latest.json",
             "--metadata-url=http://127.0.0.1:8099/meta.json",
+            "--dictionary-url=http://127.0.0.1:8099/custom_dict.json",
         ]);
         assert_eq!(env.status_file, Some("/tmp/status.json".into()));
         assert_eq!(env.log_file, Some("/tmp/app.log".into()));
@@ -668,6 +716,83 @@ mod tests {
         assert_eq!(
             env.metadata_url.as_deref(),
             Some("http://127.0.0.1:8099/meta.json")
+        );
+        assert_eq!(
+            env.dictionary_url.as_deref(),
+            Some("http://127.0.0.1:8099/custom_dict.json")
+        );
+    }
+
+    #[test]
+    fn a_dictionary_url_is_https_or_local_http_and_is_passed_on_a_restart() {
+        // The same rule as the feed and metadata URLs: a test must not be able to send the app to some other host.
+        assert_eq!(
+            run(
+                &["--dictionary-url", "http://example.com/custom_dict.json"],
+                &[]
+            ),
+            Err(TestEnvError::BadUrl {
+                flag: "dictionary-url".into(),
+                url: "http://example.com/custom_dict.json".into()
+            })
+        );
+        let env = ok(&["--dictionary-url", "https://example.com/custom_dict.json"]);
+        assert_eq!(env.set_flags(), ["dictionary-url"]);
+        assert_eq!(
+            env.restart_args(),
+            ["--dictionary-url=https://example.com/custom_dict.json"]
+        );
+    }
+
+    // A throwaway public key (see signed_metadata's tests): it signs nothing real.
+    const TEST_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEyM0EzNEMxRkU1RjEzNTUKUldSVkUxLyt3VFE2RWxFcjNsMzhMVGJIekpzTDMwVWlDZktzM3VQelZZS2o4eHJlcWpXajRCUncK";
+
+    #[test]
+    fn a_metadata_trust_key_is_a_public_key_and_is_passed_on_a_restart() {
+        let env = ok(&["--metadata-trust-key", TEST_KEY]);
+        assert_eq!(env.metadata_trust_key.as_deref(), Some(TEST_KEY));
+        assert_eq!(env.set_flags(), ["metadata-trust-key"]);
+        assert_eq!(
+            env.restart_args(),
+            [format!("--metadata-trust-key={TEST_KEY}")]
+        );
+        // The variable works like every other value flag.
+        let env = run(&[], &[("RESONANCE_TEST_METADATA_TRUST_KEY", TEST_KEY)]).expect("parses");
+        assert_eq!(env.metadata_trust_key.as_deref(), Some(TEST_KEY));
+        // A typo must not silently leave the real keys in charge of the wrong test.
+        assert_eq!(
+            run(&["--metadata-trust-key", "not-a-key"], &[]),
+            Err(TestEnvError::BadTrustKey {
+                key: "not-a-key".into()
+            })
+        );
+        assert_eq!(
+            run(&["--metadata-trust-key"], &[]),
+            Err(TestEnvError::MissingValue("metadata-trust-key".into()))
+        );
+    }
+
+    #[test]
+    fn the_trust_key_comes_after_the_metadata_url_in_the_flag_order() {
+        let env = ok(&[
+            "--metadata-trust-key",
+            TEST_KEY,
+            "--dictionary-url",
+            "https://example.com/d.json",
+            "--metadata-url",
+            "https://example.com/m.json",
+        ]);
+        assert_eq!(
+            env.set_flags(),
+            ["metadata-url", "metadata-trust-key", "dictionary-url"]
+        );
+        assert_eq!(
+            env.restart_args(),
+            [
+                "--metadata-url=https://example.com/m.json".to_string(),
+                format!("--metadata-trust-key={TEST_KEY}"),
+                "--dictionary-url=https://example.com/d.json".to_string(),
+            ]
         );
     }
 
@@ -836,6 +961,47 @@ mod tests {
             run(&["--bridge-url"], &[]),
             Err(TestEnvError::MissingValue("bridge-url".into()))
         );
+    }
+
+    #[test]
+    fn llama_url_is_a_local_http_server_with_a_port() {
+        let env = ok(&["--llama-url", "http://127.0.0.1:8099"]);
+        assert_eq!(env.llama_url.as_deref(), Some("http://127.0.0.1:8099"));
+        assert!(env.set_flags().contains(&"llama-url"));
+        // A trailing slash is not part of the base address the app appends /completion to.
+        let env = ok(&["--llama-url=http://localhost:8099/"]);
+        assert_eq!(env.llama_url.as_deref(), Some("http://localhost:8099"));
+        let env = run(&[], &[("RESONANCE_TEST_LLAMA_URL", "http://[::1]:9")]).expect("parses");
+        assert_eq!(env.llama_url.as_deref(), Some("http://[::1]:9"));
+        assert_eq!(
+            run(&["--llama-url"], &[]),
+            Err(TestEnvError::MissingValue("llama-url".into()))
+        );
+        // A restarted app keeps talking to the same stand-in.
+        assert_eq!(
+            ok(&["--llama-url", "http://127.0.0.1:8099"]).restart_args(),
+            ["--llama-url=http://127.0.0.1:8099"]
+        );
+    }
+
+    #[test]
+    fn llama_url_refuses_anything_but_local_http_with_a_port() {
+        for url in [
+            "http://llama.example.com:8080",
+            "https://127.0.0.1:8080",
+            "http://127.0.0.1",
+            "http://127.0.0.1:abc",
+            "http://127.0.0.1.example.com:8080",
+            "http://user@127.0.0.1:8080",
+            "http://127.0.0.1:8080/v1/x",
+            "127.0.0.1:8080",
+        ] {
+            assert_eq!(
+                run(&["--llama-url", url], &[]),
+                Err(TestEnvError::BadLlamaUrl { url: url.into() }),
+                "{url}"
+            );
+        }
     }
 
     #[test]

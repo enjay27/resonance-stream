@@ -13,6 +13,10 @@ lazy_static! {
     static ref RECRUIT_PATTERN: Regex = Regex::new(r"@[A-Za-z0-9]+").unwrap();
     static ref NUM_UNIT_PATTERN: Regex = Regex::new(r"(\d+)(種|人|周|回)").unwrap();
     static ref THINK_PATTERN: Regex = Regex::new(r"(?s)<think>.*?</think>\s*").unwrap();
+    /// A turn header the model wrote out: the tag and the role word that follows
+    /// it (`<start_of_turn>model` + newline), which is not part of the translation.
+    static ref ROLE_HEADER_PATTERN: Regex =
+        Regex::new(r"<start_of_turn>\s*(?:model|user)(?:\s+|$)").unwrap();
     static ref TURN_TAG_PATTERN: Regex =
         Regex::new(r"</?end_of_turn>|</?start_of_turn>|<bos>|<eos>").unwrap();
     static ref SPACE_BEFORE_PUNCT: Regex = Regex::new(r"\s+([.!?,~])").unwrap();
@@ -149,6 +153,13 @@ enum Piece {
     Placeholder(String),
 }
 
+/// Adds plain text to `pieces`; nothing for an empty stretch.
+fn push_text(pieces: &mut Vec<Piece>, text: &str) {
+    if !text.is_empty() {
+        pieces.push(Piece::Text(text.to_string()));
+    }
+}
+
 struct Masker {
     pieces: Vec<Piece>,
     replacements: HashMap<String, String>,
@@ -186,12 +197,10 @@ impl Masker {
         let mut pieces = Vec::with_capacity(self.pieces.len() + 2);
         for piece in std::mem::take(&mut self.pieces) {
             match piece {
-                Piece::Text(text) if text.contains(target) => {
+                Piece::Text(text) => {
                     let mut parts = text.split(target).peekable();
                     while let Some(part) = parts.next() {
-                        if !part.is_empty() {
-                            pieces.push(Piece::Text(part.to_string()));
-                        }
+                        push_text(&mut pieces, part);
                         if parts.peek().is_some() {
                             pieces.push(Piece::Placeholder(placeholder.clone()));
                         }
@@ -214,16 +223,12 @@ impl Masker {
             let mut last = 0;
             for caps in re.captures_iter(&text) {
                 let m = caps.get(0).expect("group 0 always matches");
-                if m.start() > last {
-                    pieces.push(Piece::Text(text[last..m.start()].to_string()));
-                }
+                push_text(&mut pieces, &text[last..m.start()]);
                 let placeholder = self.new_placeholder(replacement(&caps));
                 pieces.push(Piece::Placeholder(placeholder));
                 last = m.end();
             }
-            if last < text.len() {
-                pieces.push(Piece::Text(text[last..].to_string()));
-            }
+            push_text(&mut pieces, &text[last..]);
         }
         self.pieces = pieces;
     }
@@ -244,12 +249,45 @@ impl Masker {
 }
 
 // --- PREPROCESSOR ---
+
+/// The cached nicknames that occur in `message`, longest first (then by name). The cache grows all
+/// session, so this is the only step of the preprocessing that has to see all of it: a caller that
+/// shares the cache behind a lock picks the names here, releases the lock, and shields with
+/// [`preprocess_with_nicknames`].
+pub fn nicknames_in(
+    message: &str,
+    nickname_cache: &HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut names: Vec<(String, String)> = nickname_cache
+        .iter()
+        .filter(|(ja_name, _)| message.contains(ja_name.as_str()))
+        .map(|(ja_name, romaji)| (ja_name.clone(), romaji.clone()))
+        .collect();
+    names.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
+    names
+}
+
 pub fn preprocess_text(
     input: &str,
     custom_dict: &Dictionary,
     nickname_cache: Option<&HashMap<String, String>>,
 ) -> ShieldData {
+    let nicknames = nickname_cache.map_or_else(Vec::new, |cache| nicknames_in(input, cache));
+    preprocess_with_nicknames(input, custom_dict, &nicknames)
+}
+
+/// [`preprocess_text`] with the nicknames already picked ([`nicknames_in`]).
+pub fn preprocess_with_nicknames(
+    input: &str,
+    custom_dict: &Dictionary,
+    nicknames: &[(String, String)],
+) -> ShieldData {
     let mut masker = Masker::new(input);
+
+    // A placeholder the player typed is shielded first, as itself and under a
+    // number of its own: the restore below reads `[P0]` (and `[ p0 ]`, `［P0］`)
+    // as the shield's, so left alone it would be swapped for a real term.
+    masker.mask_regex(&PLACEHOLDER_PATTERN, |caps| caps[0].to_string());
 
     // 0. Emote tokens (display text, not Japanese)
     for token in [STICKER_TOKEN, EMOTE_TOKEN] {
@@ -261,17 +299,9 @@ pub fn preprocess_text(
         masker.mask_literal(bracket, bracket);
     }
 
-    // 2. Replace Nicknames from Cache. The cache grows all session, so only the
-    // names present in this message are sorted (longest first).
-    if let Some(cache) = nickname_cache {
-        let mut names: Vec<(&String, &String)> = cache
-            .iter()
-            .filter(|(ja_name, _)| input.contains(ja_name.as_str()))
-            .collect();
-        names.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(b.0)));
-        for (ja_name, romaji) in names {
-            masker.mask_literal(ja_name, romaji);
-        }
+    // 2. Replace Nicknames from Cache (the ones present in this message, longest first)
+    for (ja_name, romaji) in nicknames {
+        masker.mask_literal(ja_name, romaji);
     }
 
     // 3. Recruitment & @-Tag
@@ -302,7 +332,9 @@ pub fn postprocess_text(translated: &str, shield: &ShieldData) -> String {
     // 1. Strip <think> tags
     let mut final_text = THINK_PATTERN.replace_all(translated, "").to_string();
 
-    // 2. Strip leaked model turn tokens (</end_of_turn> etc.)
+    // 2. Strip leaked model turn tokens (</end_of_turn> etc.), a leaked role
+    // header whole first so its word does not stay behind
+    final_text = ROLE_HEADER_PATTERN.replace_all(&final_text, "").to_string();
     final_text = TURN_TAG_PATTERN.replace_all(&final_text, "").to_string();
 
     // Restore shielded words in one pass. Matching the whole `[P<n>]` token
@@ -978,6 +1010,184 @@ mod tests {
         assert_eq!(cache.get("b"), None);
         assert!(cache.get("a").is_some() && cache.get("c").is_some());
         assert_eq!(cache.len(), 2);
+    }
+
+    fn round_trip(line: &str, dict: &Dictionary) -> (ShieldData, String) {
+        let shield = preprocess_text(line, dict, None);
+        let restored = postprocess_text(&shield.masked_text, &shield);
+        (shield, restored)
+    }
+
+    #[test]
+    fn a_placeholder_typed_in_chat_comes_back_as_typed() {
+        let dict = Dictionary::from_json_str(r#"{"role": {"火力": "딜러"}}"#).unwrap();
+        for (line, want) in [
+            ("[P0]火力", "[P0]딜러"),
+            ("火力[P0]", "딜러[P0]"),
+            ("[P1]火力", "[P1]딜러"),
+            ("[P0][P0]火力", "[P0][P0]딜러"),
+        ] {
+            let (_, restored) = round_trip(line, &dict);
+            assert_eq!(restored, want, "line {line:?}");
+        }
+    }
+
+    #[test]
+    fn every_spelling_the_restore_accepts_is_shielded_when_typed() {
+        // The restore reads `[ P 3 ]`, `[p3]` and full-width brackets as a
+        // placeholder, so a player's text in any of those spellings is shielded.
+        let dict = Dictionary::from_json_str(r#"{"role": {"火力": "딜러"}}"#).unwrap();
+        let (_, restored) = round_trip("火力 [ P 0 ] [p1] ［P2］ [P 3]", &dict);
+        assert_eq!(restored, "딜러 [ P 0 ] [p1] ［P2］ [P 3]");
+    }
+
+    #[test]
+    fn a_typed_placeholder_gets_a_number_of_its_own() {
+        let dict = Dictionary::from_json_str(r#"{"role": {"火力": "딜러"}}"#).unwrap();
+        let (shield, _) = round_trip("[P0]火力", &dict);
+        assert_eq!(shield.masked_text, "[P0][P1]");
+        assert_eq!(
+            shield.replacements.get("[P0]").map(String::as_str),
+            Some("[P0]")
+        );
+        assert_eq!(
+            shield.replacements.get("[P1]").map(String::as_str),
+            Some("딜러")
+        );
+    }
+
+    fn restored(output: &str) -> String {
+        let shield = preprocess_text("", &Dictionary::default(), None);
+        postprocess_text(output, &shield)
+    }
+
+    #[test]
+    fn a_leaked_role_header_goes_whole_not_just_its_tag() {
+        // W-12: only the tag used to go, and the role word stayed ("model 번역").
+        for (leaked, want) in [
+            ("<start_of_turn>model\n번역</end_of_turn><eos>", "번역"),
+            ("<start_of_turn>model\r\n번역", "번역"),
+            ("<start_of_turn>user\n안녕하세요", "안녕하세요"),
+            ("<start_of_turn>model 번역", "번역"),
+            ("<start_of_turn>model", ""),
+            (
+                "번역<end_of_turn>\n<start_of_turn>model\n두 번째",
+                "번역 두 번째",
+            ),
+        ] {
+            assert_eq!(restored(leaked), want, "output {leaked:?}");
+        }
+    }
+
+    #[test]
+    fn a_word_that_only_starts_like_a_role_stays() {
+        // The word goes only as the header: a tag followed by "modeling" is
+        // still just a stray tag.
+        assert_eq!(restored("<start_of_turn>modeling 번역"), "modeling 번역");
+        assert_eq!(
+            restored("a model city, the user's"),
+            "a model city, the user's"
+        );
+    }
+
+    #[test]
+    fn only_the_cached_names_that_are_in_the_message_are_picked_longest_first() {
+        let cache = HashMap::from([
+            ("たろう".to_string(), "Taro".to_string()),
+            ("たろうさん".to_string(), "Tarosan".to_string()),
+            ("はなこ".to_string(), "Hanako".to_string()),
+            ("じろう".to_string(), "Jiro".to_string()),
+        ]);
+        let picked = nicknames_in("たろうさんとはなこ", &cache);
+        assert_eq!(
+            picked,
+            [
+                ("たろうさん".to_string(), "Tarosan".to_string()),
+                ("たろう".to_string(), "Taro".to_string()),
+                ("はなこ".to_string(), "Hanako".to_string()),
+            ],
+            "two names of the same length are ordered by name"
+        );
+        assert!(nicknames_in("こんにちは", &cache).is_empty());
+        assert!(nicknames_in("たろう", &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn shielding_with_names_picked_beforehand_gives_what_shielding_with_the_cache_gives() {
+        // The translator picks the names under the cache's lock and shields after
+        // releasing it; the result must be the one the cache itself would give.
+        let dict = Dictionary::from_json_str(r#"{"role": {"火力": "딜러"}}"#).unwrap();
+        let cache = HashMap::from([
+            ("たろう".to_string(), "Taro".to_string()),
+            ("はなこ".to_string(), "Hanako".to_string()),
+        ]);
+        for line in [
+            "たろうさん、火力募集 3人",
+            "はなこ",
+            "こんにちは",
+            "[P0]たろう",
+        ] {
+            let direct = preprocess_text(line, &dict, Some(&cache));
+            let picked = preprocess_with_nicknames(line, &dict, &nicknames_in(line, &cache));
+            assert_eq!(picked.masked_text, direct.masked_text, "line {line:?}");
+            assert_eq!(picked.replacements, direct.replacements, "line {line:?}");
+        }
+    }
+
+    #[test]
+    fn the_line_stored_longest_ago_and_never_read_leaves_first() {
+        // Storing a line moves the clock too. If it did not, every line would
+        // be tied and the victim would be whichever the map listed first; with
+        // this many lines that is not the oldest.
+        let mut cache = TranslationCache::new(32);
+        for i in 0..32 {
+            cache.put(&format!("line{i}"), "x");
+        }
+        cache.put("one more", "y");
+        assert_eq!(cache.get("line0"), None);
+        assert_eq!(cache.len(), 32);
+    }
+
+    #[test]
+    fn a_read_moves_a_line_past_ones_stored_before_it() {
+        // Reading every line but the newest makes the newest the one used
+        // longest ago. A read that did not move the clock would leave all of
+        // them tied, and the victim would be whichever the map listed first;
+        // with this many lines that is not the newest.
+        let mut cache = TranslationCache::new(32);
+        for i in 0..32 {
+            cache.put(&format!("line{i}"), "x");
+        }
+        for i in 0..31 {
+            assert!(cache.get(&format!("line{i}")).is_some());
+        }
+        cache.put("one more", "y");
+        assert_eq!(cache.get("line31"), None);
+        assert_eq!(cache.len(), 32);
+    }
+
+    #[test]
+    fn a_cache_with_a_line_is_not_empty() {
+        let mut cache = TranslationCache::new(2);
+        assert!(cache.is_empty());
+        cache.put("a", "A");
+        assert!(!cache.is_empty());
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn a_dictionary_counts_and_finds_each_of_its_terms() {
+        let dict = Dictionary::from_json_str(
+            r#"{"role": {"火力": "딜러", "盾": "탱커"}, "item": {"薬": "포션"}}"#,
+        )
+        .unwrap();
+        assert_eq!(dict.len(), 3);
+        assert!(!dict.is_empty());
+        for (ja, ko) in [("火力", "딜러"), ("盾", "탱커"), ("薬", "포션")] {
+            assert!(dict.contains_key(ja), "{ja} is in the dictionary");
+            assert_eq!(dict.get(ja).map(String::as_str), Some(ko));
+        }
+        assert!(!dict.contains_key("剣"));
     }
 
     #[test]

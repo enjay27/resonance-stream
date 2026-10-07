@@ -66,14 +66,22 @@ fn show_popup(app: &AppHandle, kind: PopupKind) -> Result<(), String> {
         Some(window) => window,
         None => create_popup(app, kind)?,
     };
+    let mut restored = false;
     // Without the plugin (`--no-window-state`) there is nothing to restore from.
     if !crate::test_env::no_window_state() && !window.is_visible().unwrap_or(false) {
         // Size and place only: with `VISIBLE` the plugin would show it itself,
         // before we are ready.
         let _ = window.restore_state(StateFlags::SIZE | StateFlags::POSITION);
+        restored = true;
     }
     let _ = window.unminimize();
     window.show().map_err(|e| e.to_string())?;
+    // The plugin saved the INNER size. Set while the window is hidden, an undecorated window came back about 30 px
+    // taller than it was left (the bridge's `PP-place`, real app, 2 runs); set again once shown it is exact, as
+    // `apply_rect` is. The place was set before showing, so nothing jumps.
+    if restored {
+        let _ = window.restore_state(StateFlags::SIZE | StateFlags::POSITION);
+    }
     // A popup kept hidden has an old copy of the settings: let its page refresh.
     let _ = app.emit_to(kind.label(), "popup-shown", ());
     window.set_focus().map_err(|e| e.to_string())
@@ -87,6 +95,62 @@ fn show_popup(app: &AppHandle, kind: PopupKind) -> Result<(), String> {
 #[tauri::command]
 pub async fn open_popup(app: AppHandle, kind: PopupKind) -> Result<(), String> {
     show_popup(&app, kind)
+}
+
+/// One window as the bridge's `snapshot-popups` reports it (`null` for a window that does not exist).
+fn window_json(app: &AppHandle, label: &str) -> serde_json::Value {
+    let Some(webview) = app.get_webview_window(label) else {
+        return serde_json::json!({ "exists": false });
+    };
+    let rect = app
+        .get_window(label)
+        .and_then(|window| window_rect(&window))
+        .and_then(|rect| serde_json::to_value(rect).ok());
+    let inner = webview
+        .inner_size()
+        .ok()
+        .map(|size| serde_json::json!({ "width": size.width, "height": size.height }));
+    serde_json::json!({
+        "exists": true,
+        "visible": webview.is_visible().unwrap_or(false),
+        "inner": inner,
+        "always_on_top": webview.is_always_on_top().unwrap_or(false),
+        "rect": rect,
+    })
+}
+
+/// Each popup's window and the main one as they are now (the bridge's `snapshot-popups`).
+pub fn popups_snapshot(app: &AppHandle) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    out.insert("main".into(), window_json(app, "main"));
+    for kind in PopupKind::ALL {
+        out.insert(kind.label().into(), window_json(app, kind.label()));
+    }
+    let mut labels: Vec<String> = app.webview_windows().into_keys().collect();
+    labels.sort();
+    out.insert("labels".into(), serde_json::json!(labels));
+    serde_json::Value::Object(out)
+}
+
+/// What the popup's X does (the bridge's `hide-popup`): a close request, which hides it.
+pub fn hide_popup(app: &AppHandle, kind: PopupKind) -> Result<(), String> {
+    let window = app
+        .get_webview_window(kind.label())
+        .ok_or_else(|| format!("{} does not exist", kind.label()))?;
+    window.close().map_err(|e| e.to_string())
+}
+
+/// Puts a popup at an outer rect, as dragging and resizing it would (the bridge's `place-popup`).
+pub fn place_popup(
+    app: &AppHandle,
+    kind: PopupKind,
+    rect: resonance_types::WindowRect,
+) -> Result<(), String> {
+    let window = app
+        .get_window(kind.label())
+        .ok_or_else(|| format!("{} does not exist", kind.label()))?;
+    apply_rect(&window, rect);
+    Ok(())
 }
 
 /// Creates every popup's window, hidden, a moment after start-up, so opening

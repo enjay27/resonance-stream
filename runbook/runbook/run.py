@@ -14,20 +14,35 @@ import sys
 
 from runbook import bridge, common
 from runbook.common import Recorder
+from runbook.pipelines.capture_spike import CaptureSpike
+from runbook.pipelines.chat_rules import ChatRules
+from runbook.pipelines.download_integrity import DownloadIntegrity
 from runbook.pipelines.interface import InterfacePick
+from runbook.pipelines.persistence import Persistence
+from runbook.pipelines.popups import Popups
+from runbook.pipelines.translator_stub import TranslatorStub
 from runbook.pipelines.updater_mock import UpdaterMock
 from runbook.pipelines.window_restore import WindowRestore
 
-PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick, "window-restore": WindowRestore}
+PIPELINES = {"updater-mock": UpdaterMock, "interface": InterfacePick, "window-restore": WindowRestore, "capture-spike": CaptureSpike,
+             "chat-rules": ChatRules,
+             "persistence": Persistence,
+             "download-integrity": DownloadIntegrity, "translator-stub": TranslatorStub,
+             "popups": Popups}
 
 
 def build(name: str, rec: Recorder, exe, args):
-    """The pipeline `name`, with only the options it takes (`--version` and `--ui` are the update pipeline's)."""
-    options = {"new_version": args.version, "ui_checks": args.ui} if name == "updater-mock" else {}
+    """The pipeline `name`, with only the options it takes (`--version` and `--ui` are the update pipeline's, `--add-firewall-rule` the capture spike's)."""
+    options = {}
+    if name == "updater-mock":
+        options = {"new_version": args.version, "ui_checks": args.ui}
+    elif name == "capture-spike":
+        options = {"add_firewall_rule": args.add_firewall_rule}
     return PIPELINES[name](rec, exe, **options)
 
 
 def main(argv: list[str] | None = None) -> int:
+    common.utf8_output()
     parser = argparse.ArgumentParser(prog="python -m runbook.run")
     parser.add_argument("pipeline", choices=sorted(PIPELINES))
     parser.add_argument("--exe", default=None, help="a test-env build of the app (default: RUNBOOK_TEXT_LOCAL_EXE, "
@@ -35,6 +50,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--key", default=os.environ.get("RUNBOOK_TEXT_BACKUP_KEY"), help="the BACKUP signing key file")
     parser.add_argument("--version", default="9.9.9", help="the version the mock release announces")
     parser.add_argument("--ui", action="store_true", help="also ask about what the dialog looked like")
+    parser.add_argument("--add-firewall-rule", action="store_true",
+                        help="capture-spike: make the firewall rule the app wants for each copy it starts (this copy only, any remote "
+                             "address) and remove it at the end -- edits the Windows firewall, so it is never on by default")
     args = parser.parse_args(argv)
     exe = args.exe or os.environ.get("RUNBOOK_TEXT_LOCAL_EXE") or (
         str(common.default_exe()) if common.default_exe().is_file() else None)

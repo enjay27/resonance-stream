@@ -89,6 +89,17 @@ pub fn box_name(channel: Channel) -> (&'static str, Rgb) {
     }
 }
 
+/// Theme colours of a channel: the sender's name, and the row's left edge.
+pub fn channel_colors(channel: Channel) -> (&'static str, &'static str) {
+    match channel {
+        Channel::World => ("text-purple-500", "border-l-purple-500"),
+        Channel::Guild => ("text-emerald-500", "border-l-emerald-500"),
+        Channel::Party => ("text-sky-500", "border-l-sky-500"),
+        Channel::Local => ("text-base-content/70", "border-l-base-content/50"),
+        Channel::Beginner => ("text-amber-500", "border-l-amber-500"),
+    }
+}
+
 /// A normal-mode row's size and position. Fixed: a row must not change size
 /// when the opacity slider crosses [`BACKING_BELOW_OPACITY`].
 pub const ROW_LAYOUT: &str = "ml-1.5 px-2.5 py-1 w-fit max-w-[calc(100%-0.5rem)]";
@@ -181,6 +192,24 @@ mod tests {
         assert_eq!(tab_label_class(true, false), "");
         assert_eq!(tab_label_class(false, true), "hidden");
         assert_eq!(tab_label_class(true, true), "");
+    }
+
+    #[test]
+    fn each_channel_has_its_theme_colours_for_the_name_and_the_row_edge() {
+        // Moved out of `ChatRow` unchanged: the sender's name colour and the row's left edge.
+        let table = [
+            (Channel::World, ("text-purple-500", "border-l-purple-500")),
+            (Channel::Guild, ("text-emerald-500", "border-l-emerald-500")),
+            (Channel::Party, ("text-sky-500", "border-l-sky-500")),
+            (
+                Channel::Local,
+                ("text-base-content/70", "border-l-base-content/50"),
+            ),
+            (Channel::Beginner, ("text-amber-500", "border-l-amber-500")),
+        ];
+        for (channel, want) in table {
+            assert_eq!(channel_colors(channel), want, "{channel:?}");
+        }
     }
 
     const WHITE: Rgb = [255, 255, 255];

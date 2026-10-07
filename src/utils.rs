@@ -3,6 +3,20 @@ use crate::ui_types::SystemLogLevel;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 
+/// A window-wide listener that ends with the component that made it. Leptos's own
+/// `window_event_listener` does not: it stays on the window after the component is gone, and the
+/// next event reaches its closure, which reads signals that were disposed with the component and
+/// panics (the title bar's `mousedown` did that on every click once compact mode removed the bar).
+/// Call it where `window_event_listener` was called, inside a component.
+pub fn window_listener<E>(event: E, cb: impl Fn(E::EventType) + 'static)
+where
+    E: leptos::ev::EventDescriptor + 'static,
+    E::EventType: JsCast,
+{
+    let handle = leptos::prelude::window_event_listener(event, cb);
+    leptos::prelude::on_cleanup(move || handle.remove());
+}
+
 pub fn format_time(ts: u64) -> String {
     let date = js_sys::Date::new(&JsValue::from_f64(ts as f64 * 1000.0));
     format!("{:02}:{:02}", date.get_hours(), date.get_minutes())

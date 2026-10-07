@@ -4,6 +4,8 @@
 
 pub mod bridge;
 pub mod capture;
+pub mod config_migration;
+pub mod crash_log;
 pub mod download;
 pub mod favorites_migration;
 pub mod furigana;
@@ -13,6 +15,8 @@ pub mod log_throttle;
 pub mod paste;
 pub mod protocol;
 pub mod replay;
+pub mod server_pins;
+pub mod signed_metadata;
 pub mod sniffer_net;
 pub mod test_env;
 pub mod text;

@@ -1,4 +1,4 @@
-use chrono::{Local, TimeZone};
+use chrono::Local;
 use std::fs;
 use std::io::Write;
 use tauri_plugin_opener::OpenerExt;
@@ -69,8 +69,8 @@ pub async fn export_chat_log(
     // 5. Format and write each message
     for log in logs {
         // Convert Unix timestamp to readable date/time
-        let dt = Local.timestamp_opt(log.timestamp as i64, 0).unwrap();
-        let time_str = dt.format("%Y-%m-%d %H:%M:%S");
+        // The timestamp is a raw value from the wire: one out of range must not end the export.
+        let time_str = export_time(log.timestamp);
 
         // Format translation (if it exists)
         let trans_str = match &log.translated {
@@ -91,7 +91,30 @@ pub async fn export_chat_log(
 
 #[tauri::command]
 pub fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    resonance_core::download::check_open_url(&url)?;
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+/// A chat timestamp as local time; `????-??-?? ??:??:??` when it is not a date.
+fn export_time(timestamp: u64) -> String {
+    resonance_core::crash_log::unix_to_utc(timestamp)
+        .map(|t| {
+            t.with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|| "????-??-?? ??:??:??".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::export_time;
+
+    #[test]
+    fn an_out_of_range_timestamp_does_not_stop_the_export() {
+        assert_eq!(export_time(u64::MAX), "????-??-?? ??:??:??");
+        assert_eq!(export_time(1_700_000_000).len(), 19);
+    }
 }

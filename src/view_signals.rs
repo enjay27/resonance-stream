@@ -64,6 +64,12 @@ pub struct ChatSignals {
     pub set_search_term: WriteSignal<String>,
     pub is_at_bottom: ReadSignal<bool>,
     pub set_is_at_bottom: WriteSignal<bool>,
+    /// Counts rows of the list that changed in place (a translation landed, a message was updated): a
+    /// row's height can change under a view that sits at the bottom, and the list, which re-filters only
+    /// when its membership changes, does not see it. The list watches this one signal instead of every
+    /// row watching itself.
+    pub rows_changed: ReadSignal<u32>,
+    pub set_rows_changed: WriteSignal<u32>,
     pub unread_count: ReadSignal<i32>,
     pub set_unread_count: WriteSignal<i32>,
     pub unread_counts: ReadSignal<HashMap<String, usize>>,
@@ -81,6 +87,7 @@ impl ChatSignals {
         let (system_source_filter, set_system_source_filter) = signal::<Option<String>>(None);
         let (search_term, set_search_term) = signal::<String>(String::new());
         let (is_at_bottom, set_is_at_bottom) = signal::<bool>(true);
+        let (rows_changed, set_rows_changed) = signal::<u32>(0);
         let (unread_count, set_unread_count) = signal::<i32>(0);
         let (unread_counts, set_unread_counts) = signal::<HashMap<String, usize>>(HashMap::new());
         let (current_time, set_current_time) =
@@ -100,6 +107,8 @@ impl ChatSignals {
             set_search_term,
             is_at_bottom,
             set_is_at_bottom,
+            rows_changed,
+            set_rows_changed,
             unread_count,
             set_unread_count,
             unread_counts,

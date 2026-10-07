@@ -19,7 +19,10 @@ use crate::protocol::types::{AppState, SnifferState, SystemLogLevel};
 use crossbeam_channel::Sender;
 use resonance_core::capture::{ChatPipeline, PipelineAction};
 use resonance_core::text::{contains_japanese, convert_to_romaji};
-use resonance_core::workers::read_error_backoff;
+use resonance_core::workers::{
+    read_error_backoff, wait_for, watchdog_check, WatchdogVerdict, WATCHDOG_LIMIT_SECS,
+    WATCHDOG_TICK,
+};
 
 // --- GLOBAL STATE ---
 static LAST_TRAFFIC_TIME: AtomicU64 = AtomicU64::new(0);
@@ -37,6 +40,20 @@ pub struct SnifferHandle {
 impl SnifferHandle {
     pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::SeqCst)
+    }
+
+    /// Stops the sniffer and waits, up to `wait`, until its capture thread has ended. The thread
+    /// drops its socket before it clears the alive flag, so once this returns `true` the socket is
+    /// closed and nothing else is capturing: a new sniffer can start without two pipelines seeing
+    /// the same packets. `false`: the thread was still running when the time was up.
+    pub fn stop_and_wait(self, wait: Duration) -> bool {
+        let alive = self.alive.clone();
+        drop(self); // closes the stop channel: the capture and watchdog threads end
+        wait_for(
+            || !alive.load(Ordering::SeqCst),
+            wait,
+            Duration::from_millis(25),
+        )
     }
 }
 
@@ -67,30 +84,18 @@ pub fn emit_sniffer_state(app: &tauri::AppHandle, state: SnifferState, message: 
     let _ = app.emit("sniffer-state", payload);
 }
 
-#[tauri::command]
+/// async: `start_sniffer_worker` asks `netsh` whether the firewall rule exists, which takes
+/// hundreds of milliseconds -- not on the main thread, where it froze the window at every
+/// start (review W-6). That one check is the only one: a missing rule is reported there
+/// (log line, `Error` state, `firewall-missing`), and the worker is not started.
+#[tauri::command(async)]
 pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
     if crate::test_env::no_capture() {
         emit_sniffer_state(&app, SnifferState::Off, "Capture disabled (--no-capture)");
         return;
     }
-    if !check_firewall_rule() {
-        inject_system_message(
-            &app,
-            SystemLogLevel::Warning,
-            "Sniffer",
-            "Firewall rule missing. Triggering Setup Wizard.",
-        );
-        emit_sniffer_state(
-            &app,
-            SnifferState::Error,
-            "방화벽 설정 필요 (Setup Required)",
-        );
-        let _ = app.emit("firewall-missing", ());
-        return;
-    }
 
-    let mut tx_lock = state.sniffer_tx.lock();
-    if tx_lock.as_ref().is_some_and(SnifferHandle::is_alive) {
+    if !state.services.start_sniffer(&app) {
         inject_system_message(
             &app,
             SystemLogLevel::Warning,
@@ -99,10 +104,7 @@ pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
         );
         emit_sniffer_state(&app, SnifferState::Pending, "Listening for game traffic...");
         IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
-        return;
     }
-    let tx = start_sniffer_worker(app.clone());
-    *tx_lock = Some(tx);
 }
 
 pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
@@ -140,7 +142,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
     let config = crate::config::current_config(&app);
 
     feed_watchdog();
-    spawn_watchdog(app.clone(), rx.clone());
+    spawn_watchdog(app.clone(), rx.clone(), alive.clone());
 
     // --- MAIN SNIFFER THREAD ---
     let app_handle = app.clone();
@@ -249,7 +251,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
             // block list is only consulted for actual chat messages.
             let actions = pipeline.feed_network_packet(
                 &buf[..n],
-                |uid| state.blocked_users.lock().contains_key(&uid),
+                |uid| state.config.read().blocked_users.contains_key(&uid),
                 || state.next_pid.fetch_add(1, Ordering::SeqCst),
                 || {
                     feed_watchdog();
@@ -276,25 +278,31 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
 }
 
 // --- 2. WATCHDOG THREAD ---
-fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
+fn spawn_watchdog(
+    app: AppHandle,
+    rx: crossbeam_channel::Receiver<()>,
+    capture_alive: Arc<AtomicBool>,
+) {
     thread::spawn(move || {
         loop {
-            match rx.recv_timeout(Duration::from_secs(5)) {
+            match rx.recv_timeout(WATCHDOG_TICK) {
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 _ => {}
             }
 
             let last = LAST_TRAFFIC_TIME.load(Ordering::Relaxed);
-            if last == 0 {
-                continue;
-            }
-
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
 
-            if now.saturating_sub(last) > 15 {
+            let verdict = watchdog_check(last, now, capture_alive.load(Ordering::SeqCst));
+            if verdict == WatchdogVerdict::CaptureEnded {
+                // The capture is gone: its failure was reported with its own error, and "no game
+                // traffic" would only replace it.
+                break;
+            }
+            if verdict == WatchdogVerdict::Stalled {
                 // If it was previously active, throw the error state
                 // A full-tunnel VPN hides the chat from every adapter: say so.
                 let vpn = network::vpn_in_the_way();
@@ -304,10 +312,10 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
                     "Sniffer",
                     match &vpn {
                         Some(name) => format!(
-                            "Watchdog: No game traffic for 15s. The default route runs through a VPN adapter ({name}); \
+                            "Watchdog: No game traffic for {WATCHDOG_LIMIT_SECS}s. The default route runs through a VPN adapter ({name}); \
                              turn the VPN off or exclude the game from it."
                         ),
-                        None => "Watchdog: No game traffic for 15s.".to_string(),
+                        None => format!("Watchdog: No game traffic for {WATCHDOG_LIMIT_SECS}s."),
                     },
                 );
 
@@ -324,7 +332,7 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
                 );
                 IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
 
-                // Kick the watchdog so we wait another 15s before checking again
+                // Kick the watchdog so we wait another WATCHDOG_LIMIT_SECS before speaking again
                 feed_watchdog();
             }
         }
@@ -359,11 +367,9 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                     );
                 }
 
-                // Dispatch Side Effects. A duplicate dropped here is neither
-                // translated nor archived.
-                if !store_and_emit(app, chat.clone()) {
-                    continue;
-                }
+                // Dispatch Side Effects. (A duplicate never gets here: the pipeline
+                // dropped it, so it is neither translated nor archived.)
+                store_and_emit(app, chat.clone());
 
                 // Every Japanese message is owed a translation, even with the
                 // translator off or still starting: its next start catches up.
@@ -371,14 +377,16 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                     state.translation_ledger.lock().record(chat.pid);
                 }
 
-                // Translated messages are archived by the translator with their
-                // translation; anything else is archived as it is.
-                let translator = state.translator_tx.lock();
+                // Every message is in the chat log from the moment it arrives; what
+                // the translator does later only adds to the training-pair file and a
+                // newer chat-log line with the translation.
+                crate::services::translator::archive_arrival(app, &chat);
+                let translator = state.services.translator_sender();
                 match translator.as_ref() {
                     Some(tx) if use_translation && contains_japanese(&chat.message) => {
                         let _ = tx.send(TranslationJob::new(chat));
                     }
-                    _ => crate::services::translator::archive_chat(app, &chat),
+                    _ => crate::services::translator::archive_untranslated(app, &chat),
                 }
             }
         }
@@ -392,59 +400,41 @@ pub fn block_user_command(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) {
-    // 1. Add to In-Memory AppState
-    state.blocked_users.lock().insert(uid, nickname.clone());
-
-    // 2. Add to Disk Config
+    // 1. The block list is the config's (the capture reads it from there); this puts it in use and on disk.
     crate::config::modify_config(&app, &state, |config| {
         config.blocked_users.insert(uid, nickname);
     });
 
-    // 3. Retroactively scrub existing messages in the UI
-    let mut history = state.chat_history.lock();
-    for msg in history.values_mut() {
-        if msg.uid == uid && !msg.is_blocked {
-            msg.is_blocked = true;
-            let _ = app.emit("chat-message-update", msg.clone());
-        }
-    }
+    // 2. Retroactively scrub existing messages in the UI
+    scrub_rows(&app, &state, uid, true);
 }
 
 #[tauri::command(async)]
 pub fn unblock_user_command(uid: u64, app: tauri::AppHandle, state: tauri::State<'_, AppState>) {
-    // 1. Remove from In-Memory AppState
-    state.blocked_users.lock().remove(&uid);
-
-    // 2. Remove from Disk Config
+    // 1. Remove from the config: in use and on disk
     crate::config::modify_config(&app, &state, |config| {
         config.blocked_users.remove(&uid);
     });
 
-    // 3. Retroactively un-scrub existing messages in the UI
-    let mut history = state.chat_history.lock();
-    for msg in history.values_mut() {
-        if msg.uid == uid && msg.is_blocked {
-            msg.is_blocked = false;
-            let _ = app.emit("chat-message-update", msg.clone());
-        }
+    // 2. Retroactively un-scrub existing messages in the UI
+    scrub_rows(&app, &state, uid, false);
+}
+
+/// Flags (or clears) every stored row of `uid` and tells the windows. The history lock is held only while the
+/// rows are changed, not while each one is emitted: the capture thread needs it to store the next line.
+fn scrub_rows(app: &AppHandle, state: &AppState, uid: u64, blocked: bool) {
+    let changed = {
+        let mut history = state.chat_history.lock();
+        resonance_core::history::set_blocked_for_uid(history.values_mut(), uid, blocked)
+    };
+    for message in changed {
+        let _ = app.emit("chat-message-update", message);
     }
 }
 
 #[tauri::command]
 pub fn restart_sniffer_command(app: tauri::AppHandle) {
-    // On its own thread: the pause below would otherwise freeze the window
-    // (synchronous commands run on the main thread).
-    thread::spawn(move || {
-        let state = app.state::<AppState>();
-
-        // 1. Drop the sender to safely terminate the old sniffer thread
-        *state.sniffer_tx.lock() = None;
-
-        // 2. Wait a moment for the OS to release the socket binding
-        thread::sleep(Duration::from_millis(500));
-
-        // 3. Start a fresh sniffer!
-        let tx = start_sniffer_worker(app.clone());
-        *state.sniffer_tx.lock() = Some(tx);
-    });
+    // On its own thread (inside `Services`): the wait for the old capture would otherwise freeze the
+    // window, since synchronous commands run on the main thread.
+    crate::services::owner::Services::restart_sniffer_in_background(&app);
 }

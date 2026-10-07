@@ -57,6 +57,26 @@ def test_flag_args_carry_the_mock_urls_and_the_log_file():
     assert args[args.index("--log-file") + 1] == "app.log"
 
 
+def test_flag_args_carry_the_dictionary_url():
+    args = mockfeed.flag_args("d", "s", dictionary_url="http://127.0.0.1:5/custom_dict.json")
+    assert args[args.index("--dictionary-url") + 1] == "http://127.0.0.1:5/custom_dict.json"
+    assert "--dictionary-url" not in mockfeed.flag_args("d", "s")
+
+
+def test_the_mock_serves_a_dictionary_and_counts_who_asked_for_it():
+    import urllib.request
+
+    server = mockfeed.MockServer().start()
+    try:
+        assert server.dictionary_url == server.base_url + "/custom_dict.json"
+        server.dictionary_text = '{"term": {"ボス": "보스"}}'
+        body = urllib.request.urlopen(server.dictionary_url, timeout=5).read().decode("utf-8")  # noqa: S310 -- local
+        assert body == '{"term": {"ボス": "보스"}}'
+        assert server.hits.count("GET /custom_dict.json") == 1
+    finally:
+        server.stop()
+
+
 def test_flag_args_can_leave_out_fresh():
     assert "--fresh" not in mockfeed.flag_args("d", "s", fresh=False)
 
@@ -64,9 +84,9 @@ def test_flag_args_can_leave_out_fresh():
 def test_every_flag_is_one_the_app_knows():
     known = {"--data-dir", "--fresh", "--assume-setup-done", "--no-capture", "--no-translator",
              "--no-update-check", "--no-popups", "--no-window-state", "--feed-url", "--metadata-url",
-             "--status-file", "--log-file", "--print-env"}
+             "--dictionary-url", "--status-file", "--log-file", "--print-env"}
     args = mockfeed.flag_args("d", "s", feed_url="http://127.0.0.1:5/f", metadata_url="http://127.0.0.1:5/m",
-                              log_file="l")
+                              dictionary_url="http://127.0.0.1:5/d", log_file="l")
     assert {a for a in args if a.startswith("--")} <= known
 
 
@@ -95,6 +115,82 @@ def test_the_server_serves_feed_metadata_and_exe():
         assert get(server.exe_url)[1] == exe
         assert "model" in json.loads(get(server.metadata_url)[1])
         assert [h.split()[-1] for h in server.hits] == ["/latest.json", "/update.exe", "/metadata.json"]
+
+
+# --- the signed metadata -----------------------------------------------------------------------
+def test_signed_metadata_names_a_revision_and_the_dictionarys_hash():
+    text = json.loads(mockfeed.metadata_json("http://127.0.0.1:1/m.gguf", revision=7, dictionary_sha256="ab" * 32))
+    assert text["revision"] == 7 and text["dictionary"]["sha256"] == "ab" * 32
+    # the old gist's shape has neither (nothing else about it changed)
+    old = json.loads(mockfeed.metadata_json())
+    assert "revision" not in old and "sha256" not in old["dictionary"]
+
+
+def test_flag_args_carry_the_metadata_trust_key():
+    args = mockfeed.flag_args("d", "s", metadata_url="http://127.0.0.1:5/m", metadata_trust_key="a2V5")
+    assert args[args.index("--metadata-trust-key") + 1] == "a2V5"
+    assert "--metadata-trust-key" not in mockfeed.flag_args("d", "s", metadata_url="http://127.0.0.1:5/m")
+
+
+@pytest.fixture
+def dry(monkeypatch):
+    monkeypatch.setenv("RUNBOOK_DRYRUN", "1")
+
+
+def test_a_signed_server_serves_the_metadata_its_signature_and_the_dictionary_it_names(dry, tmp_path):
+    signer = mockfeed.MetadataSigner(tmp_path / "k", "good")
+    with mockfeed.MockServer(signer=signer) as server:
+        body = get(server.metadata_url)[1]
+        metadata = json.loads(body)
+        assert metadata["revision"] == 1
+        assert metadata["dictionary"]["sha256"] == sha(server.dictionary_text.encode("utf-8"))
+        assert get(server.metadata_url + ".sig")[0] == 200
+        assert server.metadata_flags() == ("--metadata-url", server.metadata_url, "--metadata-trust-key", signer.public_key)
+        server.revision = 5
+        assert json.loads(get(server.metadata_url)[1])["revision"] == 5
+
+
+def test_a_server_without_a_signer_publishes_no_signature(dry):
+    with mockfeed.MockServer() as server:
+        with pytest.raises(urllib.error.HTTPError) as err:
+            get(server.metadata_url + ".sig")
+        assert err.value.code == 404
+        assert server.metadata_flags() == ("--metadata-url", server.metadata_url)
+
+
+def test_the_metadata_modes_break_it_one_way_each(dry, tmp_path):
+    good, other = mockfeed.MetadataSigner(tmp_path / "g", "good"), mockfeed.MetadataSigner(tmp_path / "o", "other")
+    with mockfeed.MockServer(signer=good, foreign_signer=other) as server:
+        honest_sig = get(server.metadata_url + ".sig")[1]
+        server.metadata_mode = "no-signature"
+        with pytest.raises(urllib.error.HTTPError):
+            get(server.metadata_url + ".sig")
+        server.metadata_mode = "wrong-key"
+        assert get(server.metadata_url + ".sig")[1] != honest_sig  # signed by the other key
+        server.metadata_mode = "tampered"
+        assert get(server.metadata_url + ".sig")[1] == honest_sig
+        assert json.loads(get(server.metadata_url)[1])["model"]["latest_version"] == "runbook-evil"  # but the text is not what was signed
+        server.metadata_mode = "ok"
+        server.dictionary_override = "{}"
+        assert get(server.dictionary_url)[1] == b"{}"  # no longer the file the signed metadata names
+        assert json.loads(get(server.metadata_url)[1])["dictionary"]["sha256"] == sha(server.dictionary_text.encode("utf-8"))
+
+
+def test_a_wrong_key_server_needs_a_second_key(dry, tmp_path):
+    with mockfeed.MockServer(signer=mockfeed.MetadataSigner(tmp_path / "g", "good")) as server:
+        server.metadata_mode = "wrong-key"
+        with pytest.raises((urllib.error.URLError, http.client.HTTPException, ConnectionError)):  # the handler fails: no foreign signer to sign with
+            get(server.metadata_url + ".sig")
+
+
+@pytest.mark.skipif(__import__("shutil").which("npx") is None, reason="needs npx (and the network the first time)")
+def test_the_real_signer_signs_for_the_revision_it_is_given(tmp_path):
+    from runbook import updater
+    signer = mockfeed.MetadataSigner(tmp_path / "k", "real")
+    sig = signer.sign(b'{"revision": 3}', 3)
+    assert updater.signature_version(sig) == "3"  # the signed comment the app compares with the file's revision
+    assert updater.signature_key_id(sig)
+    assert signer.public_key and signer.public_key != sig
 
 
 def test_feed_modes():

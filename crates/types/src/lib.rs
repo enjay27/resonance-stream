@@ -3,10 +3,13 @@
 //! two sides cannot drift apart. Field names and serde attributes ARE the wire
 //! format — renaming one is a protocol change.
 //!
-//! Dependencies stay minimal (serde only): this crate compiles to wasm for the UI.
+//! Dependencies stay minimal (serde, serde_with): this crate compiles to wasm for the UI.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+mod app_config;
+pub use app_config::AppConfig;
 
 // --- Chat and system log ---
 
@@ -453,7 +456,7 @@ impl Theme {
 /// game by its global shortcut. `shortcut` is a Tauri accelerator built from
 /// `KeyboardEvent.code` ("Ctrl+Shift+Digit1"); empty means none. `note` is
 /// a reminder shown under the text (its meaning in Korean); never sent.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FavoriteMessage {
     pub text: String,
@@ -484,7 +487,7 @@ pub struct FavoriteTab {
 /// (`get_favorites`, `save_favorites`, the `favorites-changed` event): the
 /// messages and the tabs. The backend is the one source of truth, so two
 /// windows never overwrite each other's settings.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FavoritesState {
     pub messages: Vec<FavoriteMessage>,
@@ -547,14 +550,26 @@ pub struct VersionInfo {
     pub sha256: String,
 }
 
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RemoteDictionary {
     pub version: String,
     pub updated_at: String,
+    /// SHA-256 of the dictionary file, in the signed metadata: the dictionary has no signature of its
+    /// own. Absent in the old gist, which is not signed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sha256: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GistMetadata {
+    /// Which publication of the signed metadata this is (counts up by one each time; the signature
+    /// names it). 0 in the old gist, which is not signed.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub revision: u64,
     /// The gist's own `app` entry is ignored: the app learns about its updates
     /// from the release feed. The gist keeps it for copies that predate that.
     #[serde(default)]
@@ -569,6 +584,35 @@ pub struct UpdateCheckResult {
     pub model_update_available: bool,
     pub dict_update_available: bool,
     pub remote_data: GistMetadata,
+    /// Why the model and dictionary metadata was refused (a missing or bad signature, an older
+    /// revision): when it is set, `remote_data`'s model and dictionary are empty and no model or
+    /// dictionary update is offered. `None` for a normal check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_error: Option<String>,
+}
+
+impl UpdateCheckResult {
+    /// The result of a check whose model / dictionary metadata was refused (`error` says why): the
+    /// app's own update (`app_update_available`, `app`: from its own signed feed) is kept, and
+    /// nothing the refused metadata said is offered or passed on.
+    pub fn refused(app_update_available: bool, app: VersionInfo, error: String) -> Self {
+        Self {
+            app_update_available,
+            model_update_available: false,
+            dict_update_available: false,
+            remote_data: GistMetadata {
+                revision: 0,
+                app,
+                model: VersionInfo::default(),
+                dictionary: RemoteDictionary {
+                    version: String::new(),
+                    updated_at: String::new(),
+                    sha256: String::new(),
+                },
+            },
+            metadata_error: Some(error),
+        }
+    }
 }
 
 // --- Furigana ---
@@ -675,6 +719,35 @@ pub fn is_popup_label(label: &str) -> bool {
     label.starts_with(POPUP_LABEL_PREFIX)
 }
 
+/// How many messages a channel's tab keeps (and the backend keeps and reloads) when the
+/// config holds no number for it: WORLD is the busy one, so it keeps fewer. The one place
+/// this is decided -- the backend, the chat view, the settings input and a new config all ask here.
+pub fn default_channel_limit(channel: Channel) -> usize {
+    match channel {
+        Channel::World => 500,
+        _ => 1000,
+    }
+}
+
+/// [`default_channel_limit`] for a tab's key in `tab_limits`: the channel's own default, and
+/// 1000 for anything that is no channel (it is not read as WORLD).
+pub fn default_tab_limit(key: &str) -> usize {
+    Channel::ALL
+        .into_iter()
+        .find(|channel| channel.as_str() == key)
+        .map_or(1000, default_channel_limit)
+}
+
+/// `tab_limits` of a new config: every channel's default, and the all-tab and custom tab
+/// (which have no input of their own) at 1000.
+pub fn default_tab_limits() -> HashMap<String, usize> {
+    Channel::ALL
+        .into_iter()
+        .map(|channel| (channel.as_str().to_string(), default_channel_limit(channel)))
+        .chain([(ALL_TAB.to_string(), 1000), (CUSTOM_TAB.to_string(), 1000)])
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -688,6 +761,58 @@ mod tests {
         let msg: ChatMessage = serde_json::from_str(old).expect("old line must parse");
         assert_eq!((msg.pid, msg.uid, msg.message.as_str()), (3, 9, "hi"));
         assert_eq!((msg.class_id, msg.level, msg.sequence_id), (0, 0, 0));
+    }
+
+    #[test]
+    fn an_update_check_result_names_why_the_metadata_was_refused_only_when_it_was() {
+        // A result from before the field (and a normal one) has none, and says nothing about it on the wire.
+        let plain = r#"{"app_update_available":false,"model_update_available":false,"dict_update_available":false,
+            "remote_data":{"model":{"latest_version":"1","download_url":"","release_notes":"","sha256":""},
+                           "dictionary":{"version":"1","updated_at":""}}}"#;
+        let result: UpdateCheckResult =
+            serde_json::from_str(plain).expect("an older result parses");
+        assert_eq!(result.metadata_error, None);
+        assert!(!serde_json::to_string(&result)
+            .unwrap()
+            .contains("metadata_error"));
+
+        let refused = UpdateCheckResult {
+            metadata_error: Some("signature refused".into()),
+            ..result
+        };
+        let text = serde_json::to_string(&refused).unwrap();
+        assert!(
+            text.contains(r#""metadata_error":"signature refused""#),
+            "{text}"
+        );
+        let back: UpdateCheckResult = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.metadata_error.as_deref(), Some("signature refused"));
+    }
+
+    #[test]
+    fn a_refused_check_keeps_the_app_update_and_offers_no_model_or_dictionary() {
+        let announced = VersionInfo {
+            latest_version: "0.7.0".into(),
+            download_url: "https://example.com/app.exe".into(),
+            release_notes: "notes".into(),
+            sha256: String::new(),
+        };
+        let result = UpdateCheckResult::refused(true, announced, "no signature".into());
+        // The app's own update comes from its own signed feed and is unaffected.
+        assert!(result.app_update_available);
+        assert_eq!(result.remote_data.app.latest_version, "0.7.0");
+        // Nothing the unverified metadata said is offered or passed on.
+        assert!(!result.model_update_available);
+        assert!(!result.dict_update_available);
+        assert_eq!(result.remote_data.revision, 0);
+        assert_eq!(result.remote_data.model.latest_version, "");
+        assert_eq!(result.remote_data.model.download_url, "");
+        assert_eq!(result.remote_data.model.sha256, "");
+        assert_eq!(result.remote_data.dictionary.version, "");
+        assert_eq!(result.metadata_error.as_deref(), Some("no signature"));
+        // A refusal with no app update to announce.
+        let quiet = UpdateCheckResult::refused(false, VersionInfo::default(), "x".into());
+        assert!(!quiet.app_update_available);
     }
 
     #[test]
@@ -707,6 +832,43 @@ mod tests {
             assert_eq!(channel.as_str(), name);
             assert_eq!(Channel::from_name(name), channel);
         }
+    }
+
+    #[test]
+    fn every_channel_has_one_default_limit_and_world_is_the_small_one() {
+        // Decided by Kade 2026-10-07: WORLD 500, every other channel 1000.
+        assert_eq!(default_channel_limit(Channel::World), 500);
+        for channel in [
+            Channel::Local,
+            Channel::Party,
+            Channel::Guild,
+            Channel::Beginner,
+        ] {
+            assert_eq!(default_channel_limit(channel), 1000, "{channel:?}");
+        }
+    }
+
+    #[test]
+    fn a_tab_key_gets_its_channels_default_and_anything_else_1000() {
+        assert_eq!(default_tab_limit("WORLD"), 500);
+        assert_eq!(default_tab_limit("GUILD"), 1000);
+        assert_eq!(default_tab_limit(ALL_TAB), 1000);
+        assert_eq!(default_tab_limit("SOMETHING"), 1000); // not read as WORLD
+    }
+
+    #[test]
+    fn a_new_config_gets_the_default_limits_for_every_tab() {
+        let limits = default_tab_limits();
+        assert_eq!(limits.len(), Channel::ALL.len() + 2);
+        for channel in Channel::ALL {
+            assert_eq!(
+                limits[channel.as_str()],
+                default_channel_limit(channel),
+                "{channel:?}"
+            );
+        }
+        assert_eq!(limits[ALL_TAB], 1000);
+        assert_eq!(limits[CUSTOM_TAB], 1000);
     }
 
     #[test]

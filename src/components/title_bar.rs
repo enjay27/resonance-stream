@@ -35,7 +35,7 @@ pub fn TitleBar() -> impl IntoView {
     // closes it. `mousedown`, not `click`: the title bar is a drag region, and a
     // press there starts a window drag that may never become a click.
     let picker_ref = NodeRef::<Div>::new();
-    window_event_listener(mousedown, move |ev| {
+    crate::utils::window_listener(mousedown, move |ev| {
         if !picker_open.get_untracked() {
             return;
         }

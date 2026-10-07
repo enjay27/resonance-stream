@@ -1,7 +1,7 @@
 //! Which chat messages a view shows. Pure functions, so they are tested on
 //! the host (`cargo test -p resonance-stream-ui`) without a browser.
 
-use crate::ui_types::{Channel, ChatMessage};
+use crate::ui_types::{default_tab_limit, Channel, ChatMessage};
 use std::collections::{HashMap, VecDeque};
 
 pub use crate::ui_types::{ALL_TAB, CUSTOM_TAB, SYSTEM_TAB};
@@ -146,7 +146,7 @@ impl Tab {
 }
 
 /// How many messages a tab keeps. Channel tabs have their own limit
-/// (right-click menu; unset: WORLD 200, others 1000). The all-tab and the
+/// (right-click menu; unset: `default_tab_limit`). The all-tab and the
 /// custom tab have no input of their own: the all-tab holds as many as all
 /// channel limits together (2000 when none is set), the custom tab as many
 /// as its selected channels together.
@@ -155,11 +155,7 @@ pub fn tab_limit(limits: &HashMap<String, usize>, key: &str, custom_filters: &[S
         limits
             .get(key)
             .copied()
-            .unwrap_or(if key == Channel::World.as_str() {
-                200
-            } else {
-                1000
-            })
+            .unwrap_or_else(|| default_tab_limit(key))
     };
     let limit = match key {
         ALL_TAB => {
@@ -401,6 +397,52 @@ pub fn is_muted(m: &ChatMessage, min_level: u64) -> bool {
     m.is_blocked || (m.channel == Channel::World && m.level < min_level)
 }
 
+/// How long ago a message was sent, as a row shows it with relative time on: `now` (under 10 s), `42s`,
+/// `5m`, `2h 10m`, `3d`. Both stamps are seconds, or milliseconds when past 10^10 (an older log kept
+/// milliseconds); a message from the future reads `now`.
+pub fn relative_time(message_ts: u64, now_ts: u64) -> String {
+    let secs = |ts: u64| if ts > 10_000_000_000 { ts / 1000 } else { ts };
+    let (message, now) = (secs(message_ts), secs(now_ts));
+    let age = now.saturating_sub(message);
+    if age < 10 {
+        "now".to_string()
+    } else if age < 60 {
+        format!("{}s", age)
+    } else if age < 3600 {
+        format!("{}m", age / 60)
+    } else if age < 86400 {
+        let (hours, mins) = (age / 3600, (age % 3600) / 60);
+        if mins > 0 {
+            format!("{}h {}m", hours, mins)
+        } else {
+            format!("{}h", hours)
+        }
+    } else {
+        format!("{}d", age / 86400)
+    }
+}
+
+/// Rows the list shows to start with, and the number each scroll to the top adds.
+pub const DISPLAY_PAGE: usize = 50;
+
+/// How close to the top (in px) a scroll counts as reaching it.
+pub const LOAD_MORE_ZONE: i32 = 50;
+
+/// How many rows the list shows after a scroll event: one more page on reaching the top, and back to
+/// the first page once the view is at the bottom again (P-1: the limit only ever grew, so the longer
+/// the overlay stayed open the more rows the page held). At the bottom the older pages are not on
+/// screen, so dropping them is invisible; a list shorter than the window is at the bottom too, and has
+/// nothing older to load.
+pub fn next_display_limit(limit: usize, scroll_top: i32, at_bottom: bool) -> usize {
+    if at_bottom {
+        DISPLAY_PAGE
+    } else if scroll_top < LOAD_MORE_ZONE {
+        limit + DISPLAY_PAGE
+    } else {
+        limit
+    }
+}
+
 /// The newest `limit` items accepted by `keep`, oldest first -- walking
 /// from the newest end, so a short page of a long list stops early.
 pub fn newest_matching<T>(
@@ -437,6 +479,36 @@ pub fn translation_pending(m: &ChatMessage, use_translation: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_message_age_reads_now_seconds_minutes_hours_days() {
+        // Moved out of `ChatRow` unchanged (timestamps in seconds).
+        let at = |age: u64| relative_time(1_760_000_000, 1_760_000_000 + age);
+        assert_eq!(at(0), "now");
+        assert_eq!(at(9), "now");
+        assert_eq!(at(10), "10s");
+        assert_eq!(at(59), "59s");
+        assert_eq!(at(60), "1m");
+        assert_eq!(at(3599), "59m");
+        assert_eq!(at(3600), "1h");
+        assert_eq!(at(3660), "1h 1m");
+        assert_eq!(at(86_399), "23h 59m");
+        assert_eq!(at(86_400), "1d");
+        assert_eq!(at(3 * 86_400 + 5), "3d");
+    }
+
+    #[test]
+    fn a_message_from_the_future_reads_now() {
+        assert_eq!(relative_time(1_760_000_100, 1_760_000_000), "now");
+    }
+
+    #[test]
+    fn timestamps_in_milliseconds_are_read_as_seconds() {
+        // The backend sends seconds, an older log had milliseconds: past 1e10 it is milliseconds.
+        assert_eq!(relative_time(1_760_000_000_000, 1_760_000_090_000), "1m");
+        assert_eq!(relative_time(1_760_000_000, 1_760_000_090_000), "1m");
+        assert_eq!(relative_time(1_760_000_000_000, 1_760_000_090), "1m");
+    }
 
     fn bare_display(class: &str) -> Vec<&str> {
         class
@@ -653,6 +725,32 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
+    fn scrolling_to_the_top_loads_one_more_page() {
+        assert_eq!(next_display_limit(50, 10, false), 100);
+        assert_eq!(next_display_limit(150, 49, false), 200);
+        assert_eq!(
+            next_display_limit(150, LOAD_MORE_ZONE, false),
+            150,
+            "50 px is not the top"
+        );
+    }
+
+    #[test]
+    fn scrolling_in_the_middle_keeps_the_limit() {
+        assert_eq!(next_display_limit(150, 300, false), 150);
+    }
+
+    #[test]
+    fn coming_back_to_the_bottom_drops_the_older_pages_again() {
+        // P-1: the limit used to grow for as long as the overlay was open.
+        assert_eq!(next_display_limit(300, 4000, true), DISPLAY_PAGE);
+        assert_eq!(next_display_limit(DISPLAY_PAGE, 4000, true), DISPLAY_PAGE);
+        // A list shorter than the window is at the bottom and near the top at once:
+        // the bottom wins, there is nothing older to load.
+        assert_eq!(next_display_limit(300, 0, true), DISPLAY_PAGE);
+    }
+
+    #[test]
     fn newest_matching_returns_the_last_page_in_order() {
         let log: BTreeMap<u64, u64> = (1..=10).map(|pid| (pid, pid)).collect();
         assert_eq!(
@@ -689,13 +787,13 @@ mod tests {
         let l = limits(&[("PARTY", 50), ("LOCAL", 30), ("전체", 999), ("커스텀", 999)]);
         let custom = vec!["PARTY".to_string(), "WORLD".to_string()];
         assert_eq!(tab_limit(&l, "PARTY", &custom), 50);
-        assert_eq!(tab_limit(&l, "WORLD", &custom), 200); // unset: menu default
+        assert_eq!(tab_limit(&l, "WORLD", &custom), 500); // unset: menu default
         assert_eq!(tab_limit(&l, "GUILD", &custom), 1000);
         // All-tab: every set channel limit together; its own entry is ignored.
         assert_eq!(tab_limit(&l, ALL_TAB, &custom), 80);
         assert_eq!(tab_limit(&HashMap::new(), ALL_TAB, &custom), 2000);
         // Custom: its selected channels together.
-        assert_eq!(tab_limit(&l, CUSTOM_TAB, &custom), 250);
+        assert_eq!(tab_limit(&l, CUSTOM_TAB, &custom), 550);
         assert_eq!(tab_limit(&l, CUSTOM_TAB, &[]), 1); // never 0: keeps the newest
     }
 

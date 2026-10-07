@@ -96,7 +96,7 @@ Order: verify first (K4, K6, K7 in W1), then build on the answers.
   adapter is picked and capture still works (**the open question** -- if packets are seen on the
   VPN adapter, the virtual-adapter rule in `pick_interface` is wrong and gets a test + fix);
   (3) offline: no crash, falls back to the list.
-- [x] **K6. Per-exe firewall rule on Windows** -- verified 2026-10-05 by Kade (`firewall` notebook, 8 pass / 0 fail: dev + release exe, wizard once, chat captured, old shared rule gone, unique names). Original steps: -- the four steps in `unverified-on-windows.md`
+- [x] **K6. Per-exe firewall rule on Windows** -- (2026-10-06 Kade: stays manual; an automatic run makes a rule only with `--add-firewall-rule`) verified 2026-10-05 by Kade (`firewall` notebook, 8 pass / 0 fail: dev + release exe, wizard once, chat captured, old shared rule gone, unique names). Original steps: -- the four steps in `unverified-on-windows.md`
   (dev exe -> wizard -> captured; installed exe -> wizard once -> captured; back to dev: no
   wizard; `netsh ... show rule` lists two rules; the old shared rule is gone).
 - [ ] **K7. Favorites paste into the game** -- the game or its anti-cheat may ignore `SendInput`.
@@ -124,7 +124,7 @@ Order: verify first (K4, K6, K7 in W1), then build on the answers.
 
 Small and independent first; the ones that wait on Kade last.
 
-- [ ] **K18. Settings open when the app closes leaves the window enlarged** (built 2026-10-05, `claude/restore-window-size-on-exit`: unticked until Kade checks it on Windows -- by hand: open Settings, quit from the tray / close the window, start again: the window must come back at its old size; **automatic since 2026-10-05: `python -m runbook.run window-restore`**, the bridge pipeline does both ways out, no clicks) -- the grown size is
+- [ ] **K18. Settings open when the app closes leaves the window enlarged** (2026-10-06: `window-restore` K18-quit / K18-close pass 9/9 on a hosted Windows runner, a real exe at 1024x720 -- see [`test-automation.md`](test-automation.md); still unticked until Kade has seen it on his PC; built 2026-10-05, `claude/restore-window-size-on-exit`: unticked until Kade checks it on Windows -- by hand: open Settings, quit from the tray / close the window, start again: the window must come back at its old size; **automatic since 2026-10-05: `python -m runbook.run window-restore`**, the bridge pipeline does both ways out, no clicks) -- the grown size is
   what `tauri-plugin-window-state` saves. Restore before exit. App glue; Windows check.
 - [x] **K13. Hydration drops a translation event** (done 2026-10-05, `claude/hydration-translation-race`: `ChatStore::hold_translation` / `take_held_translations`, 3 tests; the race itself was never observed on Windows) that lands during the `get_chat_history`
   fetch for a row that existed before listening (`ChatStore::merge_history`, UI pure module,
@@ -150,7 +150,7 @@ Small and independent first; the ones that wait on Kade last.
 - [ ] **K10. `-t 4` threads** -- decide by measuring FPS with the game running (Kade).
 - [ ] **K9. `class_id` is always 0** (sender tag 24) -- needs a capture where the value can be
   matched to a class (Kade; `raw_capture`).
-- [ ] **K8. A4: double `<bos>`** -- waits on Kade's answer: did training tokenize with BOS
+- [ ] **K8. A4: double `<bos>`** -- (2026-10-06: the `translator-stub` pipeline now reports the literal `<bos>` count of every prompt the app sends; it is not judged.) waits on Kade's answer: did training tokenize with BOS
   added (keep the prompt) or not (drop `<bos>` from `translation_prompt`)? Question is in
   [`review-2026-09-30-round2.md`](review-2026-09-30-round2.md).
 
@@ -164,7 +164,7 @@ Small and independent first; the ones that wait on Kade last.
 - [ ] **K23. Troubleshooting docs** -- the Sep 29 deletion left the README pointing at old
   GitHub issues; write new `TROUBLE_SHOOTING*.md` (Kade) and fix the `index.html` `<title>`
   ("Tauri + Leptos App"; check Tauri does not use it for the window / taskbar first).
-- [ ] **K24. Dropped by design, revisit only if asked:** gist host allow-list, reqwest 0.12.
+- [ ] **K24. Dropped by design, revisit only if asked:** gist host allow-list, reqwest 0.12. (2026-10-06: `audit.yml`, #172, reports reqwest 0.11 findings -- so it is now asked; **Kade has not decided**; needs the app gate on Windows. See [`test-automation.md`](test-automation.md).)
 
 ---
 

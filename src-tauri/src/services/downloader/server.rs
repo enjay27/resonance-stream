@@ -1,4 +1,5 @@
 use crate::{FolderStatus, ProgressPayload};
+use resonance_core::download::{part_path, publish_dir};
 use std::fs;
 use tauri::{AppHandle, Emitter};
 
@@ -27,23 +28,40 @@ pub async fn check_ai_server_status(app: tauri::AppHandle) -> Result<FolderStatu
 #[tauri::command]
 pub async fn download_ai_server(app: AppHandle) -> Result<(), String> {
     let ai_server_dir = crate::app_dirs::data(&app)
-        .unwrap()
+        .map_err(|e| e.to_string())?
         .join("bin")
         .join(AI_SERVER_FOLDER);
-    fs::create_dir_all(&ai_server_dir).map_err(|e| e.to_string())?;
 
-    let server_exe = ai_server_dir.join("llama-server.exe");
-
-    // Skip if already downloaded and extracted
-    if server_exe.exists() {
+    // Skip if already downloaded and extracted. The folder only ever appears whole (below), so
+    // the exe being there means its DLLs are too.
+    if ai_server_dir.join(AI_SERVER_FILENAME).exists() {
         return Ok(());
     }
 
-    let zip_path = ai_server_dir.join("server_temp.zip");
+    // Everything is built in `ai-server.part` and moved into place at the end: a kill or a full
+    // disk half-way leaves a folder nobody looks at, not an "installed" server without its DLLs.
+    let staging = part_path(&ai_server_dir);
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+
+    let result = stage_ai_server(&app, &staging).await;
+    if let Err(e) = result {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(e);
+    }
+    publish_dir(&staging, &ai_server_dir).map_err(|e| {
+        let _ = fs::remove_dir_all(&staging);
+        format!("Could not install the AI engine: {e}")
+    })
+}
+
+/// Downloads the zip into `staging` and extracts it there (flat), then deletes the zip.
+async fn stage_ai_server(app: &AppHandle, staging: &std::path::Path) -> Result<(), String> {
+    let zip_path = staging.join("server_temp.zip");
 
     // 1. Download the ZIP file (Streaming, verified against the pinned hash)
     super::fetch::download_file(
-        &app,
+        app,
         AI_SERVER_ZIP_URL,
         &zip_path,
         "AI 엔진 다운로드 중...",
@@ -67,7 +85,7 @@ pub async fn download_ai_server(app: AppHandle) -> Result<(), String> {
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let outpath = match file.enclosed_name() {
-            Some(path) => ai_server_dir.join(path.file_name().unwrap_or(path.as_os_str())), // Flattens the folder structure
+            Some(path) => staging.join(path.file_name().unwrap_or(path.as_os_str())), // Flattens the folder structure
             None => continue,
         };
 

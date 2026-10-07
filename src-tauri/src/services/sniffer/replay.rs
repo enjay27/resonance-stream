@@ -72,7 +72,7 @@ fn run(app: AppHandle, entries: Vec<ReplayEntry>) {
             .unwrap_or(0);
         let action = pipeline.feed_chat(
             entry.into_chat(index, now),
-            |uid| state.blocked_users.lock().contains_key(&uid),
+            |uid| state.config.read().blocked_users.contains_key(&uid),
             || state.next_pid.fetch_add(1, Ordering::SeqCst),
         );
         if let Some(action) = action {

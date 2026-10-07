@@ -609,9 +609,28 @@ mod tests {
         assert!(first.is_some());
         let again = pipeline.feed_chat(chat_from(7, 1000, 1, "hello"), |_| false, || 2);
         assert!(again.is_none());
-        // a different sequence id is a different message
+        // The same sender, words and send time under another sequence id is a second game
+        // client's copy: ignored here, not later in the app (review R-3).
         assert!(pipeline
             .feed_chat(chat_from(7, 1000, 2, "hello"), |_| false, || 3)
+            .is_none());
+        // Other words in the same second are another message.
+        assert!(pipeline
+            .feed_chat(chat_from(7, 1000, 3, "hello!"), |_| false, || 4)
+            .is_some());
+    }
+
+    #[test]
+    fn a_second_clients_copy_of_a_reloaded_message_is_ignored() {
+        // History reloaded from disk teaches both keys, so the server's or a second client's
+        // re-send of a message already shown is not shown twice.
+        let mut pipeline = ChatPipeline::new();
+        pipeline.remember(&[chat_from(7, 1000, 1, "hello")]);
+        assert!(pipeline
+            .feed_chat(chat_from(7, 1000, 99, "hello"), |_| false, || 1)
+            .is_none());
+        assert!(pipeline
+            .feed_chat(chat_from(7, 1001, 100, "hello"), |_| false, || 2)
             .is_some());
     }
 

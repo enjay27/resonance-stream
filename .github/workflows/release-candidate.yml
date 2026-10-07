@@ -4,8 +4,9 @@ name: Release candidate
 # for testing on Windows: one plain exe (no installer) + SHA256SUMS.txt,
 # tagged v<workspace version>-rc.<feature>[.<n>], where <feature> is the
 # merged branch's name without its prefix (candidate/main-ui -> main-ui) and
-# .<n> counts repeat builds of the same feature. Only the newest 5 candidate
-# releases (and their tags) are kept.
+# .<n> counts repeat builds of the same feature. The CI gates must pass before anything is published.
+# No real-app smoke test runs here: it is slow and starts only from a pushed release tag (release.yml).
+# Only the newest 5 candidate releases (and their tags) are kept.
 #
 # Prereleases never become "Latest", and the app does not read GitHub
 # releases for its update check (it reads the gist), so users never see one.
@@ -125,6 +126,7 @@ jobs:
   release:
     name: publish prerelease
     needs: [pick, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runReplayChat } from "./runner.mjs";
 
-const FAKE = new URL("./fake_app.mjs", import.meta.url).pathname;
+const FAKE = fileURLToPath(new URL("./fake_app.mjs", import.meta.url));
 const SAMPLE = [
   '{"delay_ms": 0, "channel": "WORLD", "nickname": "a", "level": 60, "text": "こんにちは"}',
   '{"delay_ms": 300, "channel": "PARTY", "nickname": "b", "level": 60, "text": "回復<sprite=3>"}',

@@ -1,29 +1,24 @@
-use crate::chat_view::{compact_original_class, translation_pending};
-use crate::dictionary_edit::draft;
-use crate::favorites::add_from_chat;
-use crate::favorites_sync;
-use crate::readability::{box_name, needs_backing, row_palette, ORIGINAL_TEXT, TEXT_BOX};
-use crate::ruby_view::{mark, RubyCache};
+//! One chat row: the sender, the text (translated, original, or the Study view's furigana) in the
+//! normal or the compact layout, and the menus a click opens. The menus are in `menus`, the
+//! furigana and the drawing of keywords in `ruby`.
+
+mod menus;
+mod ruby;
+
+use self::menus::{MessageMenu, SenderMenu};
+use self::ruby::{ask_ruby, cached, render_emphasized, render_original};
+use crate::chat_view::{compact_original_class, relative_time, translation_pending};
+use crate::readability::{
+    box_name, channel_colors, needs_backing, row_palette, ORIGINAL_TEXT, TEXT_BOX,
+};
 use crate::store::AppSignals;
-use crate::tauri_bridge::invoke;
 use crate::translation_view::{effective, shows_translation, HOVER_ONLY};
-use crate::ui_types::{Channel, ChatMessage, RubySpan, TranslationView};
+use crate::ui_types::{ChatMessage, RubySpan, TranslationView};
 use crate::use_context;
-use crate::utils::{copy_to_clipboard, format_time, is_japanese};
-use crate::view_signals::{DictDraft, MenuKind, RowMenu};
-use leptos::portal::Portal;
+use crate::utils::{format_time, is_japanese};
+use crate::view_signals::{MenuKind, RowMenu};
 use leptos::prelude::*;
-use leptos::reactive::spawn_local;
 use leptos::{component, view, IntoView};
-use std::cell::RefCell;
-
-/// Lines already given furigana: a row that is built again (a tab switch,
-/// paging) does not ask the backend again.
-const RUBY_CACHE_LINES: usize = 2000;
-
-thread_local! {
-    static RUBY_CACHE: RefCell<RubyCache> = RefCell::new(RubyCache::new(RUBY_CACHE_LINES));
-}
 
 #[component]
 pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
@@ -31,35 +26,6 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
     // what events update.
     let sig = RwSignal::from(sig);
     let signals = use_context::<AppSignals>().expect("AppSignals missing");
-
-    // Star: save this message (translation as the note) to the favorites.
-    let save_favorite = move || {
-        let (text, translated) = sig.with_untracked(|m| (m.message.clone(), m.translated.clone()));
-        let mut added = false;
-        signals
-            .config
-            .set_favorite_messages
-            .update(|list| added = add_from_chat(list, &text, translated.as_deref()));
-        if added {
-            favorites_sync::save(signals.config);
-        }
-    };
-
-    Effect::new(move |_| {
-        if sig.with(|m| m.translated.is_some()) {
-            if signals.chat.is_at_bottom.get_untracked() {
-                request_animation_frame(move || {
-                    if let Some(window) = web_sys::window() {
-                        if let Some(doc) = window.document() {
-                            if let Some(el) = doc.get_element_by_id("chat-scroll-container") {
-                                el.set_scroll_top(el.scroll_height());
-                            }
-                        }
-                    }
-                });
-            }
-        }
-    });
 
     let pid = sig.with_untracked(|m| m.pid);
     let menu_open = move |kind: MenuKind| {
@@ -75,54 +41,12 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
     // "✓ ..." shown on a menu item for a moment before the menu closes.
     let (done, set_done) = signal(None::<&'static str>);
 
-    let channel_colors = move || {
-        sig.with(|m| match m.channel {
-            Channel::World => ("text-purple-500", "border-l-purple-500"),
-            Channel::Guild => ("text-emerald-500", "border-l-emerald-500"),
-            Channel::Party => ("text-sky-500", "border-l-sky-500"),
-            Channel::Local => ("text-base-content/70", "border-l-base-content/50"),
-            Channel::Beginner => ("text-amber-500", "border-l-amber-500"),
-        })
-    };
+    let channel_colors = move || sig.with(|m| channel_colors(m.channel));
 
     let display_time = move || {
         let raw_ts = sig.with(|m| m.timestamp);
-        let msg_secs = if raw_ts > 10_000_000_000 {
-            raw_ts / 1000
-        } else {
-            raw_ts
-        };
-
         if signals.config.use_relative_time.get() {
-            let current_raw = signals.chat.current_time.get();
-            let current_secs = if current_raw > 10_000_000_000 {
-                current_raw / 1000
-            } else {
-                current_raw
-            };
-            let diff_secs = if current_secs > msg_secs {
-                current_secs - msg_secs
-            } else {
-                0
-            };
-
-            if diff_secs < 10 {
-                "now".to_string()
-            } else if diff_secs < 60 {
-                format!("{}s", diff_secs)
-            } else if diff_secs < 3600 {
-                format!("{}m", diff_secs / 60)
-            } else if diff_secs < 86400 {
-                let hours = diff_secs / 3600;
-                let mins = (diff_secs % 3600) / 60;
-                if mins > 0 {
-                    format!("{}h {}m", hours, mins)
-                } else {
-                    format!("{}h", hours)
-                }
-            } else {
-                format!("{}d", diff_secs / 86400)
-            }
+            relative_time(raw_ts, signals.chat.current_time.get())
         } else {
             format_time(raw_ts)
         }
@@ -175,129 +99,6 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
             .with(|s| sig.with(|m| *s == m.nickname))
     };
 
-    let name_menu = move || {
-        view! {
-            <Show when=move || name_open.get()>
-                <Portal>
-                    <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[130px] animate-in fade-in zoom-in-95 duration-100"
-                         style=move || {
-                             let (x, y) = menu_pos.get();
-                             format!("top: {}px; left: {}px;", y + 8, x + 8)
-                         }
-                         on:click=move |ev| ev.stop_propagation()>
-
-                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
-                            on:click=move |_| {
-                                sig.with_untracked(|m| copy_to_clipboard(&m.nickname));
-                                signals.ui.set_active_menu.set(None);
-                            }>
-                            "📋 Copy Name"
-                        </button>
-
-                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2"
-                            on:click=move |_| {
-                                let n = sig.with_untracked(|m| m.nickname.clone());
-                                if signals.chat.search_term.get_untracked() == n {
-                                    signals.chat.set_search_term.set("".into());
-                                } else {
-                                    signals.chat.set_search_term.set(n);
-                                }
-                                signals.ui.set_active_menu.set(None);
-                            }>
-                            "🔍 Filter Chat"
-                        </button>
-
-                        <button class="btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2 text-error"
-                            on:click=move |_| {
-                                let target_uid = sig.with_untracked(|m| m.uid);
-                                let target_name = sig.with_untracked(|m| m.nickname.clone());
-                                let blocked_name = sig.with_untracked(|m| m.nickname.clone());
-
-                                spawn_local(async move {
-                                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                                        "uid": target_uid,
-                                        "nickname": target_name
-                                    })).unwrap();
-                                    let _ = invoke("block_user_command", args).await;
-                                });
-
-                                signals.config.set_blocked_users.update(|map| { map.insert(target_uid, blocked_name); });
-                                signals.ui.set_active_menu.set(None);
-                            }>
-                            "🚫 Block User"
-                        </button>
-                    </div>
-                </Portal>
-            </Show>
-        }
-        .into_any()
-    };
-
-    // The message's menu: copy, favorite, add to the dictionary.
-    let text_menu = move || {
-        // Runs `action`, shows `label` as done, and closes the menu a moment later.
-        let finish = move |label: &'static str| {
-            set_done.set(Some(label));
-            spawn_local(async move {
-                gloo_timers::future::TimeoutFuture::new(700).await;
-                if done.get_untracked() == Some(label) {
-                    set_done.set(None);
-                    if text_open.get_untracked() {
-                        signals.ui.set_active_menu.set(None);
-                    }
-                }
-            });
-        };
-        let item = "btn btn-ghost btn-sm justify-start text-xs font-normal h-8 min-h-0 px-2";
-        view! {
-            <Show when=move || text_open.get()>
-                <Portal>
-                    <div class="fixed z-50 bg-base-300 border border-white/10 rounded-lg shadow-2xl p-1 flex flex-col min-w-[150px] animate-in fade-in zoom-in-95 duration-100"
-                         style=move || {
-                             let (x, y) = menu_pos.get();
-                             format!("top: {}px; left: {}px;", y + 8, x + 8)
-                         }
-                         on:click=move |ev| ev.stop_propagation()>
-                        <button class=item
-                            on:click=move |_| {
-                                sig.with_untracked(|m| copy_to_clipboard(&m.message));
-                                finish("copy");
-                            }>
-                            {move || if done.get() == Some("copy") { "✓ 복사됨" } else { "📋 메시지 복사" }}
-                        </button>
-                        <Show when=move || sig.with(|m| m.translated.is_some())>
-                            <button class=item
-                                on:click=move |_| {
-                                    sig.with_untracked(|m| copy_to_clipboard(m.translated.as_deref().unwrap_or_default()));
-                                    finish("copy-translation");
-                                }>
-                                {move || if done.get() == Some("copy-translation") { "✓ 복사됨" } else { "📋 번역 복사" }}
-                            </button>
-                        </Show>
-                        <button class=item
-                            on:click=move |_| {
-                                save_favorite();
-                                finish("favorite");
-                            }>
-                            {move || if done.get() == Some("favorite") { "✓ 추가됨" } else { "⭐ 자주 쓰는 메시지에 추가" }}
-                        </button>
-                        <button class=item
-                            on:click=move |_| {
-                                let (key, value) = sig.with_untracked(|m| {
-                                    draft(&selection.get_untracked(), &m.message, m.translated.as_deref())
-                                });
-                                signals.ui.set_dict_draft.set(Some(DictDraft { key, value }));
-                                signals.ui.set_active_menu.set(None);
-                            }>
-                            "📖 사전에 추가"
-                        </button>
-                    </div>
-                </Portal>
-            </Show>
-        }
-        .into_any()
-    };
-
     // Hover on the message text: a pointer and a line under it.
     let text_class = move || {
         if sig.with(|m| m.is_blocked) {
@@ -337,23 +138,11 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
         if blocked || !is_japanese(&text) {
             return;
         }
-        if let Some(spans) = RUBY_CACHE.with(|c| c.borrow().get(&text).cloned()) {
+        if let Some(spans) = cached(&text) {
             set_ruby.set(Some(spans));
             return;
         }
-        spawn_local(async move {
-            let args =
-                serde_wasm_bindgen::to_value(&serde_json::json!({ "texts": [&text] })).unwrap();
-            let Ok(answer) = invoke("annotate_furigana", args).await else {
-                return;
-            };
-            if let Ok(mut lines) = serde_wasm_bindgen::from_value::<Vec<Vec<RubySpan>>>(answer) {
-                if let Some(spans) = lines.pop() {
-                    RUBY_CACHE.with(|c| c.borrow_mut().put(&text, spans.clone()));
-                    set_ruby.set(Some(spans));
-                }
-            }
-        });
+        ask_ruby(&text, set_ruby);
     });
     let dots = || view! { <span class="loading loading-dots loading-xs ml-1.5 align-middle opacity-50"></span> };
 
@@ -392,7 +181,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                         <span class=move || format!("ml-1 font-normal {}", palette.get().meta)>{r}</span>
                                     })}
                                 </span>
-                                {name_menu()}
+                                <SenderMenu sig=sig open=name_open pos=menu_pos />
                                 <span class=move || format!("tabular-nums {}", palette.get().meta)>"Lv." {move || sig.with(|m| m.level)}</span>
                                 <time class=move || format!("tabular-nums {}", palette.get().meta)>{display_time}</time>
                             </div>
@@ -442,7 +231,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                                 }
                             }}
                             </div>
-                            {text_menu()}
+                            <MessageMenu sig=sig open=text_open pos=menu_pos done=done set_done=set_done selection=selection />
                         </div>
                     </div>
                 }
@@ -497,101 +286,10 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
                         }}
                         </span>
                     </div>
-                    {name_menu()}
-                    {text_menu()}
+                    <SenderMenu sig=sig open=name_open pos=menu_pos />
+                    <MessageMenu sig=sig open=text_open pos=menu_pos done=done set_done=set_done selection=selection />
                 </div>
             </Show>
         </Show>
     }
-}
-
-/// A message's original: with furigana once the backend has answered, as
-/// plain text until then (and for a line without Japanese).
-fn render_original(text: &str, spans: Option<Vec<RubySpan>>, keywords: &[String]) -> AnyView {
-    match spans {
-        Some(spans) => render_ruby(&spans, keywords),
-        None => render_emphasized(text, keywords).into_any(),
-    }
-}
-
-/// Spans as `<ruby>` (reading over the kanji) and plain text, the emphasis
-/// keywords marked the way `render_emphasized` marks them.
-fn render_ruby(spans: &[RubySpan], keywords: &[String]) -> AnyView {
-    mark(spans, keywords)
-        .into_iter()
-        .map(|piece| {
-            let class = if piece.emphasized {
-                "text-warning font-black mx-0.5"
-            } else {
-                ""
-            };
-            match piece.reading {
-                Some(reading) => view! {
-                    <ruby class=class>{piece.text}<rt data-reading=reading></rt></ruby>
-                }
-                .into_any(),
-                None => view! { <span class=class>{piece.text}</span> }.into_any(),
-            }
-        })
-        .collect_view()
-        .into_any()
-}
-
-// CLEANED UP: No more messy text-shadows needed!
-fn render_emphasized(text: &str, keywords: &[String]) -> impl IntoView {
-    if keywords.is_empty() || text.is_empty() {
-        return view! { <span>{text.to_string()}</span> }.into_any();
-    }
-
-    let mut views = Vec::new();
-    let mut current_text = text;
-
-    while !current_text.is_empty() {
-        let mut earliest_find = None;
-        for kw in keywords {
-            if kw.is_empty() {
-                continue;
-            }
-            if let Some(idx) = current_text.find(kw) {
-                if earliest_find.map_or(true, |(e_idx, _)| idx < e_idx) {
-                    earliest_find = Some((idx, kw));
-                }
-            }
-        }
-
-        match earliest_find {
-            Some((idx, kw)) => {
-                let before = &current_text[..idx];
-                if !before.is_empty() {
-                    views.push(
-                        view! {
-                            <span>{before.to_string()}</span>
-                        }
-                        .into_any(),
-                    );
-                }
-                // Emphasis keywords keep their warning color, but no shadow needed.
-                views.push(
-                    view! {
-                        <span class="text-warning font-black mx-0.5">
-                            {kw.to_string()}
-                        </span>
-                    }
-                    .into_any(),
-                );
-                current_text = &current_text[idx + kw.len()..];
-            }
-            None => {
-                views.push(
-                    view! {
-                        <span>{current_text.to_string()}</span>
-                    }
-                    .into_any(),
-                );
-                break;
-            }
-        }
-    }
-
-    views.into_view().into_any()
 }

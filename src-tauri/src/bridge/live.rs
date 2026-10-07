@@ -17,7 +17,7 @@ use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::ipc::{Invoke, InvokeBody};
 use tauri::{AppHandle, Listener, Manager, Runtime};
 
@@ -42,6 +42,8 @@ pub fn start(app: &AppHandle) {
         .to_string();
     let mut options = MqttOptions::new("resonance-stream-app", &host, port);
     options.set_keep_alive(Duration::from_secs(5));
+    // The client's default is 10 KiB, which dropped the answer to `get-chat-history` after a busy session.
+    options.set_max_packet_size(wire::MAX_PACKET_BYTES, wire::MAX_PACKET_BYTES);
     options.set_last_will(LastWill::new(
         wire::STATUS_TOPIC,
         "offline",
@@ -148,6 +150,12 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             return publish(answer.0, answer.1);
         }
     };
+    // The bridge starts before the rest of start-up, so that it hears every event (the translator's first states,
+    // the first system messages). A command must not run on a half-started app: wait for `ready`.
+    let waited = Instant::now();
+    while !crate::test_env::is_ready() && waited.elapsed() < Duration::from_secs(60) {
+        std::thread::sleep(Duration::from_millis(25));
+    }
     log::info!("[Bridge] Command {:?}", request.command);
     let answer = |result: Result<(), String>| {
         let text = match &result {
@@ -159,7 +167,7 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
     let answer_data = |data: Value| {
         publish(
             wire::ack_topic(&request.id),
-            wire::ack_data(&request.id, data),
+            wire::fit_ack(&request.id, wire::ack_data(&request.id, data)),
         );
     };
     let rect_json = |rect: Option<resonance_types::WindowRect>| {
@@ -215,6 +223,115 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             if let Err(e) = crate::services::downloader::restart_to_apply_update(app.clone()) {
                 answer(Err(e));
             }
+        }
+        // The chat-row menu's and the clear button's commands, called the way the UI's invoke reaches them.
+        Command::BlockUser { uid, nickname } => {
+            crate::services::sniffer::block_user_command(
+                *uid,
+                nickname.clone(),
+                app.clone(),
+                app.state(),
+            );
+            answer(Ok(()));
+        }
+        Command::UnblockUser { uid } => {
+            crate::services::sniffer::unblock_user_command(*uid, app.clone(), app.state());
+            answer(Ok(()));
+        }
+        Command::GetChatHistory => {
+            let history = crate::commands::get_chat_history(app.state());
+            answer_data(serde_json::to_value(history).unwrap_or(Value::Null));
+        }
+        Command::ClearHistory => {
+            crate::commands::clear_chat_history(app.state());
+            answer(Ok(()));
+        }
+        Command::SyncDictionary { version } => {
+            // The settings view's sync: an async command that fetches, validates, saves and installs; its error is the ack's.
+            let synced = tauri::async_runtime::block_on(
+                crate::services::downloader::sync_dictionary(app.clone(), version.clone()),
+            );
+            answer(synced.map(|_| ()));
+        }
+        Command::SaveLocalDictionary { content } => {
+            // The dictionary editor's save: validates, writes custom_dict.json, installs from the next job on.
+            answer(crate::services::downloader::save_local_dictionary(
+                app.clone(),
+                content.clone(),
+            ));
+        }
+        Command::AnnotateFurigana { texts } => {
+            // The UI's own command, an async fn that only computes: run it to the end here (this thread is not the runtime's).
+            let spans =
+                tauri::async_runtime::block_on(crate::commands::annotate_furigana(texts.clone()));
+            answer_data(serde_json::to_value(spans).unwrap_or(Value::Null));
+        }
+        Command::GetFavorites => {
+            // What `save_favorites` tells the windows (`favorites-changed`); the UI reads the same from the config it loads.
+            let favorites = app.state::<crate::AppState>().config.read().favorites();
+            answer_data(serde_json::to_value(favorites).unwrap_or(Value::Null));
+        }
+        Command::SaveFavorites { favorites } => {
+            // The popup's own command: the favorites only, the config file written, `favorites-changed` emitted. It returns
+            // when the file is written, so the ack means "saved".
+            crate::config::save_favorites(app.clone(), app.state(), favorites.clone());
+            answer(Ok(()));
+        }
+        Command::RestartSniffer => {
+            // Runs on a thread of its own (a pause for the OS to release the socket): ack now, the test waits for `sniffer-state`.
+            crate::services::sniffer::restart_sniffer_command(app.clone());
+            answer(Ok(()));
+        }
+        Command::OpenPopup { kind } => {
+            // `open_popup` is async on purpose (a window made from a synchronous command can deadlock on Windows):
+            // run it on the async runtime and answer when the window is shown.
+            let (app, kind) = (app.clone(), *kind);
+            let (tx, rx) = std::sync::mpsc::channel();
+            tauri::async_runtime::spawn(async move {
+                let _ = tx.send(crate::window::open_popup(app, kind).await);
+            });
+            match rx.recv_timeout(Duration::from_secs(30)) {
+                Ok(result) => answer(result),
+                Err(_) => answer(Err("the popup was not shown within 30 s".into())),
+            }
+        }
+        Command::HidePopup { kind } => answer(crate::window::hide_popup(app, *kind)),
+        Command::PlacePopup { kind, rect } => answer(crate::window::place_popup(app, *kind, *rect)),
+        Command::SnapshotPopups => answer_data(crate::window::popups_snapshot(app)),
+        Command::PinMain { on } => match app.get_window("main") {
+            Some(window) => {
+                crate::window::set_always_on_top(window, *on);
+                answer(Ok(()));
+            }
+            None => answer(Err("There is no main window".into())),
+        },
+        Command::StartTranslator => {
+            crate::commands::launch_translator(app.clone(), app.state());
+            answer(Ok(()));
+        }
+        Command::DownloadModel {
+            url,
+            version,
+            sha256,
+        } => {
+            // The wizard's download; its end (the return value the UI shows) comes as a `download-result` event.
+            let (app, id) = (app.clone(), request.id.clone());
+            let (url, version, sha256) = (url.clone(), version.clone(), sha256.clone());
+            tauri::async_runtime::spawn(async move {
+                let result =
+                    crate::services::downloader::model::download_model(app, url, version, sha256)
+                        .await;
+                publish_event(
+                    wire::DOWNLOAD_RESULT_EVENT,
+                    serde_json::json!({
+                        "id": id,
+                        "what": "model",
+                        "ok": result.is_ok(),
+                        "error": result.err(),
+                    }),
+                );
+            });
+            answer(Ok(()));
         }
         Command::Quit => {
             answer(Ok(()));

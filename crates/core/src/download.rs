@@ -33,6 +33,33 @@ pub fn check_download_url_allowing(url: &str, allow_local_http: bool) -> Result<
     }
 }
 
+/// Whether `open_browser` may open `url`: a plain `https` page, with a host, and no space,
+/// control character or backslash anywhere. The ui only ever asks for github.com; the app runs
+/// as Administrator and the opener would hand `file:`, `ms-msdt:` and the like to Windows, so
+/// anything else is refused (review W-9).
+pub fn check_open_url(url: &str) -> Result<(), String> {
+    let refused = || {
+        Err(format!(
+            "Refusing to open {:?}: only plain https pages are opened",
+            url
+        ))
+    };
+    let is_https = url
+        .get(..8)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
+    if !is_https {
+        return refused();
+    }
+    let rest = &url[8..];
+    let bad_char = url
+        .chars()
+        .any(|c| c.is_ascii_control() || c == ' ' || c == '\\');
+    if rest.is_empty() || bad_char || rest.starts_with(['/', '?', '#']) {
+        return refused();
+    }
+    Ok(())
+}
+
 /// Checks a finished download: its size against `Content-Length` (when the
 /// server sent one) and its SHA-256 against `expected_sha256` (when known).
 pub struct DownloadCheck {
@@ -115,6 +142,73 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// response headers and between chunks. Not a limit on the whole download: a
 /// multi-GB model on a slow link may take an hour as long as it keeps moving.
 pub const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The whole of a small remote call -- the update feed, the metadata, the dictionary: connecting,
+/// the answer and its body. These are a few kilobytes, so unlike a download a host that takes
+/// longer is stuck, and must not hold the start-up "checking for updates" forever (review W-8).
+pub const REMOTE_CALL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A response body that went past its cap.
+#[derive(Debug, PartialEq, Eq)]
+pub struct BodyTooLarge {
+    pub limit: usize,
+}
+
+impl std::fmt::Display for BodyTooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const KIB: usize = 1024;
+        const MIB: usize = 1024 * 1024;
+        let limit = self.limit;
+        if limit >= MIB && limit % MIB == 0 {
+            write!(
+                f,
+                "The response is larger than the {} MiB the app accepts",
+                limit / MIB
+            )
+        } else if limit >= KIB && limit % KIB == 0 {
+            write!(
+                f,
+                "The response is larger than the {} KiB the app accepts",
+                limit / KIB
+            )
+        } else {
+            write!(
+                f,
+                "The response is larger than the {limit} bytes the app accepts"
+            )
+        }
+    }
+}
+
+/// Counts the bytes of a response body as its chunks arrive and refuses the one that takes it
+/// past `limit`, so a host that never stops sending cannot fill the memory.
+#[derive(Debug)]
+pub struct BodyCap {
+    limit: usize,
+    seen: usize,
+}
+
+impl BodyCap {
+    pub fn new(limit: usize) -> Self {
+        Self { limit, seen: 0 }
+    }
+
+    /// Adds a chunk of `len` bytes; an error when the body would be larger than the limit.
+    pub fn add(&mut self, len: usize) -> Result<(), BodyTooLarge> {
+        match self.seen.checked_add(len) {
+            Some(total) if total <= self.limit => {
+                self.seen = total;
+                Ok(())
+            }
+            _ => Err(BodyTooLarge { limit: self.limit }),
+        }
+    }
+
+    /// Bytes accepted so far.
+    pub fn seen(&self) -> usize {
+        self.seen
+    }
+}
 
 /// Tells a stuck download from a slow one: it is stuck when no data has
 /// arrived for `limit`. The clock is passed in, so this is tested without
@@ -213,6 +307,84 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     })
 }
 
+/// Reads a settings file as text, trying again while it cannot be read (an antivirus scan or
+/// another program may hold it for a moment). The last error comes back after `attempts`.
+pub fn read_text_retrying(path: &Path, attempts: u32, pause: Duration) -> io::Result<String> {
+    let mut last_err = None;
+    for attempt in 0..attempts.max(1) {
+        if attempt > 0 {
+            std::thread::sleep(pause);
+        }
+        match std::fs::read_to_string(path) {
+            Ok(text) => return Ok(text),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.expect("at least one attempt"))
+}
+
+/// Copies a file that cannot be used to `<path>.bad` (the next save would replace it) and says
+/// where the copy is. The original stays.
+pub fn keep_bad_copy(path: &Path) -> io::Result<std::path::PathBuf> {
+    keep_copy(path, "bad")
+}
+
+/// Copies a file to `<path>.<suffix>` and says where the copy is. The original stays.
+pub fn keep_copy(path: &Path, suffix: &str) -> io::Result<std::path::PathBuf> {
+    let mut copy = path.as_os_str().to_owned();
+    copy.push(".");
+    copy.push(suffix);
+    let copy = std::path::PathBuf::from(copy);
+    std::fs::copy(path, &copy)?;
+    Ok(copy)
+}
+
+/// `<path>.part`: where something is built before it is moved to `path`.
+pub fn part_path(path: &Path) -> std::path::PathBuf {
+    let mut part = path.as_os_str().to_owned();
+    part.push(".part");
+    std::path::PathBuf::from(part)
+}
+
+/// Moves a finished staging folder to `dest`, so a folder that is there at all is a whole one.
+/// Whatever a broken earlier attempt left at `dest` is replaced; nothing is touched when
+/// `staged` is missing.
+pub fn publish_dir(staged: &Path, dest: &Path) -> io::Result<()> {
+    if !staged.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("nothing was staged at {}", staged.display()),
+        ));
+    }
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)?;
+    }
+    std::fs::rename(staged, dest)
+}
+
+/// The update's swap: the running exe moves to `old`, the downloaded one takes its place.
+/// A stale `old` from an earlier update is dropped first. If the second rename fails the
+/// first one is undone, so the app is never left without an exe at `current`; the error
+/// says what failed and whether the previous version is back.
+pub fn install_swap(current: &Path, temp: &Path, old: &Path) -> Result<(), String> {
+    if old.exists() {
+        let _ = std::fs::remove_file(old);
+    }
+    std::fs::rename(current, old).map_err(|e| format!("Failed to backup current exe: {}", e))?;
+    if let Err(e) = std::fs::rename(temp, current) {
+        return Err(match std::fs::rename(old, current) {
+            Ok(()) => format!("Failed to install new exe: {}; the previous version was restored", e),
+            Err(restore) => format!(
+                "Failed to install new exe: {}; restoring the previous version also failed: {} (it is at {})",
+                e,
+                restore,
+                old.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Is `remote` a newer version than `current`? Versions that both parse as
 /// semver ("0.4.0", "v0.5.1") are compared; anything else falls back to
 /// "different means newer", as before.
@@ -237,6 +409,40 @@ mod tests {
         assert!(check_download_url("http://example.com/a").is_err());
         assert!(check_download_url("file:///C:/evil.exe").is_err());
         assert!(check_download_url("").is_err());
+    }
+
+    #[test]
+    fn only_https_pages_are_opened_in_the_browser() {
+        // The ui only ever asks for github.com; what else may reach `open_browser` is a script
+        // that should not be there (review W-9), so anything but a plain https page is refused.
+        assert!(check_open_url("https://github.com/enjay27/resonance-stream").is_ok());
+        assert!(check_open_url("HTTPS://github.com/x?y=1#z").is_ok());
+        for refused in [
+            "http://github.com",
+            "file:///C:/Windows/System32/calc.exe",
+            "javascript:alert(1)",
+            "data:text/html,<script>1</script>",
+            "mailto:a@b.c",
+            "tel:123",
+            "ms-msdt:/id",
+            "\\\\server\\share\\x.exe",
+            "C:\\Windows\\System32\\calc.exe",
+            "",
+            "https://",
+            "https:///no-host",
+            "https://?q=1",
+            "https://#frag",
+            " https://github.com",
+            "https://git hub.com",
+            "https://github.com/a\nb",
+            "https://github.com/a\0b",
+            "https://\\evil.com",
+        ] {
+            assert!(
+                check_open_url(refused).is_err(),
+                "{refused:?} must be refused"
+            );
+        }
     }
 
     #[test]
@@ -360,6 +566,250 @@ mod tests {
         let dir = temp_dir("giveup");
         let err = replace_file(&dir.join("missing"), &dir.join("x"), 2, Duration::ZERO);
         assert!(err.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- reading a settings file: a lock is waited out, a bad file is kept (W-7) ---
+
+    #[test]
+    fn a_file_that_appears_while_retrying_is_read() {
+        // An antivirus scan holds the file for a moment: the read is tried again.
+        let dir = temp_dir("read-late");
+        let path = dir.join("config.json");
+        let late = path.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(40));
+            std::fs::write(late, b"{}").unwrap();
+        });
+        let text = read_text_retrying(&path, 100, Duration::from_millis(10)).unwrap();
+        writer.join().unwrap();
+        assert_eq!(text, "{}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_that_stays_unreadable_gives_the_last_error_after_its_attempts() {
+        let dir = temp_dir("read-never");
+        let err = read_text_retrying(&dir.join("missing.json"), 3, Duration::ZERO).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_readable_file_is_read_on_the_first_try() {
+        let dir = temp_dir("read-now");
+        let path = dir.join("config.json");
+        std::fs::write(&path, "hello").unwrap();
+        assert_eq!(
+            read_text_retrying(&path, 1, Duration::ZERO).unwrap(),
+            "hello"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bad_file_is_kept_beside_the_original() {
+        let dir = temp_dir("bad-copy");
+        let path = dir.join("config.json");
+        std::fs::write(&path, "{ torn").unwrap();
+        let kept = keep_bad_copy(&path).unwrap();
+        assert_eq!(kept, dir.join("config.json.bad"));
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "{ torn");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{ torn",
+            "the original is not touched"
+        );
+        assert!(keep_bad_copy(&dir.join("missing.json")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_copy_can_be_kept_under_any_suffix() {
+        let dir = temp_dir("kept-copy");
+        let path = dir.join("config.json");
+        std::fs::write(&path, "{}").unwrap();
+        let kept = keep_copy(&path, "v7").unwrap();
+        assert_eq!(kept, dir.join("config.json.v7"));
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "{}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- short remote calls: a limit on the wait and on the body (W-8) ---
+
+    #[test]
+    fn a_body_may_be_exactly_as_large_as_its_cap() {
+        let mut cap = BodyCap::new(10);
+        assert!(cap.add(4).is_ok());
+        assert!(cap.add(6).is_ok());
+        assert_eq!(cap.seen(), 10);
+    }
+
+    #[test]
+    fn a_body_one_byte_over_its_cap_is_refused() {
+        let mut cap = BodyCap::new(10);
+        cap.add(10).unwrap();
+        assert_eq!(cap.add(1), Err(BodyTooLarge { limit: 10 }));
+    }
+
+    #[test]
+    fn a_huge_chunk_cannot_wrap_the_count() {
+        let mut cap = BodyCap::new(10);
+        cap.add(5).unwrap();
+        assert!(cap.add(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn the_message_names_the_limit() {
+        assert_eq!(
+            BodyTooLarge { limit: 262_144 }.to_string(),
+            "The response is larger than the 256 KiB the app accepts"
+        );
+        assert_eq!(
+            BodyTooLarge {
+                limit: 4 * 1024 * 1024
+            }
+            .to_string(),
+            "The response is larger than the 4 MiB the app accepts"
+        );
+        assert_eq!(
+            BodyTooLarge { limit: 1000 }.to_string(),
+            "The response is larger than the 1000 bytes the app accepts"
+        );
+    }
+
+    #[test]
+    fn a_short_call_gives_up_before_a_download_would_but_after_connecting() {
+        assert!(REMOTE_CALL_TIMEOUT > CONNECT_TIMEOUT);
+        assert!(REMOTE_CALL_TIMEOUT <= STALL_TIMEOUT.saturating_mul(2));
+    }
+
+    // --- install_swap: the update's two renames --------------------------
+
+    fn swap_paths(
+        dir: &std::path::Path,
+    ) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        (
+            dir.join("app.exe"),
+            dir.join("update_temp.exe"),
+            dir.join("app.exe.old"),
+        )
+    }
+
+    #[test]
+    fn install_swap_puts_the_new_exe_in_place_and_keeps_the_old_one() {
+        let dir = temp_dir("swap-ok");
+        let (current, temp, old) = swap_paths(&dir);
+        std::fs::write(&current, b"v1").unwrap();
+        std::fs::write(&temp, b"v2").unwrap();
+        install_swap(&current, &temp, &old).unwrap();
+        assert_eq!(std::fs::read(&current).unwrap(), b"v2");
+        assert_eq!(std::fs::read(&old).unwrap(), b"v1");
+        assert!(!temp.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn install_swap_drops_a_stale_backup_first() {
+        let dir = temp_dir("swap-stale");
+        let (current, temp, old) = swap_paths(&dir);
+        std::fs::write(&current, b"v2").unwrap();
+        std::fs::write(&temp, b"v3").unwrap();
+        std::fs::write(&old, b"v1").unwrap();
+        install_swap(&current, &temp, &old).unwrap();
+        assert_eq!(std::fs::read(&current).unwrap(), b"v3");
+        assert_eq!(std::fs::read(&old).unwrap(), b"v2");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn install_swap_puts_the_running_exe_back_when_the_second_rename_fails() {
+        // W-1: the current exe was already moved to `.old` when installing the new one failed.
+        let dir = temp_dir("swap-rollback");
+        let (current, temp, old) = swap_paths(&dir);
+        std::fs::write(&current, b"v1").unwrap();
+        // `update_temp.exe` is gone (an antivirus took it), so the second rename fails.
+        let err = install_swap(&current, &temp, &old).unwrap_err();
+        assert!(err.contains("Failed to install new exe"), "{err}");
+        assert!(err.contains("restored"), "{err}");
+        assert_eq!(
+            std::fs::read(&current).unwrap(),
+            b"v1",
+            "the app must still be there"
+        );
+        assert!(!old.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn install_swap_changes_nothing_when_the_first_rename_fails() {
+        let dir = temp_dir("swap-first");
+        let (current, temp, old) = swap_paths(&dir);
+        std::fs::write(&temp, b"v2").unwrap();
+        let err = install_swap(&current, &temp, &old).unwrap_err();
+        assert!(err.contains("Failed to backup current exe"), "{err}");
+        assert_eq!(
+            std::fs::read(&temp).unwrap(),
+            b"v2",
+            "the download is kept for another try"
+        );
+        assert!(!current.exists() && !old.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- staged folders: an install appears whole or not at all (W-3) -----
+
+    #[test]
+    fn a_staging_folder_sits_beside_the_real_one() {
+        let dest = std::path::Path::new("bin").join("ai-server");
+        assert_eq!(
+            part_path(&dest),
+            std::path::Path::new("bin").join("ai-server.part")
+        );
+    }
+
+    #[test]
+    fn publish_dir_moves_the_finished_folder_into_place() {
+        let dir = temp_dir("publish-ok");
+        let (staged, dest) = (dir.join("ai-server.part"), dir.join("ai-server"));
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(staged.join("llama-server.exe"), b"exe").unwrap();
+        std::fs::write(staged.join("ggml.dll"), b"dll").unwrap();
+        publish_dir(&staged, &dest).unwrap();
+        assert_eq!(
+            std::fs::read(dest.join("llama-server.exe")).unwrap(),
+            b"exe"
+        );
+        assert_eq!(std::fs::read(dest.join("ggml.dll")).unwrap(), b"dll");
+        assert!(!staged.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_dir_replaces_what_an_earlier_broken_install_left() {
+        let dir = temp_dir("publish-replace");
+        let (staged, dest) = (dir.join("ai-server.part"), dir.join("ai-server"));
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(staged.join("llama-server.exe"), b"new").unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("server_temp.zip"), b"leftover").unwrap();
+        publish_dir(&staged, &dest).unwrap();
+        assert_eq!(
+            std::fs::read(dest.join("llama-server.exe")).unwrap(),
+            b"new"
+        );
+        assert!(!dest.join("server_temp.zip").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_dir_leaves_the_destination_alone_when_nothing_was_staged() {
+        let dir = temp_dir("publish-missing");
+        let (staged, dest) = (dir.join("ai-server.part"), dir.join("ai-server"));
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("keep.txt"), b"keep").unwrap();
+        assert!(publish_dir(&staged, &dest).is_err());
+        assert_eq!(std::fs::read(dest.join("keep.txt")).unwrap(), b"keep");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

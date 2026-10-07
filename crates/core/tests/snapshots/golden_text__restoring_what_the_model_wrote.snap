@@ -1,0 +1,36 @@
+---
+source: crates/core/tests/golden_text.rs
+expression: table
+---
+model:  "오늘은 [P0]와 [P1]에서 가"
+final:  "오늘은 <0>와 <1>에서 가"
+
+model:  "[P1] and [P10]"
+final:  "<1> and <10>"
+
+model:  "[ P 3 ] [p4] ［P5］ [P 6]"
+final:  "<3> <4> <5> <6>"
+
+model:  "<think>생각 중\n여러 줄</think>  번역 결과"
+final:  "번역 결과"
+
+model:  "번역<end_of_turn>"
+final:  "번역"
+
+model:  "<start_of_turn>model\n번역</end_of_turn><eos>"
+final:  "번역"
+
+model:  "안녕 ! 잘 가 ~ 정말 ?"
+final:  "안녕! 잘 가~ 정말?"
+
+model:  "여러   칸    띄어쓰기\n줄바꿈"
+final:  "여러 칸 띄어쓰기 줄바꿈"
+
+model:  "[P99]는 발급한 적 없는 번호"
+final:  "[P99]는 발급한 적 없는 번호"
+
+model:  "   앞뒤 공백   "
+final:  "앞뒤 공백"
+
+model:  ""
+final:  ""

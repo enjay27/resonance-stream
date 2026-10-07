@@ -11,6 +11,7 @@ released 0.6.0 / 0.6.1 ignore every flag.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import http.server
 import json
@@ -18,6 +19,8 @@ import threading
 import time
 from pathlib import Path
 from typing import Callable
+
+from . import common
 
 NEW_EXE_MARKER = b"\n--runbook-mock-new-version--\n"
 
@@ -34,12 +37,57 @@ def feed_json(version: str, url: str, signature: str, notes: str = "") -> str:
     }, ensure_ascii=False)
 
 
-def metadata_json(model_url: str = "http://127.0.0.1:1/model.gguf") -> str:
-    """The gist's `metadata.json` (`GistMetadata`): the `app` entry is ignored by the app and left out."""
-    return json.dumps({
-        "model": {"latest_version": "runbook-mock", "download_url": model_url, "release_notes": "", "sha256": ""},
-        "dictionary": {"version": "runbook-mock", "updated_at": "2026-10-05"},
-    })
+def metadata_json(model_url: str = "http://127.0.0.1:1/model.gguf", *, revision: int = 0, dictionary_sha256: str = "",
+                  dictionary_version: str = "runbook-mock") -> str:
+    """The published `metadata.json` (`GistMetadata`): the `app` entry is ignored by the app and left out. With a `revision`
+    (and the dictionary's SHA-256) it is the signed kind `metadata.yml` publishes; without, the old gist's shape."""
+    out: dict = {}
+    if revision:
+        out["revision"] = revision
+    out["model"] = {"latest_version": "runbook-mock", "download_url": model_url, "release_notes": "", "sha256": ""}
+    out["dictionary"] = {"version": dictionary_version, "updated_at": "2026-10-05"}
+    if dictionary_sha256:
+        out["dictionary"]["sha256"] = dictionary_sha256
+    return json.dumps(out)
+
+
+class MetadataSigner:
+    """A throwaway signing key for the mock's metadata, made and used with `tauri signer` (the tool `metadata.yml` signs with), so
+    the app's real verifier is what judges it: it is told to trust this key alone (`--metadata-trust-key`). The key lives in `folder`
+    for one run and signs nothing real.
+
+    In a dry run nothing is run: a stand-in scheme is used (`FAKESIG`), which only the stand-in app in `tests/fake_app.py` reads."""
+
+    def __init__(self, folder: str | Path, name: str = "metadata-key") -> None:
+        self.folder = Path(folder)
+        self.folder.mkdir(parents=True, exist_ok=True)
+        self.key = self.folder / f"{name}.key"
+        self._count = 0
+        if common.dry_run():
+            self.key_id = hashlib.sha256(name.encode()).hexdigest()[:16].upper()
+            self.public_key = base64.b64encode(f"untrusted comment: dry run key\n{self.key_id}\n".encode()).decode()
+            return
+        code, out = common.capture(["npx", "--yes", "@tauri-apps/cli@2", "signer", "generate", "--ci", "-w", str(self.key)], timeout=300)
+        pub = self.key.with_name(self.key.name + ".pub")
+        if code != 0 or not pub.exists():
+            raise RuntimeError("could not make a signing key with `tauri signer generate`: " + " ".join(out.split())[-300:])
+        self.public_key = pub.read_text(encoding="utf-8").strip()
+        self.key_id = ""
+
+    def sign(self, body: bytes, revision: int) -> str:
+        """The `.sig` text (base64, as `tauri signer sign` writes it) for `body`, its signed comment saying `version:<revision>`."""
+        if common.dry_run():
+            digest = hashlib.sha256(body).hexdigest()
+            return base64.b64encode(f"FAKESIG\n{self.key_id}\n{digest}\n{revision}\n".encode()).decode()
+        self._count += 1
+        target = self.folder / f"{self.key.stem}-{self._count}.json"
+        target.write_bytes(body)
+        code, out = common.capture(["npx", "--yes", "@tauri-apps/cli@2", "signer", "sign", "-f", str(self.key), "-p", "", "--app-version",
+                                    str(revision), str(target)], timeout=300)
+        sig = target.with_name(target.name + ".sig")
+        if code != 0 or not sig.exists():
+            raise RuntimeError("`tauri signer sign` failed: " + " ".join(out.split())[-300:])
+        return sig.read_text(encoding="utf-8").strip()
 
 
 def make_new_exe(src: str | Path, dest: str | Path) -> Path:
@@ -53,14 +101,16 @@ def make_new_exe(src: str | Path, dest: str | Path) -> Path:
 
 # --- the command line -----------------------------------------------------------------------------
 def flag_args(data_dir: str | Path, status_file: str | Path, *, feed_url: str | None = None,
-              metadata_url: str | None = None, log_file: str | Path | None = None, fresh: bool = True,
-              capture: bool = False, window_state: bool = False, extra: tuple[str, ...] = ()) -> list[str]:
+              metadata_url: str | None = None, metadata_trust_key: str | None = None, dictionary_url: str | None = None,
+              log_file: str | Path | None = None, fresh: bool = True,
+              capture: bool = False, window_state: bool = False, translator: bool = False, popups: bool = False,
+              extra: tuple[str, ...] = ()) -> list[str]:
     """An isolated run: its own data folder, no wizard, no sniffer, no translator, no popups, no saved
-    window place. The update check is left ON -- it is what is being tested. `capture=True` leaves the sniffer on, `window_state=True` lets the app restore and save the window's size and place."""
+    window place. The update check is left ON -- it is what is being tested. `capture=True` leaves the sniffer on, `window_state=True` lets the app restore and save the window's size and place, `translator=True` leaves the translator on (give it `--llama-url` in `extra`), `popups=True` lets the app create its popup windows."""
     args = ["--data-dir", str(data_dir)]
     if fresh:
         args.append("--fresh")
-    args += ["--assume-setup-done", *([] if capture else ["--no-capture"]), "--no-translator", "--no-popups",
+    args += ["--assume-setup-done", *([] if capture else ["--no-capture"]), *([] if translator else ["--no-translator"]), *([] if popups else ["--no-popups"]),
              *([] if window_state else ["--no-window-state"]), "--status-file", str(status_file)]
     if log_file is not None:
         args += ["--log-file", str(log_file)]
@@ -68,6 +118,10 @@ def flag_args(data_dir: str | Path, status_file: str | Path, *, feed_url: str | 
         args += ["--feed-url", feed_url]
     if metadata_url is not None:
         args += ["--metadata-url", metadata_url]
+    if metadata_trust_key is not None:
+        args += ["--metadata-trust-key", metadata_trust_key]
+    if dictionary_url is not None:
+        args += ["--dictionary-url", dictionary_url]
     return [*args, *extra]
 
 
@@ -91,9 +145,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             body = owner.feed_text().encode("utf-8")
             return self._reply(200, body, "application/json")
         if self.path == "/metadata.json":
-            return self._reply(200, owner.metadata_text().encode("utf-8"), "application/json")
+            return self._reply(200, owner.metadata_served().encode("utf-8"), "application/json")
+        if self.path == "/metadata.json.sig":
+            sig = owner.metadata_signature()
+            return self._reply(404, b"not found") if sig is None else self._reply(200, sig.encode("utf-8"))
+        if self.path == "/custom_dict.json":
+            return self._reply(200, owner.dictionary_served().encode("utf-8"), "application/json; charset=utf-8")
         if self.path == "/update.exe" and owner.exe_mode != "404":
             return self._exe(owner)
+        if self.path == "/model.gguf" and owner.model_mode != "404":
+            return self._model(owner)
         self._reply(404, b"not found")
 
     def _reply(self, status: int, body: bytes, content_type: str = "text/plain") -> None:
@@ -114,22 +175,54 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         # cut: the handler returns and the connection closes early
 
 
+def _model_handler(self, owner: "MockServer") -> None:
+    body = owner.model_bytes
+    self._send(200, body)
+    if owner.model_mode == "ok":
+        self.wfile.write(body)
+        return
+    # cut: the headers promised the whole file; half of it goes out, then the connection closes
+    self.wfile.write(body[: max(1, len(body) // 2)])
+    self.wfile.flush()
+
+
+_Handler._model = _model_handler  # type: ignore[attr-defined]
+
+
 class MockServer:
-    """GitHub in miniature on 127.0.0.1: `/latest.json`, `/metadata.json`, `/update.exe`.
+    """GitHub in miniature on 127.0.0.1: `/latest.json`, `/metadata.json`, `/update.exe`, `/model.gguf`, `/custom_dict.json`.
 
     `feed_mode`: ok | garbage (not JSON) | 404.   `exe_mode`: ok | cut (connection closes early) |
-    stall (goes silent after a third) | 404.   Set them, or `version`, while it runs.
+    stall (goes silent after a third) | 404.   `model_mode` (the file at `/model.gguf`, `model_bytes`): ok | cut | 404.
+    Set them, or `version`, while it runs.
     `hits` lists every request, in order.
+
+    With a `signer` (a `MetadataSigner`) the metadata is the signed kind: `revision`, the dictionary's SHA-256, and the signature at
+    `/metadata.json.sig`. `metadata_mode`: ok | no-signature (the `.sig` is 404) | wrong-key (signed by `foreign_signer`, another key) |
+    tampered (the signature is for another text). `revision` and `dictionary_override` (the text served at `/custom_dict.json`
+    instead of `dictionary_text`, so it no longer matches the signed hash) can be set while it runs. Without a signer the metadata is
+    the old gist's shape and there is no `.sig`.
     """
 
     def __init__(self, exe_bytes: bytes = b"", signature: str = "c2ln", version: str = "9.9.9",
-                 notes: str = "runbook mock release") -> None:
+                 notes: str = "runbook mock release", signer: MetadataSigner | None = None,
+                 foreign_signer: MetadataSigner | None = None) -> None:
         self.exe_bytes = exe_bytes
         self.signature = signature
         self.version = version
         self.notes = notes
         self.feed_mode = "ok"
         self.exe_mode = "ok"
+        self.model_bytes = b""
+        self.model_mode = "ok"
+        self.dictionary_text = '{"term": {"ボス": "보스"}}'  # what `/custom_dict.json` serves (the gist's custom dictionary)
+        self.dictionary_override: str | None = None
+        self.signer = signer
+        self.foreign_signer = foreign_signer
+        self.revision = 1
+        self.metadata_mode = "ok"
+        self._signatures: dict[tuple, str] = {}
+        self._sign_lock = threading.Lock()
         self.hits: list[str] = []
         self.stopping = threading.Event()
         self._httpd: http.server.ThreadingHTTPServer | None = None
@@ -150,6 +243,10 @@ class MockServer:
         return self.base_url + "/metadata.json"
 
     @property
+    def dictionary_url(self) -> str:
+        return self.base_url + "/custom_dict.json"
+
+    @property
     def exe_url(self) -> str:
         return self.base_url + "/update.exe"
 
@@ -160,7 +257,38 @@ class MockServer:
         return feed_json(self.version, self.exe_url, self.signature, self.notes)
 
     def metadata_text(self) -> str:
-        return metadata_json(self.base_url + "/model.gguf")
+        """The metadata as published (before any fault): signed kind when there is a signer."""
+        if self.signer is None:
+            return metadata_json(self.base_url + "/model.gguf")
+        return metadata_json(self.base_url + "/model.gguf", revision=self.revision,
+                             dictionary_sha256=hashlib.sha256(self.dictionary_text.encode("utf-8")).hexdigest())
+
+    def metadata_served(self) -> str:
+        """What `/metadata.json` answers: the published text, or -- `tampered` -- that text changed after it was signed."""
+        text = self.metadata_text()
+        return text.replace("runbook-mock", "runbook-evil") if self.metadata_mode == "tampered" else text
+
+    def metadata_signature(self) -> str | None:
+        """What `/metadata.json.sig` answers; None for 404 (no signer, or `no-signature`). Signing runs a tool, so a result is kept."""
+        if self.signer is None or self.metadata_mode == "no-signature":
+            return None
+        signer = self.foreign_signer if self.metadata_mode == "wrong-key" else self.signer
+        if signer is None:
+            raise RuntimeError("metadata_mode 'wrong-key' needs a foreign_signer")
+        text = self.metadata_text()
+        with self._sign_lock:
+            key = (id(signer), self.revision, text)
+            if key not in self._signatures:
+                self._signatures[key] = signer.sign(text.encode("utf-8"), self.revision)
+            return self._signatures[key]
+
+    def dictionary_served(self) -> str:
+        return self.dictionary_text if self.dictionary_override is None else self.dictionary_override
+
+    def metadata_flags(self) -> tuple[str, ...]:
+        """The flags that make an app read this server's metadata and trust its key (and nothing else)."""
+        flags = ("--metadata-url", self.metadata_url)
+        return flags + (("--metadata-trust-key", self.signer.public_key) if self.signer is not None else ())
 
     # -- life cycle
     def start(self) -> "MockServer":
@@ -171,6 +299,7 @@ class MockServer:
         self._httpd = httpd
         self._thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         self._thread.start()
+        self.metadata_signature()  # signs now, not while the app waits for its answer
         return self
 
     def stop(self) -> None:

@@ -1,0 +1,12 @@
+---
+source: crates/core/tests/golden_text.rs
+expression: table
+---
+in:       【募集】火力できる方いませんか
+restored: 【募集】딜러できる方いませんか
+
+in:       アズルルさんは完凸で3人
+restored: Azururuさんは풀돌で3인
+
+in:       @Bob12 こっち来て
+restored: @Bob12 こっち来て

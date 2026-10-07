@@ -2,6 +2,7 @@
 
 use crate::config_signals::ConfigSignals;
 use crate::hooks::use_events::setup_event_listeners;
+use crate::setup_plan::{check_failed_message, plan_downloads, SetupDownloads};
 use crate::status_signals::{ServiceSignals, SetupSignals};
 use crate::store::AppSignals;
 use crate::tauri_bridge::{invoke, listen};
@@ -44,8 +45,9 @@ pub fn finalize_setup(
     }
 }
 
-/// Fetches the gist metadata, downloads model, server and dictionary with
-/// progress, launches the translator, then calls `finalize`.
+/// Fetches the signed model / dictionary metadata, downloads model, server and dictionary with
+/// progress, launches the translator, then calls `finalize`. Every way it stops leaves a line under
+/// the button (`setup_error`), as well as the status text and the system log.
 pub fn start_download(
     signals: AppSignals,
     finalize_setup: impl Fn(()) + Copy + Send + Sync + 'static,
@@ -54,41 +56,67 @@ pub fn start_download(
         set_status_text,
         set_downloading,
         set_progress,
+        set_setup_error,
         ..
     } = signals.setup;
     let ServiceSignals {
         set_model_ready, ..
     } = signals.service;
 
+    // The wizard stopped: back to the button, with the reason on screen and in the log.
+    let stop = move |status: String, message: String| {
+        set_downloading.set(false);
+        set_status_text.set(status);
+        set_setup_error.set(Some(message.clone()));
+        add_system_log(SystemLogLevel::Error, "ModelManager", &message);
+    };
+    // What the backend said, as text (`invoke` gives a string for a command's `Err(String)`).
+    let reason = |e: JsValue| e.as_string().unwrap_or_else(|| format!("{e:?}"));
+
     move |ev: web_sys::MouseEvent| {
         // Prevent the default button behavior if necessary
         ev.prevent_default();
 
         set_downloading.set(true);
+        set_setup_error.set(None);
         set_status_text.set("Starting Downloads...".to_string());
 
         spawn_local(async move {
-            // FETCH THE GIST METADATA FIRST
+            // FETCH THE SIGNED METADATA FIRST
             let update_res = invoke("check_all_updates", JsValue::NULL).await;
-            let (model_url, model_version, model_hash, dict_version) = if let Ok(res) = update_res {
-                if let Ok(data) =
-                    serde_wasm_bindgen::from_value::<crate::ui_types::UpdateCheckResult>(res)
-                {
-                    (
-                        data.remote_data.model.download_url,
-                        data.remote_data.model.latest_version,
-                        data.remote_data.model.sha256,
-                        data.remote_data.dictionary.version,
-                    )
-                } else {
-                    set_status_text.set("Error: Failed to parse update data".to_string());
-                    set_downloading.set(false);
+            let check = match update_res {
+                Ok(res) => {
+                    match serde_wasm_bindgen::from_value::<crate::ui_types::UpdateCheckResult>(res)
+                    {
+                        Ok(check) => check,
+                        Err(_) => {
+                            stop(
+                                "Error: Failed to parse update data".to_string(),
+                                "업데이트 정보를 읽지 못했습니다.".to_string(),
+                            );
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    stop(
+                        "Error: Network check failed".to_string(),
+                        check_failed_message(&reason(e)),
+                    );
                     return;
                 }
-            } else {
-                set_status_text.set("Error: Network check failed".to_string());
-                set_downloading.set(false);
-                return;
+            };
+            let SetupDownloads {
+                model_url,
+                model_version,
+                model_hash,
+                dict_version,
+            } = match plan_downloads(&check) {
+                Ok(plan) => plan,
+                Err(message) => {
+                    stop("Error: model information refused".to_string(), message);
+                    return;
+                }
             };
 
             // 1. Setup the progress listener
@@ -113,28 +141,22 @@ pub fn start_download(
             }))
             .unwrap();
 
-            let model_result = invoke("download_model", args).await;
-            if let Err(e) = model_result {
-                set_downloading.set(false);
-                set_status_text.set(format!("Model Error: {:?}", e));
-                add_system_log(
-                    SystemLogLevel::Error,
-                    "ModelManager",
-                    &format!("Model download failed: {:?}", e),
+            if let Err(e) = invoke("download_model", args).await {
+                let why = reason(e);
+                stop(
+                    format!("Model Error: {why}"),
+                    format!("모델 다운로드에 실패했습니다. ({why})"),
                 );
                 closure.forget();
                 return;
             }
 
             // 3. Download the AI Server (llama-server.exe via zip)
-            let server_result = invoke("download_ai_server", JsValue::NULL).await;
-            if let Err(e) = server_result {
-                set_downloading.set(false);
-                set_status_text.set(format!("Server Error: {:?}", e));
-                add_system_log(
-                    SystemLogLevel::Error,
-                    "ModelManager",
-                    &format!("Server download failed: {:?}", e),
+            if let Err(e) = invoke("download_ai_server", JsValue::NULL).await {
+                let why = reason(e);
+                stop(
+                    format!("Server Error: {why}"),
+                    format!("AI 서버 다운로드에 실패했습니다. ({why})"),
                 );
                 closure.forget();
                 return;
@@ -146,14 +168,11 @@ pub fn start_download(
             }))
             .unwrap();
 
-            let sync_dict = invoke("sync_dictionary", dict_args).await;
-            if let Err(e) = sync_dict {
-                set_downloading.set(false);
-                set_status_text.set(format!("Dict Error: {:?}", e));
-                add_system_log(
-                    SystemLogLevel::Error,
-                    "ModelManager",
-                    &format!("Sync dictionary failed: {:?}", e),
+            if let Err(e) = invoke("sync_dictionary", dict_args).await {
+                let why = reason(e);
+                stop(
+                    format!("Dict Error: {why}"),
+                    format!("사용자 사전 동기화에 실패했습니다. ({why})"),
                 );
                 closure.forget();
                 return;

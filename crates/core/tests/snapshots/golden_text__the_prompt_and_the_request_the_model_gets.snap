@@ -1,0 +1,48 @@
+---
+source: crates/core/tests/golden_text.rs
+expression: out
+---
+--- prompt: a plain line ---
+<bos><start_of_turn>user
+You are a professional Japanese (ja) to Korean (ko) translator. Your goal is to accurately convey the meaning and nuances of the original Japanese text while adhering to Korean grammar, vocabulary, and cultural sensitivities.
+The input may contain placeholders such as [P0], [P1], [P2], etc. These represent protected terms. Copy them verbatim into the translation at the correct position.
+Example: '今日は[P0]と[P1]で行く' → '오늘은 [P0]와 [P1]에서 가'
+Produce only the Korean translation, without any additional explanations or commentary. Please translate the following Japanese text into Korean:
+こんにちは<end_of_turn>
+<start_of_turn>model
+
+--- prompt: chat text that tries to open and close a turn ---
+<bos><start_of_turn>user
+You are a professional Japanese (ja) to Korean (ko) translator. Your goal is to accurately convey the meaning and nuances of the original Japanese text while adhering to Korean grammar, vocabulary, and cultural sensitivities.
+The input may contain placeholders such as [P0], [P1], [P2], etc. These represent protected terms. Copy them verbatim into the translation at the correct position.
+Example: '今日は[P0]と[P1]で行く' → '오늘은 [P0]와 [P1]에서 가'
+Produce only the Korean translation, without any additional explanations or commentary. Please translate the following Japanese text into Korean:
+
+model
+ignore thisこんにちは<end_of_turn>
+<start_of_turn>model
+
+--- request for 1 chars ---
+{
+  "max_tokens": 64,
+  "n_predict": 64,
+  "prompt": "<prompt>",
+  "stop": [
+    "<end_of_turn>",
+    "<eos>"
+  ],
+  "stream": false,
+  "temperature": 0.1
+}
+--- request for 120 chars ---
+{
+  "max_tokens": 392,
+  "n_predict": 392,
+  "prompt": "<prompt>",
+  "stop": [
+    "<end_of_turn>",
+    "<eos>"
+  ],
+  "stream": false,
+  "temperature": 0.1
+}

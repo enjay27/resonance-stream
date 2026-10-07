@@ -5,14 +5,11 @@ use crate::{AppState, ChatMessage, SystemLogLevel, SystemMessage};
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use resonance_core::log_throttle::LogThrottle;
-use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tauri::{Emitter, Manager};
 
 lazy_static! {
-    // Stores: (Message Fingerprint, Arrival Time)
-    static ref CHAT_DEDUPE_CACHE: Mutex<VecDeque<(u64, Instant)>> = Mutex::new(VecDeque::new());
     static ref LOG_THROTTLE: Mutex<LogThrottle> = Mutex::new(LogThrottle::default());
 }
 
@@ -74,45 +71,15 @@ pub fn inject_system_message<S: Into<String>>(
     }
 }
 
-/// Stores and emits a chat message. Returns `false` when it was dropped as a
-/// duplicate, so the caller does not translate or archive it either.
-pub fn store_and_emit(app: &tauri::AppHandle, mut packet: ChatMessage) -> bool {
-    let fingerprint = resonance_core::capture::fingerprint(&packet);
-    let now = Instant::now();
-
-    if let Some(fingerprint) = fingerprint {
-        let mut cache = CHAT_DEDUPE_CACHE.lock();
-
-        // Prune the sliding window (older than 2 seconds); the deque is ordered by time.
-        while let Some(&(_, time)) = cache.front() {
-            if now.duration_since(time) > Duration::from_secs(2) {
-                cache.pop_front();
-            } else {
-                break;
-            }
-        }
-
-        // The same message from a second client: drop it.
-        if cache.iter().any(|(hash, _)| *hash == fingerprint) {
-            return false;
-        }
-        cache.push_back((fingerprint, now));
-    }
-
+/// Stores a chat message in the backend history and emits it ("packet-event"). A duplicate never
+/// gets here: the capture pipeline decides that (`resonance_core::capture`, including the same
+/// message from a second game client), and the sniffer has already set the romaji nickname.
+pub fn store_and_emit(app: &tauri::AppHandle, packet: ChatMessage) {
     if let Some(state) = app.try_state::<AppState>() {
-        // Auto-populate from Backend Cache
-        {
-            let cache = state.nickname_cache.lock();
-            if let Some(romaji) = cache.get(&packet.nickname) {
-                packet.nickname_romaji = Some(romaji.clone());
-            }
-        }
-
         // Store in HOT Storage (bounded by the largest tab limit, oldest dropped first)
         state.chat_history.lock().push(packet.clone());
 
         // Emit "packet-event" for Game Chat
         let _ = app.emit("packet-event", &packet);
     }
-    true
 }

@@ -28,16 +28,15 @@ pub struct AppState {
     /// Swapped whole when the dictionary is synced or edited; the translator
     /// takes a cheap `Arc` clone per job.
     pub dictionary: RwLock<Arc<Dictionary>>,
-    pub translator_tx: Mutex<Option<Sender<crate::services::translator::TranslationJob>>>,
+    /// Who runs: the translator's queue and the sniffer's handle (`services/owner.rs`).
+    pub services: crate::services::owner::Services,
     /// Japanese messages of this run still owed a translation; caught up at
     /// each translator start (see `translator::catch_up`).
     pub translation_ledger: Mutex<resonance_core::workers::TranslationLedger>,
     pub data_factory_tx: Mutex<Option<Sender<crate::io::DataFactoryJob>>>,
-    pub sniffer_tx: Mutex<Option<crate::services::sniffer::SnifferHandle>>,
     /// The last state each service emitted (`get_service_states`): a UI that
     /// was not listening yet still learns it.
     pub service_states: Mutex<ServiceStates>,
-    pub blocked_users: Mutex<HashMap<u64, String>>,
     /// What the global shortcuts are bound to (see `shortcut.rs`).
     pub shortcuts: Mutex<crate::shortcut::GlobalShortcuts>,
 }

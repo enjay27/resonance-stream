@@ -142,6 +142,12 @@ pub fn SetupWizard(
                                     <progress class="progress progress-success w-full h-4" value=move || signals.setup.progress.get().to_string() max="100"></progress>
                                     <span class="text-xs font-mono">{move || format!("{}%", signals.setup.progress.get())}</span>
                                 </Show>
+                                // Why the last try stopped (a refused signature, no network, a failed download).
+                                <Show when=move || signals.setup.setup_error.get().is_some()>
+                                    <div role="alert" class="alert alert-error text-left text-xs break-words">
+                                        <span>{move || signals.setup.setup_error.get().unwrap_or_default()}</span>
+                                    </div>
+                                </Show>
                             </div>
                         }.into_any(),
                         _ => view! { <div></div> }.into_any(),

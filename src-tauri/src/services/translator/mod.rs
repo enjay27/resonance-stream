@@ -15,8 +15,10 @@ use crate::inject_system_message;
 use crate::protocol::types::{ChatMessage, SystemLogLevel, TranslatorState};
 
 use self::core::server_url;
+use resonance_core::history::ArchiveTarget;
 use resonance_core::text::{
-    preprocess_text, translate_masked, TranslationCache, TRANSLATION_CACHE_SIZE,
+    nicknames_in, preprocess_with_nicknames, translate_masked, TranslationCache,
+    TRANSLATION_CACHE_SIZE,
 };
 use resonance_core::workers::{translation_is_stale, ServerSupervisor, SupervisorAction};
 use resonance_llama::translate_text;
@@ -58,7 +60,7 @@ pub fn start_translator_worker(app: AppHandle, model_path: PathBuf) -> Sender<Tr
         );
         thread::spawn(move || {
             for job in rx {
-                archive_chat(&app, &job.chat);
+                archive_untranslated(&app, &job.chat);
             }
         });
         return tx;
@@ -219,7 +221,7 @@ impl ServerRun<'_> {
     fn live(&mut self, job: TranslationJob) -> SupervisorAction {
         if translation_is_stale(job.queued_at, Instant::now()) {
             log::debug!("[Translator] Skipped pid {}: waited too long", job.chat.pid);
-            archive_chat(self.app, &job.chat);
+            archive_untranslated(self.app, &job.chat);
             return SupervisorAction::Continue;
         }
         self.translate(job)
@@ -271,7 +273,7 @@ fn sleep_while(total: Duration, is_current: &dyn Fn() -> bool) -> bool {
 /// owed in the ledger), until the translator is stopped or replaced.
 fn drain_untranslated(app: &AppHandle, rx: &Receiver<TranslationJob>) {
     while let Ok(job) = rx.recv() {
-        archive_chat(app, &job.chat);
+        archive_untranslated(app, &job.chat);
     }
 }
 
@@ -347,17 +349,32 @@ fn catch_up(
     Some(SupervisorAction::Continue)
 }
 
-/// Queues `chat` for the archive, as it is (untranslated), when its channel
-/// is archived.
-pub fn archive_chat(app: &AppHandle, chat: &ChatMessage) {
+/// Queues `chat` for the archive when its channel is archived.
+fn archive(app: &AppHandle, chat: &ChatMessage, target: ArchiveTarget) {
     let state = app.state::<crate::AppState>();
     if !crate::io::archives_channel(app, chat.channel) {
         return;
     }
     let df_tx = state.data_factory_tx.lock().clone();
     if let Some(df_tx) = df_tx {
-        let _ = df_tx.send(crate::io::DataFactoryJob { chat: chat.clone() });
+        let _ = df_tx.send(crate::io::DataFactoryJob {
+            chat: chat.clone(),
+            target,
+        });
     }
+}
+
+/// A message has just arrived: it goes to the chat log at once, whatever the translator does
+/// or fails to do with it (review W-4). Before the translation job is queued, so a
+/// translated copy always comes after it in the log.
+pub fn archive_arrival(app: &AppHandle, chat: &ChatMessage) {
+    archive(app, chat, ArchiveTarget::ChatLog);
+}
+
+/// No translation will come for `chat`: it goes to the training-pair file as it is. The chat
+/// log has it since it arrived.
+pub fn archive_untranslated(app: &AppHandle, chat: &ChatMessage) {
+    archive(app, chat, ArchiveTarget::Dataset);
 }
 
 enum JobResult {
@@ -383,14 +400,12 @@ fn process_translation_job(
         return JobResult::Skipped;
     }
 
-    // 1. Preprocess. The nickname lock is held only for this step: the
-    // sniffer needs it for every Japanese nickname, and must not wait for
-    // the HTTP round trip below.
+    // 1. Preprocess. The nickname lock is held only to pick the names this message
+    // contains: the sniffer needs it for every Japanese nickname, and must wait neither
+    // for the rest of the shielding nor for the HTTP round trip below.
     let dict = state.dictionary.read().clone();
-    let shield = {
-        let nick_cache = state.nickname_cache.lock();
-        preprocess_text(&chat.message, &dict, Some(&nick_cache))
-    };
+    let nicknames = nicknames_in(&chat.message, &state.nickname_cache.lock());
+    let shield = preprocess_with_nicknames(&chat.message, &dict, &nicknames);
 
     // 2. HTTP Request (Blocking), unless this line was translated before;
     // 3. Postprocess
@@ -402,18 +417,16 @@ fn process_translation_job(
             // No translation: the row stays as it is, and the original is
             // still archived.
             log::warn!("[Translator] pid {}: {}", chat.pid, reason);
-            archive_chat(app, &chat);
+            archive_untranslated(app, &chat);
             return JobResult::Failed;
         }
     };
 
-    // 4. Dispatch Side Effects
-    let archive = state.data_factory_tx.lock().clone();
-    if let Some(df_tx) = archive.filter(|_| crate::io::archives_channel(app, chat.channel)) {
-        let mut archived = chat.clone();
-        archived.translated = Some(final_str.clone());
-        let _ = df_tx.send(crate::io::DataFactoryJob { chat: archived });
-    }
+    // 4. Dispatch Side Effects: the translated copy goes to both archives (the chat log
+    // already holds the message from its arrival; `load_recent` keeps the newest line).
+    let mut archived = chat.clone();
+    archived.translated = Some(final_str.clone());
+    archive(app, &archived, ArchiveTarget::Both);
 
     if let Some(existing_chat) = state.chat_history.lock().get_mut(chat.pid) {
         existing_chat.translated = Some(final_str.clone());

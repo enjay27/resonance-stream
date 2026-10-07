@@ -142,15 +142,8 @@ pub fn restart_to_apply_update(app: AppHandle) -> Result<(), String> {
         .ok_or("No verified update has been downloaded")?;
     verify_file(&temp_exe, &feed)?;
 
-    // Clean up old backups
-    if old_exe.exists() {
-        let _ = fs::remove_file(&old_exe);
-    }
-
-    // The Windows Rename Trick
-    fs::rename(&current_exe, &old_exe)
-        .map_err(|e| format!("Failed to backup current exe: {}", e))?;
-    fs::rename(&temp_exe, &current_exe).map_err(|e| format!("Failed to install new exe: {}", e))?;
+    // The Windows Rename Trick; puts the running exe back if the new one cannot be moved in.
+    resonance_core::download::install_swap(&current_exe, &temp_exe, &old_exe)?;
 
     // Spawn the new executable
     // A test run keeps its flags; `--fresh` and `--print-env` never carry over.

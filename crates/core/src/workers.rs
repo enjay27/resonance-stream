@@ -46,6 +46,73 @@ pub fn translator_change(old: TranslatorSettings, new: TranslatorSettings) -> Wo
     }
 }
 
+/// What a settings change does to the sniffer, given the adapter it was bound to and the one it
+/// should be bound to now (`""` is automatic). A changed adapter drops the running capture; a
+/// new one starts only once the first-run setup is done, so the wizard's own saves never open a
+/// socket. `Start` is never answered: the sniffer is started by the ui, not by a setting.
+pub fn sniffer_change(old_interface: &str, new_interface: &str, init_done: bool) -> WorkerChange {
+    match (old_interface != new_interface, init_done) {
+        (false, _) => WorkerChange::Keep,
+        (true, true) => WorkerChange::Restart,
+        (true, false) => WorkerChange::Stop,
+    }
+}
+
+/// How often the sniffer's watchdog looks at the clock.
+pub const WATCHDOG_TICK: Duration = Duration::from_secs(5);
+
+/// Seconds without a game packet after which the watchdog says so.
+pub const WATCHDOG_LIMIT_SECS: u64 = 15;
+
+/// What the watchdog found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchdogVerdict {
+    /// The capture thread is gone (it failed while setting up, or ended): that has its own
+    /// message, and "no game traffic" would only replace it. The watchdog stops.
+    CaptureEnded,
+    /// No packet has been recorded yet (`last_traffic` is 0): nothing to judge.
+    NotStarted,
+    Healthy,
+    /// More than [`WATCHDOG_LIMIT_SECS`] since the last packet: report it and look again later.
+    Stalled,
+}
+
+/// The watchdog's decision, from whether the capture thread still runs and the Unix seconds of the
+/// last game packet and of now (passed in, so it is tested without a clock). A clock that stepped
+/// back is not a stall.
+pub fn watchdog_check(last_traffic: u64, now: u64, capture_alive: bool) -> WatchdogVerdict {
+    if !capture_alive {
+        WatchdogVerdict::CaptureEnded
+    } else if last_traffic == 0 {
+        WatchdogVerdict::NotStarted
+    } else if now.saturating_sub(last_traffic) > WATCHDOG_LIMIT_SECS {
+        WatchdogVerdict::Stalled
+    } else {
+        WatchdogVerdict::Healthy
+    }
+}
+
+/// How long a restart waits for the old capture thread to end before it goes on anyway. A read
+/// times out after half a second, so a healthy thread ends well inside this.
+pub const SNIFFER_STOP_WAIT: Duration = Duration::from_secs(3);
+
+/// Polls `condition` every `poll` until it holds or `timeout` has passed, and says whether it
+/// held. It is looked at once more when the time is up, so a thread that ends right at the
+/// deadline is not reported as stuck. This replaces "sleep a while and hope" (review W-10).
+pub fn wait_for(mut condition: impl FnMut() -> bool, timeout: Duration, poll: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if condition() {
+            return true;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return condition();
+        }
+        std::thread::sleep(poll.min(deadline - now));
+    }
+}
+
 /// A translation that waited longer than this is skipped: by then its chat
 /// row has scrolled away, and translating it only delays the newer ones.
 pub const MAX_TRANSLATION_WAIT: Duration = Duration::from_secs(60);
@@ -255,6 +322,168 @@ mod tests {
             translator_change(s(false, Cpu, Middle), s(true, Cpu, Middle)),
             WorkerChange::Start
         );
+    }
+
+    // --- the sniffer: what a settings change does, and when the watchdog speaks ---------------
+
+    #[test]
+    fn the_sniffer_keeps_running_while_its_adapter_is_unchanged() {
+        for init_done in [false, true] {
+            assert_eq!(sniffer_change("", "", init_done), WorkerChange::Keep);
+            assert_eq!(
+                sniffer_change("Ethernet", "Ethernet", init_done),
+                WorkerChange::Keep
+            );
+        }
+    }
+
+    #[test]
+    fn a_changed_adapter_restarts_the_sniffer_once_setup_is_done() {
+        // auto -> a named adapter, a named one -> another, a named one -> auto.
+        for (old, new) in [("", "Ethernet"), ("Ethernet", "Wi-Fi"), ("Wi-Fi", "")] {
+            assert_eq!(
+                sniffer_change(old, new, true),
+                WorkerChange::Restart,
+                "{old:?} -> {new:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_changed_adapter_only_stops_the_sniffer_before_setup_is_done() {
+        // The old capture is dropped; nothing is started until the wizard has finished.
+        assert_eq!(sniffer_change("", "Ethernet", false), WorkerChange::Stop);
+    }
+
+    #[test]
+    fn the_watchdog_is_quiet_until_traffic_has_been_recorded() {
+        assert_eq!(
+            watchdog_check(0, 1_000_000, true),
+            WatchdogVerdict::NotStarted
+        );
+        assert_eq!(watchdog_check(0, 0, true), WatchdogVerdict::NotStarted);
+    }
+
+    #[test]
+    fn the_watchdog_speaks_after_more_than_fifteen_seconds_of_silence() {
+        let last = 1_000_000;
+        assert_eq!(watchdog_check(last, last, true), WatchdogVerdict::Healthy);
+        assert_eq!(
+            watchdog_check(last, last + 15, true),
+            WatchdogVerdict::Healthy,
+            "exactly the limit"
+        );
+        assert_eq!(
+            watchdog_check(last, last + 16, true),
+            WatchdogVerdict::Stalled
+        );
+        assert_eq!(
+            watchdog_check(last, last + 3600, true),
+            WatchdogVerdict::Stalled
+        );
+    }
+
+    #[test]
+    fn a_clock_that_steps_back_does_not_make_the_watchdog_speak() {
+        assert_eq!(
+            watchdog_check(1_000_000, 999_000, true),
+            WatchdogVerdict::Healthy
+        );
+    }
+
+    #[test]
+    fn the_watchdog_looks_every_five_seconds_for_a_fifteen_second_limit() {
+        assert_eq!(WATCHDOG_TICK, Duration::from_secs(5));
+        assert_eq!(WATCHDOG_LIMIT_SECS, 15);
+    }
+
+    #[test]
+    fn a_watchdog_over_a_capture_that_has_ended_stops_instead_of_blaming_the_traffic() {
+        // The capture thread died while setting up (not admin, no adapter ...): that was reported
+        // with its own error, and "no game traffic" 15 s later would only replace it.
+        assert_eq!(
+            watchdog_check(0, 1_000_000, false),
+            WatchdogVerdict::CaptureEnded
+        );
+        assert_eq!(
+            watchdog_check(1_000_000, 1_000_100, false),
+            WatchdogVerdict::CaptureEnded
+        );
+        assert_eq!(
+            watchdog_check(1_000_000, 1_000_001, false),
+            WatchdogVerdict::CaptureEnded
+        );
+    }
+
+    // --- waiting for a thread to end instead of sleeping and hoping (review W-10) --------------
+
+    #[test]
+    fn a_condition_that_already_holds_returns_at_once() {
+        let started = Instant::now();
+        assert!(wait_for(
+            || true,
+            Duration::from_secs(5),
+            Duration::from_millis(10)
+        ));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_condition_another_thread_makes_true_is_waited_for() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let flag = Arc::new(AtomicBool::new(false));
+        let setter = {
+            let flag = flag.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(60));
+                flag.store(true, Ordering::SeqCst);
+            })
+        };
+        let got = wait_for(
+            || flag.load(Ordering::SeqCst),
+            Duration::from_secs(5),
+            Duration::from_millis(5),
+        );
+        setter.join().unwrap();
+        assert!(got);
+    }
+
+    #[test]
+    fn a_condition_that_never_holds_gives_up_after_the_timeout() {
+        let started = Instant::now();
+        assert!(!wait_for(
+            || false,
+            Duration::from_millis(80),
+            Duration::from_millis(10)
+        ));
+        let waited = started.elapsed();
+        assert!(
+            waited >= Duration::from_millis(80),
+            "waited only {waited:?}"
+        );
+        assert!(waited < Duration::from_secs(2), "waited {waited:?}");
+    }
+
+    #[test]
+    fn the_condition_is_looked_at_once_more_when_the_time_is_up() {
+        // A thread that ends right at the deadline must not be reported as stuck.
+        let mut calls = 0;
+        let got = wait_for(
+            || {
+                calls += 1;
+                calls >= 2
+            },
+            Duration::ZERO,
+            Duration::from_millis(1),
+        );
+        assert!(got, "looked {calls} time(s)");
+    }
+
+    #[test]
+    fn the_old_capture_gets_three_seconds_to_end() {
+        // A read times out after 0.5 s, so a healthy thread ends well inside this.
+        assert_eq!(SNIFFER_STOP_WAIT, Duration::from_secs(3));
     }
 
     #[test]

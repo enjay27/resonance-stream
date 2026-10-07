@@ -147,10 +147,32 @@ pub fn metadata_url() -> Option<&'static str> {
         .and_then(|active| active.env.metadata_url.as_deref())
 }
 
+/// `--metadata-trust-key`: the one public key the signed metadata is checked against in this run, in
+/// place of the keys built into the app. Always `None` in a normal run (the flags are not read there).
+pub fn metadata_trust_key() -> Option<&'static str> {
+    ACTIVE
+        .get()
+        .and_then(|active| active.env.metadata_trust_key.as_deref())
+}
+
+/// `--dictionary-url`: where the custom dictionary is read from (`sync_dictionary`).
+pub fn dictionary_url() -> Option<&'static str> {
+    ACTIVE
+        .get()
+        .and_then(|active| active.env.dictionary_url.as_deref())
+}
+
 /// May a download come from `http://127.0.0.1` (and the like)? Only when a test
 /// run points the feed or the metadata at a mock server of its own.
 pub fn allow_local_http() -> bool {
     flag(|env| env.feed_url.is_some() || env.metadata_url.is_some())
+}
+
+/// `--llama-url`: the stand-in llama-server to use instead of starting one (`http://127.0.0.1:PORT`).
+pub fn llama_url() -> Option<&'static str> {
+    ACTIVE
+        .get()
+        .and_then(|active| active.env.llama_url.as_deref())
 }
 
 /// `--replay-chat`: the file whose chat lines are fed in as if captured.
@@ -222,6 +244,12 @@ pub fn mark_ready(app: &AppHandle) {
         status.ready = true;
     }
     write_status(active);
+}
+
+/// Has start-up finished (`mark_ready`)? A normal run, which has no test flags, counts as ready. The bridge holds
+/// its commands back until this is true, because it starts listening before the rest of start-up.
+pub fn is_ready() -> bool {
+    ACTIVE.get().is_none_or(|active| active.status.lock().ready)
 }
 
 /// Records where the app's own update stands (`--status-file`'s `update`).

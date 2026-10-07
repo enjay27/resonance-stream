@@ -234,7 +234,8 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
     interfaces
 }
 
-#[tauri::command]
+/// async: three `netsh` runs (drop the old rules, add this exe's), not on the main thread.
+#[tauri::command(async)]
 pub fn ensure_firewall_rule_command(app: tauri::AppHandle) -> Result<String, String> {
     if crate::test_env::no_capture() {
         return Ok("Skipped (--no-capture)".to_string());

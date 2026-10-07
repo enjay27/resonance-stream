@@ -67,25 +67,14 @@ pub fn emit_sniffer_state(app: &tauri::AppHandle, state: SnifferState, message: 
     let _ = app.emit("sniffer-state", payload);
 }
 
-#[tauri::command]
+/// async: `start_sniffer_worker` asks `netsh` whether the firewall rule exists, which takes
+/// hundreds of milliseconds -- not on the main thread, where it froze the window at every
+/// start (review W-6). That one check is the only one: a missing rule is reported there
+/// (log line, `Error` state, `firewall-missing`), and the worker is not started.
+#[tauri::command(async)]
 pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
     if crate::test_env::no_capture() {
         emit_sniffer_state(&app, SnifferState::Off, "Capture disabled (--no-capture)");
-        return;
-    }
-    if !check_firewall_rule() {
-        inject_system_message(
-            &app,
-            SystemLogLevel::Warning,
-            "Sniffer",
-            "Firewall rule missing. Triggering Setup Wizard.",
-        );
-        emit_sniffer_state(
-            &app,
-            SnifferState::Error,
-            "방화벽 설정 필요 (Setup Required)",
-        );
-        let _ = app.emit("firewall-missing", ());
         return;
     }
 

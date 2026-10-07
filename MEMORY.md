@@ -4,7 +4,7 @@
 
 ## Now — 2026-10-06
 
-**Where things stand.** `main` has the test bridge's packet-limit fix (#203), reqwest 0.12 (#199), golden tests (#201), weekly mutation tests (#202) and the English review documents (#204-#206). Roadmap stages S0-S7 are in [`.memory/roadmap/refactor.md`](.memory/roadmap/refactor.md). S0a (this index) and S0b (smoke steps independent, #208) and S0c (smoke run 37545082187 green) are done; S1a (update swap rolls back, #210), S1b (AI server extracted via `.part`, #211), S1c (panic log, #212) and S3a (server files hash-checked, #213) and S2c (channel-limit defaults in `types`: WORLD 500, others 1000; PR open) too; order agreed with Kade: S2a, S2b, S2d, S3b, S3c, S4-S7, one PR at a time. Roadmap and architecture work continues in a new session.
+**Where things stand.** `main` has the test bridge's packet-limit fix (#203), reqwest 0.12 (#199), golden tests (#201), weekly mutation tests (#202) and the English review documents (#204-#206). Roadmap stages S0-S7 are in [`.memory/roadmap/refactor.md`](.memory/roadmap/refactor.md). S0a (this index) and S0b (smoke steps independent, #208) and S0c (smoke run 37545082187 green) are done; S1a (update swap rolls back, #210), S1b (AI server extracted via `.part`, #211), S1c (panic log, #212) and S3a (server files hash-checked, #213) and S2c (channel-limit defaults in `types`: WORLD 500, others 1000, #214) and S2a (chat archived on arrival; PR open) too; order agreed with Kade: S2b, S2d, S3b, S3c, S4-S7, one PR at a time. Roadmap and architecture work continues in a new session.
 
 **Written but not verified**
 - Smoke run 37545082187 (`main` at #208, 2026-10-06) ended green: all eight pipelines passed, so rows `CS-restart-nodup`, `CP-big-ack`, `CP-fav-*`, popups and download-integrity are read as passing. **Only the step results were read, not the per-row values**: the K8 `<bos>` count and the K16 一人 reading are still Kade's to read from the uploaded `bridge-smoke-logs`. Whether the Node broker (aedes) has a packet limit of its own is open.
@@ -14,7 +14,7 @@
 
 **Open decisions (Kade).** K8 `<bos>` count; K16 how 一人 / 二人 / 一人前 are read; what a leaked `<start_of_turn>model` should become; the update-check result (O-1..O-5 in [`docs/decisions.md`](docs/decisions.md)).
 **Known defects, not fixed.** A `[P0]` typed in chat collides with a real placeholder; a leaked `<start_of_turn>model` leaves the word "model"; six mutation gaps in `text.rs` (`TranslationCache` eviction order, `is_empty`, `Dictionary` accessors). Pinned by golden tests; see W-11, W-12, A-2.4 in the review.
-**Top risks (review).** The self-update has no rollback (W-1); the admin app's `llama-server.exe` is now hash-checked before spawn (W-2, S3a; the check-to-spawn window is open); chat is not archived on some paths (W-4). Stages S1-S3.
+**Top risks (review).** The self-update has no rollback (W-1); the admin app's `llama-server.exe` is now hash-checked before spawn (W-2, S3a; the check-to-spawn window is open); chat was not archived on some paths (W-4, fixed by S2a, PR open). Stages S1-S3.
 
 ## Where the detail is
 

@@ -1,7 +1,7 @@
 use crate::{inject_system_message, ChatMessage, SystemLogLevel};
 use chrono::Local;
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use resonance_core::history::{chat_log_file_name, dataset_file_name};
+use resonance_core::history::{chat_log_file_name, dataset_file_name, ArchiveTarget};
 use resonance_types::Channel;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -14,6 +14,8 @@ use tauri::{AppHandle, Manager};
 pub struct DataFactoryJob {
     /// The message as shown, with its translation when it has one.
     pub chat: ChatMessage,
+    /// Which archive gets it (see [`ArchiveTarget`]).
+    pub target: ArchiveTarget,
 }
 
 /// The archive lives in the app data folder -- the one "앱 데이터 폴더 열기"
@@ -160,16 +162,24 @@ pub fn start_data_factory_worker(app: AppHandle) -> Sender<DataFactoryJob> {
         };
         let mut failing = false; // one report per streak of failures
         while let Ok(job) = rx.recv() {
-            let chat = job.chat;
+            let chat = job.chat.clone();
             let entry = serde_json::json!({
                 "pid": chat.pid,
                 "original": chat.message,
                 "translated": chat.translated, // Some("text") or null
                 "timestamp": now_ms()
             });
-            let dataset_result = datasets.write(chat.channel, &entry.to_string());
+            let dataset_result = if job.target.writes_dataset() {
+                datasets.write(chat.channel, &entry.to_string())
+            } else {
+                Ok(())
+            };
             let day_before = daily.day.clone();
-            let daily_result = daily.write(&chat);
+            let daily_result = if job.target.writes_chat_log() {
+                daily.write(&chat)
+            } else {
+                Ok(())
+            };
             if !day_before.is_empty() && daily.day != day_before {
                 prune_chat_logs(&app); // a new day: yesterday's cut-off moved
             }

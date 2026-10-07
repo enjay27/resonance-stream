@@ -12,7 +12,7 @@
 //! Pure: no clock, no network, no files; the caller passes the bytes and the last accepted revision.
 
 use crate::update_signature::{verify_update, UpdateSignatureError, TRUSTED_UPDATE_KEYS};
-use resonance_types::GistMetadata;
+use resonance_types::{DictionaryState, GistMetadata};
 use sha2::{Digest, Sha256};
 use std::fmt;
 
@@ -181,6 +181,23 @@ pub fn verify_dictionary(dictionary: &[u8], metadata: &GistMetadata) -> Result<(
     }
 }
 
+/// Is the dictionary file on disk the one that was synced? `file` is its SHA-256 (`None`: there is no
+/// file), `recorded` the one kept at the last sync. Without both there is nothing to compare, and
+/// that is `Unknown` -- never `Same`, so two empty hashes do not agree.
+pub fn dictionary_state(file: Option<&str>, recorded: &str) -> DictionaryState {
+    let recorded = recorded.trim().to_ascii_lowercase();
+    let Some(file) = file.map(|hash| hash.trim().to_ascii_lowercase()) else {
+        return DictionaryState::Unknown;
+    };
+    if file.is_empty() || recorded.is_empty() {
+        DictionaryState::Unknown
+    } else if file == recorded {
+        DictionaryState::Same
+    } else {
+        DictionaryState::Modified
+    }
+}
+
 /// The system-log line for a dictionary that was refused although the metadata was accepted. A hash
 /// mismatch is often only timing -- a file published a moment ago can still be an old copy on some
 /// server -- so it says to try again later.
@@ -197,6 +214,41 @@ pub fn dictionary_refusal_line(error: &MetadataError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_dictionary_on_disk_is_the_synced_one_only_when_the_hashes_agree() {
+        let recorded = "ab12cd";
+        assert_eq!(
+            dictionary_state(Some("ab12cd"), recorded),
+            DictionaryState::Same
+        );
+        // Case and stray whitespace in either do not make a file "modified".
+        assert_eq!(
+            dictionary_state(Some("AB12CD\n"), " ab12cd "),
+            DictionaryState::Same
+        );
+        assert_eq!(
+            dictionary_state(Some("ab12ce"), recorded),
+            DictionaryState::Modified
+        );
+    }
+
+    #[test]
+    fn with_nothing_to_compare_the_dictionary_is_not_claimed_to_be_the_same() {
+        // No file, or no hash recorded (never synced; a copy from before the hash was kept): unknown,
+        // never "same" -- two empty strings must not agree.
+        assert_eq!(dictionary_state(None, "ab12cd"), DictionaryState::Unknown);
+        assert_eq!(
+            dictionary_state(Some("ab12cd"), ""),
+            DictionaryState::Unknown
+        );
+        assert_eq!(
+            dictionary_state(Some("ab12cd"), "  "),
+            DictionaryState::Unknown
+        );
+        assert_eq!(dictionary_state(Some(""), ""), DictionaryState::Unknown);
+        assert_eq!(dictionary_state(None, ""), DictionaryState::Unknown);
+    }
 
     // Throwaway keys and signatures made with the `minisign` crate (what `tauri signer` uses); they
     // sign nothing real. BODY is what was signed; SIG_<n>_<key> is its signature for revision <n>.

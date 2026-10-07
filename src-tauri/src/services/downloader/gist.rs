@@ -5,12 +5,13 @@ use resonance_core::download::{
     is_newer_version, BodyCap, BodyTooLarge, CONNECT_TIMEOUT, REMOTE_CALL_TIMEOUT,
 };
 use resonance_core::signed_metadata::{
-    accept_dictionary, accept_metadata, dictionary_refusal_line, refusal_line, signature_url,
-    trusted_metadata_keys, MetadataError,
+    accept_dictionary, accept_metadata, dictionary_refusal_line, dictionary_state, refusal_line,
+    signature_url, trusted_metadata_keys, MetadataError,
 };
 use resonance_core::test_env::UpdateState;
 use resonance_core::text::Dictionary;
 use resonance_core::update_feed::{parse_feed_allowing, UpdateFeed};
+use resonance_types::DictionaryStatus;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -371,6 +372,8 @@ pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, 
 
     let mut metadata = crate::config::load_metadata(&app);
     metadata.current_dict_version = verified.dictionary.version;
+    metadata.current_dict_sha256 = verified.dictionary.sha256.trim().to_ascii_lowercase();
+    metadata.current_dict_revision = verified.revision;
     crate::config::save_metadata(&app, &metadata);
 
     Ok("Dictionary updated and reloaded!".to_string())
@@ -380,6 +383,19 @@ pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, 
 pub fn get_dict_version(app: tauri::AppHandle) -> String {
     let metadata = crate::config::load_metadata(&app);
     metadata.current_dict_version
+}
+
+/// Which dictionary is in use: the version and signed revision of the last sync, and whether the
+/// file on disk is still that one (the editor saves over it, which makes it `modified`).
+#[tauri::command(async)]
+pub fn get_dictionary_status(app: tauri::AppHandle) -> DictionaryStatus {
+    let metadata = crate::config::load_metadata(&app);
+    let file = resonance_core::download::sha256_file(&dictionary_path(&app)).ok();
+    DictionaryStatus {
+        version: metadata.current_dict_version,
+        revision: metadata.current_dict_revision,
+        state: dictionary_state(file.as_deref(), &metadata.current_dict_sha256),
+    }
 }
 
 #[tauri::command]

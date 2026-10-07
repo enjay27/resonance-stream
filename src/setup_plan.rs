@@ -9,7 +9,6 @@ pub struct SetupDownloads {
     pub model_url: String,
     pub model_version: String,
     pub model_hash: String,
-    pub dict_version: String,
 }
 
 /// The downloads the check announced, or why the wizard cannot start them. A refused publication
@@ -32,7 +31,6 @@ pub fn plan_downloads(check: &UpdateCheckResult) -> Result<SetupDownloads, Strin
         model_url: model.download_url.clone(),
         model_version: model.latest_version.clone(),
         model_hash: model.sha256.clone(),
-        dict_version: check.remote_data.dictionary.version.clone(),
     })
 }
 
@@ -60,14 +58,13 @@ mod tests {
             "dictionary":{"version":"1.0.6","updated_at":"2026-03-08","sha256":"cd34"}}}"#;
 
     #[test]
-    fn a_good_check_gives_the_model_and_the_dictionary_version() {
+    fn a_good_check_gives_the_model_to_download() {
         assert_eq!(
             plan_downloads(&checked(GOOD)),
             Ok(SetupDownloads {
                 model_url: "https://example.com/m.gguf".into(),
                 model_version: "1.1.0".into(),
                 model_hash: "ab12".into(),
-                dict_version: "1.0.6".into(),
             })
         );
     }

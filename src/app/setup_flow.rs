@@ -110,7 +110,6 @@ pub fn start_download(
                 model_url,
                 model_version,
                 model_hash,
-                dict_version,
             } = match plan_downloads(&check) {
                 Ok(plan) => plan,
                 Err(message) => {
@@ -163,12 +162,7 @@ pub fn start_download(
             }
 
             // 4. Sync dictionary
-            let dict_args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                "version": dict_version
-            }))
-            .unwrap();
-
-            if let Err(e) = invoke("sync_dictionary", dict_args).await {
+            if let Err(e) = invoke("sync_dictionary", JsValue::NULL).await {
                 let why = reason(e);
                 stop(
                     format!("Dict Error: {why}"),

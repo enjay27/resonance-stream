@@ -11,7 +11,7 @@ use self::chat::ChatSection;
 use self::data_dev::DataDevSection;
 use self::keywords::KeywordSection;
 use self::translation::TranslationSection;
-use crate::dictionary_status::{sync_outcome, version_to_sync};
+use crate::dictionary_status::sync_outcome;
 use crate::settings_nav::SettingsCategory;
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
@@ -106,27 +106,11 @@ pub fn Settings() -> impl IntoView {
 
     let sync_dict_action = Action::new_local(|_: &()| async move {
         let reason = |e: JsValue| e.as_string().unwrap_or_else(|| format!("{e:?}"));
-        // sync_dictionary needs the dictionary version of the signed metadata: look it up first
-        let version = match invoke("check_all_updates", JsValue::NULL).await {
-            Ok(res) => {
-                match serde_wasm_bindgen::from_value::<crate::ui_types::UpdateCheckResult>(res) {
-                    Ok(data) => version_to_sync(&data),
-                    Err(_) => Err("업데이트 정보를 읽지 못했습니다.".to_string()),
-                }
-            }
-            Err(e) => Err(reason(e)),
-        };
-        let result = match version {
-            Ok(version) => {
-                let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "version": version }))
-                    .unwrap();
-                invoke("sync_dictionary", args)
-                    .await
-                    .map(|_| ())
-                    .map_err(reason)
-            }
-            Err(why) => Err(why),
-        };
+        // The backend syncs what the signed metadata names; a refused publication is its error.
+        let result = invoke("sync_dictionary", JsValue::NULL)
+            .await
+            .map(|_| ())
+            .map_err(reason);
         sync_outcome(result)
     });
     let save_chat_action = Action::new_local(move |_: &()| {

@@ -308,23 +308,15 @@ fn install_dictionary(app: &AppHandle, dict: Dictionary) {
 }
 
 /// Fetches the custom dictionary, checks it against the signed metadata (its SHA-256 is named
-/// there) and installs it. `version` is what the UI believes it is syncing; what is recorded as
-/// installed is the verified metadata's version, so a UI (or a caller of the bridge) cannot name
-/// another one.
+/// there) and installs it. What is recorded as installed is the verified metadata's version, so a
+/// UI (or a caller of the bridge) cannot name another one.
 #[tauri::command]
-pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, String> {
+pub async fn sync_dictionary(app: AppHandle) -> Result<String, String> {
     // 1. Resolve Local Path
     let dict_path = dictionary_path(&app);
 
     // 2. What the signed metadata says the dictionary is
     let verified = verified_metadata(&app).await?;
-    if verified.dictionary.version != version {
-        log::warn!(
-            "[Dictionary] The UI asked to sync version {:?}; the verified metadata has {:?}",
-            version,
-            verified.dictionary.version
-        );
-    }
 
     // 3. Fetch from Remote
     let body = fetch_published(

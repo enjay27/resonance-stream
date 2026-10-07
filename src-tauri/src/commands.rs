@@ -50,13 +50,7 @@ pub fn get_service_states(state: tauri::State<AppState>) -> crate::ServiceStates
 #[tauri::command]
 pub fn launch_translator(app: AppHandle, state: State<'_, AppState>) {
     // Idempotent: a translator that is already running is left alone.
-    let mut slot = state.translator_tx.lock();
-    if slot.is_some() {
-        return;
-    }
-    let model_path = crate::get_model_path(&app);
-    let tx = crate::services::translator::start_translator_worker(app.clone(), model_path);
-    *slot = Some(tx);
+    state.services.start_translator(&app);
 }
 
 /// Furigana for Japanese lines, one list of spans per line, in order. The

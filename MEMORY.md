@@ -7,7 +7,7 @@ Only what would be *false* once stale lives here; the rest is in `.memory/`.
 
 - **Where:** stages S0–S6 and signed metadata M1–M3 merged; open items: [`roadmap/refactor.md`](.memory/roadmap/refactor.md), "Open items found after S6".
 - **Next:** N-2, then N-5, one PR at a time; each changes a wire or a pipeline: plan first, wait for Kade. Steps: [n2-n5 handoff](.memory/sessions/2026-10-07-open-items-n2-n5-handoff.md).
-- **Claude config refactor** (`enjay27/claude-skills` `docs/refactor-plan.md` §4): R1–R4 done (rules, trim, checks, context-guard); next: watch it in a Claude Code session.
+- **Claude config refactor** (`enjay27/claude-skills` `docs/refactor-plan.md` §4): R1–R4 done; context-guard 200k / 400k. Next: watch it in a Claude Code session.
 - **Waiting on Kade:** push `metadata-v3` (dictionary 1.0.8); a stable release (also the only proof of O-3); S7 capture; hy-mt2 inputs (D-29).
 - **Kade, in a real window:** N-6 and N-1 (the line under the sync button), the wizard's refusal line, the new class-tree names in chat.
 - **K16 and `TS-meta-*` values:** artifact `bridge-smoke-logs` of run 37613640483 **expires 2026-10-14**; after that, re-run `bridge-smoke.yml` on `main`.

@@ -7,16 +7,23 @@
 // (input + cache creation + cache read) is exactly what the status line reports as context used.
 //
 // Events:
-//   UserPromptSubmit         at WARN% and again at HANDOFF%: tells Claude to stop and offer the
-//                            choices (handoff + new session, /compact, continue), and shows Kade a
-//                            one-line warning. Each level fires once until usage drops again.
+//   UserPromptSubmit         at the warning line Claude answers, then adds one line with the number;
+//                            at the handoff line it stops first and offers the choices (handoff +
+//                            new session, /compact, continue). Kade also sees a one-line warning.
+//                            Each level fires once until usage drops again.
 //   SessionStart (compact)   after a compaction: tells Claude to say so and offer a handoff.
 //
+// Lines (Kade, 2026-10-08): warn at 200k tokens, recommend a handoff at 400k, but never later than
+// 40% / 60% of the window, so a 200k-window model gets 80k / 120k. Quality drops gradually as
+// context grows (Anthropic: "context rot"); no vendor publishes a switch point, so these are
+// judgement, and a finished task is a better moment to switch than any number.
+//
 // Settings (environment):
-//   CLAUDE_CONTEXT_WINDOW    window size in tokens. Default 200000; a session already past
-//                            200000 tokens is treated as 1000000 (a 1M-context model).
-//   CONTEXT_WARN_PCT         default 60
-//   CONTEXT_HANDOFF_PCT      default 80
+//   CLAUDE_CONTEXT_WINDOW    window size in tokens. Default 1000000: Opus 4.7+, Sonnet 5+ and
+//                            the Fable models run a 1M window by default. Set 200000 for a
+//                            200k-window model.
+//   CONTEXT_WARN_TOKENS      default 200000     CONTEXT_WARN_PCT      default 40 (cap)
+//   CONTEXT_HANDOFF_TOKENS   default 400000     CONTEXT_HANDOFF_PCT   default 60 (cap)
 //
 // The hook never blocks a prompt: on any error it prints nothing and exits 0.
 // Source of truth: github.com/enjay27/claude-skills (hooks/). Repositories vendor a copy.
@@ -66,15 +73,28 @@ function contextTokens(transcriptText) {
   return null;
 }
 
-function windowSize(tokens, env) {
+function windowSize(env) {
   const configured = parseInt(env.CLAUDE_CONTEXT_WINDOW || "", 10);
-  if (configured > 0) return configured;
-  return tokens > 200000 ? 1000000 : 200000;
+  return configured > 0 ? configured : 1000000;
 }
 
-function levelFor(pct, warn, handoff) {
-  if (pct >= handoff) return 2;
-  if (pct >= warn) return 1;
+function num(value, fallback) {
+  const n = parseInt(value || "", 10);
+  return n > 0 ? n : fallback;
+}
+
+// The warning and handoff lines in tokens: a fixed token count, capped at a share of the window.
+function thresholds(size, env) {
+  const line = (tokens, pct) => Math.min(tokens, Math.floor((size * pct) / 100));
+  return {
+    warn: line(num(env.CONTEXT_WARN_TOKENS, 200000), num(env.CONTEXT_WARN_PCT, 40)),
+    handoff: line(num(env.CONTEXT_HANDOFF_TOKENS, 400000), num(env.CONTEXT_HANDOFF_PCT, 60)),
+  };
+}
+
+function levelFor(tokens, warn, handoff) {
+  if (tokens >= handoff) return 2;
+  if (tokens >= warn) return 1;
   return 0;
 }
 
@@ -134,28 +154,27 @@ function decide(input, transcriptText, previousLevel, env) {
   const tokens = contextTokens(transcriptText);
   if (tokens === null) return null;
 
-  const size = windowSize(tokens, env);
+  const size = windowSize(env);
   const pct = Math.round((tokens / size) * 100);
-  const warn = parseInt(env.CONTEXT_WARN_PCT || "60", 10);
-  const handoff = parseInt(env.CONTEXT_HANDOFF_PCT || "80", 10);
-  const level = levelFor(pct, warn, handoff);
+  const { warn, handoff } = thresholds(size, env);
+  const level = levelFor(tokens, warn, handoff);
 
   if (level <= previousLevel) {
     // re-arm after usage drops (e.g. after /compact), stay quiet otherwise
     return level < previousLevel ? { level, output: null } : null;
   }
 
-  const used = `${pct}% (${fmt(tokens)} of ${fmt(size)} tokens)`;
+  const used = `${fmt(tokens)} tokens (${pct}% of ${fmt(size)})`;
   const context =
     level === 2
-      ? `context-guard: the context window is ${used} full, past the ${handoff}% handoff line. ` +
+      ? `context-guard: the context holds ${used}, past the ${fmt(handoff)} handoff line. ` +
         "Before doing anything for this prompt, tell Kade the number and recommend a handoff. " +
         "Do not start new multi-step work until he answers. " +
         CHOICES
-      : `context-guard: the context window is ${used} full (warning line ${warn}%). ` +
+      : `context-guard: the context holds ${used} (warning line ${fmt(warn)}). ` +
         "Answer this prompt, then at the end add one line telling Kade the number and that a " +
         "handoff will be recommended at " +
-        `${handoff}%. If this prompt starts a large new task, ask first. ` +
+        `${fmt(handoff)}. If this prompt starts a large new task, ask first. ` +
         CHOICES;
 
   return {
@@ -164,8 +183,8 @@ function decide(input, transcriptText, previousLevel, env) {
       hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context },
       systemMessage:
         level === 2
-          ? `Context ${pct}% used: handoff recommended`
-          : `Context ${pct}% used`,
+          ? `Context ${fmt(tokens)} tokens (${pct}%) used: handoff recommended`
+          : `Context ${fmt(tokens)} tokens (${pct}%) used`,
     },
   };
 }
@@ -194,4 +213,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { contextTokens, windowSize, levelFor, decide, stateFile };
+module.exports = { contextTokens, windowSize, thresholds, levelFor, decide, stateFile };

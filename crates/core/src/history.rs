@@ -138,6 +138,24 @@ pub fn apply_block_list(messages: &mut [ChatMessage], is_blocked: impl Fn(u64) -
     }
 }
 
+/// Sets the blocked flag of every message of `uid` and returns copies of the rows that changed. The caller
+/// emits them after it has released the history lock: an emit under that lock held up the capture thread
+/// (it needs the same lock to store a line) for as long as a sender's rows took to send.
+pub fn set_blocked_for_uid<'a>(
+    messages: impl IntoIterator<Item = &'a mut ChatMessage>,
+    uid: u64,
+    blocked: bool,
+) -> Vec<ChatMessage> {
+    messages
+        .into_iter()
+        .filter(|message| message.uid == uid && message.is_blocked != blocked)
+        .map(|message| {
+            message.is_blocked = blocked;
+            message.clone()
+        })
+        .collect()
+}
+
 /// [`load_recent`] examining at most `max_lines` log lines (newest first), so
 /// the start-up cost does not grow with the age of the log folder: a channel
 /// that never fills (LOCAL, PARTY) would otherwise read every line ever saved.
@@ -347,6 +365,60 @@ mod tests {
             ..Default::default()
         })
         .unwrap()
+    }
+
+    fn row(pid: u64, uid: u64, is_blocked: bool) -> ChatMessage {
+        ChatMessage {
+            pid,
+            uid,
+            is_blocked,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn blocking_a_sender_flags_their_rows_and_returns_only_the_ones_that_changed() {
+        let mut rows = vec![
+            row(1, 7, false),
+            row(2, 8, false),
+            row(3, 7, true),
+            row(4, 7, false),
+        ];
+        let changed = set_blocked_for_uid(rows.iter_mut(), 7, true);
+        let flags: Vec<bool> = rows.iter().map(|m| m.is_blocked).collect();
+        assert_eq!(flags, [true, false, true, true]);
+        let pids: Vec<u64> = changed.iter().map(|m| m.pid).collect();
+        assert_eq!(
+            pids,
+            [1, 4],
+            "row 3 was blocked already, row 2 is someone else's"
+        );
+        assert!(
+            changed.iter().all(|m| m.is_blocked),
+            "the copies carry the new flag"
+        );
+    }
+
+    #[test]
+    fn unblocking_a_sender_clears_their_rows_and_leaves_the_others_alone() {
+        let mut rows = vec![row(1, 7, true), row(2, 8, true), row(3, 7, false)];
+        let changed = set_blocked_for_uid(rows.iter_mut(), 7, false);
+        let flags: Vec<bool> = rows.iter().map(|m| m.is_blocked).collect();
+        assert_eq!(flags, [false, true, false]);
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].pid, 1);
+        assert!(!changed[0].is_blocked);
+    }
+
+    #[test]
+    fn a_chat_history_gives_its_rows_to_it() {
+        let mut history = ChatHistory::new(ChannelLimits::new(&HashMap::new()));
+        history.push(row(1, 7, false));
+        history.push(row(2, 8, false));
+        let changed = set_blocked_for_uid(history.values_mut(), 7, true);
+        assert_eq!(changed.len(), 1);
+        assert!(history.get(1).unwrap().is_blocked);
+        assert!(!history.get(2).unwrap().is_blocked);
     }
 
     #[test]

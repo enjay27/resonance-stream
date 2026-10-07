@@ -251,7 +251,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
             // block list is only consulted for actual chat messages.
             let actions = pipeline.feed_network_packet(
                 &buf[..n],
-                |uid| state.blocked_users.lock().contains_key(&uid),
+                |uid| state.config.read().blocked_users.contains_key(&uid),
                 || state.next_pid.fetch_add(1, Ordering::SeqCst),
                 || {
                     feed_watchdog();
@@ -400,41 +400,35 @@ pub fn block_user_command(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) {
-    // 1. Add to In-Memory AppState
-    state.blocked_users.lock().insert(uid, nickname.clone());
-
-    // 2. Add to Disk Config
+    // 1. The block list is the config's (the capture reads it from there); this puts it in use and on disk.
     crate::config::modify_config(&app, &state, |config| {
         config.blocked_users.insert(uid, nickname);
     });
 
-    // 3. Retroactively scrub existing messages in the UI
-    let mut history = state.chat_history.lock();
-    for msg in history.values_mut() {
-        if msg.uid == uid && !msg.is_blocked {
-            msg.is_blocked = true;
-            let _ = app.emit("chat-message-update", msg.clone());
-        }
-    }
+    // 2. Retroactively scrub existing messages in the UI
+    scrub_rows(&app, &state, uid, true);
 }
 
 #[tauri::command(async)]
 pub fn unblock_user_command(uid: u64, app: tauri::AppHandle, state: tauri::State<'_, AppState>) {
-    // 1. Remove from In-Memory AppState
-    state.blocked_users.lock().remove(&uid);
-
-    // 2. Remove from Disk Config
+    // 1. Remove from the config: in use and on disk
     crate::config::modify_config(&app, &state, |config| {
         config.blocked_users.remove(&uid);
     });
 
-    // 3. Retroactively un-scrub existing messages in the UI
-    let mut history = state.chat_history.lock();
-    for msg in history.values_mut() {
-        if msg.uid == uid && msg.is_blocked {
-            msg.is_blocked = false;
-            let _ = app.emit("chat-message-update", msg.clone());
-        }
+    // 2. Retroactively un-scrub existing messages in the UI
+    scrub_rows(&app, &state, uid, false);
+}
+
+/// Flags (or clears) every stored row of `uid` and tells the windows. The history lock is held only while the
+/// rows are changed, not while each one is emitted: the capture thread needs it to store the next line.
+fn scrub_rows(app: &AppHandle, state: &AppState, uid: u64, blocked: bool) {
+    let changed = {
+        let mut history = state.chat_history.lock();
+        resonance_core::history::set_blocked_for_uid(history.values_mut(), uid, blocked)
+    };
+    for message in changed {
+        let _ = app.emit("chat-message-update", message);
     }
 }
 

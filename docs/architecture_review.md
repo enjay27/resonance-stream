@@ -180,7 +180,7 @@ Mostly **reported** (a review agent estimated from reading the code); nothing wa
 - **Proposal:** batch the visible rows.
 - **Severity:** Low · **Effort:** Small
 
-### P-4 Block / unblock emits one event per message while holding the history lock
+### P-4 Block / unblock emits one event per message while holding the history lock (**fixed 2026-10-07, S5d**: the rows are changed under the lock and emitted after it is released; still one event per row)
 
 - **Where:** `sniffer/mod.rs:404-410`, `:424-430` (reported).
 - **Evidence:** the `chat_history` lock is held while an event is emitted for each of the user's rows; the capture path (`store_and_emit`) needs the same lock. For a spammer that is hundreds of rows.
@@ -265,7 +265,7 @@ Mostly **reported** (a review agent estimated from reading the code); nothing wa
 - **Proposal:** move `install_swap(current, temp, old, rename)` to core with the rename function injected. A temp-directory test that injects a failure on the second rename reproduces and prevents W-1.
 - **Severity:** Medium · **Effort:** Small (one bundle with W-1)
 
-### R-7 The block list has several copies
+### R-7 The block list has several copies (**fixed 2026-10-07, S5d**: the config is the one copy in the backend; the capture reads it from there)
 
 - **Where (reported):** `AppState.blocked_users` (`protocol/types.rs:40`), `config.blocked_users`, ui `ConfigSignals.blocked_users`; writers are the block / unblock commands and `save_config`.
 - **Evidence:** `apply_config` does not refresh the runtime map. Only the block commands write it today, so this is a smell, not a live bug.

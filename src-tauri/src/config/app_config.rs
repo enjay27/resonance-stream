@@ -140,7 +140,12 @@ pub fn save_config(
     // One save at a time: two overlapping saves would each compare against
     // the same old config and start (or stop) the same worker twice.
     let _saving = state.config_lock.lock();
-    let config = config.keeping_favorites_of(&state.config.read());
+    let config = {
+        let stored = state.config.read();
+        config
+            .keeping_favorites_of(&stored)
+            .keeping_block_list_of(&stored)
+    };
     apply_config(&app, &state, config)
 }
 

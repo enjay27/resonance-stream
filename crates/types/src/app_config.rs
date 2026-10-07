@@ -154,6 +154,13 @@ impl AppConfig {
     pub fn keeping_favorites_of(self, stored: &AppConfig) -> Self {
         self.with_favorites(stored.favorites())
     }
+
+    /// This config with the block list of `stored`: the list changes only through the block and unblock
+    /// commands, and a whole-config save must not bring back or drop a sender from an older copy.
+    pub fn keeping_block_list_of(mut self, stored: &AppConfig) -> Self {
+        self.blocked_users = stored.blocked_users.clone();
+        self
+    }
 }
 
 #[cfg(test)]
@@ -260,6 +267,27 @@ mod tests {
         };
         let saved = stale.keeping_favorites_of(&stored);
         assert_eq!(saved.favorites(), stored.favorites());
+        assert_eq!(
+            saved.overlay_opacity, 0.5,
+            "the other settings are the new ones"
+        );
+    }
+
+    #[test]
+    fn a_whole_config_save_keeps_the_stored_block_list() {
+        // The block list changes only through the block and unblock commands. A window's
+        // copy of it may be older (a block made over the bridge or from another window).
+        let stored = AppConfig {
+            blocked_users: [(7, "spammer".to_string())].into(),
+            ..AppConfig::default()
+        };
+        let stale = AppConfig {
+            overlay_opacity: 0.5,
+            blocked_users: [(9, "old".to_string())].into(),
+            ..AppConfig::default()
+        };
+        let saved = stale.keeping_block_list_of(&stored);
+        assert_eq!(saved.blocked_users, stored.blocked_users);
         assert_eq!(
             saved.overlay_opacity, 0.5,
             "the other settings are the new ones"

@@ -37,7 +37,6 @@ pub struct AppState {
     /// The last state each service emitted (`get_service_states`): a UI that
     /// was not listening yet still learns it.
     pub service_states: Mutex<ServiceStates>,
-    pub blocked_users: Mutex<HashMap<u64, String>>,
     /// What the global shortcuts are bound to (see `shortcut.rs`).
     pub shortcuts: Mutex<crate::shortcut::GlobalShortcuts>,
 }

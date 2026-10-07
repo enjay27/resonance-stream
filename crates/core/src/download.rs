@@ -232,11 +232,17 @@ pub fn read_text_retrying(path: &Path, attempts: u32, pause: Duration) -> io::Re
 /// Copies a file that cannot be used to `<path>.bad` (the next save would replace it) and says
 /// where the copy is. The original stays.
 pub fn keep_bad_copy(path: &Path) -> io::Result<std::path::PathBuf> {
-    let mut bad = path.as_os_str().to_owned();
-    bad.push(".bad");
-    let bad = std::path::PathBuf::from(bad);
-    std::fs::copy(path, &bad)?;
-    Ok(bad)
+    keep_copy(path, "bad")
+}
+
+/// Copies a file to `<path>.<suffix>` and says where the copy is. The original stays.
+pub fn keep_copy(path: &Path, suffix: &str) -> io::Result<std::path::PathBuf> {
+    let mut copy = path.as_os_str().to_owned();
+    copy.push(".");
+    copy.push(suffix);
+    let copy = std::path::PathBuf::from(copy);
+    std::fs::copy(path, &copy)?;
+    Ok(copy)
 }
 
 /// `<path>.part`: where something is built before it is moved to `path`.
@@ -487,6 +493,17 @@ mod tests {
             "the original is not touched"
         );
         assert!(keep_bad_copy(&dir.join("missing.json")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_copy_can_be_kept_under_any_suffix() {
+        let dir = temp_dir("kept-copy");
+        let path = dir.join("config.json");
+        std::fs::write(&path, "{}").unwrap();
+        let kept = keep_copy(&path, "v7").unwrap();
+        assert_eq!(kept, dir.join("config.json.v7"));
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "{}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

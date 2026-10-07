@@ -249,10 +249,38 @@ impl Masker {
 }
 
 // --- PREPROCESSOR ---
+
+/// The cached nicknames that occur in `message`, longest first (then by name). The cache grows all
+/// session, so this is the only step of the preprocessing that has to see all of it: a caller that
+/// shares the cache behind a lock picks the names here, releases the lock, and shields with
+/// [`preprocess_with_nicknames`].
+pub fn nicknames_in(
+    message: &str,
+    nickname_cache: &HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut names: Vec<(String, String)> = nickname_cache
+        .iter()
+        .filter(|(ja_name, _)| message.contains(ja_name.as_str()))
+        .map(|(ja_name, romaji)| (ja_name.clone(), romaji.clone()))
+        .collect();
+    names.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
+    names
+}
+
 pub fn preprocess_text(
     input: &str,
     custom_dict: &Dictionary,
     nickname_cache: Option<&HashMap<String, String>>,
+) -> ShieldData {
+    let nicknames = nickname_cache.map_or_else(Vec::new, |cache| nicknames_in(input, cache));
+    preprocess_with_nicknames(input, custom_dict, &nicknames)
+}
+
+/// [`preprocess_text`] with the nicknames already picked ([`nicknames_in`]).
+pub fn preprocess_with_nicknames(
+    input: &str,
+    custom_dict: &Dictionary,
+    nicknames: &[(String, String)],
 ) -> ShieldData {
     let mut masker = Masker::new(input);
 
@@ -271,17 +299,9 @@ pub fn preprocess_text(
         masker.mask_literal(bracket, bracket);
     }
 
-    // 2. Replace Nicknames from Cache. The cache grows all session, so only the
-    // names present in this message are sorted (longest first).
-    if let Some(cache) = nickname_cache {
-        let mut names: Vec<(&String, &String)> = cache
-            .iter()
-            .filter(|(ja_name, _)| input.contains(ja_name.as_str()))
-            .collect();
-        names.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(b.0)));
-        for (ja_name, romaji) in names {
-            masker.mask_literal(ja_name, romaji);
-        }
+    // 2. Replace Nicknames from Cache (the ones present in this message, longest first)
+    for (ja_name, romaji) in nicknames {
+        masker.mask_literal(ja_name, romaji);
     }
 
     // 3. Recruitment & @-Tag
@@ -1068,6 +1088,50 @@ mod tests {
             restored("a model city, the user's"),
             "a model city, the user's"
         );
+    }
+
+    #[test]
+    fn only_the_cached_names_that_are_in_the_message_are_picked_longest_first() {
+        let cache = HashMap::from([
+            ("たろう".to_string(), "Taro".to_string()),
+            ("たろうさん".to_string(), "Tarosan".to_string()),
+            ("はなこ".to_string(), "Hanako".to_string()),
+            ("じろう".to_string(), "Jiro".to_string()),
+        ]);
+        let picked = nicknames_in("たろうさんとはなこ", &cache);
+        assert_eq!(
+            picked,
+            [
+                ("たろうさん".to_string(), "Tarosan".to_string()),
+                ("たろう".to_string(), "Taro".to_string()),
+                ("はなこ".to_string(), "Hanako".to_string()),
+            ],
+            "two names of the same length are ordered by name"
+        );
+        assert!(nicknames_in("こんにちは", &cache).is_empty());
+        assert!(nicknames_in("たろう", &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn shielding_with_names_picked_beforehand_gives_what_shielding_with_the_cache_gives() {
+        // The translator picks the names under the cache's lock and shields after
+        // releasing it; the result must be the one the cache itself would give.
+        let dict = Dictionary::from_json_str(r#"{"role": {"火力": "딜러"}}"#).unwrap();
+        let cache = HashMap::from([
+            ("たろう".to_string(), "Taro".to_string()),
+            ("はなこ".to_string(), "Hanako".to_string()),
+        ]);
+        for line in [
+            "たろうさん、火力募集 3人",
+            "はなこ",
+            "こんにちは",
+            "[P0]たろう",
+        ] {
+            let direct = preprocess_text(line, &dict, Some(&cache));
+            let picked = preprocess_with_nicknames(line, &dict, &nicknames_in(line, &cache));
+            assert_eq!(picked.masked_text, direct.masked_text, "line {line:?}");
+            assert_eq!(picked.replacements, direct.replacements, "line {line:?}");
+        }
     }
 
     #[test]

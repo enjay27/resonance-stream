@@ -194,7 +194,7 @@ Mostly **reported** (a review agent estimated from reading the code); nothing wa
 - **Proposal:** pass the flag into the parser so it does not build them. **Not urgent.**
 - **Severity:** Low · **Effort:** Small
 
-### P-6 Translation preprocessing scans the whole dictionary and nickname cache inside a lock
+### P-6 Translation preprocessing scans the whole dictionary and nickname cache inside a lock (**fixed 2026-10-07, S5e**: the lock is held only to pick the names the message contains)
 
 - **Where:** `text.rs:266-290`; the lock is taken at `translator/mod.rs:390-393`; the capture path takes the same lock at `sniffer/mod.rs:353` (confirmed for the latter; the rest reported).
 - **Evidence:** a `contains` per dictionary term and a scan of the nickname cache run under the `nickname_cache` lock. Hundreds of microseconds at thousands of entries (estimated), lost in LLM latency.

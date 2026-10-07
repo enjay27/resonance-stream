@@ -1,0 +1,66 @@
+# Exports the Resonance user Project (resonance-stream + resonance-lab) to STATUS.md on the
+# `status` branch, for cloud sessions, which cannot reach the Project API (ADR-031 phase B5):
+#   git fetch origin status && git show origin/status:STATUS.md
+# A session that needs fresh state runs this workflow (workflow_dispatch).
+#
+# This repository is public, so STATUS.md is public: issue titles already are, but a *draft*
+# item's title is private in the Project and becomes public here. Keep drafts free of
+# anything private.
+#
+# Dormant until the Project exists: skipped while vars.PROJECT_NUMBER is unset.
+# Needs secrets.PROJECT_TOKEN (classic token, `project` scope; see project-sync.yml).
+name: Project snapshot
+
+on:
+  schedule:
+    - cron: "17 0,6,12 * * *"  # 09:17, 15:17, 21:17 KST
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: project-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: export Project to STATUS.md
+    if: vars.PROJECT_NUMBER != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write  # push the generated `status` branch
+    steps:
+      - name: Check out the bridge script
+        uses: actions/checkout@v4
+        with:
+          repository: stella-rain/.github
+          ref: main
+          path: .bridge
+          persist-credentials: false
+
+      - name: Export
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          OWNER_TYPE: user
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+        run: python3 .bridge/scripts/project_bridge.py snapshot --out "$RUNNER_TEMP/STATUS.md"
+
+      - name: Publish to the status branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/status-branch"
+          mkdir -p "$out" && cd "$out"
+          git init -q -b status
+          cp "$RUNNER_TEMP/STATUS.md" STATUS.md
+          git add STATUS.md
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Project snapshot"
+          # One generated commit, replaced each run: the branch is a view, not history.
+          git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" status
+          echo "published $(wc -l < STATUS.md) lines to the status branch" >> "$GITHUB_STEP_SUMMARY"

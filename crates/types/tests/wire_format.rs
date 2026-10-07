@@ -176,6 +176,7 @@ fn a_window_rect_and_a_progress_payload_keep_their_field_names() {
 #[test]
 fn the_remote_metadata_keeps_the_gists_snake_case() {
     let gist = GistMetadata {
+        revision: 0,
         app: VersionInfo::default(),
         model: VersionInfo {
             latest_version: "m2".into(),
@@ -186,6 +187,7 @@ fn the_remote_metadata_keeps_the_gists_snake_case() {
         dictionary: RemoteDictionary {
             version: "d3".into(),
             updated_at: "2026-10-06".into(),
+            sha256: String::new(),
         },
     };
     let want = json!({
@@ -201,6 +203,36 @@ fn the_remote_metadata_keeps_the_gists_snake_case() {
     assert_eq!(serde_json::to_value(&gist).unwrap(), want);
     let back: GistMetadata = serde_json::from_value(want).unwrap();
     assert_eq!(back.model.sha256, "ab");
+}
+
+#[test]
+fn the_signed_metadata_adds_a_revision_and_a_dictionary_hash_and_the_old_gist_has_neither() {
+    // The signed file the app reads from the repo's `metadata` branch.
+    let signed = json!({
+        "revision": 12,
+        "model": { "latest_version": "m2", "download_url": "u", "release_notes": "n", "sha256": "ab" },
+        "dictionary": { "version": "d3", "updated_at": "2026-10-06", "sha256": "cd" }
+    });
+    let read: GistMetadata = serde_json::from_value(signed.clone()).unwrap();
+    assert_eq!(read.revision, 12);
+    assert_eq!(read.dictionary.sha256, "cd");
+    assert_eq!(serde_json::to_value(&read).unwrap()["revision"], 12);
+    assert_eq!(
+        serde_json::to_value(&read).unwrap()["dictionary"]["sha256"],
+        "cd"
+    );
+
+    // The old gist has neither; they read as 0 and "" and are left out when written again, so the
+    // shape the ui and the old copies know does not change.
+    let old: GistMetadata = serde_json::from_value(json!({
+        "model": { "latest_version": "m1", "download_url": "", "release_notes": "", "sha256": "" },
+        "dictionary": { "version": "d1", "updated_at": "" }
+    }))
+    .unwrap();
+    assert_eq!((old.revision, old.dictionary.sha256.as_str()), (0, ""));
+    let written = serde_json::to_value(&old).unwrap();
+    assert!(written.get("revision").is_none());
+    assert!(written["dictionary"].get("sha256").is_none());
 }
 
 #[test]

@@ -173,7 +173,7 @@ Mostly **reported** (a review agent estimated from reading the code); nothing wa
 - **Proposal:** one container-level signal.
 - **Severity:** Low · **Effort:** Small
 
-### P-3 Study view makes one furigana IPC call per row
+### P-3 Study view makes one furigana IPC call per row (**fixed 2026-10-07, S6b**: rows asking within 50 ms share one call)
 
 - **Where:** `chat_row.rs:332-357`, command `annotate_furigana` (`commands.rs:66`, reported).
 - **Evidence:** the command takes a `Vec<String>` but each row sends one `[text]`. Turning the study view on in a 1,000-row tab means up to 1,000 round trips (the 2,000-line cache helps afterwards).

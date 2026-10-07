@@ -123,9 +123,148 @@ impl RubyCache {
     }
 }
 
+/// Most distinct lines one `annotate_furigana` call carries.
+pub const RUBY_BATCH_MAX: usize = 100;
+
+/// Rows that ask for furigana close together (a tab switch builds them all at once) are answered by
+/// one backend call instead of one call each (P-3). A row adds its line and something to call when the
+/// answer comes (`C`); a line asked by several rows is asked once. The caller starts a short timer
+/// when `add` says the window opened and drains the batch when it fires.
+pub struct RubyBatch<C> {
+    lines: Vec<String>,
+    waiting: HashMap<String, Vec<C>>,
+}
+
+impl<C> RubyBatch<C> {
+    pub fn new() -> Self {
+        Self {
+            lines: Vec::new(),
+            waiting: HashMap::new(),
+        }
+    }
+
+    /// Adds a row's request. `true` when the batch was empty: this request opens the window.
+    pub fn add(&mut self, line: &str, row: C) -> bool {
+        let opens = self.lines.is_empty();
+        match self.waiting.get_mut(line) {
+            Some(rows) => rows.push(row),
+            None => {
+                self.lines.push(line.to_string());
+                self.waiting.insert(line.to_string(), vec![row]);
+            }
+        }
+        opens
+    }
+
+    /// Takes everything asked so far as calls of at most `max` distinct lines each, in the order the
+    /// lines were first asked.
+    pub fn drain(&mut self, max: usize) -> Vec<RubyCall<C>> {
+        let lines = std::mem::take(&mut self.lines);
+        let mut waiting = std::mem::take(&mut self.waiting);
+        lines
+            .chunks(max.max(1))
+            .map(|chunk| RubyCall {
+                lines: chunk.to_vec(),
+                waiting: chunk
+                    .iter()
+                    .map(|line| waiting.remove(line).unwrap_or_default())
+                    .collect(),
+            })
+            .collect()
+    }
+}
+
+impl<C> Default for RubyBatch<C> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// One backend call: its lines, and the rows waiting for each.
+pub struct RubyCall<C> {
+    lines: Vec<String>,
+    waiting: Vec<Vec<C>>,
+}
+
+impl<C> RubyCall<C> {
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
+
+    /// Pairs the backend's answer (one list of spans per line, in order) with the lines and the rows
+    /// waiting for each. A line the answer does not reach stays unanswered, and an answer longer than
+    /// the question is cut: the row simply shows no furigana, as after a failed call.
+    pub fn answer(self, spans: Vec<Vec<RubySpan>>) -> Vec<(String, Vec<RubySpan>, Vec<C>)> {
+        self.lines
+            .into_iter()
+            .zip(spans)
+            .zip(self.waiting)
+            .map(|((line, spans), rows)| (line, spans, rows))
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rows_asking_in_one_window_become_one_call_with_each_line_once() {
+        let mut batch = RubyBatch::new();
+        assert!(batch.add("あ", 1), "the first request starts the window");
+        assert!(!batch.add("い", 2));
+        assert!(!batch.add("あ", 3), "the same line from another row");
+        let calls = batch.drain(100);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].lines(), ["あ", "い"], "in the order first asked");
+        assert!(batch.drain(100).is_empty(), "drained once");
+        assert!(batch.add("う", 4), "an empty batch starts a new window");
+    }
+
+    #[test]
+    fn a_long_batch_is_cut_into_calls_of_at_most_max_lines() {
+        let mut batch = RubyBatch::new();
+        for i in 0..5 {
+            batch.add(&format!("line{i}"), i);
+        }
+        let calls = batch.drain(2);
+        let sizes: Vec<usize> = calls.iter().map(|c| c.lines().len()).collect();
+        assert_eq!(sizes, [2, 2, 1]);
+        assert_eq!(calls[2].lines(), ["line4"]);
+    }
+
+    #[test]
+    fn each_waiting_row_gets_the_spans_of_its_own_line() {
+        let mut batch = RubyBatch::new();
+        batch.add("あ", 1);
+        batch.add("い", 2);
+        batch.add("あ", 3);
+        let call = batch.drain(100).pop().unwrap();
+        let answered = call.answer(vec![vec![p("あ")], vec![r("い", "i")]]);
+        assert_eq!(
+            answered,
+            [
+                ("あ".to_string(), vec![p("あ")], vec![1, 3]),
+                ("い".to_string(), vec![r("い", "i")], vec![2]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_short_answer_leaves_the_lines_it_did_not_cover_unanswered() {
+        let mut batch = RubyBatch::new();
+        batch.add("あ", 1);
+        batch.add("い", 2);
+        let call = batch.drain(100).pop().unwrap();
+        let answered = call.answer(vec![vec![p("あ")]]);
+        assert_eq!(answered.len(), 1);
+        assert_eq!(answered[0].0, "あ");
+        // An answer longer than the question is cut the same way.
+        let mut batch = RubyBatch::new();
+        batch.add("あ", 1);
+        let call = batch.drain(100).pop().unwrap();
+        assert_eq!(call.answer(vec![vec![p("あ")], vec![p("い")]]).len(), 1);
+    }
 
     fn r(text: &str, reading: &str) -> RubySpan {
         RubySpan::with_reading(text, reading)

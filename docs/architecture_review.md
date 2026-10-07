@@ -252,7 +252,7 @@ Mostly **reported** (a review agent estimated from reading the code); nothing wa
 - **Protected by:** one table test plus the existing `chat_view` / `history` tests.
 - **Severity:** Medium · **Effort:** Small
 
-### R-5 UI components are long
+### R-5 UI components are long (**`ChatRow` done 2026-10-07, S6d**: pure helpers moved and tested, the row split into `chat_row/{mod,menus,ruby}.rs`; the other three views are left)
 
 - **Where (reported):** `ChatRow` `chat_row.rs:29-510` (481 lines), `FavoritesWindow` 481, `DictionaryModal` 477, `NavBar` 375, `AppUpdateModal` about 200. The relative-time block (`chat_row.rs:88-129`) is pure.
 - **Proposal:** move the pure helpers into `utils.rs` / `readability.rs` and test them on the host; split the big views into sub-components. **No behaviour change.**

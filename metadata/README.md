@@ -1,9 +1,9 @@
 # metadata/
 
 What the app reads about the translation model and the custom dictionary, as **sources**. They are
-not read by the app from here: the signing workflow (a later change) turns them into the signed files
-the app fetches, so the app can tell them from anything an attacker could serve. See `docs/decisions.md`
-D-28.
+not read by the app from here: the `metadata.yml` workflow (a pushed tag `metadata-v<N>`) turns them into
+signed files on the generated `metadata` branch, and the app fetches and verifies those, so it can tell
+them from anything an attacker could serve. See `docs/decisions.md` D-28.
 
 | file | what | edited by |
 |---|---|---|

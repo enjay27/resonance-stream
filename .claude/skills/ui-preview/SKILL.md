@@ -44,6 +44,24 @@ with `window.__TAURI__` faked.
   Backend events (`listen`) never fire; to show a state that arrives by event,
   set it through a command the view calls on mount instead.
 
+## Previewing the first-run wizard
+
+`init_done: true` in the generated `config.js` skips it. Do not edit `preview.sh` for one run: in the
+Playwright script intercept the file and flip the flag --
+
+```js
+await page.route('**/config.js', async (route) => {
+  const res = await route.fetch();
+  await route.fulfill({ response: res, body: (await res.text()).replace(/init_done"?\s*:\s*true/, (m) => m.replace('true', 'false')) });
+});
+```
+
+-- then, after `page.goto`, answer the backend per case with `page.evaluate` (a mock function that
+`throw`s a string makes `invoke` reject with that string). To reach the last step: tick the agreement
+checkbox, click "동의하고 시작하기", switch the translation toggle on (`input.toggle`) and click "다음";
+"다운로드 시작" then calls `check_all_updates`, `download_model`, `download_ai_server` and
+`sync_dictionary` in that order.
+
 ## Limits
 
 - Not the Tauri window: no transparency, no window commands, no tray, no global

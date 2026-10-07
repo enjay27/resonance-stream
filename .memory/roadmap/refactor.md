@@ -49,7 +49,9 @@ Order: biggest risk first (losing the app or data) -> silent drops -> trust boun
 - ~~**Bridge MQTT packet limit**~~ **done** (PR #203): the cause of `CS-restart-nodup` (10 KiB default limit vs a 108 KB answer, then a reconnect). Limit 16 MiB, an over-limit answer becomes an error ack. The real-app result is read in S0c.
 - ~~**Review and roadmap documents**~~ **done** (PR #204, Korean) and rewritten in English in this change.
 
-## Numbers (2026-10-06)
+## Numbers at the 2026-10-06 baseline
+
+The same table measured again after the work, with the other measurements, is `docs/refactoring_report.md` section 1.
 
 | Part | Lines (`.rs`) | Note |
 |---|---|---|
@@ -75,6 +77,16 @@ Tests: 495 pass in core + llama + types; `#[test]` counts core 385 · types 49 �
 | Tests and QA | independent smoke steps; read the unread real-app rows; visual regression | S0, S6 |
 | Operations | log file and panic hook; "copy diagnostics" | S1, later |
 
-## Known defects (not fixed yet)
+## Known defects
 
-- A leaked `<start_of_turn>model` leaves the word "model" (`model 번역`); what it should be is undecided. (S5)
+None open from the review. (The leaked `<start_of_turn>model` header, W-12, is fixed: S5c, #229.)
+
+## Open items found after S6 (2026-10-07)
+
+Found while doing the signed metadata and the dictionary work; none is in the review. Each starts, like every task, with a plan and a failing test.
+
+- **N-1 The dictionary sync button shows no result.** `sync_dict_action` (`components/settings/mod.rs`) returns "최신 상태" or "동기화 실패" and nothing displays it; success and failure are visible only in the system log. Show the result next to the button (`ui-preview`).
+- **N-2 `sync_dictionary` ignores its `version` argument.** Since M3b it records the verified metadata's version and only logs a warning when the UI's differs. Remove the parameter from the command, the ui, the bridge command and the stand-in app (a wire change, so plan first).
+- **N-3 The cheat sheet and the dictionary are two hand-maintained copies of the same names.** They drifted (ten trees, the 極限空間 spelling, the label "(나뽀)"), and the cheat sheet says its data is from fan sites. Settle the eight trees (月影 氷牙 霜天 狼弓 鷹弓 剛身 威咲 森癒), then add a host test in the ui crate (`include_str!("../metadata/custom_dict.json")`) that every cheat-sheet name is in the dictionary with the same Korean, or is on a short list of reasons.
+- **N-4 A dictionary term matches anywhere inside a word.** `Dictionary` shields every occurrence, with no word boundary, so a short term hits longer words (the reason `墓 始 継 終` were left out). `crates/core/tests/repo_dictionary.rs` guards one-character keys only; decide whether to list the two-character ones (工場, 霧海, 珊瑚, 迷妄 are in) with a reason, or to match on boundaries (a behaviour change: goldens).
+- **N-5 `download_model` still takes its URL and hash from the UI** (M4 of S3b-2). They now come from verified metadata, but the backend does not enforce it. Use the last verified metadata instead.

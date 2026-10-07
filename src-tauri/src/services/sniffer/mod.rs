@@ -20,7 +20,8 @@ use crossbeam_channel::Sender;
 use resonance_core::capture::{ChatPipeline, PipelineAction};
 use resonance_core::text::{contains_japanese, convert_to_romaji};
 use resonance_core::workers::{
-    read_error_backoff, watchdog_check, WatchdogVerdict, WATCHDOG_LIMIT_SECS, WATCHDOG_TICK,
+    read_error_backoff, wait_for, watchdog_check, WatchdogVerdict, WATCHDOG_LIMIT_SECS,
+    WATCHDOG_TICK,
 };
 
 // --- GLOBAL STATE ---
@@ -39,6 +40,20 @@ pub struct SnifferHandle {
 impl SnifferHandle {
     pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::SeqCst)
+    }
+
+    /// Stops the sniffer and waits, up to `wait`, until its capture thread has ended. The thread
+    /// drops its socket before it clears the alive flag, so once this returns `true` the socket is
+    /// closed and nothing else is capturing: a new sniffer can start without two pipelines seeing
+    /// the same packets. `false`: the thread was still running when the time was up.
+    pub fn stop_and_wait(self, wait: Duration) -> bool {
+        let alive = self.alive.clone();
+        drop(self); // closes the stop channel: the capture and watchdog threads end
+        wait_for(
+            || !alive.load(Ordering::SeqCst),
+            wait,
+            Duration::from_millis(25),
+        )
     }
 }
 
@@ -80,8 +95,7 @@ pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
         return;
     }
 
-    let mut tx_lock = state.sniffer_tx.lock();
-    if tx_lock.as_ref().is_some_and(SnifferHandle::is_alive) {
+    if !state.services.start_sniffer(&app) {
         inject_system_message(
             &app,
             SystemLogLevel::Warning,
@@ -90,10 +104,7 @@ pub fn start_sniffer_command(app: AppHandle, state: State<'_, AppState>) {
         );
         emit_sniffer_state(&app, SnifferState::Pending, "Listening for game traffic...");
         IS_SNIFFER_ACTIVE.store(false, Ordering::Relaxed);
-        return;
     }
-    let tx = start_sniffer_worker(app.clone());
-    *tx_lock = Some(tx);
 }
 
 pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
@@ -429,19 +440,7 @@ pub fn unblock_user_command(uid: u64, app: tauri::AppHandle, state: tauri::State
 
 #[tauri::command]
 pub fn restart_sniffer_command(app: tauri::AppHandle) {
-    // On its own thread: the pause below would otherwise freeze the window
-    // (synchronous commands run on the main thread).
-    thread::spawn(move || {
-        let state = app.state::<AppState>();
-
-        // 1. Drop the sender to safely terminate the old sniffer thread
-        *state.sniffer_tx.lock() = None;
-
-        // 2. Wait a moment for the OS to release the socket binding
-        thread::sleep(Duration::from_millis(500));
-
-        // 3. Start a fresh sniffer!
-        let tx = start_sniffer_worker(app.clone());
-        *state.sniffer_tx.lock() = Some(tx);
-    });
+    // On its own thread (inside `Services`): the wait for the old capture would otherwise freeze the
+    // window, since synchronous commands run on the main thread.
+    crate::services::owner::Services::restart_sniffer_in_background(&app);
 }

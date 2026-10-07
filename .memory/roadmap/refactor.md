@@ -3,6 +3,8 @@
 Measured 2026-10-06 on `main` `1478528` (right after PR #203). Evidence, numbers and proposals are in [`docs/architecture_review.md`](../../docs/architecture_review.md)
 (item IDs W / R / P / A / M, decisions D-1..D-7). Related: [`security_model.md`](../../docs/security_model.md), [`testing.md`](../../docs/testing.md), the decision log [`decisions.md`](../../docs/decisions.md). The earlier 2026-09 refactor is in [`refactor-2026-09.md`](refactor-2026-09.md); the real-app test automation roadmap is [`test-automation.md`](test-automation.md).
 
+**Result (2026-10-07):** S0 to S6 and the signed metadata are done; the before / after comparison, measured with the same scripts on `1478528` and `e97e36c`, is [`docs/refactoring_report.md`](../../docs/refactoring_report.md) (`scripts/refactoring_metrics.py` makes its structure numbers).
+
 ## Done-conditions of every stage
 
 1. **Plan first.** Show an impact analysis (graft `callers` output) and wait for Kade's go (CLAUDE.md, workflow-control).

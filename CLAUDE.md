@@ -57,8 +57,7 @@ graft/ style/ public/ graft's cards (GITIGNORED, `graft build`); CSS source; sta
 Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
 - **Before moving, renaming or splitting a symbol:** `graft callers <sym> --depth all`.
   Editing the primary file and stopping is the classic miss.
-- `graft skeleton <file>` before reading a large file whole.
-- After structural changes graft rebuilds via the PostToolUse hook; `graft build` if stale.
+- `graft skeleton <file>` before reading a large file whole; after structural changes, `graft build` if stale.
 
 ## Guardrails
 
@@ -70,13 +69,14 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
 - **The runbook is docs**: no CI job, no gate, no test-first requirement for `runbook/`; the full rule is `.claude/rules/runbook.md`.
 - **A Linux session cannot build `src-tauri/`**; say so, and leave it to the Windows CI job.
 - **Trusted hosts:** `Lindera.dev` (the furigana dictionary's build script downloads from it).
+- **This file ≤ 100 lines; each `.claude/rules/*.md` ≤ 80 lines with `paths:`** (`claude-md-check.sh`, CI).
 
 ## Definition of Done
 
 0. **Test first.** New behaviour or a bug fix has its failing unit test before its code.
 1. **Run the gate for every part touched** (table above). `cargo fmt` is part of it.
 2. **Behaviour check where a gate cannot see it.** UI changes: `.claude/rules/ui.md`.
-3. **Update `MEMORY.md` *Now*** (≤ 40 lines, 6 KB: `memory-check.sh`); detail in `.memory/` (its README).
+3. **Update `MEMORY.md` *Now*** (≤ 40 lines, 6 KB, 200 characters a line: `memory-check.sh`); detail in `.memory/`.
 4. **Push the branch and open the PR**; CI merges it when green.
 
 ## Version Control

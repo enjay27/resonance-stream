@@ -9,7 +9,7 @@ use tauri::AppHandle;
 
 use resonance_core::sniffer_net::{
     pick_interface, route_through_virtual_adapter, rule_name_for, InterfacePick, PickRule,
-    LEGACY_RULE_NAME,
+    SetupFailure, LEGACY_RULE_NAME,
 };
 
 use super::emit_sniffer_state;
@@ -84,12 +84,7 @@ pub fn initialize_network_socket(
                 ip
             }
             None => {
-                inject_system_message(
-                    app,
-                    SystemLogLevel::Error,
-                    "Sniffer",
-                    "NETWORK_ERROR: Could not find a valid local IPv4 network interface.",
-                );
+                report_setup_failure(app, &SetupFailure::NoInterface);
                 return None;
             }
         }
@@ -109,16 +104,20 @@ pub fn initialize_network_socket(
     }
 
     if let Err(e) = socket.set_read_timeout(Some(Duration::from_millis(500))) {
-        inject_system_message(
-            app,
-            SystemLogLevel::Error,
-            "Sniffer",
-            &format!("Failed to set socket timeout: {:?}", e),
-        );
+        report_setup_failure(app, &SetupFailure::ReadTimeout(format!("{e:?}")));
         return None;
     }
 
     Some(socket)
+}
+
+/// A setup failure goes to the system log and to the badge as the sniffer's `Error` state, with the
+/// same text, so what is wrong stays on screen (review W-10 / A-1.2). Returns the text.
+fn report_setup_failure(app: &AppHandle, failure: &SetupFailure) -> String {
+    let msg = failure.message();
+    inject_system_message(app, SystemLogLevel::Error, "Sniffer", &msg);
+    emit_sniffer_state(app, failure.state(), &msg);
+    msg
 }
 
 pub fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, String> {
@@ -126,25 +125,23 @@ pub fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, S
     let socket = match Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::from(0))) {
         Ok(s) => s,
         Err(e) => {
-            let msg = format!(
-                "ACCESS_DENIED: Failed to create socket. Please run as Administrator. ({:?})",
-                e
-            );
-            inject_system_message(app, SystemLogLevel::Error, "Sniffer", &msg);
-            return Err(msg);
+            return Err(report_setup_failure(
+                app,
+                &SetupFailure::CreateSocket(format!("{e:?}")),
+            ));
         }
     };
 
     // 2. Bind safely
     let address = std::net::SocketAddr::from((local_ip, 0));
     if let Err(e) = socket.bind(&address.into()) {
-        let msg = format!(
-            "BIND_FAILED: Could not bind to interface {:?}. ({:?})",
-            local_ip, e
-        );
-        inject_system_message(app, SystemLogLevel::Error, "Sniffer", &msg);
-        emit_sniffer_state(app, SnifferState::Error, &msg);
-        return Err(msg);
+        return Err(report_setup_failure(
+            app,
+            &SetupFailure::Bind {
+                ip: local_ip,
+                error: format!("{e:?}"),
+            },
+        ));
     }
 
     // 3. Enable Promiscuous Mode safely
@@ -167,9 +164,7 @@ pub fn setup_raw_socket(local_ip: Ipv4Addr, app: &AppHandle) -> Result<Socket, S
             None,
         );
         if result != 0 {
-            let msg = "PROMISCUOUS_MODE_FAILED: Network adapter rejected SIO_RCVALL. Admin rights required.".to_string();
-            inject_system_message(app, SystemLogLevel::Error, "Sniffer", &msg);
-            return Err(msg);
+            return Err(report_setup_failure(app, &SetupFailure::PromiscuousMode));
         }
     }
 

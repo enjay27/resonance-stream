@@ -10,7 +10,53 @@
 //! -- ASCII, so `netsh` output and exit codes behave the same on any locale
 //! and for any user name in the path.
 
+use resonance_types::SnifferState;
 use std::net::Ipv4Addr;
+
+/// Why the raw socket could not be set up. Each one is logged and shown as the sniffer's `Error`
+/// state with the same text, so the badge says what is wrong instead of staying on "Engine Active"
+/// until the watchdog blames the traffic. The `String`s are the OS error, already formatted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetupFailure {
+    /// Automatic adapter pick found no IPv4 adapter.
+    NoInterface,
+    /// A raw socket could not be created: the app is not running as Administrator.
+    CreateSocket(String),
+    /// The socket could not be bound to the chosen adapter.
+    Bind { ip: Ipv4Addr, error: String },
+    /// The adapter rejected `SIO_RCVALL` (promiscuous mode).
+    PromiscuousMode,
+    /// The read timeout could not be set.
+    ReadTimeout(String),
+}
+
+impl SetupFailure {
+    /// The line for the system log and the badge. The codes (`NETWORK_ERROR`, `ACCESS_DENIED`, ...)
+    /// are what a user quotes in a report and the runbook looks for: keep them.
+    pub fn message(&self) -> String {
+        match self {
+            SetupFailure::NoInterface => {
+                "NETWORK_ERROR: Could not find a valid local IPv4 network interface.".to_string()
+            }
+            SetupFailure::CreateSocket(error) => format!(
+                "ACCESS_DENIED: Failed to create socket. Please run as Administrator. ({error})"
+            ),
+            SetupFailure::Bind { ip, error } => {
+                format!("BIND_FAILED: Could not bind to interface {ip:?}. ({error})")
+            }
+            SetupFailure::PromiscuousMode => {
+                "PROMISCUOUS_MODE_FAILED: Network adapter rejected SIO_RCVALL. Admin rights required."
+                    .to_string()
+            }
+            SetupFailure::ReadTimeout(error) => format!("Failed to set socket timeout: {error}"),
+        }
+    }
+
+    /// The sniffer state to show: always `Error` -- setup did not finish, nothing will be captured.
+    pub fn state(&self) -> SnifferState {
+        SnifferState::Error
+    }
+}
 
 /// The name every rule starts with; also the name of the single rule older
 /// versions created for whichever exe ran setup last.
@@ -134,6 +180,60 @@ mod tests {
 
     const DEV: &str = r"C:\Users\kade\resonance-stream\target\debug\resonance-stream.exe";
     const RELEASE: &str = r"C:\Program Files\Resonance Stream\resonance-stream.exe";
+
+    // --- why the raw socket could not be set up (review W-10 / A-1.2) ---------------------
+
+    #[test]
+    fn a_setup_failure_says_the_same_words_the_log_always_did() {
+        // The `interface` pipeline of the runbook reads the NETWORK_ERROR line of the system log, and
+        // a user may search a report for these codes: the texts are part of the app's output.
+        assert_eq!(
+            SetupFailure::NoInterface.message(),
+            "NETWORK_ERROR: Could not find a valid local IPv4 network interface."
+        );
+        assert_eq!(
+            SetupFailure::CreateSocket("Os { code: 10013 }".into()).message(),
+            "ACCESS_DENIED: Failed to create socket. Please run as Administrator. (Os { code: 10013 })"
+        );
+        assert_eq!(
+            SetupFailure::Bind {
+                ip: Ipv4Addr::new(192, 168, 0, 2),
+                error: "Os { code: 10049 }".into()
+            }
+            .message(),
+            "BIND_FAILED: Could not bind to interface 192.168.0.2. (Os { code: 10049 })"
+        );
+        assert_eq!(
+            SetupFailure::PromiscuousMode.message(),
+            "PROMISCUOUS_MODE_FAILED: Network adapter rejected SIO_RCVALL. Admin rights required."
+        );
+        assert_eq!(
+            SetupFailure::ReadTimeout("Os { code: 1 }".into()).message(),
+            "Failed to set socket timeout: Os { code: 1 }"
+        );
+    }
+
+    #[test]
+    fn every_setup_failure_is_an_error_state_for_the_badge() {
+        // Before, only a failed bind sent one: the others left "Engine Active" on screen until
+        // the watchdog blamed the traffic 15 s later.
+        for failure in [
+            SetupFailure::NoInterface,
+            SetupFailure::CreateSocket(String::new()),
+            SetupFailure::Bind {
+                ip: Ipv4Addr::LOCALHOST,
+                error: String::new(),
+            },
+            SetupFailure::PromiscuousMode,
+            SetupFailure::ReadTimeout(String::new()),
+        ] {
+            assert_eq!(
+                failure.state(),
+                resonance_types::SnifferState::Error,
+                "{failure:?}"
+            );
+        }
+    }
 
     #[test]
     fn name_starts_with_the_legacy_name_and_ends_in_eight_hex_digits() {

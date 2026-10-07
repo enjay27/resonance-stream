@@ -131,7 +131,7 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
     let config = crate::config::current_config(&app);
 
     feed_watchdog();
-    spawn_watchdog(app.clone(), rx.clone());
+    spawn_watchdog(app.clone(), rx.clone(), alive.clone());
 
     // --- MAIN SNIFFER THREAD ---
     let app_handle = app.clone();
@@ -267,7 +267,11 @@ pub fn start_sniffer_worker(app: AppHandle) -> SnifferHandle {
 }
 
 // --- 2. WATCHDOG THREAD ---
-fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
+fn spawn_watchdog(
+    app: AppHandle,
+    rx: crossbeam_channel::Receiver<()>,
+    capture_alive: Arc<AtomicBool>,
+) {
     thread::spawn(move || {
         loop {
             match rx.recv_timeout(WATCHDOG_TICK) {
@@ -281,7 +285,13 @@ fn spawn_watchdog(app: AppHandle, rx: crossbeam_channel::Receiver<()>) {
                 .unwrap()
                 .as_secs();
 
-            if watchdog_check(last, now) == WatchdogVerdict::Stalled {
+            let verdict = watchdog_check(last, now, capture_alive.load(Ordering::SeqCst));
+            if verdict == WatchdogVerdict::CaptureEnded {
+                // The capture is gone: its failure was reported with its own error, and "no game
+                // traffic" would only replace it.
+                break;
+            }
+            if verdict == WatchdogVerdict::Stalled {
                 // If it was previously active, throw the error state
                 // A full-tunnel VPN hides the chat from every adapter: say so.
                 let vpn = network::vpn_in_the_way();

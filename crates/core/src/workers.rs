@@ -67,6 +67,9 @@ pub const WATCHDOG_LIMIT_SECS: u64 = 15;
 /// What the watchdog found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WatchdogVerdict {
+    /// The capture thread is gone (it failed while setting up, or ended): that has its own
+    /// message, and "no game traffic" would only replace it. The watchdog stops.
+    CaptureEnded,
     /// No packet has been recorded yet (`last_traffic` is 0): nothing to judge.
     NotStarted,
     Healthy,
@@ -74,10 +77,13 @@ pub enum WatchdogVerdict {
     Stalled,
 }
 
-/// The watchdog's decision, from the Unix seconds of the last game packet and of now (passed in,
-/// so it is tested without a clock). A clock that stepped back is not a stall.
-pub fn watchdog_check(last_traffic: u64, now: u64) -> WatchdogVerdict {
-    if last_traffic == 0 {
+/// The watchdog's decision, from whether the capture thread still runs and the Unix seconds of the
+/// last game packet and of now (passed in, so it is tested without a clock). A clock that stepped
+/// back is not a stall.
+pub fn watchdog_check(last_traffic: u64, now: u64, capture_alive: bool) -> WatchdogVerdict {
+    if !capture_alive {
+        WatchdogVerdict::CaptureEnded
+    } else if last_traffic == 0 {
         WatchdogVerdict::NotStarted
     } else if now.saturating_sub(last_traffic) > WATCHDOG_LIMIT_SECS {
         WatchdogVerdict::Stalled
@@ -330,32 +336,62 @@ mod tests {
 
     #[test]
     fn the_watchdog_is_quiet_until_traffic_has_been_recorded() {
-        assert_eq!(watchdog_check(0, 1_000_000), WatchdogVerdict::NotStarted);
-        assert_eq!(watchdog_check(0, 0), WatchdogVerdict::NotStarted);
+        assert_eq!(
+            watchdog_check(0, 1_000_000, true),
+            WatchdogVerdict::NotStarted
+        );
+        assert_eq!(watchdog_check(0, 0, true), WatchdogVerdict::NotStarted);
     }
 
     #[test]
     fn the_watchdog_speaks_after_more_than_fifteen_seconds_of_silence() {
         let last = 1_000_000;
-        assert_eq!(watchdog_check(last, last), WatchdogVerdict::Healthy);
+        assert_eq!(watchdog_check(last, last, true), WatchdogVerdict::Healthy);
         assert_eq!(
-            watchdog_check(last, last + 15),
+            watchdog_check(last, last + 15, true),
             WatchdogVerdict::Healthy,
             "exactly the limit"
         );
-        assert_eq!(watchdog_check(last, last + 16), WatchdogVerdict::Stalled);
-        assert_eq!(watchdog_check(last, last + 3600), WatchdogVerdict::Stalled);
+        assert_eq!(
+            watchdog_check(last, last + 16, true),
+            WatchdogVerdict::Stalled
+        );
+        assert_eq!(
+            watchdog_check(last, last + 3600, true),
+            WatchdogVerdict::Stalled
+        );
     }
 
     #[test]
     fn a_clock_that_steps_back_does_not_make_the_watchdog_speak() {
-        assert_eq!(watchdog_check(1_000_000, 999_000), WatchdogVerdict::Healthy);
+        assert_eq!(
+            watchdog_check(1_000_000, 999_000, true),
+            WatchdogVerdict::Healthy
+        );
     }
 
     #[test]
     fn the_watchdog_looks_every_five_seconds_for_a_fifteen_second_limit() {
         assert_eq!(WATCHDOG_TICK, Duration::from_secs(5));
         assert_eq!(WATCHDOG_LIMIT_SECS, 15);
+    }
+
+    #[test]
+    fn a_watchdog_over_a_capture_that_has_ended_stops_instead_of_blaming_the_traffic() {
+        // The capture thread died while setting up (not admin, no adapter ...): that was reported
+        // with its own error, and "no game traffic" 15 s later would only replace it.
+        assert_eq!(
+            watchdog_check(0, 1_000_000, false),
+            WatchdogVerdict::CaptureEnded
+        );
+        assert_eq!(
+            watchdog_check(1_000_000, 1_000_100, false),
+            WatchdogVerdict::CaptureEnded
+        );
+        assert_eq!(
+            watchdog_check(1_000_000, 1_000_001, false),
+            WatchdogVerdict::CaptureEnded
+        );
     }
 
     #[test]

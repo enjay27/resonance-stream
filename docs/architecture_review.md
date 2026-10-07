@@ -428,6 +428,7 @@ Below, the recommendations per feature (module) with the finding IDs they come f
 | A-2.4 | Close the six gaps the mutation run showed (`TranslationCache` eviction order, `is_empty`, `Dictionary` accessors) | PR #202 | the cache's eviction is pinned by tests | Small |
 | A-2.5 | Shorten the preprocessing lock scope | P-6 | less waiting on the capture path | Small |
 | A-2.6 | (proposal) A **golden set of real sentences** with dictionary terms, emotes and number units, as input and expected masking, 20 to 50 lines | concept | the effect of preprocessing or dictionary changes shows as a diff | Small |
+| A-2.7 | **Short dictionary keys** (N-4): `Dictionary` shields a key wherever its characters stand, inside longer words too, because Japanese has no word boundary to match on, so a boundary rule is not possible. Instead `crates/core/tests/repo_dictionary.rs` pins the keys of one character (`〆 凸 ＠`) and of two (25, each with its reason), so a new short key has to be added there on purpose | N-4 | a short key cannot slip in and hit ordinary words unseen | Small |
 
 ### A-3 Chat storage and history (`core/history`, `io/archive`, `events.rs`)
 

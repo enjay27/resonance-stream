@@ -397,6 +397,31 @@ pub fn is_muted(m: &ChatMessage, min_level: u64) -> bool {
     m.is_blocked || (m.channel == Channel::World && m.level < min_level)
 }
 
+/// How long ago a message was sent, as a row shows it with relative time on: `now` (under 10 s), `42s`,
+/// `5m`, `2h 10m`, `3d`. Both stamps are seconds, or milliseconds when past 10^10 (an older log kept
+/// milliseconds); a message from the future reads `now`.
+pub fn relative_time(message_ts: u64, now_ts: u64) -> String {
+    let secs = |ts: u64| if ts > 10_000_000_000 { ts / 1000 } else { ts };
+    let (message, now) = (secs(message_ts), secs(now_ts));
+    let age = now.saturating_sub(message);
+    if age < 10 {
+        "now".to_string()
+    } else if age < 60 {
+        format!("{}s", age)
+    } else if age < 3600 {
+        format!("{}m", age / 60)
+    } else if age < 86400 {
+        let (hours, mins) = (age / 3600, (age % 3600) / 60);
+        if mins > 0 {
+            format!("{}h {}m", hours, mins)
+        } else {
+            format!("{}h", hours)
+        }
+    } else {
+        format!("{}d", age / 86400)
+    }
+}
+
 /// Rows the list shows to start with, and the number each scroll to the top adds.
 pub const DISPLAY_PAGE: usize = 50;
 
@@ -454,6 +479,36 @@ pub fn translation_pending(m: &ChatMessage, use_translation: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_message_age_reads_now_seconds_minutes_hours_days() {
+        // Moved out of `ChatRow` unchanged (timestamps in seconds).
+        let at = |age: u64| relative_time(1_760_000_000, 1_760_000_000 + age);
+        assert_eq!(at(0), "now");
+        assert_eq!(at(9), "now");
+        assert_eq!(at(10), "10s");
+        assert_eq!(at(59), "59s");
+        assert_eq!(at(60), "1m");
+        assert_eq!(at(3599), "59m");
+        assert_eq!(at(3600), "1h");
+        assert_eq!(at(3660), "1h 1m");
+        assert_eq!(at(86_399), "23h 59m");
+        assert_eq!(at(86_400), "1d");
+        assert_eq!(at(3 * 86_400 + 5), "3d");
+    }
+
+    #[test]
+    fn a_message_from_the_future_reads_now() {
+        assert_eq!(relative_time(1_760_000_100, 1_760_000_000), "now");
+    }
+
+    #[test]
+    fn timestamps_in_milliseconds_are_read_as_seconds() {
+        // The backend sends seconds, an older log had milliseconds: past 1e10 it is milliseconds.
+        assert_eq!(relative_time(1_760_000_000_000, 1_760_000_090_000), "1m");
+        assert_eq!(relative_time(1_760_000_000, 1_760_000_090_000), "1m");
+        assert_eq!(relative_time(1_760_000_000_000, 1_760_000_090), "1m");
+    }
 
     fn bare_display(class: &str) -> Vec<&str> {
         class

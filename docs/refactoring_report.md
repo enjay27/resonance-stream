@@ -159,6 +159,12 @@ The new checks cost lines in the places that cross a trust boundary, which is wh
 | `types` | one 1,423-line file | Low | Small |
 | Capture corpus (S7) | waits for a real capture | Low | Small |
 | Class trees in the dictionary | eight trees where the cheat sheet and the dictionary still disagree (月影 氷牙 霜天 狼弓 鷹弓 剛身 威咲 森癒) | Low | Small |
+| Cheat sheet vs dictionary | two hand-maintained copies of the same names, with nothing linking them: the cause of the eight trees above (roadmap N-3) | Low | Small |
+| Dictionary matching | a term matches anywhere inside a word; only one-character keys are guarded by a test (N-4) | Low | Small |
+| Sync button | the settings "update dictionary" button shows no result; success and failure are only in the system log (N-1) | Low | Small |
+| `sync_dictionary` | still takes a `version` argument it ignores (N-2) | Low | Small |
+| `download_model` (M4) | still takes its URL and hash from the UI; they come from verified metadata, but the backend does not enforce it (N-5) | Low to Medium | Small |
+| Tooling | the `ui-preview` skill had no recipe for the first-run wizard (added) | Low | Small |
 
 ## 7. Assessment from the comparison
 

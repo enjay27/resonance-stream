@@ -264,7 +264,7 @@ class App:
         # the chat rules (sniffer/mod.rs, capture/message_processor.rs, events.rs, as understood)
         self.history: list[dict] = []
         self.signatures: dict[tuple, int] = {}
-        self.fingerprints: list[tuple[tuple, float]] = []
+        self.contents: dict[tuple, int] = {}
         self.blocked: dict[int, str] = {}
         self.ignored = ["WORLD"]
         self.next_pid = 1
@@ -442,22 +442,24 @@ class App:
         if chat["uid"] in self.blocked and bug != "block-later":
             chat["isBlocked"] = True
         signature = (chat["uid"], chat["timestamp"], chat["sequenceId"])
-        if signature in self.signatures and bug != "no-dedupe":
+        # the pipeline's second key (message_processor.rs): the same line from a second client has
+        # another sequence id but the same sender, words and send time. No clock; none without a send time.
+        content = (chat["uid"], chat["message"], chat["timestamp"]) if chat["timestamp"] else None
+        seen = self.signatures.get(signature)
+        if seen is None and content is not None:
+            seen = self.contents.get(content)
+        if seen is not None and bug != "no-dedupe":
             if chat["isBlocked"]:  # the pipeline's UpdateBlockedMessage
-                row = next((m for m in self.history if m["pid"] == self.signatures[signature]), None)
+                row = next((m for m in self.history if m["pid"] == seen), None)
                 if row and not row["isBlocked"]:
                     row["isBlocked"] = True
                     self.event("chat-message-update", row)
             return
-        now = time.monotonic()
-        fingerprint = (chat["uid"], chat["message"], chat["timestamp"])  # events.rs: the same line from a second client within 2 s
-        self.fingerprints = [(f, t) for f, t in self.fingerprints if now - t <= 2]
-        if any(f == fingerprint for f, _ in self.fingerprints) and bug != "no-dedupe":
-            return
-        self.fingerprints.append((fingerprint, now))
         chat["pid"] = self.next_pid
         self.next_pid += 1
         self.signatures[signature] = chat["pid"]
+        if content is not None:
+            self.contents[content] = chat["pid"]
         self.history.append(chat)
         self.archive(chat)
         self.event("packet-event", chat)
@@ -525,6 +527,8 @@ class App:
             for row in self.history:
                 if os.environ.get("FAKE_APP_SNIFF_BUG") != "no-remember":  # the capture is taught the chat reloaded from disk
                     self.signatures[(row["uid"], row["timestamp"], row["sequenceId"])] = row["pid"]
+                    if row["timestamp"]:  # and its second key (the same words from a second client)
+                        self.contents[(row["uid"], row["message"], row["timestamp"])] = row["pid"]
 
     @staticmethod
     def prune(logs: Path, keep_days: int, bug: str) -> None:

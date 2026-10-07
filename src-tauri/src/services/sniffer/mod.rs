@@ -348,11 +348,9 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                     );
                 }
 
-                // Dispatch Side Effects. A duplicate dropped here is neither
-                // translated nor archived.
-                if !store_and_emit(app, chat.clone()) {
-                    continue;
-                }
+                // Dispatch Side Effects. (A duplicate never gets here: the pipeline
+                // dropped it, so it is neither translated nor archived.)
+                store_and_emit(app, chat.clone());
 
                 // Every Japanese message is owed a translation, even with the
                 // translator off or still starting: its next start catches up.

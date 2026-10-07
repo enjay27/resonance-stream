@@ -3,7 +3,7 @@
 - Baseline commit: `1478528` (`main`, right after PR #203); measured 2026-10-06, decisions of the same day added in section 9.
 - Scope: repository structure, layers, refactoring candidates, weak points and risks, inefficient logic, recommendations by project concept and feature, documents and process.
 - Related documents: [`security_model.md`](security_model.md) (trust boundaries), [`testing.md`](testing.md) (test layers and commands), [`decisions.md`](decisions.md) (decision log).
-- **This document only proposes.** No code was changed.
+- **This document only proposes.** No code was changed. (What the work then changed, measured on both commits: [`refactoring_report.md`](refactoring_report.md).)
 - Every claim carries its source:
   - **measured**: a value obtained by running something.
   - **confirmed**: the code was opened this session and the cited `file:line` says it.

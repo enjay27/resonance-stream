@@ -30,6 +30,8 @@ pub enum MetadataError {
     NoDictionaryHash,
     /// The dictionary is not the one the signed metadata names.
     DictionaryDiffers { expected: String, found: String },
+    /// The dictionary is the named one, but the app cannot read it as a dictionary.
+    DictionaryUnreadable(String),
 }
 
 impl fmt::Display for MetadataError {
@@ -49,6 +51,9 @@ impl fmt::Display for MetadataError {
                 f,
                 "the dictionary does not match the signed metadata (expected {expected}, got {found})"
             ),
+            Self::DictionaryUnreadable(why) => {
+                write!(f, "the dictionary matches its hash but is not a readable dictionary ({why})")
+            }
         }
     }
 }
@@ -80,6 +85,31 @@ pub fn verify_metadata(
         });
     }
     serde_json::from_value(value).map_err(|e| MetadataError::NotJson(e.to_string()))
+}
+
+/// A whole publication the way the app takes it: the metadata, then the dictionary it names, which the
+/// app must also be able to read. `metadata.yml` runs this on the freshly signed files before it
+/// publishes them.
+pub fn verify_published(
+    metadata: &[u8],
+    signature_b64: &str,
+    dictionary: &[u8],
+    trusted_keys: &[&str],
+    accepted_revision: u64,
+) -> Result<GistMetadata, MetadataError> {
+    let verified = verify_metadata(metadata, signature_b64, trusted_keys, accepted_revision)?;
+    verify_dictionary(dictionary, &verified)?;
+    check_dictionary_reads(dictionary)?;
+    Ok(verified)
+}
+
+/// Can the app read these bytes as its dictionary (text, and the categorised JSON)?
+pub fn check_dictionary_reads(dictionary: &[u8]) -> Result<(), MetadataError> {
+    let text = std::str::from_utf8(dictionary)
+        .map_err(|_| MetadataError::DictionaryUnreadable("not UTF-8 text".to_string()))?;
+    crate::text::Dictionary::from_json_str(text)
+        .map(|_| ())
+        .map_err(MetadataError::DictionaryUnreadable)
 }
 
 /// [`verify_metadata`] against the keys built into the app.
@@ -258,6 +288,38 @@ mod tests {
     }
 
     #[test]
+    fn a_publication_passes_when_the_metadata_and_the_dictionary_both_check_out() {
+        let metadata = verify_published(BODY, SIG_7_A, DICT, &[KEY_A], 6).unwrap();
+        assert_eq!(metadata.revision, 7);
+    }
+
+    #[test]
+    fn a_publication_is_refused_for_a_bad_signature_a_wrong_dictionary_or_a_dictionary_that_does_not_parse(
+    ) {
+        assert!(matches!(
+            verify_published(BODY, SIG_7_B, DICT, &[KEY_A], 0),
+            Err(MetadataError::Signature(_))
+        ));
+        assert!(matches!(
+            verify_published(BODY, SIG_7_A, b"{}", &[KEY_A], 0),
+            Err(MetadataError::DictionaryDiffers { .. })
+        ));
+        // Signed with the right hash, but not a dictionary the app can read: build such a pair.
+        let not_a_dictionary = b"[1, 2, 3]";
+        let mut metadata = verify_metadata(BODY, SIG_7_A, &[KEY_A], 0).unwrap();
+        let hash: String = Sha256::digest(not_a_dictionary)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        metadata.dictionary.sha256 = hash;
+        assert_eq!(verify_dictionary(not_a_dictionary, &metadata), Ok(()));
+        assert!(matches!(
+            check_dictionary_reads(not_a_dictionary),
+            Err(MetadataError::DictionaryUnreadable(_))
+        ));
+    }
+
+    #[test]
     fn the_sources_in_the_repo_are_what_the_app_reads() {
         // `metadata/` holds what gets signed and published (the workflow adds the revision and the
         // dictionary's hash): it must parse the way the app will parse the published files.
@@ -293,6 +355,7 @@ mod tests {
                 expected: "aa".into(),
                 found: "bb".into(),
             },
+            MetadataError::DictionaryUnreadable("not an object".into()),
         ];
         for error in errors {
             let text = error.to_string();

@@ -1,0 +1,165 @@
+name: Metadata
+
+# Publishes the model's and the dictionary's metadata, signed. The app reads it from the `metadata`
+# branch of this repository and accepts it only when one of the keys built into the app signed it
+# (docs/decisions.md D-28; the app's side is crates/core/src/signed_metadata.rs).
+#
+# To publish: change metadata/metadata.json and/or metadata/custom_dict.json in a pull request, let it
+# merge into main, then push the tag metadata-v<N> on that commit of main, N one higher than the last
+# publication (the first one is 1):
+#
+#   git tag metadata-v1 <commit of main> && git push origin metadata-v1
+#
+# Only a pushed tag runs this workflow -- a merge into main never does. Claude's pull requests merge
+# by themselves once CI is green, so a signer that ran on every merge would put an unreviewed model URL
+# in front of every user; the tag is the human step, as for a stable release (release.yml).
+#
+# What it does: checks the tag, builds the published metadata.json (the source with `revision` N and the
+# SHA-256 of custom_dict.json added), signs it with the update key, checks the result the way the app
+# will (examples/verify_metadata.rs), and commits metadata.json, metadata.json.sig and custom_dict.json
+# to the `metadata` branch (created by the first run; generated, never edit it by hand). The app fetches
+# raw.githubusercontent.com/<owner>/<repo>/metadata/<file>; GitHub's cache can hold an old copy for a few
+# minutes after a publication.
+#
+# Secrets (the same two as release.yml, Settings > Secrets and variables > Actions):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# To run it again for a tag after a failure: Actions > Metadata > Re-run. A tag whose revision is
+# already on the `metadata` branch is refused.
+# Tag / file logic: .github/scripts/metadata-lib.sh (tests: metadata-lib.test.sh, run by CI).
+on:
+  push:
+    tags: ['metadata-v[0-9]+']
+
+# One publication at a time: two tags pushed together must not race for the branch.
+concurrency:
+  group: metadata
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: sign and publish
+    runs-on: ubuntu-latest
+    # Writes only the `metadata` branch (the step that pushes); every other step only reads.
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      REF_TYPE: ${{ github.ref_type }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag
+        id: check
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" != "tag" ]; then
+            echo "::error::Run this workflow from a tag (git tag metadata-v1 && git push origin metadata-v1), not from a branch."
+            exit 1
+          fi
+          bash .github/scripts/metadata-lib.test.sh
+          source .github/scripts/metadata-lib.sh
+          revision=$(metadata_revision "$TAG")
+          git fetch -q origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$TAG is not on main. Metadata is published from main only."
+            exit 1
+          fi
+          last=0
+          if git ls-remote --exit-code --heads origin metadata >/dev/null 2>&1; then
+            git fetch -q origin metadata
+            last=$(git show origin/metadata:metadata.json | jq -r '.revision // 0')
+          fi
+          if ! reason=$(metadata_revision_problem "$revision" "$last"); then
+            echo "::error::$TAG: $reason"
+            exit 1
+          fi
+          if ! reason=$(metadata_source_problem < metadata/metadata.json); then
+            echo "::error::metadata/metadata.json: $reason"
+            exit 1
+          fi
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "last=$last" >> "$GITHUB_OUTPUT"
+
+      - name: Build the files to publish
+        env:
+          REVISION: ${{ steps.check.outputs.revision }}
+        run: |
+          set -euo pipefail
+          source .github/scripts/metadata-lib.sh
+          mkdir out
+          cp metadata/custom_dict.json out/custom_dict.json
+          metadata_publish_json "$REVISION" "$(metadata_sha256 out/custom_dict.json)" \
+            < metadata/metadata.json > out/metadata.json
+          cat out/metadata.json
+
+      # The signature is over the exact bytes of out/metadata.json, so nothing may touch the file after
+      # this. --app-version puts the revision into the signed comment: the app refuses a signature made
+      # for another revision, and a revision lower than one it already accepted.
+      - name: Sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          REVISION: ${{ steps.check.outputs.revision }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::The repository secret TAURI_SIGNING_PRIVATE_KEY is not set (see release.yml)."
+            exit 1
+          fi
+          npx --yes @tauri-apps/cli@2 signer sign --app-version "$REVISION" out/metadata.json
+          ls -l out
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
+          cache-bin: false
+
+      # The app's own check on the files about to be published: catches a private key that is not the one
+      # whose public half is in the app, a wrong revision, and a dictionary that does not match.
+      - name: Verify the way the app will
+        env:
+          LAST: ${{ steps.check.outputs.last }}
+        run: |
+          set -euo pipefail
+          cargo run --release -p resonance-core --example verify_metadata -- \
+            out/metadata.json out/metadata.json.sig out/custom_dict.json "$LAST"
+
+      - name: Publish to the metadata branch
+        env:
+          REVISION: ${{ steps.check.outputs.revision }}
+          LAST: ${{ steps.check.outputs.last }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$LAST" -gt 0 ]; then
+            git checkout -q -B metadata-publish origin/metadata
+            git rm -rfq .
+          else
+            git checkout -q --orphan metadata-publish
+            git rm -rfq .
+          fi
+          cp out/metadata.json out/metadata.json.sig out/custom_dict.json .
+          cat > README.md <<'README'
+          # metadata (generated)
+
+          Written by `.github/workflows/metadata.yml` of the `main` branch when a tag `metadata-v<N>` is
+          pushed: do not edit it by hand. The app reads `metadata.json`, `metadata.json.sig` and
+          `custom_dict.json` from here and uses them only if the signature checks out. The sources are in
+          `metadata/` on `main`.
+          README
+          git add metadata.json metadata.json.sig custom_dict.json README.md
+          git commit -q -m "Metadata revision $REVISION" -m "Published from tag $TAG at $SOURCE_SHA (main)."
+          # Not forced: a branch that moved since the check is a race, and the run fails instead.
+          git push origin HEAD:refs/heads/metadata
+          echo "Published revision $REVISION: https://raw.githubusercontent.com/$GITHUB_REPOSITORY/metadata/metadata.json"

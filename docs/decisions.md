@@ -40,7 +40,8 @@ Sources: a quote or a note in `CLAUDE.md` / `MEMORY.md` is cited as such. "Claud
 
 | ID | Decision | By | Why | Consequence | Status |
 |---|---|---|---|---|---|
-| D-4 | Keep **two `AppConfig` types** (the app's and the ui's) | Kade, 2026-09-29 (CLAUDE.md: "do not merge them") | the app owns the file and the real defaults; the ui sees its own view | a field added to one is added to the other with the same name; `app_config_full.json` round-trips in both | Active |
+| D-4 | Keep **two `AppConfig` types** (the app's and the ui's) | Kade, 2026-09-29 (CLAUDE.md: "do not merge them") | the app owns the file and the real defaults; the ui sees its own view | a field added to one is added to the other with the same name; `app_config_full.json` round-trips in both | **Superseded by D-25** |
+| D-25 | **One `AppConfig`**, in `crates/types` (`app_config.rs`), re-exported by the ui; the app keeps reading, migrating and writing the file | Kade, 2026-10-07 (asked to merge; reverses D-4) | the two structs were field-for-field identical (35 fields); the ui never used its own `Default`; S2c had already moved the defaults into `types` | a new setting goes into `AppConfig`, `app_config_full.json` and `ConfigSignals`; the ui's `Default` is now the real defaults | Active |
 | D-16 | New pure logic goes in `crates/core`; what crosses the Tauri boundary is defined once in `crates/types` | CLAUDE.md | tested on every OS; one definition | the layering of the review's section 2 | Active |
 | D-17 | No Npcap / WinDivert; capture is a raw socket (`SIO_RCVALL`) | CLAUDE.md (removed 2026-09-29) | capture never used them | needs Administrator; port 5003 | Active |
 | D-18 | Favorites change only through `save_favorites`; `save_config` ignores the favorites in its payload | CLAUDE.md | a popup window's copy of the settings may be older | `CP-fav-*` rows check it on the real exe | Active |

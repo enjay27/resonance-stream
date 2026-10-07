@@ -75,7 +75,7 @@ The problems below are not "the structure is collapsing". They are **gaps in the
 
 - **Capture and text performance are not a problem today.** Regexes are compiled once with `lazy_static` (`text.rs:12-23`, confirmed). The frame assembler is capped at 1 MiB per stream (reported).
   Preprocessing a line costs hundreds of microseconds at most against 100+ ms of LLM time (estimated).
-- **Keeping two `AppConfig` types is right.** It is a recorded architecture decision and the round-trip fixture (`app_config_full.json`) catches drift.
+- **Keeping two `AppConfig` types is right.** (*Superseded 2026-10-07: Kade merged them into one, `decisions.md` D-25.*) It is a recorded architecture decision and the round-trip fixture (`app_config_full.json`) catches drift.
 - **Test-only code living in core is not a big problem.** Stable exes are built without the `test-env` feature, so the bridge and its MQTT client are not in them (`cargo tree` showed no `rumqttc`, measured in an earlier session).
 
 ---
@@ -614,7 +614,7 @@ Refactoring stages (S4 to S6) **do not change behaviour** (the wire format is th
 
 ### 8.4 Not doing
 
-- Merge the two `AppConfig`s: a recorded decision (Kade, 2026-09-29); the round-trip fixture guards it.
+- ~~Merge the two `AppConfig`s: a recorded decision (Kade, 2026-09-29)~~ -- done 2026-10-07 at Kade's request (`decisions.md` D-25).
 - Move `test_env`, `replay` and the bridge out of core (about 2,800 lines): they are not in stable builds (`test-env` feature) and moving costs more than it gains.
 - A full tokio port of the worker threads and blocking reqwest: it works and the dedicated threads are well isolated.
 - Micro-optimising the parser and text path (P-5, and P-6 beyond lock scope): microseconds against LLM latency.

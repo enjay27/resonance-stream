@@ -3,10 +3,13 @@
 //! two sides cannot drift apart. Field names and serde attributes ARE the wire
 //! format — renaming one is a protocol change.
 //!
-//! Dependencies stay minimal (serde only): this crate compiles to wasm for the UI.
+//! Dependencies stay minimal (serde, serde_with): this crate compiles to wasm for the UI.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+mod app_config;
+pub use app_config::AppConfig;
 
 // --- Chat and system log ---
 

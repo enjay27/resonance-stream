@@ -23,12 +23,10 @@ the app's own tests run only on Windows. CI (`.github/workflows/ci.yml`) runs co
 ui on Linux and the full app gate on `windows-latest`, on every push and PR.
 
 **New pure logic goes in `crates/core`**, where it is tested on every OS. Anything that
-crosses the Tauri boundary is defined once, in `crates/types` (serde only — it compiles
-to wasm) — **except `AppConfig`**, which is deliberately two types: the app's
-(`src-tauri/src/config/app_config.rs`, owns the file on disk and the real defaults) and
-the ui's (`src/ui_types.rs`, the UI's view of it). Architecture decision, Kade
-2026-09-29 — do not merge them. A field added to one must be added to the other with
-the same name, or it will not cross the boundary.
+crosses the Tauri boundary is defined once, in `crates/types` (serde, serde_with — it
+compiles to wasm) -- `AppConfig`, the settings file's type, too (`crates/types/src/app_config.rs`;
+the app owns the file and the real defaults, the ui re-exports the same type). Until
+2026-10-07 it was two types, the app's and the ui's (Kade, 2026-09-29); Kade merged them.
 
 ---
 
@@ -81,7 +79,7 @@ src/                  ui crate (resonance-stream-ui)
   chat_view.rs          chat list: per-tab views + limits (ChatStore), filter, paging -- pure, host-tested
   components/           views; settings/ is one file per settings section
   hooks/                backend event, config and tray wiring
-  ui_types.rs           ui-only types (AppConfig) + re-export of resonance-types
+  ui_types.rs           ui-only types + re-export of resonance-types (AppConfig included)
 src-tauri/            app crate (resonance-stream, lib resonance_stream_lib)
   src/lib.rs            module list, crate-root re-exports, run() — start-up wiring only
   src/events.rs         inject_system_message / store_and_emit: emit to UI + keep history
@@ -130,10 +128,11 @@ Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
   parent outside the `<Show>` and passed down as props — see `components/settings/`.
 - Helpers that need many signals take `signals: AppSignals` and destructure only the
   fields they use (`let ChatSignals { a, set_b, .. } = signals.chat;`).
-- **A setting that lives in `config.json` is a field of `AppConfig` (ui) and a signal of
-  `signals.config` (`ConfigSignals`, named like the field).** Adding one means adding it
-  to `ConfigSignals` -- `to_config` / `apply` list every field, so forgetting is a compile
-  error -- and to the app's `AppConfig`. Its load-time quirks (a saved value that is
+- **A setting that lives in `config.json` is a field of `AppConfig` (`crates/types`) and a
+  signal of `signals.config` (`ConfigSignals`, named like the field).** Adding one means adding
+  it to `AppConfig` (with its default and a value in `app_config_full.json`) and to
+  `ConfigSignals` -- `to_config` / `apply` list every field, so forgetting is a compile
+  error. Its load-time quirks (a saved value that is
   clamped or replaced) live in `apply`, not in `hydration.rs`.
 
 ## Guardrails

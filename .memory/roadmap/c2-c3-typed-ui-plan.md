@@ -22,7 +22,7 @@ several times: channel names (`"WORLD"`, ...: ~130 places), service states (`"Ac
 | `ChatMessage.channel` | `"WORLD" "LOCAL" "PARTY" "GUILD"` (camelCase struct, upper-case value) | enum serialises to the same strings; **any other string reads as WORLD** (old `chat_logs/*.jsonl`, `dataset_*.jsonl` and the unmapped code 9 stay loadable) |
 | `SnifferStatePayload.state`, `TranslatorStatePayload.state` | `"Off" "Starting" "Pending" "Active" "Error" "Restarting"`; translator also `"Loading Model" "Catching Up"`, `"Ready"` | same strings; unknown reads as `Off` |
 | `config.json` | `active_tab` = Korean label, `tab_limits` keys = channel name or `"전체"`/`"커스텀"`, `archive_ignored_channels`, `custom_tab_filters` = channel names | stays strings on disk; the ui/app convert at the edge (`Tab::from_label`/`label`, `Channel::from_str`) |
-| the two `AppConfig` types | same field names | unchanged (CLAUDE.md: not merged) |
+| the `AppConfig` type | one type in `crates/types` since 2026-10-07 (was two) | unchanged |
 
 ## Steps
 

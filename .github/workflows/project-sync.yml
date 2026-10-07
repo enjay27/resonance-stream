@@ -1,0 +1,27 @@
+# Adds this repository's issues to the Resonance user Project (enjay27) and applies
+# command labels (cmd:status-now, cmd:verify-needs-kade, ...). The bridge is Stella Rain's
+# (stella-rain/.github, ADR-031 phase B5), called here with `owner-type: user`.
+#
+# Dormant until the Project exists: the job is skipped while vars.PROJECT_NUMBER is unset
+# (setup-project.sh sets it). Needs secrets.PROJECT_TOKEN: a classic token with only the
+# `project` scope -- GitHub Apps and fine-grained tokens cannot reach a user's Project, and
+# `secrets: inherit` does not cross owners, so it is passed explicitly.
+name: Project sync
+
+on:
+  issues:
+    types: [opened, reopened, labeled]
+
+permissions: {}
+
+jobs:
+  sync:
+    if: vars.PROJECT_NUMBER != ''
+    permissions:
+      issues: write  # remove applied command labels; read the sender's permission
+    uses: stella-rain/.github/.github/workflows/project-sync.yml@main
+    with:
+      owner-type: user
+      project-number: ${{ vars.PROJECT_NUMBER }}
+    secrets:
+      PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}

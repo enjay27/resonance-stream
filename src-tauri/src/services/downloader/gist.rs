@@ -183,7 +183,8 @@ pub async fn sync_dictionary(app: AppHandle, version: String) -> Result<String, 
 
     // 3. Save Locally
     fs::create_dir_all(dict_path.parent().unwrap()).map_err(|e| e.to_string())?;
-    fs::write(&dict_path, &json_content).map_err(|e| e.to_string())?;
+    resonance_core::download::write_atomic(&dict_path, json_content.as_bytes())
+        .map_err(|e| e.to_string())?;
     install_dictionary(&app, dict);
 
     inject_system_message(
@@ -231,7 +232,8 @@ pub fn get_local_dictionary(app: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub fn save_local_dictionary(app: tauri::AppHandle, content: String) -> Result<(), String> {
     let dict = Dictionary::from_json_str(&content)?;
-    std::fs::write(dictionary_path(&app), content).map_err(|e| e.to_string())?;
+    resonance_core::download::write_atomic(&dictionary_path(&app), content.as_bytes())
+        .map_err(|e| e.to_string())?;
     install_dictionary(&app, dict);
     Ok(())
 }

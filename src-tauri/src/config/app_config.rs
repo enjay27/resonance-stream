@@ -1,5 +1,6 @@
 use crate::{inject_system_message, AppState, SystemLogLevel, TranslatorState};
-use resonance_core::download::write_atomic;
+use parking_lot::Mutex;
+use resonance_core::download::{keep_bad_copy, read_text_retrying, write_atomic};
 use resonance_core::favorites_migration::migrate_favorites;
 use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
@@ -12,6 +13,7 @@ use serde_with::serde_as;
 use serde_with::DisplayFromStr;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// `#[serde(default)]`: a field missing from the file (an older version, a
@@ -200,16 +202,41 @@ pub fn read_config_file(app: &AppHandle) -> AppConfig {
         return default_config;
     }
 
-    match fs::read_to_string(&path) {
-        Ok(content) => parse_config(&content).unwrap_or_else(|e| {
-            // Keep the unreadable file: the next save would overwrite it.
-            let backup = path.with_extension("json.bad");
-            let _ = fs::copy(&path, &backup);
-            log::error!("config.json unreadable ({e}); defaults used, file kept as {backup:?}");
-            AppConfig::default()
-        }),
-        Err(_) => AppConfig::default(),
+    // A lock held for a moment (an antivirus scan) is waited out; a file that stays unreadable,
+    // or does not parse, is kept as `config.json.bad` -- the next save would replace it -- and
+    // the user is told once the app state exists (`take_load_notice`).
+    match read_text_retrying(&path, 3, Duration::from_millis(250)) {
+        Ok(content) => parse_config(&content)
+            .unwrap_or_else(|e| defaults_instead(&path, &format!("it could not be parsed ({e})"))),
+        Err(e) => defaults_instead(&path, &format!("it could not be read ({e})")),
     }
+}
+
+/// What the start-up read found wrong with `config.json`, for the system log (set while the
+/// app state does not exist yet, so it cannot be logged there and then).
+static LOAD_NOTICE: Mutex<Option<String>> = Mutex::new(None);
+
+/// The note about a `config.json` that was not used, once.
+pub fn take_load_notice() -> Option<String> {
+    LOAD_NOTICE.lock().take()
+}
+
+/// Defaults in place of a `config.json` that cannot be used: the file is copied to
+/// `config.json.bad` first, and the notice says where it is -- or that even the copy failed.
+fn defaults_instead(path: &std::path::Path, why: &str) -> AppConfig {
+    let notice = match keep_bad_copy(path) {
+        Ok(backup) => format!(
+            "config.json was not used: {why}. The defaults are in use and the file was kept as {}.",
+            backup.display()
+        ),
+        Err(e) => format!(
+            "config.json was not used: {why}. The defaults are in use, and the file could not be \
+             copied either ({e}): saving a setting will replace it."
+        ),
+    };
+    log::error!("{notice}");
+    *LOAD_NOTICE.lock() = Some(notice);
+    AppConfig::default()
 }
 
 fn translator_settings(c: &AppConfig) -> TranslatorSettings {
@@ -234,13 +261,20 @@ pub fn load_config(app: AppHandle) -> AppConfig {
 }
 
 /// async: writes the file and may start or stop workers -- not on the main thread.
+///
+/// `Err`: the file could not be written. The setting is in use for this run all the same (the
+/// ui already shows it), and the ui tells the user it will not survive a restart.
 #[tauri::command(async)]
-pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) {
+pub fn save_config(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    config: AppConfig,
+) -> Result<(), String> {
     // One save at a time: two overlapping saves would each compare against
     // the same old config and start (or stop) the same worker twice.
     let _saving = state.config_lock.lock();
     let config = config.keeping_favorites_of(&state.config.read());
-    apply_config(&app, &state, config);
+    apply_config(&app, &state, config)
 }
 
 /// Replaces the favorites only -- every other setting is left as it is, so the
@@ -270,20 +304,31 @@ pub fn modify_config(
     let _saving = state.config_lock.lock();
     let mut config = state.config.read().clone();
     change(&mut config);
-    apply_config(app, state, config);
+    // No ui call is waiting for this answer: a failed write goes to the system log.
+    if let Err(e) = apply_config(app, state, config) {
+        inject_system_message(app, SystemLogLevel::Error, "Settings", e);
+    }
 }
 
-fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig) {
+/// Puts `config` in use and writes it to disk. A failed write does not stop the change from
+/// taking effect, but it is reported.
+fn apply_config(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    config: AppConfig,
+) -> Result<(), String> {
     let app = app.clone();
     let old_config = state.config.read().clone();
 
     let path = get_config_path(&app);
     let mut on_disk = config.clone();
     on_disk.init_done = crate::test_env::init_done_for_disk(config.init_done);
-    if let Ok(json) = serde_json::to_string_pretty(&on_disk) {
-        if let Err(e) = write_atomic(&path, json.as_bytes()) {
-            log::error!("config.json not saved: {e}");
-        }
+    let written = serde_json::to_string_pretty(&on_disk)
+        .map_err(|e| e.to_string())
+        .and_then(|json| write_atomic(&path, json.as_bytes()).map_err(|e| e.to_string()))
+        .map_err(|e| format!("config.json was not saved ({e}): this setting is in use now but will not survive a restart."));
+    if let Err(e) = &written {
+        log::error!("{e}");
     }
     *state.config.write() = config.clone();
     state
@@ -360,6 +405,7 @@ fn apply_config(app: &AppHandle, state: &State<'_, AppState>, config: AppConfig)
     if old_config.chat_log_retention_days != config.chat_log_retention_days {
         crate::io::prune_chat_logs(&app);
     }
+    written
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use crate::{inject_system_message, AppState, SystemLogLevel, TranslatorState};
 use parking_lot::Mutex;
-use resonance_core::download::{keep_bad_copy, read_text_retrying, write_atomic};
-use resonance_core::favorites_migration::migrate_favorites;
+use resonance_core::config_migration::{migrate_config, to_file_text, Migrated, CONFIG_VERSION};
+use resonance_core::download::{keep_bad_copy, keep_copy, read_text_retrying, write_atomic};
 use resonance_core::history::ChannelLimits;
 use resonance_core::workers::{translator_change, TranslatorSettings, WorkerChange};
 use std::fs;
@@ -22,13 +22,14 @@ fn get_config_path(app: &AppHandle) -> PathBuf {
     config_dir.join("config.json")
 }
 
-/// A `config.json` as text -> the config. A file written before the favorites
-/// tabs had ids (names instead) is converted first, so every tab and favorite
-/// survives; a file already in the new shape is read as it is.
-fn parse_config(content: &str) -> serde_json::Result<AppConfig> {
+/// A `config.json` as text -> the config, and what the version found. An older file is brought up
+/// to the current shape first (`resonance_core::config_migration`: today, favorites tabs by id,
+/// so every tab and favorite survives); a file already current is read as it is; a newer one is
+/// read as far as this version understands it.
+fn parse_config(content: &str) -> serde_json::Result<(AppConfig, Migrated)> {
     let mut json: serde_json::Value = serde_json::from_str(content)?;
-    migrate_favorites(&mut json);
-    serde_json::from_value(json)
+    let migrated = migrate_config(&mut json);
+    Ok((serde_json::from_value(json)?, migrated))
 }
 
 /// Reads `config.json`, writing the defaults first if it does not exist yet.
@@ -39,7 +40,7 @@ pub fn read_config_file(app: &AppHandle) -> AppConfig {
     if !path.exists() {
         // Create default if missing
         let default_config = AppConfig::default();
-        if let Ok(json) = serde_json::to_string_pretty(&default_config) {
+        if let Ok(json) = to_file_text(&default_config) {
             let _ = write_atomic(&path, json.as_bytes());
         }
         return default_config;
@@ -49,8 +50,14 @@ pub fn read_config_file(app: &AppHandle) -> AppConfig {
     // or does not parse, is kept as `config.json.bad` -- the next save would replace it -- and
     // the user is told once the app state exists (`take_load_notice`).
     match read_text_retrying(&path, 3, Duration::from_millis(250)) {
-        Ok(content) => parse_config(&content)
-            .unwrap_or_else(|e| defaults_instead(&path, &format!("it could not be parsed ({e})"))),
+        Ok(content) => match parse_config(&content) {
+            Ok((config, Migrated::Newer { found })) => {
+                note_newer_file(&path, found);
+                config
+            }
+            Ok((config, _)) => config,
+            Err(e) => defaults_instead(&path, &format!("it could not be parsed ({e})")),
+        },
         Err(e) => defaults_instead(&path, &format!("it could not be read ({e})")),
     }
 }
@@ -62,6 +69,21 @@ static LOAD_NOTICE: Mutex<Option<String>> = Mutex::new(None);
 /// The note about a `config.json` that was not used, once.
 pub fn take_load_notice() -> Option<String> {
     LOAD_NOTICE.lock().take()
+}
+
+/// A `config.json` written by a newer version of the app (a downgrade): it is read as far as this
+/// version understands it, and a copy is kept before a save here drops what that version added.
+fn note_newer_file(path: &std::path::Path, found: u32) {
+    let kept = match keep_copy(path, &format!("v{found}")) {
+        Ok(copy) => format!("A copy was kept as {}.", copy.display()),
+        Err(e) => format!("A copy could not be kept either ({e})."),
+    };
+    let notice = format!(
+        "config.json was written by a newer version of the app (settings format {found}; this \
+         one knows {CONFIG_VERSION}). Settings that version added are dropped when you save here. {kept}"
+    );
+    log::warn!("{notice}");
+    *LOAD_NOTICE.lock() = Some(notice);
 }
 
 /// Defaults in place of a `config.json` that cannot be used: the file is copied to
@@ -166,7 +188,7 @@ fn apply_config(
     let path = get_config_path(&app);
     let mut on_disk = config.clone();
     on_disk.init_done = crate::test_env::init_done_for_disk(config.init_done);
-    let written = serde_json::to_string_pretty(&on_disk)
+    let written = to_file_text(&on_disk)
         .map_err(|e| e.to_string())
         .and_then(|json| write_atomic(&path, json.as_bytes()).map_err(|e| e.to_string()))
         .map_err(|e| format!("config.json was not saved ({e}): this setting is in use now but will not survive a restart."));
@@ -254,11 +276,16 @@ fn apply_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `parse_config` without what the version found.
+    fn read(content: &str) -> serde_json::Result<AppConfig> {
+        parse_config(content).map(|(config, _)| config)
+    }
     use resonance_types::default_favorite_messages;
 
     #[test]
     fn a_config_with_tab_names_is_converted_when_read() {
-        let config = parse_config(
+        let config = read(
             r#"{"init_done": true,
                 "favorite_tabs": ["레이드", "던전"],
                 "favorite_messages": [
@@ -282,20 +309,36 @@ mod tests {
     fn a_config_in_the_new_shape_is_read_as_it_is_and_one_without_favorites_gets_the_defaults() {
         let json = r#"{"favorite_tabs": [{"id": 4, "name": "레이드"}],
                        "favorite_messages": [{"text": "a", "tab": 4}]}"#;
-        let config = parse_config(json).unwrap();
+        let config = read(json).unwrap();
         assert_eq!(config.favorite_tabs[0].id, 4);
         assert_eq!(config.favorite_messages[0].tab, 4);
         assert_eq!(
-            parse_config(&serde_json::to_string(&config).unwrap())
+            read(&serde_json::to_string(&config).unwrap())
                 .unwrap()
                 .favorites(),
             config.favorites(),
             "saving and reading again changes nothing"
         );
 
-        let bare = parse_config(r#"{"init_done": true}"#).unwrap();
+        let bare = read(r#"{"init_done": true}"#).unwrap();
         assert_eq!(bare.favorite_messages, default_favorite_messages());
         assert!(bare.favorite_tabs.is_empty());
-        assert!(parse_config("not json").is_err());
+        assert!(read("not json").is_err());
+    }
+
+    #[test]
+    fn the_version_decides_what_a_file_goes_through() {
+        // No version: the old file is brought up to date; a stamped one is read as it is; a
+        // newer one is read as far as this version understands it and reported.
+        let (config, migrated) = parse_config(r#"{"init_done": true}"#).unwrap();
+        assert!(config.init_done);
+        assert_eq!(migrated, Migrated::Upgraded { from: 0 });
+        let (_, migrated) =
+            parse_config(&format!(r#"{{"config_version": {CONFIG_VERSION}}}"#)).unwrap();
+        assert_eq!(migrated, Migrated::Current);
+        let (config, migrated) =
+            parse_config(r#"{"config_version": 99, "init_done": true, "added_later": 1}"#).unwrap();
+        assert!(config.init_done);
+        assert_eq!(migrated, Migrated::Newer { found: 99 });
     }
 }

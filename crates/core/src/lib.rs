@@ -4,6 +4,7 @@
 
 pub mod bridge;
 pub mod capture;
+pub mod config_migration;
 pub mod crash_log;
 pub mod download;
 pub mod favorites_migration;

@@ -93,6 +93,28 @@ impl ChannelLimits {
     }
 }
 
+/// Which of the two archives a message is written to. A message goes to the chat log (the
+/// daily files `load_recent` reloads) as soon as it arrives, so nothing the translator does or
+/// fails to do can lose it; the training-pair file gets it once its outcome is known -- as it
+/// is when no translation will come, or with its translation (which also adds a second,
+/// newer chat-log line).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveTarget {
+    ChatLog,
+    Dataset,
+    Both,
+}
+
+impl ArchiveTarget {
+    pub fn writes_chat_log(self) -> bool {
+        matches!(self, ArchiveTarget::ChatLog | ArchiveTarget::Both)
+    }
+
+    pub fn writes_dataset(self) -> bool {
+        matches!(self, ArchiveTarget::Dataset | ArchiveTarget::Both)
+    }
+}
+
 /// Most log lines a start-up reload examines (see [`load_recent_within`]).
 pub const MAX_SCAN_LINES: usize = 50_000;
 
@@ -134,10 +156,13 @@ pub fn load_recent_within(
         .collect();
     files.sort(); // YYYY-MM-DD names: sorted by day
 
-    // Newest day first, newest line first, until every channel is full.
-    let mut newest_first = Vec::new();
+    // Newest day first, newest line first, until every channel is full. A message saved twice
+    // (on arrival, then again with its translation) is kept once: the newest line's content, at
+    // the place of the oldest line seen -- where it arrived. `place` is that line's scan number
+    // (it grows as lines get older), so sorting by it puts the messages in arrival order.
+    let mut newest_first: Vec<(usize, ChatMessage)> = Vec::new();
     let mut counts: HashMap<Channel, usize> = HashMap::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen: HashMap<(u64, u64, u64), usize> = HashMap::new();
     let all_full = |counts: &HashMap<Channel, usize>| {
         Channel::ALL
             .into_iter()
@@ -165,22 +190,33 @@ pub fn load_recent_within(
             // Same identity as the capture's duplicate check; messages
             // without one (no timestamp, no sequence id) are all kept.
             let identity = (message.uid, message.timestamp, message.sequence_id);
-            if (message.timestamp != 0 || message.sequence_id != 0) && !seen.insert(identity) {
-                continue;
+            if message.timestamp != 0 || message.sequence_id != 0 {
+                if let Some(&at) = seen.get(&identity) {
+                    newest_first[at].0 = scanned; // an older copy: the message arrived here
+                    continue;
+                }
             }
             let count = counts.entry(message.channel).or_insert(0);
             if *count < limits.of(message.channel) {
                 *count += 1;
-                newest_first.push(message);
+                if message.timestamp != 0 || message.sequence_id != 0 {
+                    seen.insert(identity, newest_first.len());
+                }
+                newest_first.push((scanned, message));
             }
         }
     }
 
-    newest_first.reverse();
-    for (pid, message) in (1..).zip(newest_first.iter_mut()) {
+    newest_first.sort_by_key(|(place, _)| *place);
+    let mut messages: Vec<ChatMessage> = newest_first
+        .into_iter()
+        .rev()
+        .map(|(_, message)| message)
+        .collect();
+    for (pid, message) in (1..).zip(messages.iter_mut()) {
         message.pid = pid;
     }
-    newest_first
+    messages
 }
 
 /// Backend chat history, capped per channel (`ChannelLimits`). Pids come
@@ -542,10 +578,103 @@ mod tests {
             .iter()
             .map(|m| (m.sequence_id, m.translated.clone()))
             .collect();
+        // The translated copy comes last in the file, but the message keeps the place it
+        // arrived in: archive-on-arrival writes every translated message twice.
         assert_eq!(
             seqs,
-            [(2, None), (1, Some("안녕".into())), (0, None), (0, None)]
+            [(1, Some("안녕".into())), (2, None), (0, None), (0, None)]
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_arrival_goes_to_the_chat_log_only_and_the_rest_to_what_it_lacks() {
+        // Review W-4: the chat log has every message from the moment it arrives; the
+        // training-pair file only gets a message once its outcome is known.
+        assert!(ArchiveTarget::ChatLog.writes_chat_log());
+        assert!(!ArchiveTarget::ChatLog.writes_dataset());
+        assert!(!ArchiveTarget::Dataset.writes_chat_log());
+        assert!(ArchiveTarget::Dataset.writes_dataset());
+        assert!(ArchiveTarget::Both.writes_chat_log());
+        assert!(ArchiveTarget::Both.writes_dataset());
+    }
+
+    fn saved_line(seq: u64, translated: Option<&str>) -> String {
+        serde_json::to_string(&ChatMessage {
+            uid: 9,
+            timestamp: 1000,
+            sequence_id: seq,
+            channel: Channel::Guild,
+            message: format!("m{seq}"),
+            translated: translated.map(Into::into),
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    fn seqs_and_translations(got: &[ChatMessage]) -> Vec<(u64, Option<String>)> {
+        got.iter()
+            .map(|m| (m.sequence_id, m.translated.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_message_translated_while_others_arrived_keeps_its_arrival_place() {
+        // 1 arrives, 2 and 3 arrive while 1 is translated, then 1's translation is written.
+        let dir = temp_dir("arrival-order");
+        std::fs::write(
+            dir.join(chat_log_file_name("2026-10-07")),
+            [
+                saved_line(1, None),
+                saved_line(2, None),
+                saved_line(3, None),
+                saved_line(1, Some("번역")),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let got = load_recent(&dir, &limits(&[]));
+        assert_eq!(
+            seqs_and_translations(&got),
+            [(1, Some("번역".into())), (2, None), (3, None)]
+        );
+        // Pids follow that order, so the chat list shows it.
+        assert_eq!(got.iter().map(|m| m.pid).collect::<Vec<_>>(), [1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_translation_written_after_midnight_still_belongs_to_the_day_it_arrived() {
+        let dir = temp_dir("across-midnight");
+        std::fs::write(
+            dir.join(chat_log_file_name("2026-10-06")),
+            [saved_line(1, None)].join("\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(chat_log_file_name("2026-10-07")),
+            [saved_line(2, None), saved_line(1, Some("번역"))].join("\n"),
+        )
+        .unwrap();
+        let got = load_recent(&dir, &limits(&[]));
+        assert_eq!(
+            seqs_and_translations(&got),
+            [(1, Some("번역".into())), (2, None)]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_message_that_was_never_translated_reloads_as_it_arrived() {
+        // The translator could not start: only the arrival lines exist.
+        let dir = temp_dir("never-translated");
+        std::fs::write(
+            dir.join(chat_log_file_name("2026-10-07")),
+            [saved_line(1, None), saved_line(2, None)].join("\n"),
+        )
+        .unwrap();
+        let got = load_recent(&dir, &limits(&[]));
+        assert_eq!(seqs_and_translations(&got), [(1, None), (2, None)]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

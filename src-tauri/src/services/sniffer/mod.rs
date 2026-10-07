@@ -371,14 +371,16 @@ fn dispatch_pipeline_actions(app: &AppHandle, actions: Vec<PipelineAction>) {
                     state.translation_ledger.lock().record(chat.pid);
                 }
 
-                // Translated messages are archived by the translator with their
-                // translation; anything else is archived as it is.
+                // Every message is in the chat log from the moment it arrives; what
+                // the translator does later only adds to the training-pair file and a
+                // newer chat-log line with the translation.
+                crate::services::translator::archive_arrival(app, &chat);
                 let translator = state.translator_tx.lock();
                 match translator.as_ref() {
                     Some(tx) if use_translation && contains_japanese(&chat.message) => {
                         let _ = tx.send(TranslationJob::new(chat));
                     }
-                    _ => crate::services::translator::archive_chat(app, &chat),
+                    _ => crate::services::translator::archive_untranslated(app, &chat),
                 }
             }
         }

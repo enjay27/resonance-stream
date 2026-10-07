@@ -4,7 +4,7 @@
 
 ## Now — 2026-10-07
 
-**New session? Start with [`.memory/sessions/2026-10-07-signed-metadata-and-open-items-handoff.md`](.memory/sessions/2026-10-07-signed-metadata-and-open-items-handoff.md)** (the earlier handoff is background).
+**New session? Start with [`.memory/sessions/2026-10-07-open-items-n2-n5-handoff.md`](.memory/sessions/2026-10-07-open-items-n2-n5-handoff.md)** (the earlier handoffs are background).
 
 **Where things stand.** Roadmap stages S0-S6 and the signed metadata (M1-M3) are done and merged (#207-#249); the before/after is [`docs/refactoring_report.md`](docs/refactoring_report.md), the stages and the open items found after S6 (N-1 to N-5) are in [`.memory/roadmap/refactor.md`](.memory/roadmap/refactor.md). **Real window (Kade, 2026-10-07):** S6 and the signed first-run path confirmed; not yet the wizard's refusal line, the update check (O-3), or the new dictionary terms in real chat. **Next:** N-2, N-5 (N-3, N-4, N-6, N-1 done; N-6 = the settings line "v1.0.8 · 서명 리비전 N · 게시본과 같음/직접 수정됨/확인 불가", not yet seen in a real window), one PR at a time (gist untouched); the CSP PR #248 into `rc` is Kade's to merge and test; S7 and hy-mt2 wait for his inputs (roadmap). One PR at a time.
 

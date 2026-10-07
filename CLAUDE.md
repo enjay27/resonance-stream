@@ -40,7 +40,7 @@ the app owns the file and the real defaults, the ui re-exports the same type).
 ## Repository Layout (top level; per file: `.claude/rules/{core,ui,app}.md` and graft)
 
 ```
-.claude/              graft wiring, rules/ (path-scoped), skills/: graft, release, ui-preview, workflow-control
+.claude/              graft wiring, context-guard hook, rules/ (path-scoped), skills/: graft, release, ui-preview, workflow-control
 .memory/              working memory; see .memory/README.md
 .github/ justfile     CI (gates per OS; release, rc, metadata workflows); the gates as commands
 crates/               core, llama, types — pure logic, tested on any OS

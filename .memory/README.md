@@ -10,6 +10,10 @@ it; the history is in git and `sessions/`.
 |---|---|---|
 | `active-issues/` | things **not to trust yet**: code or docs written but never run on Windows, docs that contradict the code, known bugs | one file per topic; **keep each under ~150 lines** — close items by deleting them, the history is in `sessions/` and git |
 | `roadmap/` | what is next, with the check that proves it done; facts with a number | one file per workstream |
-| `sessions/` | dated write-ups `YYYY-MM-DD-<topic>.md`, **including wrong turns** | append-only; flat folder |
+| `sessions/` | dated write-ups `YYYY-MM-DD-<topic>.md`, **including wrong turns** | append-only; flat folder; **no new handoff files** (below) |
+
+**No handoff files (from 2026-10-08).** A session ends by updating *Now*; wrong turns go in the PR's *Wrong turns*,
+and the `session-handoff` skill gives Kade the starter prompt for the next session. The handoffs already in
+`sessions/` stay as history.
 
 Write the note in the same commit as the change it describes.

@@ -95,11 +95,13 @@ pub async fn check_all_updates(app: AppHandle) -> Result<UpdateCheckResult, Stri
             model_update_available: false,
             dict_update_available: false,
             remote_data: GistMetadata {
+                revision: 0,
                 app: VersionInfo::default(),
                 model: VersionInfo::default(),
                 dictionary: RemoteDictionary {
                     version: String::new(),
                     updated_at: String::new(),
+                    sha256: String::new(),
                 },
             },
         });

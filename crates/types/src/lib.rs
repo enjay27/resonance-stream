@@ -550,14 +550,26 @@ pub struct VersionInfo {
     pub sha256: String,
 }
 
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RemoteDictionary {
     pub version: String,
     pub updated_at: String,
+    /// SHA-256 of the dictionary file, in the signed metadata: the dictionary has no signature of its
+    /// own. Absent in the old gist, which is not signed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sha256: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GistMetadata {
+    /// Which publication of the signed metadata this is (counts up by one each time; the signature
+    /// names it). 0 in the old gist, which is not signed.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub revision: u64,
     /// The gist's own `app` entry is ignored: the app learns about its updates
     /// from the release feed. The gist keeps it for copies that predate that.
     #[serde(default)]

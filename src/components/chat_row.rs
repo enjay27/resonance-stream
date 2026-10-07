@@ -3,7 +3,7 @@ use crate::dictionary_edit::draft;
 use crate::favorites::add_from_chat;
 use crate::favorites_sync;
 use crate::readability::{box_name, needs_backing, row_palette, ORIGINAL_TEXT, TEXT_BOX};
-use crate::ruby_view::{mark, RubyCache};
+use crate::ruby_view::{mark, RubyBatch, RubyCache, RUBY_BATCH_MAX};
 use crate::store::AppSignals;
 use crate::tauri_bridge::invoke;
 use crate::translation_view::{effective, shows_translation, HOVER_ONLY};
@@ -16,13 +16,53 @@ use leptos::prelude::*;
 use leptos::reactive::spawn_local;
 use leptos::{component, view, IntoView};
 use std::cell::RefCell;
+use std::time::Duration;
 
 /// Lines already given furigana: a row that is built again (a tab switch,
 /// paging) does not ask the backend again.
 const RUBY_CACHE_LINES: usize = 2000;
 
+/// How long rows wait for each other before the furigana of all of them is asked in one call.
+const RUBY_WINDOW: Duration = Duration::from_millis(50);
+
+type RubyTarget = WriteSignal<Option<Vec<RubySpan>>>;
+
 thread_local! {
     static RUBY_CACHE: RefCell<RubyCache> = RefCell::new(RubyCache::new(RUBY_CACHE_LINES));
+    static RUBY_BATCH: RefCell<RubyBatch<RubyTarget>> = RefCell::new(RubyBatch::new());
+}
+
+/// Asks for the furigana of a row's line. Rows built together (a tab switch, paging, turning the
+/// Study view on) are answered by one `annotate_furigana` call: the first request opens a short
+/// window, and everything asked inside it goes out together.
+fn ask_ruby(text: &str, target: RubyTarget) {
+    let opens = RUBY_BATCH.with(|batch| batch.borrow_mut().add(text, target));
+    if opens {
+        set_timeout(flush_ruby, RUBY_WINDOW);
+    }
+}
+
+fn flush_ruby() {
+    let calls = RUBY_BATCH.with(|batch| batch.borrow_mut().drain(RUBY_BATCH_MAX));
+    for call in calls {
+        spawn_local(async move {
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "texts": call.lines() }))
+                .unwrap();
+            let Ok(answer) = invoke("annotate_furigana", args).await else {
+                return;
+            };
+            let Ok(lines) = serde_wasm_bindgen::from_value::<Vec<Vec<RubySpan>>>(answer) else {
+                return;
+            };
+            for (line, spans, rows) in call.answer(lines) {
+                RUBY_CACHE.with(|cache| cache.borrow_mut().put(&line, spans.clone()));
+                // A row that was removed meanwhile is gone: its signal takes nothing.
+                for target in rows {
+                    let _ = target.try_set(Some(spans.clone()));
+                }
+            }
+        });
+    }
 }
 
 #[component]
@@ -341,19 +381,7 @@ pub fn ChatRow(sig: ArcRwSignal<ChatMessage>) -> impl IntoView {
             set_ruby.set(Some(spans));
             return;
         }
-        spawn_local(async move {
-            let args =
-                serde_wasm_bindgen::to_value(&serde_json::json!({ "texts": [&text] })).unwrap();
-            let Ok(answer) = invoke("annotate_furigana", args).await else {
-                return;
-            };
-            if let Ok(mut lines) = serde_wasm_bindgen::from_value::<Vec<Vec<RubySpan>>>(answer) {
-                if let Some(spans) = lines.pop() {
-                    RUBY_CACHE.with(|c| c.borrow_mut().put(&text, spans.clone()));
-                    set_ruby.set(Some(spans));
-                }
-            }
-        });
+        ask_ruby(&text, set_ruby);
     });
     let dots = || view! { <span class="loading loading-dots loading-xs ml-1.5 align-middle opacity-50"></span> };
 

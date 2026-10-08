@@ -38,10 +38,10 @@ the app owns the file and the real defaults, the ui re-exports the same type).
 - **Updates and metadata:** signed stable-release feed and signed metadata; detail in `.claude/rules/app.md`.
 - **Packaging:** `package.bat` → `cargo tauri build` → NSIS in `dist/`; version: `[workspace.package]` in `Cargo.toml`.
 
-## Repository Layout (top level; per file: `.claude/rules/{core,ui,app}.md` and graft)
+## Repository Layout (top level; per file: `.claude/rules/{core,ui,app}.md`)
 
 ```
-.claude/              graft wiring, context-guard hook, rules/ (path-scoped), skills/: graft, release, ui-preview, workflow-control
+.claude/              context-guard hook, rules/ (path-scoped), skills/: release, ui-preview, workflow-control
 .memory/              working memory; see .memory/README.md
 .github/ justfile     CI (gates per OS; release, rc, metadata workflows); the gates as commands
 crates/               core, llama, types — pure logic, tested on any OS
@@ -50,15 +50,8 @@ src-tauri/            app crate (resonance-stream, lib resonance_stream_lib)
 metadata/ release-notes/  signed metadata source; release notes per version
 docs/                 architecture review, decisions log, security model, testing
 runbook/              notebooks Kade runs on Windows -- docs, see .claude/rules/runbook.md
-graft/ style/ public/ graft's cards (GITIGNORED, `graft build`); CSS source; static assets
+style/ public/        CSS source; static assets
 ```
-
-## Using graft (the repo is indexed)
-
-Reach for graft before grep/read — see `.claude/skills/graft/SKILL.md`.
-- **Before moving, renaming or splitting a symbol:** `graft callers <sym> --depth all`.
-  Editing the primary file and stopping is the classic miss.
-- `graft skeleton <file>` before reading a large file whole; after structural changes, `graft build` if stale.
 
 ## Guardrails
 

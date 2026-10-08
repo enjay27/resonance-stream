@@ -93,7 +93,6 @@ src-tauri/src/       5,530 lines  Tauri 2 app: sockets, translator server, downl
 runbook/             8,501 lines  Python: 11 bridge pipelines, notebooks, stand-in app
 .github/workflows/   9 files      gate, audit, mutation, smoke, release
 .memory/, MEMORY.md               working memory (17 session notes, 9 roadmaps, 4 active-issue files)
-graft/                            generated code cards (gitignored)
 ```
 
 ### 2.2 Data flow and layers

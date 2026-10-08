@@ -1,5 +1,5 @@
 {
-  "revision": 2,
+  "revision": 3,
   "model": {
     "latest_version": "1.1.0",
     "download_url": "https://huggingface.co/enjay27/TranslateGemma-Blue-Protocol-Translator-JA-KO/resolve/main/translategemma-4b-it-blueprotocol-ja2ko-q4_k_m.gguf",
@@ -7,8 +7,8 @@
     "sha256": "7dc18e6bd8d3d7404f63e8996bb6d44bf35256a20406c1105e37c2424b96847d"
   },
   "dictionary": {
-    "version": "1.0.7",
+    "version": "1.0.8",
     "updated_at": "2026-10-07",
-    "sha256": "f42ef3dfd90d9345523c159d45c3e87567fadfb93bc7b9e73544e1c80faf764c"
+    "sha256": "438d0fe1aae1959104f04e9628904d494aae914ee0e1b7b8dd75e8437d2cae2b"
   }
 }

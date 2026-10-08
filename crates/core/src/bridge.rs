@@ -145,14 +145,10 @@ pub enum Command {
     SnapshotPopups,
     /// Pin the overlay over the game or let it go (`set_always_on_top`); the popups follow it.
     PinMain { on: bool },
-    /// Download the translation model as the setup wizard does (`download_model`), from what the UI would take out of the
-    /// gist: the url, the version and the SHA-256 the file must have (empty is allowed here -- the app must refuse it).
+    /// Download the translation model as the setup wizard does (`download_model`): the url, version and SHA-256 come
+    /// from the verified metadata, never from the caller (fields an older caller still sends are ignored).
     /// The ack only says it started; the end is a [`DOWNLOAD_RESULT_EVENT`] carrying this command's id.
-    DownloadModel {
-        url: String,
-        version: String,
-        sha256: String,
-    },
+    DownloadModel,
 }
 
 /// The word a test writes for a popup (`PopupKind`'s wire name).
@@ -329,32 +325,7 @@ pub fn parse_command(topic: &str, payload: &[u8]) -> Result<Request, CommandErro
                 Command::BlockUser { uid, nickname }
             }
         }
-        "download-model" => {
-            let text = |key: &str| match args.get(key) {
-                None => Ok(None),
-                Some(Value::String(text)) => Ok(Some(text.clone())),
-                Some(_) => Err(format!("download-model's \"{key}\" must be a string")),
-            };
-            let fields = (text("url"), text("version"), text("sha256"));
-            match fields {
-                (Ok(Some(url)), Ok(version), Ok(Some(sha256))) if !url.is_empty() => {
-                    Command::DownloadModel {
-                        url,
-                        version: version.unwrap_or_else(|| "test".into()),
-                        sha256,
-                    }
-                }
-                (Err(reason), _, _) | (_, Err(reason), _) | (_, _, Err(reason)) => {
-                    return Err(CommandError::BadArgument { id, reason })
-                }
-                _ => return Err(CommandError::BadArgument {
-                    id,
-                    reason:
-                        "download-model needs a \"url\" and a \"sha256\" (a string, may be empty)"
-                            .into(),
-                }),
-            }
-        }
+        "download-model" => Command::DownloadModel,
         "snapshot-popups" => Command::SnapshotPopups,
         "pin-main" => match args.get("on").and_then(Value::as_bool) {
             Some(on) => Command::PinMain { on },
@@ -809,45 +780,21 @@ mod tests {
     }
 
     #[test]
-    fn download_model_carries_what_the_ui_hands_the_command() {
+    fn download_model_takes_nothing_from_the_caller() {
+        // The model comes from the verified metadata (N-5): the command carries no url, version or hash.
+        assert_eq!(
+            parse("download-model", r#"{"id":"d"}"#).map(|r| r.command),
+            Ok(Command::DownloadModel)
+        );
+        // A caller from before N-5 still sends them: they are ignored, not refused.
         assert_eq!(
             parse(
                 "download-model",
                 r#"{"id":"d","url":"http://127.0.0.1:9/model.gguf","version":"m2","sha256":"ab"}"#
             )
             .map(|r| r.command),
-            Ok(Command::DownloadModel {
-                url: "http://127.0.0.1:9/model.gguf".into(),
-                version: "m2".into(),
-                sha256: "ab".into()
-            })
+            Ok(Command::DownloadModel)
         );
-        // An empty hash is a case worth sending (the app refuses it), but the key must be there; the version may be left out.
-        assert_eq!(
-            parse(
-                "download-model",
-                r#"{"id":"d","url":"http://x/y","sha256":""}"#
-            )
-            .map(|r| r.command),
-            Ok(Command::DownloadModel {
-                url: "http://x/y".into(),
-                version: "test".into(),
-                sha256: String::new()
-            })
-        );
-        for payload in [
-            r#"{"id":"d","sha256":"ab"}"#,
-            r#"{"id":"d","url":"","sha256":"ab"}"#,
-            r#"{"id":"d","url":"http://x/y"}"#,
-            r#"{"id":"d","url":"http://x/y","sha256":7}"#,
-            r#"{"id":"d","url":"http://x/y","sha256":"ab","version":3}"#,
-        ] {
-            let err = parse("download-model", payload).unwrap_err();
-            assert!(
-                matches!(&err, CommandError::BadArgument { id, .. } if id == "d"),
-                "{payload}: {err:?}"
-            );
-        }
     }
 
     #[test]

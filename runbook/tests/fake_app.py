@@ -685,7 +685,7 @@ class App:
         self.event("system-event", {"pid": 0, "level": "error", "source": "Metadata",
                                     "message": f"Model and dictionary updates were refused: {why}. The installed model and dictionary are kept."})
 
-    def sync_dictionary(self, version: str) -> str | None:
+    def sync_dictionary(self) -> str | None:
         """`sync_dictionary`: fetch, validate, save, install, remember the version. The error text is the ack's."""
         url = self.flags.get("dictionary-url")
         if not url:
@@ -714,7 +714,7 @@ class App:
         self.save_dictionary_file(text)
         if os.environ.get("FAKE_APP_DICT_BUG") != "sync-not-installed":  # a bug to catch: used only after a restart
             self.dictionary = terms
-        self.dict_version = str(metadata.get("dictionary", {}).get("version", version))
+        self.dict_version = str(metadata.get("dictionary", {}).get("version", ""))
         return None
 
     def save_local_dictionary(self, content: str) -> str | None:
@@ -1061,7 +1061,7 @@ class App:
         elif command == "get-chat-history":
             ack(data=[dict(m) for m in self.history])
         elif command == "sync-dictionary":
-            ack(self.sync_dictionary(str(request.get("version", ""))))
+            ack(self.sync_dictionary())
         elif command == "save-local-dictionary":
             ack(self.save_local_dictionary(str(request.get("content", ""))))
         elif command == "annotate-furigana":
@@ -1145,7 +1145,7 @@ class App:
         except (ValueError, KeyError, TypeError):
             announced = None
         if announced and announced != self.dict_version and (self.auto_sync_dict or os.environ.get("FAKE_APP_DICT_BUG") == "auto-always"):
-            self.sync_dictionary(announced)
+            self.sync_dictionary()
         try:
             body = urllib.request.urlopen(self.flags["feed-url"], timeout=5).read()  # noqa: S310
         except urllib.error.HTTPError:

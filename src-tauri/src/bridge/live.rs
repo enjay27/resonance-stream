@@ -246,10 +246,10 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             crate::commands::clear_chat_history(app.state());
             answer(Ok(()));
         }
-        Command::SyncDictionary { version } => {
+        Command::SyncDictionary => {
             // The settings view's sync: an async command that fetches, validates, saves and installs; its error is the ack's.
             let synced = tauri::async_runtime::block_on(
-                crate::services::downloader::sync_dictionary(app.clone(), version.clone()),
+                crate::services::downloader::sync_dictionary(app.clone()),
             );
             answer(synced.map(|_| ()));
         }

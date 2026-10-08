@@ -2,7 +2,7 @@
 //! revision of the signed metadata it came from, and whether the file still is that one. Pure and
 //! host-tested; the backend's `get_dictionary_status` supplies the numbers.
 
-use crate::ui_types::{DictionaryState, DictionaryStatus, UpdateCheckResult};
+use crate::ui_types::{DictionaryState, DictionaryStatus};
 
 /// What the settings show next to the sync button, e.g. `v1.0.8 · 서명 리비전 3 · 게시본과 같음`.
 pub fn status_line(status: &DictionaryStatus) -> String {
@@ -61,16 +61,6 @@ pub fn sync_outcome(result: Result<(), String>) -> SyncOutcome {
     }
 }
 
-/// The dictionary version a sync asks for, from the update check made just before it; or why there
-/// is nothing to sync: a publication that was refused (its signature did not hold) offers no
-/// dictionary, and the backend's reason says why.
-pub fn version_to_sync(check: &UpdateCheckResult) -> Result<String, String> {
-    match &check.metadata_error {
-        Some(reason) => Err(reason.clone()),
-        None => Ok(check.remote_data.dictionary.version.clone()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,16 +108,6 @@ mod tests {
         );
     }
 
-    fn checked(extra: &str) -> UpdateCheckResult {
-        serde_json::from_str(&format!(
-            r#"{{"app_update_available":false,"model_update_available":false,"dict_update_available":true,
-            {extra}"remote_data":{{"revision":4,
-            "model":{{"latest_version":"1.1.0","download_url":"","release_notes":"","sha256":""}},
-            "dictionary":{{"version":"1.0.8","updated_at":"2026-10-07","sha256":"cd34"}}}}}}"#
-        ))
-        .expect("a check result")
-    }
-
     #[test]
     fn a_sync_that_worked_says_so() {
         let outcome = sync_outcome(Ok(()));
@@ -153,19 +133,5 @@ mod tests {
             let outcome = sync_outcome(Err(reason.into()));
             assert_eq!((outcome.ok, outcome.text.as_str()), (false, "동기화 실패"));
         }
-    }
-
-    #[test]
-    fn a_good_check_gives_the_version_to_sync() {
-        assert_eq!(version_to_sync(&checked("")), Ok("1.0.8".to_string()));
-    }
-
-    #[test]
-    fn a_refused_publication_is_not_synced_and_says_why() {
-        let refused = checked(r#""metadata_error":"no signature is published for the metadata.","#);
-        assert_eq!(
-            version_to_sync(&refused),
-            Err("no signature is published for the metadata.".to_string())
-        );
     }
 }

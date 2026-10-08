@@ -1,7 +1,8 @@
 # Adds this repository's issues to the Resonance organization Project (star-resonance) and
 # applies command labels (cmd:status-now, cmd:verify-not-verified, ...). The bridge is Stella
 # Rain's, reused: stella-rain/.github (public). Needs vars.PROJECT_NUMBER, vars.BRIDGE_APP_CLIENT_ID
-# and secrets.BRIDGE_APP_PRIVATE_KEY as organization settings shared with this repository.
+# and secrets.BRIDGE_APP_PRIVATE_KEY as organization settings shared with this repository; the
+# key is passed by name because `secrets: inherit` does not cross organizations.
 # Dormant (the job is skipped) until PROJECT_NUMBER is set.
 name: Project sync
 
@@ -17,4 +18,6 @@ jobs:
     permissions:
       issues: write  # remove applied command labels; read the sender's permission
     uses: stella-rain/.github/.github/workflows/project-sync.yml@main
-    secrets: inherit
+    secrets:
+      # `secrets: inherit` does not cross organizations (this bridge is Stella Rain's).
+      BRIDGE_APP_PRIVATE_KEY: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}

@@ -934,13 +934,25 @@ class App:
         import http.client
 
         bug = os.environ.get("FAKE_APP_DL_BUG", "")
-        url, expected = request["url"], request["sha256"].strip().lower()
 
         def done(error: str | None = None) -> None:
             self.event("download-result", {"id": request["id"], "what": "model", "ok": error is None, "error": error})
 
+        # The model comes from the signed metadata, checked now (N-5); what the request carries is ignored.
+        try:
+            metadata, why = self.verify_metadata()
+        except (OSError, http.client.HTTPException, ValueError) as e:
+            return done(f"Network error: {e}")
+        if metadata is None:
+            self.refuse(why)
+            return done(f"Model and dictionary updates were refused: {why}. The installed model and dictionary are kept.")
+        self.remember_revision(int(metadata["revision"]))
+        model = metadata.get("model", {})
+        url, expected = str(model.get("download_url", "")).strip(), str(model.get("sha256", "")).strip().lower()
         if not expected:
             return done("No SHA-256 published for this model; refusing to download it")
+        if not url:
+            return done("No download address published for this model; refusing to download it")
         parts = urllib.parse.urlparse(url)
         local_http = parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost")
         if parts.scheme != "https" and not local_http and bug != "accepts-http":

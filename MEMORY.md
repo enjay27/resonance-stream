@@ -10,7 +10,7 @@ Only what would be *false* once stale lives here; the rest is in `.memory/`.
 No `status:` label = backlog; an open PR = in review. `verify:*` stays on a closed issue until the check is done.
 
 - **Where:** stages S0–S6 and signed metadata M1–M3 merged; open items: [`roadmap/refactor.md`](.memory/roadmap/refactor.md), "Open items found after S6".
-- **Next:** #264 (N-2), then #265 (N-5), one PR at a time; each changes a wire or a pipeline: plan first, wait for Kade.
+- **Next:** the post-S6 list is done (N-5 #265 in its PR, 2026-10-08); its real-app run waits on Kade (`verify:needs-kade`).
 - **Trial:** labels instead of *Now* until about 2026-10-22; then drop this file's *Now* (and maybe `MEMORY.md`) in its own PR.
 
 **Decided** (detail in `docs/decisions.md`): D-28 signed metadata (`metadata-v1`, `-v2` published), D-29 model → hy-mt2 (K8 moot).

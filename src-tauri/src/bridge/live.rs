@@ -309,18 +309,11 @@ fn handle(app: &AppHandle, client: &Client, topic: &str, payload: &[u8]) {
             crate::commands::launch_translator(app.clone(), app.state());
             answer(Ok(()));
         }
-        Command::DownloadModel {
-            url,
-            version,
-            sha256,
-        } => {
+        Command::DownloadModel => {
             // The wizard's download; its end (the return value the UI shows) comes as a `download-result` event.
             let (app, id) = (app.clone(), request.id.clone());
-            let (url, version, sha256) = (url.clone(), version.clone(), sha256.clone());
             tauri::async_runtime::spawn(async move {
-                let result =
-                    crate::services::downloader::model::download_model(app, url, version, sha256)
-                        .await;
+                let result = crate::services::downloader::model::download_model(app).await;
                 publish_event(
                     wire::DOWNLOAD_RESULT_EVENT,
                     serde_json::json!({

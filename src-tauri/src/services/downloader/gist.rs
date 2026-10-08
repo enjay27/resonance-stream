@@ -148,6 +148,12 @@ async fn verified_metadata(app: &AppHandle) -> Result<GistMetadata, String> {
     if let Some(verified) = LAST_VERIFIED.lock().clone() {
         return Ok(verified);
     }
+    verified_metadata_fresh(app).await
+}
+
+/// The published metadata, fetched and verified now; accepted like an update check's. A refusal is
+/// written to the system log and returned as the error. `download_model` takes the model from it.
+pub async fn verified_metadata_fresh(app: &AppHandle) -> Result<GistMetadata, String> {
     let accepted = crate::config::load_metadata(app).accepted_revision;
     match fetch_verified_metadata(accepted).await? {
         Ok(verified) => {

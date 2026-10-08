@@ -3,7 +3,7 @@ use resonance_core::download::{keep_bad_copy, read_text_retrying, write_atomic};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppMetadata {
@@ -85,7 +85,7 @@ fn unusable(app: &AppHandle, path: &std::path::Path, why: &str) {
     );
 }
 
-pub fn save_metadata(app: &AppHandle, metadata: &AppMetadata) {
+fn save_metadata(app: &AppHandle, metadata: &AppMetadata) {
     inject_system_message(
         &app,
         SystemLogLevel::Info,
@@ -103,6 +103,18 @@ pub fn save_metadata(app: &AppHandle, metadata: &AppMetadata) {
                 format!("metadata.json was not saved ({e})"),
             );
         }
+    }
+}
+
+/// Reads `metadata.json`, lets `change` edit it, and writes it when `change` says it changed
+/// something -- all under `AppState::metadata_lock`, so concurrent writers do not lose each other's
+/// change. The only way the app writes the file (besides the first run's defaults).
+pub fn modify_metadata(app: &AppHandle, change: impl FnOnce(&mut AppMetadata) -> bool) {
+    let state = app.state::<crate::AppState>();
+    let _writing = state.metadata_lock.lock();
+    let mut metadata = load_metadata(app);
+    if change(&mut metadata) {
+        save_metadata(app, &metadata);
     }
 }
 

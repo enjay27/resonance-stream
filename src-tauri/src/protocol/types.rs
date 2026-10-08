@@ -21,6 +21,9 @@ pub struct AppState {
     pub config: RwLock<AppConfig>,
     /// Held while a config change is applied (see `save_config`).
     pub config_lock: Mutex<()>,
+    /// Held while `metadata.json` is read, changed and written (`modify_metadata`), so two
+    /// writers (a sync and a download, say) cannot lose each other's change.
+    pub metadata_lock: Mutex<()>,
     pub chat_history: Mutex<ChatHistory>,
     pub system_history: Mutex<VecDeque<SystemMessage>>,
     pub next_pid: AtomicU64,

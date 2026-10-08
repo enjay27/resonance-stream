@@ -129,16 +129,13 @@ async fn fetch_verified_metadata(
 /// `sync_dictionary`. The revision is stored once the metadata's signature has held -- the
 /// dictionary is checked later, at the sync, and a mismatch there refuses only the dictionary.
 fn accept_verified(app: &AppHandle, verified: &GistMetadata) {
-    let metadata = crate::config::load_metadata(app);
-    if verified.revision > metadata.accepted_revision {
-        crate::config::save_metadata(
-            app,
-            &crate::config::AppMetadata {
-                accepted_revision: verified.revision,
-                ..metadata
-            },
-        );
-    }
+    crate::config::modify_metadata(app, |metadata| {
+        let newer = verified.revision > metadata.accepted_revision;
+        if newer {
+            metadata.accepted_revision = verified.revision;
+        }
+        newer
+    });
     *LAST_VERIFIED.lock() = Some(verified.clone());
 }
 
@@ -368,11 +365,12 @@ pub async fn sync_dictionary(app: AppHandle) -> Result<String, String> {
         verified.dictionary.version
     );
 
-    let mut metadata = crate::config::load_metadata(&app);
-    metadata.current_dict_version = verified.dictionary.version;
-    metadata.current_dict_sha256 = verified.dictionary.sha256.trim().to_ascii_lowercase();
-    metadata.current_dict_revision = verified.revision;
-    crate::config::save_metadata(&app, &metadata);
+    crate::config::modify_metadata(&app, |metadata| {
+        metadata.current_dict_version = verified.dictionary.version;
+        metadata.current_dict_sha256 = verified.dictionary.sha256.trim().to_ascii_lowercase();
+        metadata.current_dict_revision = verified.revision;
+        true
+    });
 
     Ok("Dictionary updated and reloaded!".to_string())
 }
@@ -418,11 +416,12 @@ pub fn save_local_dictionary(app: tauri::AppHandle, content: String) -> Result<(
 
 #[tauri::command]
 pub fn ignore_update(app: AppHandle, target: String, version: String) {
-    let mut metadata = crate::config::load_metadata(&app);
-    if target == "app" {
-        metadata.ignored_app_version = Some(version);
-    } else if target == "model" {
-        metadata.ignored_model_version = Some(version);
-    }
-    crate::config::save_metadata(&app, &metadata);
+    crate::config::modify_metadata(&app, |metadata| {
+        if target == "app" {
+            metadata.ignored_app_version = Some(version);
+        } else if target == "model" {
+            metadata.ignored_model_version = Some(version);
+        }
+        true
+    });
 }

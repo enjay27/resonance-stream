@@ -65,6 +65,7 @@ pub fn run() {
             app.manage(AppState {
                 config: RwLock::new(config.clone()),
                 config_lock: Mutex::new(()),
+                metadata_lock: Mutex::new(()),
                 chat_history: Mutex::new(ChatHistory::new(
                     resonance_core::history::ChannelLimits::new(&config.tab_limits),
                 )),

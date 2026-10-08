@@ -8,8 +8,8 @@ One Cargo workspace in five crates, three parts, plus the runbook (treated as do
 **Which part you touch decides which gate applies** -- the most important thing on this page.
 
 Follow the `kade-workflow` skill (plan first, test first, gates, commit and PR style, context
-budget). Where it and this file differ, this file wins. Current state: open issues by label
-(`status:now|next`, `verify:needs-kade|not-verified`), index @MEMORY.md
+budget). Where it and this file differ, this file wins. Current state: the organization
+Project "Resonance" (star-resonance), read as `STATUS.md` on the `status` branch, index @MEMORY.md
 
 | tree | part | builds on | gate |
 |---|---|---|---|
@@ -70,7 +70,7 @@ style/ public/        CSS source; static assets
 0. **Test first.** New behaviour or a bug fix has its failing unit test before its code.
 1. **Run the gate for every part touched** (table above). `cargo fmt` is part of it.
 2. **Behaviour check where a gate cannot see it.** UI changes: `.claude/rules/ui.md`.
-3. **Record state on the issue** (`status:` / `verify:` labels; a follow-up gets an issue); `MEMORY.md` only for what has none.
+3. **Record state on the issue** (a `cmd:` label: `cmd:status-now`, `cmd:verify-needs-windows`, `-macos`, `-android`, `-iphone`, `cmd:verify-not-verified`; a decision for Kade: assign the issue to him; a follow-up gets an issue); `MEMORY.md` only for what has none.
 4. **Push the branch and open the PR**; CI merges it when green.
 
 ## Version Control

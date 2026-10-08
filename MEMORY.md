@@ -5,13 +5,13 @@ Only what would be *false* once stale lives here; the rest is in `.memory/`.
 
 ## Now — 2026-10-08
 
-**State lives in issues, by label** (since 2026-10-08; this file keeps only what has no issue). A session reads, over REST:
-`gh api "repos/enjay27/resonance-stream/issues?labels=<label>&state=open"` for `status:now`, `status:next`, `verify:needs-kade`, `verify:not-verified`.
-No `status:` label = backlog; an open PR = in review. `verify:*` stays on a closed issue until the check is done.
+**State lives in the star-resonance Project "Resonance"** (since 2026-10-09; this file keeps only what has no issue). A session reads
+`git fetch origin status && git show origin/status:STATUS.md` (a snapshot 3 times a day; run `project-snapshot.yml` for a fresh one).
+Write with a `cmd:` label on the issue (`cmd:status-now`, `cmd:verify-needs-windows`, `cmd:verify-not-verified`); a decision for Kade is an assignee.
 
 - **Where:** stages S0–S6 and signed metadata M1–M3 merged; open items: [`roadmap/refactor.md`](.memory/roadmap/refactor.md), "Open items found after S6".
 - **Next:** S8 (the edges between the parts, `roadmap/refactor.md`): S8a done in its PR, then S8b; S8c/S8d need Kade's go on a plan.
-- **Trial:** labels instead of *Now* until about 2026-10-22; then drop this file's *Now* (and maybe `MEMORY.md`) in its own PR.
+- **Trial:** the Project instead of *Now* until about 2026-10-22; then drop this file's *Now* (and maybe `MEMORY.md`) in its own PR.
 
 **Decided** (detail in `docs/decisions.md`): D-28 signed metadata (`metadata-v1`, `-v2` published), D-29 model → hy-mt2 (K8 moot).
 **Stages and risks left:** `roadmap/refactor.md` (S3–S7, W-items).

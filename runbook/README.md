@@ -85,4 +85,6 @@ read what they should. It does **not** prove anything about Windows, the game, o
 mock-feed pipeline's dry run drives `tests/fake_app.py`, a stand-in that follows the app's flags
 and status file and speaks to the bridge's MQTT broker (a minimal client of its own).
 
-Run `pytest` from this folder (`runbook/`); the full suite takes about three minutes.
+Run `pytest` from this folder (`runbook/`). The full suite takes about 35 minutes (368 tests, 33.5 min in a
+Linux session on 2026-10-08); `test_pipeline_translator_stub.py` is half of it, since each planted bug runs the whole
+pipeline. After changing one pipeline or helper, its own test file (`tests/test_pipeline_<name>.py`) is enough.

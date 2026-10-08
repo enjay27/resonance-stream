@@ -91,9 +91,10 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
                     total_percent: 100,
                 },
             );
-            let mut metadata = crate::config::load_metadata(&app);
-            metadata.current_model_version = version;
-            crate::config::save_metadata(&app, &metadata);
+            crate::config::modify_metadata(&app, |metadata| {
+                metadata.current_model_version = version;
+                true
+            });
             return Ok(());
         }
         inject_system_message(
@@ -168,9 +169,10 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
     );
 
     // 3. Commit the new version to metadata so the update checker knows we have it
-    let mut metadata = crate::config::load_metadata(&app);
-    metadata.current_model_version = version;
-    crate::config::save_metadata(&app, &metadata);
+    crate::config::modify_metadata(&app, |metadata| {
+        metadata.current_model_version = version;
+        true
+    });
 
     Ok(())
 }

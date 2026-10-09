@@ -121,7 +121,6 @@ A pull request does not run the smoke test (Kade's rule, 2026-10-06): a bridge o
 | Smoke runs only from a tag or by hand | a bridge change is not proven on the real app before it merges | accepted (Kade); read the result after a manual dispatch |
 | The real-app rows `CP-fav-*`, `CR-ruby-*` (the 一人 reading, K16), `TS-dict-*`, popups and download have not been read since they were built | their real-app result is unknown | S0c |
 | Mutation testing covers `text.rs` only | the rest of core has no measure of test strength | A-7.4: rotate files |
-| Furigana is not in the golden tests | its readings depend on the dictionary build (K16) | add once K16 is settled |
 | The app's 21 unit tests run only on Windows | a Linux session cannot run them | Windows CI |
 | No visual regression | a layout break is found by eye | A-4.5 / A-7.3 |
 | No fault injection, no soak test | failure paths and slow leaks are untested | A-7.5, A-7.6 |

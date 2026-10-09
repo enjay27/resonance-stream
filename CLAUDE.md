@@ -67,6 +67,8 @@ style/ public/        CSS source; static assets
 
 - `.github/workflows/auto-merge.yml` (not GitHub auto-merge) merges a green PR and deletes its
   `claude/*` branch.
+- Local sessions follow the same flow: a `claude/<task>` branch and a PR, opened with Kade's
+  `gh` login (without it, print the commands for Kade).
 - Only `claude/*` PRs into `main` auto-merge; a PR into `rc` (or anywhere else) waits for a person.
   `workflow_run` workflows are read from `main`: an `auto-merge.yml` change acts after its own merge.
   Workflow merges use `GITHUB_TOKEN` (no `push` run on `main`); the PR's own run is the gate.

@@ -22,7 +22,8 @@ the app gate is a **compile-only** cross-check against `x86_64-pc-windows-gnu` (
 `gcc-mingw-w64-x86-64`), so the app's own tests run only on Windows. CI (`ci.yml`) runs core + ui
 on Linux and the full app gate on `windows-latest`, on every push and PR.
 
-**New pure logic goes in `crates/core`**, where it is tested on every OS. Anything that
+**New pure logic goes in `crates/core`** (or the ui's pure modules), where it is tested on every OS;
+`just coverage` shows what the tests do not reach. Anything that
 crosses the Tauri boundary is defined once, in `crates/types` (serde, serde_with — it
 compiles to wasm) -- `AppConfig`, the settings file's type, too (`crates/types/src/app_config.rs`;
 the app owns the file and the real defaults, the ui re-exports the same type).
@@ -31,9 +32,7 @@ the app owns the file and the real defaults, the ui re-exports the same type).
 
 - **Frontend:** Leptos 0.8 (CSR) → wasm via Trunk; Tailwind 4 + daisyUI (Trunk pre-build hook, `cmd /c`).
   **Backend:** Tauri 2 (`unstable`, tray, global-shortcut, fs, shell, opener).
-- **Capture:** raw socket with `SIO_RCVALL`, needs **Administrator**; port 5003 carries chat. No Npcap / WinDivert.
-- **Translation:** llama.cpp server (Vulkan, downloaded at runtime) on `127.0.0.1:8080` or a free port;
-  only the PID the app started is ever killed. Pre/post-processing in `crates/core/src/text.rs`.
+- **Capture and translation:** raw-socket capture (Administrator) and a local llama.cpp server; detail in `.claude/rules/app.md`.
 - **Updates and metadata:** signed stable-release feed and signed metadata; detail in `.claude/rules/app.md`.
 - **Packaging:** `package.bat` → `cargo tauri build` → NSIS in `dist/`; version: `[workspace.package]` in `Cargo.toml`.
 
@@ -57,17 +56,12 @@ style/ public/        CSS source; static assets
 - **Protocol.** `ChatMessage`/`SystemMessage` serialize as camelCase across the Tauri boundary:
   renaming a field is a protocol change, not a refactor.
 - **Gist and release URLs are public**; none of them is a secret.
-- **Where tests go.** Pure logic is tested in `crates/core` (or the ui's pure modules), so it
-  runs on every OS. `just coverage` shows what the tests do not reach.
-- **The runbook is docs**: `runbook/` has no CI job and no gate; the full rule is `.claude/rules/runbook.md`.
-- **A Linux session cannot build `src-tauri/`**; say so, and leave it to the Windows CI job.
 - **Trusted hosts:** `Lindera.dev` (the furigana dictionary's build script downloads from it).
 
 ## Definition of Done
 
-1. **The gate for every part touched** is in the table above; `cargo fmt` is part of it.
-2. **Behaviour check where a gate cannot see it.** UI changes: `.claude/rules/ui.md`.
-3. **Record state on the issue** (a `cmd:` label: `cmd:status-now`, `cmd:verify-needs-windows`, `-macos`, `-android`, `-iphone`, `cmd:verify-not-verified`; a decision for Kade: assign the issue to him; a follow-up gets an issue); `MEMORY.md` only for what has none.
+1. **Behaviour check where a gate cannot see it.** UI changes: `.claude/rules/ui.md`.
+2. **Record state on the issue** (a `cmd:` label: `cmd:status-now`, `cmd:verify-needs-windows`, `-macos`, `-android`, `-iphone`, `cmd:verify-not-verified`; a decision for Kade: assign the issue to him; a follow-up gets an issue); `MEMORY.md` only for what has none.
 
 ## Version Control
 

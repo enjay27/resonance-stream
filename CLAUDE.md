@@ -7,9 +7,8 @@ through a local llama.cpp server, and shows it in a Tauri overlay.
 One Cargo workspace in five crates, three parts, plus the runbook (treated as docs).
 **Which part you touch decides which gate applies** -- the most important thing on this page.
 
-Follow the `kade-workflow` skill (plan first, test first, gates, commit and PR style, context
-budget). Where it and this file differ, this file wins. Current state: the organization
-Project "Resonance" (star-resonance), read as `STATUS.md` on the `status` branch, index @MEMORY.md
+Current state: the organization Project "Resonance" (star-resonance), read as `STATUS.md` on the
+`status` branch, index @MEMORY.md
 
 | tree | part | builds on | gate |
 |---|---|---|---|
@@ -55,39 +54,34 @@ style/ public/        CSS source; static assets
 
 ## Guardrails
 
-- **Refactors do not change behaviour.** `ChatMessage`/`SystemMessage` serialize as camelCase
-  across the Tauri boundary — renaming a field is a protocol change, not a refactor.
-- **Zero hardcoded credentials.** No tokens or keys in committed files; gist and release URLs are public.
+- **Protocol.** `ChatMessage`/`SystemMessage` serialize as camelCase across the Tauri boundary:
+  renaming a field is a protocol change, not a refactor.
+- **Gist and release URLs are public**; none of them is a secret.
 - **Where tests go.** Pure logic is tested in `crates/core` (or the ui's pure modules), so it
   runs on every OS. `just coverage` shows what the tests do not reach.
-- **The runbook is docs**: no CI job, no gate, no test-first requirement for `runbook/`; the full rule is `.claude/rules/runbook.md`.
+- **The runbook is docs**: `runbook/` has no CI job and no gate; the full rule is `.claude/rules/runbook.md`.
 - **A Linux session cannot build `src-tauri/`**; say so, and leave it to the Windows CI job.
 - **Trusted hosts:** `Lindera.dev` (the furigana dictionary's build script downloads from it).
-- **This file ≤ 100 lines; each `.claude/rules/*.md` ≤ 80 lines with `paths:`** (`claude-md-check.sh`, CI).
 
 ## Definition of Done
 
-0. **Test first.** New behaviour or a bug fix has its failing unit test before its code.
-1. **Run the gate for every part touched** (table above). `cargo fmt` is part of it.
+1. **The gate for every part touched** is in the table above; `cargo fmt` is part of it.
 2. **Behaviour check where a gate cannot see it.** UI changes: `.claude/rules/ui.md`.
 3. **Record state on the issue** (a `cmd:` label: `cmd:status-now`, `cmd:verify-needs-windows`, `-macos`, `-android`, `-iphone`, `cmd:verify-not-verified`; a decision for Kade: assign the issue to him; a follow-up gets an issue); `MEMORY.md` only for what has none.
-4. **Push the branch and open the PR**; CI merges it when green.
 
 ## Version Control
 
-**One task, one branch, one PR**, run by Claude without being asked.
-
-- Branch from an up-to-date `main`: `git fetch origin main && git checkout -B claude/<task> origin/main`.
-  Never commit to `main`; a follow-up is a new branch. Never rewrite history that is already pushed.
-- `.github/workflows/auto-merge.yml` merges a green PR and deletes its `claude/*` branch. Never
-  merge by hand, and never skip, disable or edit a test/gate to get green. A failure that is
-  not this PR's (red on `main` too) is said on the PR.
-- **Several tasks:** one PR at a time; start the next only when the last is *merged* and its
-  branch is gone. Wait with `subscribe_pr_activity` and a `send_later` check-in, not `sleep` loops.
+- `.github/workflows/auto-merge.yml` (not GitHub auto-merge) merges a green PR and deletes its
+  `claude/*` branch.
 - Only `claude/*` PRs into `main` auto-merge; a PR into `rc` (or anywhere else) waits for a person.
   `workflow_run` workflows are read from `main`: an `auto-merge.yml` change acts after its own merge.
   Workflow merges use `GITHUB_TOKEN` (no `push` run on `main`); the PR's own run is the gate.
 - **Test branches, release candidates, stable releases:** the `release` skill; the rules for release
   files (never publish by hand, release notes) are in `.claude/rules/release.md`.
-- **Never commit:** secrets, `.env`; build output (`target/`, `dist/`, `style/output.css`, `*.exe`);
-  `graft/`, `node_modules/`, IDE folders; a half-applied or unformatted tree "to save progress".
+- **Never commit:** build output (`target/`, `dist/`, `style/output.css`, `*.exe`); `graft/`,
+  `node_modules/`, IDE folders; an unformatted tree.
+
+## Overrides of global rules
+
+- **Test first** does not apply to `runbook/`: it is docs, run by hand on Windows, with no CI job
+  and no gate (`.claude/rules/runbook.md`).

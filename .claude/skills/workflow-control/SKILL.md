@@ -10,7 +10,7 @@ Four steps, in order. Do not skip ahead.
 
 ## 1 · Plan (no edits)
 
-- Locate the code with graft (the `graft-kade` account skill), not by reading whole files:
+- Locate the code with graft (the `code-graph` account skill), not by reading whole files:
   `g ask "<task>" --source`, `g skeleton <file>`.
 - For every symbol you will move, rename, split or change the signature of, run
   `g callers <sym> --depth all`. List the files it reaches — that is the impact.

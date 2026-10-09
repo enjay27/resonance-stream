@@ -60,5 +60,5 @@ Sources: a quote or a note in `CLAUDE.md` / `MEMORY.md` is cited as such. "Claud
 
 | ID | Question | Waiting for | Notes |
 |---|---|---|---|
-| O-2 | **K16**: how the built exe reads 一人 / 二人 / 一人前 | the real-app result of `CR-ruby-probe` (stage S0c); Kade will upload reference readings from another Claude session (2026-10-07) | until settled, furigana stays out of the golden tests (D-21) |
+| O-2 | ~~**K16**: how the built exe reads 一人 / 二人 / 一人前~~ **settled 2026-10-10** | read from `CR-ruby-probe` (run 37613640483): いち・じん, に・じん, いち・にんまえ; reproduced and fixed in core tests (ひとり, ふたり, さんにん), which need no exe | furigana can join the golden tests (D-21) in a follow-up |
 | O-3 | Does the update check work on the real app? The update dialog did not show on 2026-10-06 | Kade: compare the app's version with the newest stable tag and read the system log's update line | the newest stable release is v0.6.1 and the app is 0.6.1, so no dialog is the expected result; only a newer release shown to an older copy proves the check |

@@ -26,7 +26,7 @@ jobs:
       - name: Check out the bridge script
         uses: actions/checkout@v7
         with:
-          repository: stella-rain/.github
+          repository: star-resonance/.github
           ref: main
           path: .bridge
           persist-credentials: false
